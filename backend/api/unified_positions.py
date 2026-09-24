@@ -113,27 +113,80 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     return accounts_match(account_filter, balance_name)
 
 
-async def _adjust_account_cash_with_conn(conn, account: str, delta: float) -> bool:
-    """Adjust cash balance using an externally-provided connection.
-    Call this inside an existing transaction to keep cash updates atomic with position changes."""
+async def _adjust_account_cash_with_conn(conn, account: str, delta: float,
+                                         *, source_ref: str = None,
+                                         description: str = None,
+                                         event_date=None) -> bool:
+    """Move cash for a trade, and WRITE THE EVENT THAT MOVED IT.
+
+    MONEY INTEGRITY, the part R-IV.493(f) said to fix first. This function is the
+    largest mover of cash in the system — every entry and every close comes through
+    it — and until now it wrote no event at all. It did `cash = cash + delta` and
+    logged a line. So the ledger could not have reconstructed the balance even in
+    principle: most of the movements were never written down.
+
+    The stored total is still maintained, because six other readers depend on it and
+    removing it in the same change would be two risks wearing one commit. What is
+    new is that the movement is now a ROW: typed, dated, attributed to the position
+    that caused it, and idempotent. A balance can be derived from those.
+
+    The event is written on the CALLER'S connection, so it lands in the same
+    transaction as the position change or not at all. Cash that moved without an
+    event, or an event without the movement, are both worse than neither.
+    """
+    from services.cash_ledger import TRADE_CREDIT, TRADE_DEBIT, dedup_key
+
     rows = await conn.fetch("SELECT account_name, cash FROM account_balances")
     for row in rows:
         if _match_account_balance(account, row["account_name"]):
+            acct = row["account_name"]
+            amount = round(delta, 2)
             await conn.execute(
                 "UPDATE account_balances SET cash = cash + $1, updated_at = NOW(), updated_by = 'auto' WHERE account_name = $2",
-                round(delta, 2), row["account_name"],
+                amount, acct,
             )
-            logger.info("Cash adjusted for %s: %+.2f", row["account_name"], delta)
+            etype = TRADE_CREDIT if amount >= 0 else TRADE_DEBIT
+            when = event_date or date.today()
+            # A key only where the movement can be attributed. Unattributed cash is
+            # written WITHOUT one -- the unique index is partial, so a NULL key is
+            # outside it -- because two genuine same-day, same-amount movements with
+            # nothing to tell them apart would otherwise dedup into one, and losing a
+            # real movement is worse than repeating one.
+            key = dedup_key(acct, etype, amount, when, source_ref) if source_ref else None
+            try:
+                await conn.execute(
+                    """INSERT INTO cash_flows
+                           (account_name, flow_type, amount, description, activity_date,
+                            imported_from, source_ref, dedup_key)
+                       VALUES ($1, $2, $3, $4, $5::date, 'TRADE_ENTRY', $6, $7)
+                       ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+                       DO NOTHING""",
+                    acct, etype, amount,
+                    description or f"trade cash movement ({source_ref or 'unattributed'})",
+                    when, source_ref, key,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # LOUD, and it fails the transaction with the position change rather
+                # than leaving money that moved with nothing to show for it.
+                logger.error("cash event write FAILED for %s %+.2f (%s): %s",
+                             acct, amount, source_ref, type(exc).__name__)
+                raise
+            logger.info("Cash adjusted for %s: %+.2f (%s, ref=%s)",
+                        acct, amount, etype, source_ref)
             return True
     logger.error("CASH ADJUSTMENT FAILED: No matching account_balance row for account=%s (delta=%+.2f)", account, delta)
     return False
 
 
-async def _adjust_account_cash(pool, account: str, delta: float) -> bool:
+async def _adjust_account_cash(pool, account: str, delta: float, **kw) -> bool:
     """Backward-compatible pool-based cash adjustment. Use _adjust_account_cash_with_conn
-    when inside a transaction to keep cash updates atomic."""
+    when inside a transaction to keep cash updates atomic.
+
+    `**kw` carries `source_ref` / `description` / `event_date` through to the event,
+    so a caller that knows which position moved the money can say so.
+    """
     async with pool.acquire() as conn:
-        return await _adjust_account_cash_with_conn(conn, account, delta)
+        return await _adjust_account_cash_with_conn(conn, account, delta, **kw)
 
 
 def normalize_spread_strikes(
@@ -548,7 +601,10 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             is_short_equity = d_existing == "SHORT" and is_stock
             cash_delta = add_cost if (s in CREDIT_STRUCTURES or is_short_equity) else -add_cost
             try:
-                cash_ok = await _adjust_account_cash(pool, account, cash_delta)
+                cash_ok = await _adjust_account_cash(
+                    pool, account, cash_delta,
+                    source_ref=existing.get("position_id"),
+                    description="added to position")
             except Exception as e:
                 logger.error("Cash adjustment failed on add-to-position: %s", e)
                 cash_ok = False
@@ -649,7 +705,9 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         is_short_equity = d == "SHORT" and s in ("stock", "stock_short", "short_stock", "")
         cash_delta = cost_basis if (s in CREDIT_STRUCTURES or is_short_equity) else -cost_basis
         try:
-            cash_ok = await _adjust_account_cash(pool, account, cash_delta)
+            cash_ok = await _adjust_account_cash(
+                pool, account, cash_delta, source_ref=position_id,
+                description="position opened")
         except Exception as e:
             logger.error("Cash adjustment failed on create: %s", e)
             cash_ok = False
@@ -2019,7 +2077,10 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                     is_short_equity = d_close == "SHORT" and is_stock
                     cash_delta = -exit_value if (s in CREDIT_STRUCTURES or is_short_equity) else exit_value
                     try:
-                        close_cash_ok = await _adjust_account_cash_with_conn(conn, pos.get("account", "ROBINHOOD"), cash_delta)
+                        close_cash_ok = await _adjust_account_cash_with_conn(
+                            conn, pos.get("account", "ROBINHOOD"), cash_delta,
+                            source_ref=pos.get("position_id"),
+                            description="closed position")
                     except Exception as e:
                         logger.error("Cash adjustment failed on close: %s", e)
                         close_cash_ok = False
@@ -2138,7 +2199,10 @@ async def delete_position(position_id: str, _=Depends(require_api_key),
         # Reverse: credit structures added cash at open → now subtract. Debit subtracted → now add.
         cash_delta = -cost if (s in CREDIT_STRUCTURES or is_short_equity) else cost
         try:
-            cash_ok = await _adjust_account_cash(pool, pos.get("account", "ROBINHOOD"), cash_delta)
+            cash_ok = await _adjust_account_cash(
+                pool, pos.get("account", "ROBINHOOD"), cash_delta,
+                source_ref=pos.get("position_id"),
+                description="position removed")
         except Exception as e:
             logger.error("Cash reversal failed on delete: %s", e)
             cash_ok = False
@@ -2260,7 +2324,9 @@ async def bulk_create_positions(req: BulkRequest, _=Depends(require_api_key)):
                 bulk_cost = abs(item.entry_price) * (1 if s_lower in ("stock", "stock_long", "long_stock") else 100) * item.quantity
                 cash_delta = bulk_cost if s_lower in CREDIT_STRUCTURES else -bulk_cost
                 try:
-                    await _adjust_account_cash(pool, "ROBINHOOD", cash_delta)
+                    await _adjust_account_cash(
+                        pool, "ROBINHOOD", cash_delta, source_ref=position_id,
+                        description="bulk import")
                 except Exception:
                     pass
 

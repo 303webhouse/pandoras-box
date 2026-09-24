@@ -53,15 +53,16 @@ logger = logging.getLogger("loss_alert")
 
 ACCOUNT = "FIDELITY_ROTH"
 
-# The principal's latest broker figure, ~$11,200 on 2026-09-24 (R-IV.517(d)). It is a
+# The Roth total in the principal's own positions file, downloaded 2026-09-24 11:09 ET
+# (R-IV.539(c); it superseded the ~$11,200 figure R-IV.517(d) started from). It is a
 # CONSTANT on purpose: the hub's own account_balances row for this account is what
 # money integrity is being built to make trustworthy, and sizing off an untrusted
 # aggregate is the failure that ruling exists to stop. Money integrity replaces this
 # read; the env var is the principal's lever until then.
-DEFAULT_ACCOUNT_VALUE_USD = 11_200.00
+DEFAULT_ACCOUNT_VALUE_USD = 11_319.53
 ACCOUNT_VALUE_AS_OF = date(2026, 9, 24)
 
-LOSS_FRACTION = 0.02                  # 2% of account value -> $224.00 at $11,200
+LOSS_FRACTION = 0.02                  # 2% of account value -> $226.39 at $11,319.53
 COST_RECOVERY_MULTIPLE = 2.0          # X7, principal's call: 2x-3x cost
 COST_RECOVERY_MIN_CONTRACTS = 2       # one contract cannot be half-sold
 
@@ -104,7 +105,16 @@ def account_value_usd() -> float:
 
 
 def loss_threshold_usd() -> float:
-    return round(account_value_usd() * LOSS_FRACTION, 2)
+    """2% of the account value, rounded HALF-UP to the cent (convention #27).
+
+    Through the same `money()` the position economics uses, so the alert's threshold
+    and the figures it compares against cannot round by two different rules.
+    """
+    from decimal import Decimal
+
+    from services.position_economics import money
+
+    return money(Decimal(str(account_value_usd())) * Decimal(str(LOSS_FRACTION)))
 
 
 # -- the stop the hub cannot see ---------------------------------------------
