@@ -7,6 +7,11 @@
      Expiry completeness is now a QUERY, not this header (R-IV.251(c)): each session close,
      every row WHERE expiry <= today AND status='OPEN' is stamped. The hand-enumerated
      dated-action line is retired as the completeness instrument; id 408 is why.
+     TA-049 (2026-09-24): D5 roster rebuilt broker-true — PDBC 1,184.93 + SLV 28.10 + WEAT
+     15.00 = 1,228.03, headroom 2,621.97. WRTH is NOT a member (short-vol income fund, ~97%
+     T-bills; Robinhood's 'Basic Materials 100%' vendor tag contradicts its holdings). SLV IS.
+     The old five-member 3,003.50 roster was stale end to end.
+     TA-050 (2026-09-24): SOXS 432's outcome restated to -415.07 cash (-415.04 gross).
      TA-044/TA-045 (2026-09-24): reachability exemption follows the TICKET, not the account —
      TAIL is exempt, CONVEXITY or a thesis must pass break-even within 1.5x the implied
      expected move. Bucket is set AT ENTRY and a retrospective change names its author.
@@ -110,14 +115,30 @@ of what was believed when; the correction belongs on the row and in this section
 - **MEMBERSHIP — BY ID, complete roster (R-IV.251(d), rewritten from R-IV.207(b)).**
   Cost basis, all wrappers:
 
+**BROKER-TRUE ROSTER (TA-049, 2026-09-24).** Membership is by composition and is
+structure-agnostic — "every account, every structure" (TA-041):
+
 | id | ticker | account | structure | basis |
 |---|---|---|---|---|
-| 404 | IEO | FIDELITY_ROTH | stock | 1,400.60 |
-| 398 | MOO | FIDELITY_ROTH | stock | 851.70 |
-| **431** | COPX | FIDELITY_ROTH | stock (09-08 lot) | **379.40** |
-| 406 | COPX | FIDELITY_ROTH | stock (09-02 lot) | 356.80 |
+| 437 | **PDBC** | FIDELITY_ROTH | stock | **1,184.93** |
+| 316 | **SLV** | ROBINHOOD | option spread, expiry 09-30 | **28.10** |
 | 367 | WEAT | ROBINHOOD | call_debit_spread 29/30 ×3 | 15.00 |
-| | | | **TOTAL** | **3,003.50** |
+| | | | **TOTAL** | **1,228.03** |
+| | | | **headroom** | **2,621.97** |
+
+**Not members, ruled TA-049:**
+- **WRTH 534 — NOT a member.** Worth Charting Options Income ETF (Tidal Trust III, inception
+  2026-04-27): current income from a short-options strategy — short call spread plus uncovered short
+  puts — on US-listed large-cap equities, with holdings ~97% Treasury bills/notes as collateral and
+  the options book at about −3%. A short-volatility income fund; **no commodity or inflation
+  exposure.** *Robinhood's vendor page lists sector "Basic Materials 100.00%", which contradicts the
+  fund's own holdings — **a ticker-screen read would have mis-filed it, the same class of error as
+  RAMZ** (TA-037).*
+- **RAMZ — NOT a member** (TA-037): a leveraged short of DRAM, not energy.
+
+**SUPERSEDED — the R-IV.386(d) roster, kept for the record:**
+~~404 IEO 1,400.60 · 398 MOO 851.70 · 431 COPX 379.40 · 406 COPX 356.80 · 367 WEAT 15.00 =
+TOTAL 3,003.50~~ — **IEO and MOO exited 09-14; both COPX lots exited 09-11.**
 
 - **CAP: $3,850 all-wrapper cost basis — headroom $846.50.** Every account, every
   structure. Down from $1,164.80. **This is the single cap statement for D5 (TA-041).**
@@ -151,6 +172,12 @@ of what was believed when; the correction belongs on the row and in this section
     over by 278.41** — but the principal **does not hold GUSH** (R-IV.516(c)) and the row is open
     only because the exit has not booked. **The sleeve is NOT breached and no add is refused on
     this row's account.** The broker-true roster is the five members at **$3,003.50**.
+
+- **TA-049: the R-IV.386(d) roster (five members, 3,003.50) was stale end to end** — IEO, MOO and
+  both COPX lots exited 09-11 to 09-14 unbooked. The ~379.40 this lane could not identify was not an
+  unnamed member; it was a roster that had not been true for two weeks. Per TA-042, a cap computed
+  from rows known to be stale is not a cap test: **the sleeve was neither breached nor within its cap
+  — it was unmeasured.**
 
 ### D4 hedge line — DECLINED, rolled · R-IV.209
 - **DECLINED 2026-09-03 by principal.** No new convexity purchased.
@@ -243,13 +270,21 @@ Fidelity still evidenced by confirmation rather than export).
 |---|---|---|---|---|
 | the chartered ×40 | 409 + 430 | 40 | **09-14** | +32.25 · +144.90 = **+177.15** |
 | a same-day round trip | 438 | 20 | 09-14 | **−7.50** |
-| re-expressed, then closed | **432** | 35 | **09-21** at 36.235 | **−415.04** |
-| | | | **net, 09-03 → 09-21** | **−245.39** |
+| re-expressed, then closed | **432** | 35 | **09-21** at 36.235 | **−415.07** |
+| | | | **net, 09-03 → 09-21** | **−245.42** |
 
-**432's −415.04 is from the Fidelity confirmations**, four of them: 754.50 (`26258-Q4ZDR8`) +
-242.65 (`26259-PM8MYF`) + 246.43 (`26259-QKPYQL`) + 439.69 (`26261-N7WG83`) = basis **1,683.27**
-against proceeds 1,268.23. Round-then-sum, per convention #27 — summing unrounded and rounding once
-gives 1,683.26 and loses a cent (R-IV.507(b)).
+**TA-050 — the outcome line, restated:** *outcome: CLOSED 09-21, realized **−415.07 cash**
+(−415.04 gross, per the confirmations' printed principal). The book is cash-not-gross; the cash figure
+governs.*
+
+The 0.03 is the sale's fee: the confirmations print the **principal** 1,268.23, while the history
+file's amount is **1,268.20** — the same sale net of fee (R-IV.536(d)). The net for the sequence moves
+with it, −245.39 → **−245.42**.
+
+**432's basis 1,683.27 is unchanged**, and is from the four Fidelity confirmations: 754.50
+(`26258-Q4ZDR8`) + 242.65 (`26259-PM8MYF`) + 246.43 (`26259-QKPYQL`) + 439.69 (`26261-N7WG83`).
+Round-then-sum, per convention #27 — summing unrounded and rounding once gives 1,683.26 and loses a
+cent (R-IV.507(b)). **Only the proceeds convention changed, not the basis.**
 
 *Parallel, other account:* ROBINHOOD id 433 (16 shares) also closed **09-21** at 36.11 for
 **−220.08**, export-verified. Not part of this Fidelity thesis, but the same day and the same move.
