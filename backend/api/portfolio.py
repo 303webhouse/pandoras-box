@@ -38,69 +38,32 @@ def _row_to_dict(row) -> dict:
 
 @router.get("/balances", dependencies=[Depends(require_api_key)])
 async def get_balances():
-    pool = await get_postgres_client()
-    rows = await pool.fetch("""
-        SELECT account_name, broker, balance, cash, buying_power, margin_total, updated_at, updated_by
-        FROM account_balances
-        ORDER BY CASE broker WHEN 'robinhood' THEN 0 ELSE 1 END, account_name
-    """)
-    # R-IV.439(a)/440(a) — the canonical scope travels WITH the row, so no consumer has to
-    # keep its own list of which accounts are tradeable. Same vocabulary the MCP tool uses
-    # (hub_mcp/tools/portfolio_balances.py, T4): config.accounts is the one source.
-    # Additive: `account_name`/`balance` are unchanged, so existing readers are unaffected.
-    from config.accounts import is_in_scope, normalize_account
+    """Account balances, THROUGH THE ONE READ SERVICE.
 
-    out = []
-    for r in rows:
-        d = _row_to_dict(r)
+    This route used to run its own query and attach its own derived figures, which
+    is how it came to serve the STORED balance (835.69) while the MCP tool served
+    the derived one (1,308.99) from the same database in the same minute. Two
+    surfaces answering differently about one account is the failure the single
+    author exists to prevent, and it had been reintroduced here by a route that
+    merely looked like it was doing the same thing.
+
+    `services.read_only.balances` now owns it: derived cash, the derived balance,
+    partial where a position cannot be valued, and buying power served as null with
+    its reason (R-IV.559(c)).
+    """
+    from config.accounts import is_in_scope, normalize_account
+    from services.read_only.balances import get_account_balances
+
+    rows = await get_account_balances()
+    if rows is None:
+        raise HTTPException(status_code=503,
+                            detail="account balances are unavailable this cycle")
+    # R-IV.439(a)/440(a) -- the canonical scope travels WITH the row, so no consumer
+    # has to keep its own list of which accounts are tradeable.
+    for d in rows:
         d["scope"] = normalize_account(d.get("account_name"))
         d["in_scope"] = is_in_scope(d.get("account_name"))
-        # R-IV.548(e): the DERIVED figure, served beside the stored one it is
-        # replacing, with the difference between them. Additive, so every existing
-        # reader is unaffected -- but no reader of this route can now see the stored
-        # cash without also being shown what the ledger makes of it.
-        #
-        # Neither figure is quietly preferred. The stored one is a running total six
-        # writers maintain and nobody can reconstruct; the derived one is complete
-        # only from its anchor forward. The gap is the product: it is what the
-        # periodic broker-CSV cleanup goes looking for.
-        try:
-            led = await _derived_balance(d.get("account_name"))
-            # R-IV.551(b)1: WHERE THE STORED FIGURE WAS SHOWN, SHOW THE DERIVED ONE.
-            #
-            # The Roth's stored cash reached -1,229.51, which a Roth cannot hold --
-            # there is no margin in one -- while the derived figure moved in step
-            # with the day's trades. The gap is the stored figure's own error, so no
-            # cash event closes it and only retiring it does.
-            #
-            # `cash` therefore carries the DERIVED figure once an account is
-            # anchored, and the stored number moves to `cash_stored` as history. An
-            # unanchored account is unchanged: it still shows what it has, because
-            # the alternative there is nothing at all.
-            if led["derived"]["derivable"]:
-                d["cash_stored"] = d.get("cash")
-                d["cash"] = led["derived"]["balance"]
-                d["cash_source"] = "derived"
-            else:
-                d["cash_stored"] = d.get("cash")
-                d["cash_source"] = "stored"
-            d["cash_derived"] = led["derived"]["balance"]
-            d["cash_derivable"] = led["derived"]["derivable"]
-            d["cash_derived_reason"] = led["derived"]["reason"]
-            d["cash_opening_balance"] = led["derived"]["opening_balance"]
-            d["cash_opening_date"] = led["derived"]["opening_date"]
-            d["cash_difference"] = led["reconciliation"]["difference"]
-            d["cash_agrees"] = led["reconciliation"]["agrees"]
-            d["cash_difference_reason"] = led["reconciliation"]["reason"]
-            d["cash_event_count"] = led["event_count"]
-        except Exception as exc:  # noqa: BLE001
-            # Loud, and the stored figure still ships: a ledger read that fails must
-            # not blank the balances page.
-            d["cash_derivable"] = None
-            d["cash_derived_reason"] = ("the ledger could not be read this cycle (%s)"
-                                        % type(exc).__name__)
-        out.append(d)
-    return out
+    return rows
 
 
 # ── 2. POST /balances/update ──
