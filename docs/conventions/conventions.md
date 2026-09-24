@@ -936,6 +936,90 @@ the thing that failed) -- this is the same rule applied to recovery rather than 
 
 ---
 
+## #23 AN ADJUDICATION SHOWS ITS EVIDENCE LINES BESIDE ITS VERDICT
+
+**R-IV.457(e), standing. Authored by CC-POSITIONS.**
+
+> **A verdict that chooses between figures is printed with the source lines it rests on -- file,
+> line, code, quantity, price, amount -- in the same output, and it travels with them. A verdict
+> alone is a claim; the lines are the evidence.**
+
+### Instance 1 -- R-IV.456, ten book/trades pairs against the Robinhood export
+
+A script adjudicated ten pairs where `unified_positions` and `trades` disagreed on realized P&L.
+For each it printed a gross figure, a net figure and a "closer to" verdict -- **and, beside them,
+the export lines it had summed.** Three of its figures were wrong, and each was wrong in a way the
+lines beside it showed at a glance:
+
+| id | script's figure | what the lines showed |
+|---|---|---|
+| 92 ICE | gross **+1,290.60** against net -8.92 | a short sale: `SS 4 @ 160.21`, `BC 4 @ 162.44`. The script knew neither code, so it counted both legs as sales. Gross is **-8.92**. |
+| 347 XLE | gross **+174.00** | two expiries in one window. The `$60` strike filter admitted id 351's 7/31 contract beside this row's 8/21 spread. |
+| 343 DRAM | gross **+125.00** | a partial close on 07-02 that this row does not hold (it is id 501). The window summed a partial and a final close against a final-only row. |
+
+**All three were plausible.** +174.00 on an XLE call spread and +125.00 on a DRAM put spread are
+ordinary-looking numbers; neither would have stood out in a verdict column. Printed beside lines
+showing two expiries and two close dates, neither survived a read.
+
+**The same script printed all three figures again on 2026-09-18**, when the lines were re-printed
+ahead of the R-IV.457(d) write. The instrument had not improved. What caught them, both times, was
+reading the lines.
+
+An earlier adjudication, R-IV.397, was withdrawn after issue for plausible wrong figures that had
+gone out without their lines. Same shape, caught later.
+
+### Instance 2 -- R-IV.457(d): the ruling itself was a verdict
+
+The book corrections were ruled from the R-IV.456 verdict table. Re-printing the lines before the
+write turned up three premises that the lines contradicted:
+
+- **META 38 -- "the unexplained $3.01."** The lines explain it. The row's `exit_price` is 0.11; the
+  export closes all three spreads at 0.44 - 0.32 = **0.12**. That is 0.01 x 300 = 3.00, and entry
+  0.5767 stored to four places x 300 = 173.01 against 173.00 is the other cent. -140.01 is
+  (0.1100 - 0.5767) x 300 exactly. Why 0.11 was written is UNKNOWN; the arithmetic is not.
+- **GUSH 358 -- "export gross +6.29."** +6.29 is the gross over **15.35049** shares: the export has
+  a fractional `Buy 0.35049 @ 39.09` beside the 15-share fill. The row holds 15, and on 15 the gross
+  is +6.15. **Held, not written** -- which figure is right turns on a quantity question the ruling did
+  not ask.
+- **XLE 347, DRAM 343 -- "book = net."** Neither was a net figure. Each was **close cash less gross
+  basis**, on a row holding only the final close. Full net would be 53.81 and 89.81, not 53.90 and
+  89.90. Each row's fee delta is stated as what it actually is.
+
+**The ruled figures for XLE 351 (+64.00) and META 38 (-137.00) were right, and four of the five
+normalizations wrote cleanly.** What the verdict carried were wrong premises: an explained delta
+called unexplained, a gross over a quantity the row does not hold, and two mixed figures called net.
+**A premise is what the next reader acts on.**
+
+### The rule
+
+- **The output that prints a verdict prints the lines beside it.** Per line: source file, line
+  identity (row number, or confirmation reference plus order), date, code, quantity, price, amount.
+  A total with no lines under it is not a finding.
+- **A verdict whose lines do not sum to it is withdrawn, not rounded.** A line that does not belong
+  to the row -- another expiry, another lot, a partial the row does not hold -- invalidates the verdict
+  it sits in, however close the figure looks.
+- **A relay that carries a verdict forward carries the lines, or a pointer precise enough to
+  re-print them** (file and line numbers). A ruling issued on a verdict alone inherits every error
+  the verdict hid.
+- **A correction written to the book carries its lines on the row.** Every R-IV.457(d) note names
+  its export lines and does the arithmetic from them, so the next reader checks the row against the
+  file, not against this lane's word.
+- **An automated "closer to" column is a triage aid, not an adjudication.** At R-IV.456 it was wrong
+  on four of ten pairs: the three above, and XLE 351, whose whole-lifecycle +91.00 read "closer to
+  BOOK" on a row that holds only the final contract, where the right figure is +64.00.
+
+### The test
+
+Cover the verdict column and read only the lines. **If the lines do not lead to the verdict on their
+own, the verdict does not stand.**
+
+**Kin:** *A DERIVED VALUE CANNOT WITNESS ITS OWN INPUT* -- a verdict computed from lines cannot vouch
+for having chosen the right lines. #18 *A NEGATIVE READ REPORTS THE PARTITION* -- show what a figure
+covers, not only the figure. Addendum 3's companion rule (an absence is only evidence when the
+instrument could have shown a presence) -- here the instrument was the line filter, and the filter
+is what failed in two of the three cases.
+
+
 ## #24 A DATE IN THE BOOK IS THE PRINCIPAL'S DAY
 
 **Registered:** R-IV.464(a). **Author:** CC-BUILD. (#23 is CC-POSITIONS'.)

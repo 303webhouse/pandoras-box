@@ -293,6 +293,77 @@ returns clean.
 lifecycle. id 422 was found because the 09-01 → 09-14 export contained both the open and the
 expiry; had the export begun 09-10 it would still be invisible.
 
+### Instances 2 and 3 — both Fidelity, both found by the 09-17 confirmations
+
+| # | position | lifecycle | realized |
+|---|---|---|---|
+| **1** | **GDXJ 5 @ 121.90, id 439** | **bought 09-14, sold 09-16** | **−22.10** |
+
+> **⚠ CORRECTED AGAIN 2026-09-18 (R-IV.454(a)) — THE COUNT IS ONE.** QQQ 690/685 ×2 (id 422) was
+> this class's **founding instance** and **it does not belong to it.** The principal recorded the
+> position as **id 414 on 2026-09-11 at 00:07 — four days before** the R-IV.385 gap ingest
+> created id 422. Two rows, one event: a **duplicate**, now `duplicate_of` id 422.
+>
+> **The ingest could not see id 414** because its census scoped on
+> `status='OPEN' OR exit_date >= '2026-09-01'`, and id 414 is `EXPIRED` with a **NULL
+> `exit_date`** — it matched **neither** clause. A date-window predicate on a nullable column
+> silently excludes every NULL (R-IV.454(b)).
+>
+> **Both instances this class has lost were the same error.** BITX (removed at R-IV.449) and QQQ
+> (removed here) were each a real event, correctly recorded by the principal, that a scoped read
+> could not see — and each time the read's blindness was reported as the book's absence.
+> **This class was over-counted by the very mechanism it exists to catch.** Of three filed
+> instances, one survives. GDXJ has been re-checked: no manual GDXJ row exists for September.
+
+> **⚠ CORRECTED 2026-09-18 (R-IV.449(a)) — THE COUNT IS TWO, NOT THREE.** BITX was filed here
+> as instance 3 and **it does not belong to this class.** The lifecycle *was* recorded — by the
+> principal, as **id 435**, twelve minutes after it happened. What existed was a **duplicate**,
+> not an absence: the reconciliation that produced id 440 could not see id 435 and created a
+> second row for the same round trip. id 435 is now `DUPLICATE_OF` id 440, never deleted.
+>
+> **This correction matters more than one row.** A duplicate and an absence present identically
+> to a reconciliation — both read as *"the broker has something the book does not."* The
+> remedies are opposite: one inserts, one retires. **Instance 3 was a real event, correctly
+> recorded, that a scoped read could not see** — the same inversion `DEF-INGEST-DUPLICATE-LOT`
+> records, arriving from the other direction.
+
+**GDXJ had never appeared in `unified_positions` in any form** — not as an open row, not as a
+closed one, not in `trades`. BITX round-tripped inside a single session. Neither left an
+orphan, an imbalance or a NULL: the book was internally consistent throughout and wrong.
+
+**The class is not Robinhood-specific.** Instance 1 was the Robinhood ingest path; 2 and 3 are
+Fidelity. That answers the question the FIDELITY SIBLING annotation posed in the other
+direction — the sibling it looked for was a missed *closure*, which resolved NEGATIVE, but the
+gap itself **does** have a Fidelity face. *"One ingest path is lossy"* is the wrong reading;
+**absence is undetected on every path.**
+
+### ⚠ STANDING CAUTION — A PRE-COVERAGE FIFO WALK RETURNS PROCEEDS, NOT P&L
+
+**Ratified R-IV.448(a).** When a sale draws on inventory bought before the export or
+confirmation set begins, a FIFO walk started at the coverage boundary finds **no basis** and
+reports the entire proceeds as realized. The number is large, plausible and silently wrong.
+
+Measured on the 09-17 Fidelity reconciliation:
+
+| sale | naive FIFO from 09-01 | true, using the book's basis | error |
+|---|---|---|---|
+| **MOO** 10 @ 86.6430 | **+866.43** | **+14.73** (basis 851.70, id 398) | **59×** |
+| **GUSH** 40 @ 47.0800 | **+1,883.20** | **+113.33** (basis 1,769.87, id 397) | **16×** |
+| RAMZ 35 @ 17.3250 | +606.38 | +1.53 (basis 604.85, id 400) | 396× |
+| SOXS 15 @ 52.8200 | +792.30 | +73.36 (basis 718.94, id 396) | 11× |
+
+**The danger is that it looks reasonable.** A +$866 realized on a ten-share ETF sale is not
+obviously absurd; +$1,883 on forty shares of a leveraged fund is the sort of figure a good day
+produces. Nothing in the output flags that the basis leg was empty.
+
+**THE RULE: where the buy predates coverage, the basis comes from the book, and the row says
+so.** Never a FIFO walk from the coverage boundary. Four rows in the R-IV.447 correction set
+carry that statement for this reason.
+
+**Kin:** `verification-laws-addendum-3.md` LAW 3 — an instrument that answers instead of
+failing. A FIFO walk with no lots to consume should return *"basis unknown"*; it returns zero,
+and zero basis is indistinguishable from a free position.
+
 ### Remedy — the import cadence, as a job
 
 `DEF-EXPORT-COVERAGE-GAP`'s standing export cadence is necessary but not sufficient here: a
@@ -303,3 +374,24 @@ interval exists in which a position can live and die unobserved.
 
 **The lots table does not fix this class either.** Like the no-artifact class, it has nothing
 to populate from. Credit for this class belongs to T6f alone.
+---
+
+## INSTRUMENT NOTE — AN EXPIRATION LINE STATES ITS CONTRACT COUNT (2026-09-20, R-IV.465(b))
+
+**The export's `OEXP` rows carry a quantity, and it is the position's size.** The Quantity field
+reads `2S` / `4S` — contracts, with an `S` suffix — while Price and Amount are empty, which is why
+a money-shaped read skips these lines entirely.
+
+```
+L340  6/12/2026  OEXP  Option Expiration for IBIT 6/12/2026 Put $35.00   qty 2S
+L344  6/12/2026  OEXP  Option Expiration for IBIT 6/12/2026 Put $33.00   qty 4S
+```
+
+**What it settles.** An expired position can be SIZED from the export without inferring anything
+from the opening fills — and it is a second witness against them. L344 is what confirmed that the
+6/12 33P expired holding **four** contracts, not the two book id 319 carried: the row had recorded
+only the first of two buys (R-IV.464(e)). L340 sized the 35P at two, entered as id 514.
+
+**Read them.** A gap census that filters on an Amount will not see an `OEXP` line, so a position
+that ENDED by expiry can be absent from a reconciliation built on cash alone — the same blind spot
+as an OPEN-scoped inventory, on the other end of the lifecycle.
