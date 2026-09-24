@@ -122,32 +122,6 @@ Fidelity still evidenced by confirmation rather than export).
 
 ## Active theses
 
-### SOXS ×40 · FIDELITY_ROTH — semis / equity-drawdown thesis · TA-017
-- **Bucket: PENDING principal.** Leveraged ETF; B2 rules do not fit a multi-week hold, and B1
-  is excluded for leveraged by standing rule. **The position is live and unchartered.**
-- Thesis: hot-CPI / hike / oil-shock equity drawdown, expressed through 3× inverse semis.
-- **Invalidation: PENDING principal.** No price level is live — id 409's 43.20 was TA-002's
-  Robinhood level and was NULLed at TA-017(3).
-- Review date: **2026-09-16 (FOMC).**
-- Status: **on — unchartered.**
-- Last Olympus read: 09-09/09-10 — instrument mismatch for a multi-week thesis, stated once.
-
-**The two lots, both BROKER_VERIFIED against Fidelity confirmations:**
-
-| id | bought | qty | price | basis |
-|---|---|---|---|---|
-| 409 | 09-03 + 09-04 | 20 | 51.5850 / 46.6601 → avg **49.1225** | 982.45 |
-| 430 | 09-08 | 20 | **43.4901** | 869.80 |
-| | | **40** | | **1,852.25** |
-
-At the 09-14 mark of **51.73** the pair carries **+$216.95** into FOMC eve.
-
-> **⚠ TWO STALE FIELDS ON id 409, flagged not changed.** `target_1` still reads **49.00** and
-> `strategy_tag` still reads **B2** — both are TA-002's, set for the Robinhood trade that
-> retired below. They are stale by exactly the reasoning that retired the 43.20 stop, but
-> neither was ordered changed. **A position whose bucket is PENDING should not be carrying a
-> bucket tag**; until it is re-chartered, `B2` on this row is a label the thesis contradicts.
-
 ### [TEMPLATE — copy for each new thesis]
 - Bucket: B1 / B2
 - Thesis (one sentence):
@@ -182,6 +156,38 @@ At the 09-14 mark of **51.73** the pair carries **+$216.95** into FOMC eve.
 
 ## Retired theses
 (Date closed · thesis · outcome · one-line lesson.)
+
+### 2026-09-21 · SOXS · FIDELITY_ROTH — semis / equity-drawdown thesis (TA-017, retired R-IV.515(d))
+**Closed 09-21.** The thesis went flat and no SOXS row is OPEN in either account.
+
+**The arc, from the rows:**
+
+| leg | ids | qty | closed | realized |
+|---|---|---|---|---|
+| the chartered ×40 | 409 + 430 | 40 | **09-14** | +32.25 · +144.90 = **+177.15** |
+| a same-day round trip | 438 | 20 | 09-14 | **−7.50** |
+| re-expressed, then closed | **432** | 35 | **09-21** at 36.235 | **−415.04** |
+| | | | **net, 09-03 → 09-21** | **−245.39** |
+
+**432's −415.04 is from the Fidelity confirmations**, four of them: 754.50 (`26258-Q4ZDR8`) +
+242.65 (`26259-PM8MYF`) + 246.43 (`26259-QKPYQL`) + 439.69 (`26261-N7WG83`) = basis **1,683.27**
+against proceeds 1,268.23. Round-then-sum, per convention #27 — summing unrounded and rounding once
+gives 1,683.26 and loses a cent (R-IV.507(b)).
+
+*Parallel, other account:* ROBINHOOD id 433 (16 shares) also closed **09-21** at 36.11 for
+**−220.08**, export-verified. Not part of this Fidelity thesis, but the same day and the same move.
+
+**Lesson: no bucket and no invalidation was ever written, so it closed on discretion rather than on
+a rule.** The Active entry carried "**Bucket: PENDING principal**" and "**Invalidation: PENDING
+principal**" from the day it was opened to the day it went flat — five weeks — and the one price
+level it ever had (43.20) belonged to a *different* trade in a *different* account and was NULLed at
+TA-017(3). A thesis with no bucket has no sizing rule and a thesis with no invalidation has no exit
+rule, so the only thing left to close on was judgement. **The −415.04 leg was opened 09-16 and shut
+five days later; nothing written down could have told anyone whether that was right.**
+
+**Two stale fields survive on id 409, flagged again and still not changed** (never ordered):
+`target_1` **49.00** and `strategy_tag` **B2**, both TA-002's, set for the Robinhood trade retired
+below. A closed row carrying another trade's bucket tag is a label the thesis contradicts.
 
 ### 2026-09-14 · id 411 SOXS ×7 ROBINHOOD — fade the semis pop (B2, R-IV.253(b))
 **Entry** 51.67 on 09-04 · **outcome:** CLOSED 09-14, **realized −4.76 gross** (7 × 50.99 =
