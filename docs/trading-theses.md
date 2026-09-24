@@ -7,6 +7,12 @@
      Expiry completeness is now a QUERY, not this header (R-IV.251(c)): each session close,
      every row WHERE expiry <= today AND status='OPEN' is stamped. The hand-enumerated
      dated-action line is retired as the completeness instrument; id 408 is why.
+     TA-042 (2026-09-24): D5 cap-test integrity rule added — where a confirmed exit is pending
+     and unbooked, the test runs against the broker-true roster and the hub figure is
+     indicative. GUSH id 441 is the live instance: member by composition, not a breach.
+     TA-043 (2026-09-24): source hierarchy added — rows/exports/broker documents are
+     evidence; briefs and narrative are context and never the basis for a tag, a roster
+     membership, a sizing figure or a trade. The briefs are not amended.
      TA-041 (2026-09-24): D5 carried TWO caps, $3,750 at the head of the section and $3,850
      below the roster. $3,850 is in force (R-IV.386(d): 3,003.50 + 846.50 = 3,850.00). The
      $3,750 line is struck and its all-wrapper scope folded into the surviving statement.
@@ -44,6 +50,23 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
 
 ## Standing rules
 (Rules that bind without a session. Added by ruling; each carries its ruling id.)
+
+### Source hierarchy for passes · TA-043
+
+**Rows, exports and broker documents are EVIDENCE. Weekly briefs and prior narrative are CONTEXT:**
+they may be cited for what was believed on a date, **never as the basis for a tag, a roster
+membership, a sizing figure or a trade.**
+
+**Two instances, both on the record:**
+1. **RAMZ filed as an energy / D5 member in the 08-31 and 09-07 briefs — and in no row, ever**
+   (TA-037). RAMZ is a leveraged short of DRAM; it was never in the sleeve, and the membership
+   existed only in brief text. Checked on execution: no RAMZ row mentions D5, energy or commodity,
+   `tags` is NULL on all four, and this document contained no RAMZ entry.
+2. **The 09-05 PIVOT verdict to sell 2 of 3 WEAT**, premised on brief text rather than the ledger's
+   own partial-sale record (TA-007). The ledger already held the 3-of-6 sale at 0.10.
+
+**The briefs are dated artifacts and are NOT amended.** Correcting them would destroy the evidence
+of what was believed when; the correction belongs on the row and in this section.
 
 ### D5 — commodity / inflation sleeve cap · R-IV.192(e), R-IV.201(c)
 - **The cap BINDS AT ADD.** Any order that would breach it is **declined by rule** — no
@@ -84,6 +107,16 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
   gained a second id. Reading this table by ticker rather than by id will misstate it.
 - **Verified against the ledger, not transcribed.** All five bases reproduce as
   `quantity × entry_price × (100 for options)` and the total lands on $3,003.50 to the cent.
+
+- **Cap test integrity — TA-042.** D5 binds at add, so the cap test must run against a roster the
+  book can vouch for. Where a broker-confirmed exit is pending and unbooked, the test runs against
+  the **broker-true roster** and the hub-derived figure is marked **indicative, not binding**.
+  **A cap computed from rows known to be stale is not a cap test.**
+  - *Live instance, 2026-09-24:* **GUSH id 441** is a D5 member by composition (leveraged long
+    energy, basis **1,124.91**). Against the $3,850 cap the hub roster would read **4,128.41 —
+    over by 278.41** — but the principal **does not hold GUSH** (R-IV.516(c)) and the row is open
+    only because the exit has not booked. **The sleeve is NOT breached and no add is refused on
+    this row's account.** The broker-true roster is the five members at **$3,003.50**.
 
 ### D4 hedge line — DECLINED, rolled · R-IV.209
 - **DECLINED 2026-09-03 by principal.** No new convexity purchased.
