@@ -9912,7 +9912,8 @@ function showWithdrawModal(accountName, defaultType) {
                     flow_type: 'ACH',
                     description: note || (flowType === 'withdraw' ? 'Withdrawal' : 'Deposit'),
                     account_name: accountName,
-                    adjust_balance: true,
+                    // R-IV.548(c): the stored total is no longer edited by this
+                    // route. The balance is derived from the ledger this appends to.
                 }),
             });
             modal.remove();

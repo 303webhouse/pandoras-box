@@ -524,7 +524,7 @@ async def quick_review(req: QuickReviewRequest):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """SELECT ticker, direction, status, entry_price, current_price, unrealized_pnl
-                   FROM unified_positions WHERE ticker = $1 AND status = 'open'""",
+                   FROM unified_positions WHERE ticker = $1 AND status = 'OPEN'""",
                 ticker,
             )
             if rows:

@@ -4,6 +4,8 @@ Stores all signals for backtesting and historical analysis
 """
 
 import asyncpg
+
+from models.position_status import STATUSES as _POSITION_STATUSES
 import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -1284,6 +1286,7 @@ async def init_database():
                         );
                 END $$
             """),
+            # One author for the status vocabulary (conventions #9).
             ("provenance vocabulary: position_legs", """
                 DO $$
                 BEGIN
@@ -1293,6 +1296,30 @@ async def init_database():
                                               'BROKER_VERIFIED', 'IMPORTED', 'UNKNOWN'));
                 END $$
             """),
+            # R-IV.548(d): STATUS IS A VOCABULARY, AND THE COLUMN NOW SAYS SO.
+            #
+            # Without a CHECK any word is accepted, and a new word slips past every
+            # consumer's filter at once -- `status = 'OPEN'` misses it, `status !=
+            # 'OPEN'` swallows it into the realized set, and nothing anywhere raises.
+            # DUPLICATE_OF is the case that already happened: it needed
+            # `models/position_status.py` written to stop `!= 'OPEN'` counting a
+            # retired duplicate as a completed trade.
+            #
+            # The list is NOT retyped here. It is generated from that module's own
+            # STATUSES tuple, so the constraint and the vocabulary cannot drift --
+            # two copies of a vocabulary is how the second one gets forgotten.
+            #
+            # Census before constraining (2026-09-24, 489 rows): CLOSED 408,
+            # EXPIRED 34, DUPLICATE_OF 24, OPEN 23. Nothing else, so nothing is
+            # broken by adding it.
+            ("status vocabulary: unified_positions", """
+                DO $$
+                BEGIN
+                    ALTER TABLE unified_positions DROP CONSTRAINT IF EXISTS unified_positions_status_check;
+                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_status_check
+                        CHECK (status IN (%s));
+                END $$
+            """ % ", ".join("'%s'" % s for s in _POSITION_STATUSES)),
             ("screen verification needs its evidence: unified_positions", """
                 DO $$
                 BEGIN

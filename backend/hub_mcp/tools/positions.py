@@ -162,9 +162,14 @@ async def hub_get_positions(
         "position_count": len(positions),
         **risk,
     }
+    # R-IV.548(b): when the caller asked for CLOSED or ALL, say out loud that the
+    # risk figure counted the open rows only. A bare "$0 capital at risk" against a
+    # CLOSED filter reads as "the book carries no risk", which is a different claim.
     summary = (
         f"{len(positions)} {status.lower()} positions, "
         f"${total_at_risk:,.0f} capital at risk (cost at the open remainder"
+        + (f"; {risk['positions_not_open']} closed or expired rows carry realized P&L "
+           f"only and are not risk" if risk.get("positions_not_open") else "")
         + ("" if risk["complete"]
            else f"; {risk['positions_excluded']} excluded for want of lots")
         + ")."

@@ -54,6 +54,32 @@ async def get_balances():
         d = _row_to_dict(r)
         d["scope"] = normalize_account(d.get("account_name"))
         d["in_scope"] = is_in_scope(d.get("account_name"))
+        # R-IV.548(e): the DERIVED figure, served beside the stored one it is
+        # replacing, with the difference between them. Additive, so every existing
+        # reader is unaffected -- but no reader of this route can now see the stored
+        # cash without also being shown what the ledger makes of it.
+        #
+        # Neither figure is quietly preferred. The stored one is a running total six
+        # writers maintain and nobody can reconstruct; the derived one is complete
+        # only from its anchor forward. The gap is the product: it is what the
+        # periodic broker-CSV cleanup goes looking for.
+        try:
+            led = await _derived_balance(d.get("account_name"))
+            d["cash_derived"] = led["derived"]["balance"]
+            d["cash_derivable"] = led["derived"]["derivable"]
+            d["cash_derived_reason"] = led["derived"]["reason"]
+            d["cash_opening_balance"] = led["derived"]["opening_balance"]
+            d["cash_opening_date"] = led["derived"]["opening_date"]
+            d["cash_difference"] = led["reconciliation"]["difference"]
+            d["cash_agrees"] = led["reconciliation"]["agrees"]
+            d["cash_difference_reason"] = led["reconciliation"]["reason"]
+            d["cash_event_count"] = led["event_count"]
+        except Exception as exc:  # noqa: BLE001
+            # Loud, and the stored figure still ships: a ledger read that fails must
+            # not blank the balances page.
+            d["cash_derivable"] = None
+            d["cash_derived_reason"] = ("the ledger could not be read this cycle (%s)"
+                                        % type(exc).__name__)
         out.append(d)
     return out
 
@@ -335,7 +361,14 @@ class CashFlowCreate(BaseModel):
     description: Optional[str] = None
     activity_date: Optional[str] = None  # ISO date, defaults to today
     account_name: str = "Robinhood"
-    adjust_balance: bool = True  # auto-adjust account_balances cash
+    # R-IV.548(c): DEFAULT FLIPPED TO NO MUTATION, and `true` no longer mutates
+    # either. `account_balances.cash` is a stored running total six writers maintain
+    # and nobody can reconstruct; money integrity is replacing it with a figure
+    # derived from this very ledger. A route that appends an event AND edits the
+    # total keeps the two free to disagree, which is the fault. The field stays so
+    # an old caller is answered rather than rejected, and the response says plainly
+    # that nothing was adjusted and why.
+    adjust_balance: bool = False
 
 
 @router.post("/cash-flows")
@@ -356,17 +389,24 @@ async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
         RETURNING *
     """, body.account_name, body.flow_type, body.amount, body.description, act_date)
 
+    if row is None:
+        # An INSERT ... RETURNING that returns nothing is not a success with an empty
+        # body; it means the row did not land. Said plainly rather than raising a
+        # TypeError three lines later on a None the caller never sees.
+        raise HTTPException(status_code=500,
+                            detail="the cash flow was not written and the database "
+                                   "returned no row")
     result = _row_to_dict(row)
-
+    result["balance_adjusted"] = False
     if body.adjust_balance:
-        updated = await pool.execute("""
-            UPDATE account_balances
-            SET cash = cash + $1, balance = balance + $1,
-                updated_at = NOW(), updated_by = 'cash_flow'
-            WHERE account_name = $2
-        """, body.amount, body.account_name)
-        result["balance_adjusted"] = updated != "UPDATE 0"
-
+        # Answered, not obeyed, and not silently either. Ignoring the flag without
+        # saying so would be a different kind of lie from mutating the total.
+        result["note"] = (
+            "adjust_balance was requested and NOT applied: account_balances.cash is a "
+            "stored running total under replacement (R-IV.548(c)). The balance is "
+            "derived from this ledger - see GET /api/portfolio/cash-balance - and a "
+            "route that both appended an event and edited the total would leave two "
+            "figures free to disagree.")
     return result
 
 
@@ -771,6 +811,102 @@ async def record_principal_cash_entry(body: CashEntryCreate, _=Depends(require_a
         "conflict_note": None if not conflict else
             "this key already recorded a different movement; the first one stands "
             "and nothing was changed - send a new idempotency_key to book another",
+        **derived,
+    }
+
+
+# ── 12. The evidence-backed ledger event (R-IV.548(c)) ──
+#
+# POSITIONS had to write the Roth's six events by audited SQL, because no route took
+# a dated event with a source_ref. That is a gap in the path, not in POSITIONS: a
+# lane reaching for raw SQL to record money is the signal that the route it needed
+# does not exist. This is that route.
+#
+# It differs from `/cash-entry` in what it is FOR. `/cash-entry` is the principal
+# typing a deposit, and its idempotency key comes from the form. This one carries a
+# movement read out of a document -- a broker CSV, a confirmation -- so the evidence
+# is REQUIRED, the actor is named, and dedup runs on the service's own key over the
+# movement itself, which is what makes re-importing the same file safe.
+
+class CashLedgerEventCreate(BaseModel):
+    account_name: str
+    event_type: str                      # the ledger vocabulary, not ANCHOR
+    amount: float                        # SIGNED
+    event_date: str                      # ISO date the money moved
+    source_ref: str                      # the document this was read out of (#32)
+    actor: str                           # who read it
+    note: Optional[str] = None
+    occurrence: int = 0                  # two identical same-day movements
+
+
+@router.post("/cash-event")
+async def record_evidence_backed_event(body: CashLedgerEventCreate,
+                                       _=Depends(require_api_key)):
+    """A typed, dated, evidence-backed ledger event. Writes no stored balance."""
+    from services.cash_ledger import ALL_TYPES, ANCHOR, dedup_key, normalise_type
+
+    etype = (body.event_type or "").strip().upper()
+    if etype == ANCHOR:
+        raise HTTPException(status_code=400,
+                            detail="an opening balance goes through /cash-anchor or "
+                                   "/cash-reanchor, which require their own evidence")
+    resolved = normalise_type(etype, body.amount)
+    if resolved is None or resolved not in ALL_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="event_type must be one of: %s" % ", ".join(sorted(ALL_TYPES - {ANCHOR})))
+    if not (body.source_ref or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="source_ref is required - an evidence-backed event "
+                                   "names the document it was read out of "
+                                   "(convention #32: hash the file as received)")
+    if not (body.actor or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="actor is required - a movement recorded by nobody "
+                                   "cannot be asked about later")
+    if body.amount == 0:
+        raise HTTPException(status_code=400, detail="amount must be non-zero")
+    try:
+        when = date.fromisoformat((body.event_date or "")[:10])
+    except (TypeError, ValueError, IndexError):
+        raise HTTPException(status_code=400,
+                            detail="event_date must be an ISO date, e.g. 2026-08-31")
+
+    acct = body.account_name
+    ref = body.source_ref.strip()
+    # The SERVICE's key, over the movement itself: same file re-imported, same rows,
+    # nothing doubled. `occurrence` is the last resort for two genuinely identical
+    # same-day movements, which this book already contains.
+    key = dedup_key(acct, resolved, body.amount, when, ref, body.occurrence)
+    desc = "%s | evidence %s | by %s%s" % (
+        resolved, ref, body.actor.strip(),
+        (" | " + body.note.strip()) if body.note else "")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO cash_flows
+                   (account_name, flow_type, amount, description, activity_date,
+                    imported_from, source_ref, dedup_key, occurrence)
+               VALUES ($1, $2, $3, $4, $5::date, 'EVIDENCE', $6, $7, $8)
+               ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+               DO NOTHING
+               RETURNING id""",
+            acct, resolved, body.amount, desc, when, ref, key, body.occurrence)
+        created = row is not None
+        if not created:
+            row = await conn.fetchrow(
+                "SELECT id FROM cash_flows WHERE account_name = $1 AND dedup_key = $2",
+                acct, key)
+
+    derived = await _derived_balance(acct)
+    return {
+        "status": "recorded" if created else "already_recorded",
+        "cash_flow_id": row["id"] if row else None,
+        "account_name": acct, "event_type": resolved, "amount": body.amount,
+        "event_date": when.isoformat(), "source_ref": ref,
+        "actor": body.actor.strip(), "occurrence": body.occurrence,
+        "stored_balance_untouched": True,
         **derived,
     }
 

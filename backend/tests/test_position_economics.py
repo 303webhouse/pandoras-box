@@ -257,3 +257,91 @@ def test_an_empty_book_publishes_zero_and_calls_itself_complete():
     out = pe.capital_at_risk([], {})
     assert out["capital_at_risk_cost_basis"] == 0.0
     assert out["complete"] is True
+
+
+# -- R-IV.548(b): a closed row holds no risk, whatever its lots say ----------
+#
+# Most closures in this book were booked without a disposal lot -- 308 of them -- so
+# SUM(lot qty) stays POSITIVE on a position that is over. The arithmetic was right and
+# the question was wrong. POSITIONS measured the cost: 301 non-OPEN rows carrying a
+# positive remainder, $88,016.87 of risk that does not exist, published to four
+# committee seats for sizing.
+
+@pytest.mark.parametrize("status", ["CLOSED", "EXPIRED", "DUPLICATE_OF", "closed"])
+def test_a_row_that_is_over_states_no_remainder_and_no_max_loss(status):
+    row = dict(OPTION, status=status)
+    e = pe.economics(row, [lot(3, "0.05", 3)], mark="0.025")
+    assert e["open_remainder"] is None
+    assert e["max_loss"] is None
+    assert e["unrealized_pnl"] is None
+    assert e["cost_at_remainder"] is None
+    assert status.upper() in e["basis_reason"]
+    assert "realized" in e["basis_reason"]
+
+
+def test_the_same_row_open_still_states_everything():
+    """POSITIVE CONTROL. The status check must not be a blanket refusal -- the same
+    lots on an OPEN row produce the full set."""
+    e = pe.economics(dict(OPTION, status="OPEN"), [lot(3, "0.05", 3)], mark="0.025")
+    assert e["open_remainder"] == 3.0
+    assert e["max_loss"] == 15.00
+    assert e["unrealized_pnl"] == -7.50
+
+
+def test_a_row_with_no_status_at_all_is_still_measured():
+    """The guard keys on a status that says the row is over, not on the absence of
+    one -- a fixture or a partial SELECT without the column must not go dark."""
+    e = pe.economics(OPTION, [lot(3, "0.05", 3)], mark="0.025")
+    assert e["max_loss"] == 15.00
+
+
+def _mixed_book():
+    """Two open rows and three closed ones, every closed row carrying live lots --
+    which is exactly the live shape: closures booked without a disposal."""
+    lots = {"O1": [lot(3, "0.05")], "O2": [lot(2, "0.20")],
+            "C1": [lot(50, "88.28")], "C2": [lot(30, "73.28")], "C3": [lot(60, "35.99")]}
+    rows = [_row("O1", "WEAT", status="OPEN"), _row("O2", "ABNB", status="OPEN"),
+            _row("C1", "TLT", "EQUITY", status="CLOSED"),
+            _row("C2", "SQQQ", "EQUITY", status="CLOSED"),
+            _row("C3", "GUSH", "EQUITY", status="EXPIRED")]
+    return rows, lots
+
+
+def test_capital_at_risk_counts_open_rows_only_whatever_the_filter():
+    """THE CONTROL R-IV.548(b) ASKED FOR: status=ALL must publish the same figure as
+    status=OPEN. A caller asking for ALL wants to SEE the closed rows, never to add
+    them to the book's risk."""
+    rows, lots = _mixed_book()
+    all_rows = pe.capital_at_risk(rows, lots)
+    open_rows = pe.capital_at_risk([r for r in rows if r["status"] == "OPEN"], lots)
+    closed_rows = pe.capital_at_risk([r for r in rows if r["status"] != "OPEN"], lots)
+
+    assert all_rows["capital_at_risk_cost_basis"] == open_rows["capital_at_risk_cost_basis"]
+    assert all_rows["capital_at_risk_cost_basis"] == 15.00 + 40.00
+    assert closed_rows["capital_at_risk_cost_basis"] == 0.0
+    # Positive control: the closed rows DO hold lots worth real money, so the figure
+    # above is a decision, not an empty fixture.
+    assert sum(float(l[0]["qty"]) * float(l[0]["price"])
+               for k, l in lots.items() if k.startswith("C")) > 8000
+
+
+def test_the_closed_rows_are_counted_apart_from_the_ones_missing_lots():
+    """An excluded row should have counted and could not. Reporting 400 closures that
+    way would bury the handful that actually need lots."""
+    rows, lots = _mixed_book()
+    out = pe.capital_at_risk(rows, lots)
+    assert out["positions_not_open"] == 3
+    assert out["positions_excluded"] == 0
+    assert out["complete"] is True
+    assert out["positions_included"] == 2
+
+
+def test_a_missing_lot_on_an_open_row_still_shows_up_as_excluded():
+    """POSITIVE CONTROL for the split above: the excluded list must still work."""
+    rows, lots = _mixed_book()
+    lots.pop("O2")
+    out = pe.capital_at_risk(rows, lots)
+    assert out["positions_excluded"] == 1
+    assert out["excluded"][0]["ticker"] == "ABNB"
+    assert out["complete"] is False
+    assert out["positions_not_open"] == 3
