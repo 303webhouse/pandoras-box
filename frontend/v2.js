@@ -1172,7 +1172,7 @@
 
   // ── c5: Book positions (same source as legacy Ledger: GET /api/v2/positions?status=OPEN) ──
   let _openPositions = [];
-  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]) };
+  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o) };
   const OPT_PUT = /put/i, OPT_CALL = /call/i;
   function structureStr(p) {
     if ((p.asset_type || '').toUpperCase() === 'EQUITY' || (p.structure || '') === 'stock') {
@@ -1883,7 +1883,7 @@ const X = (function () {
         <span class="pp-g-fig">${usd(s.atRisk)} ${esc(s.measure)} of ${usd(s.ceiling)} · headroom <b class="${headroom < 0 ? 'pp-down' : ''}">${usd(headroom)}</b></span></div>
       <div class="pp-dim">${esc(s.rule)}</div>
       <div class="pp-g-track"><i class="pp-g-fill" style="width:${pct(s.atRisk)}%"></i><b class="pp-g-ceil" style="left:${pct(s.ceiling)}%" title="limit ${usd(s.ceiling)}"></b></div>
-      <div class="pp-g-foot"><span>${floor ? `Cash ${usd(s.cash)} vs $200 always-in-cash floor ${cashOk ? chip('verified', 'above floor') : chip('reported', 'BELOW FLOOR')}` : `Cash ${usd(s.cash)}`}</span><span class="pp-dim">balance ${usd(s.balance)}</span></div>
+      <div class="pp-g-foot"><span>${floor ? `Cash ${usd(s.cash)} (mock) vs $200 always-in-cash floor ${cashOk ? chip('verified', 'above floor') : chip('reported', 'BELOW FLOOR')}` : `Cash ${usd(s.cash)} (mock)`}</span><span class="pp-dim">balance ${usd(s.balance)}</span></div>
     </div>`;
   }
 
@@ -1976,7 +1976,7 @@ const X = (function () {
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
-  const st = { cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, note: null, live: null, opener: null };
+  const st = { cb: { status: 'idle', accounts: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, note: null, live: null, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
@@ -2014,94 +2014,179 @@ const X = (function () {
     const sel = st.open ? byId(st.id) : null;
     rows.forEach((r) => { const on = !!sel && realTicker(r) === sel.ticker; r.classList.toggle('pp-cur', on); if (on) r.setAttribute('aria-current', 'true'); else r.removeAttribute('aria-current'); });
   }
-  // ── Cash actions (R-IV.547) ─────────────────────────────────────────────────
-  // MOCK. Both actions write money on the real page, so each takes ONE confirmation, and the
-  // form cannot double-submit (busy flag: the confirm button is disabled the instant it is
-  // pressed, and the handler ignores a second call). Nothing here calls the network: the two
-  // `mock*` functions below are the only seam to replace when BUILD's endpoints (R-IV.546) land.
+  // ── Cash actions (R-IV.550) — LIVE ──────────────────────────────────────────
+  // These two forms write real money through BUILD's routes (relay f689efb70dbce557da6d):
+  //   POST /api/portfolio/cash-entry     deposit / withdrawal / other, idempotent on the form's key
+  //   POST /api/portfolio/cash-reanchor  "set cash to my broker's figure"; returns the difference
+  //   GET  /api/portfolio/cash-balance   the ledger's derived balance, with the stored one beside it
+  // Rules kept here: NO arithmetic on the page (every figure shown is the server's), NO write to
+  // account_balances (neither route touches it), the CSRF header on every mutation, every refusal's
+  // `detail` shown as sent, and one confirmation. The rest of the panel is still mock.
   const money2 = (v) => (v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const signed2 = (v) => (Math.abs(v) < 0.005 ? '$0.00 (no difference)' : (v < 0 ? '−' : '+') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  const signed2 = (v) => (v === 0 ? '$0.00 (no difference)' : (v < 0 ? '−' : '+') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   const todayMT = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
-  const acctSleeve = (a) => X.sleeves.find((s) => s.account === a);
-  function mockPostCashFlow(f) {     // -> what BUILD's deposit/withdrawal response will carry
-    return new Promise((res) => setTimeout(() => {
-      const s = acctSleeve(f.account), before = s.cash, delta = f.type === 'withdrawal' ? -f.amount : f.amount;
-      s.cash = Math.round((before + delta) * 100) / 100;
-      res({ account: f.account, type: f.type, amount: f.amount, date: f.date, before, after: s.cash });
-    }, 500));
+  const newKey = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'k-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  const CASH_AMOUNT = /^\d+(\.\d{1,2})?$/;                    // typed positive, cents at most; the sign comes from the control
+  const cleanAmt = (s) => String(s == null ? '' : s).replace(/[$,\s]/g, '');
+  const cashApi = () => (window.__v2 && window.__v2.apiFetch) || window.fetch.bind(window);
+
+  // What the hub says each account's cash is. `derivable:false` is not an error and not zero.
+  async function loadCash() {
+    if (st.cb.status === 'loading') return;
+    st.cb.status = 'loading'; st.cb.error = null; if (st.open) render();
+    try {
+      const r = await cashApi()('/api/portfolio/cash-balance', { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(r.status === 401 ? 'sign in to see the hub\'s cash' : 'HTTP ' + r.status);
+      const d = await r.json();
+      st.cb.accounts = (d && d.accounts) || {}; st.cb.status = 'ok';
+    } catch (e) { st.cb.status = 'error'; st.cb.error = String(e && e.message || e); }
+    if (st.open) render();
   }
-  function mockPostCashSet(f) {      // -> the hub's derived figure, the figure entered, the difference
-    return new Promise((res) => setTimeout(() => {
-      const s = acctSleeve(f.account), hub = s.cash;
-      s.cash = Math.round(f.amount * 100) / 100;
-      res({ account: f.account, hub, entered: f.amount, difference: Math.round((f.amount - hub) * 100) / 100 });
-    }, 500));
+  function cashLive(s) {
+    const cb = st.cb, hd = `<div class="pp-cash-live"><span class="pp-k">Cash · live · the hub's own ledger</span>`;
+    if (cb.status === 'loading' || cb.status === 'idle') return hd + '<div class="pp-dim">loading…</div></div>';
+    if (cb.status === 'error') return hd + `<div>${X.chip('unknown', 'unavailable', cb.error)} <span class="pp-dim">${X.esc(cb.error)}</span> <button type="button" class="pp-btn pp-link" data-cash-reload="1">Retry</button></div></div>`;
+    const a = cb.accounts[s.account];
+    if (!a) return hd + `<div>${X.chip('unknown', 'no record', 'The hub returned nothing for this account')} <span class="pp-dim">the hub returned nothing for ${X.esc(s.account)}</span></div></div>`;
+    const d = a.derived || {}, rc = a.reconciliation || {};
+    let top;
+    if (d.derivable) top = `<div class="pp-cash-fig">${money2(d.balance)} <span class="pp-dim">derived${d.opening_date ? ' from the ' + X.esc(d.opening_date) + ' opening balance' : ''}</span></div>`;
+    else top = `<div>${X.chip('unknown', 'no balance', d.reason || 'the ledger cannot state a balance')} <span class="pp-dim">${X.esc(d.reason || 'the ledger cannot state a balance')}</span></div>`;
+    let cmp;
+    if (rc.difference != null) cmp = `Stored figure ${money2(rc.stored)} · difference ${signed2(rc.difference)}${rc.agrees ? '' : ' <span class="pp-dim">(' + X.esc(rc.reason || '') + ')</span>'}`;
+    else if (rc.stored != null) cmp = `Stored figure ${money2(rc.stored)} · nothing to compare it with: the ledger has no balance`;
+    else cmp = 'No stored figure' + (d.derivable ? ' to compare against' : '');
+    return hd + top + `<div class="pp-cash-cmp">${cmp}</div></div>`;
+  }
+  function refusal(status, body, err) {
+    if (err) return { text: 'Could not reach the hub' + (err.name === 'AbortError' ? ' (timed out)' : '') + '. The entry may or may not have been recorded. Press Confirm again to retry: the same key means it cannot be booked twice.', retry: true };
+    let d = body && body.detail;
+    if (Array.isArray(d)) d = d.map((x) => (x && x.msg) || JSON.stringify(x)).join('; ');
+    if (status === 401) return { text: 'Your session has expired. Sign in, then press Confirm again.', retry: true };
+    if (status >= 500) return { text: 'The hub had an error (HTTP ' + status + ')' + (d ? ': ' + d : '') + '. The entry may or may not have been recorded. Press Confirm again to retry: the same key means it cannot be booked twice.', retry: true };
+    return { text: d ? String(d) : 'The hub refused this (HTTP ' + status + ').', retry: false };
+  }
+  async function postCash(path, payload) {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await cashApi()(path, { method: 'POST', credentials: 'same-origin', signal: ctl.signal,
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(payload) });
+      let body = null; try { body = await r.json(); } catch (_) {}
+      return { ok: r.ok, status: r.status, body };
+    } catch (err) { return { ok: false, status: 0, body: null, err }; } finally { clearTimeout(timer); }
   }
   function cashPanel(s) {
     const k = st.cash;
     if (!k || k.acct !== s.account) return '';
     const v = k.v, accts = X.sleeves.map((x) => `<option value="${X.esc(x.account)}"${x.account === k.acct ? ' selected' : ''}>${X.esc(x.account)}</option>`).join('');
-    const head = `<h4>${k.kind === 'flow' ? 'Add deposit / withdrawal' : "Set cash to my broker's figure"} ${X.chip('unknown', 'mock', 'Nothing is written')}</h4>`;
-    if (k.step === 'result') {
-      const r = k.result;
-      const line = k.kind === 'flow'
-        ? `Recorded: ${X.esc(r.account)} ${r.type} of ${money2(r.amount)} dated ${X.esc(r.date)}. Cash ${money2(r.before)} → ${money2(r.after)}.`
-        : `Hub had ${money2(r.hub)}; you entered ${money2(r.entered)}; difference ${signed2(r.difference)}.`;
-      return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div><div class="pp-cash-res" role="status">${line}<div class="pp-dim">(mock response: nothing was written)</div></div><button type="button" class="pp-btn" data-cash-done="1">Done</button></div>`;
-    }
-    if (k.step === 'confirm') {
-      const a = parseFloat(v.amount);
-      const q = k.kind === 'flow'
-        ? `${v.type === 'withdrawal' ? 'Withdraw' : 'Deposit'} ${money2(a)} ${v.type === 'withdrawal' ? 'from' : 'to'} ${X.esc(k.acct)}, dated ${X.esc(v.date)}${v.note ? ` (“${X.esc(v.note)}”)` : ''}?`
-        : `Set ${X.esc(k.acct)} cash to ${money2(a)} as of now? The hub will show what it had and the difference.`;
-      return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div><div class="pp-cash-q">${q}<div class="pp-dim">This writes money. One confirmation.</div></div>
-        <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-confirm="1"${k.busy ? ' disabled aria-busy="true"' : ''}>${k.busy ? 'Recording…' : 'Confirm and record'}</button><button type="button" class="pp-btn" data-cash-back="1"${k.busy ? ' disabled' : ''}>Back</button></div></div>`;
-    }
     const flow = k.kind === 'flow';
-    return `<div class="pp-ticket pp-cashform" data-cash-form role="group" aria-label="${flow ? 'Add deposit or withdrawal' : 'Set cash to broker figure'} (mock)"><div>${head}</div>
+    const head = `<h4>${flow ? 'Add deposit / withdrawal' : "Set cash to my broker's figure"} ${X.chip('verified', 'live', 'This writes to the hub')}</h4>`;
+    if (k.step === 'result') return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div>${k.resultHtml}<button type="button" class="pp-btn" data-cash-done="1">Done</button></div>`;
+    if (k.step === 'confirm') {
+      const a = cleanAmt(v.amount), signedAmt = flow ? money2(Number(a)) : money2(Number(a));
+      const direction = v.type === 'withdrawal' || (v.type === 'other' && v.dir === 'out') ? 'out' : 'in';
+      const kindWord = v.type === 'other' ? 'Other movement' : v.type === 'withdrawal' ? 'Withdraw' : 'Deposit';
+      const cb = st.cb.accounts[k.acct], noBal = !(cb && cb.derived && cb.derived.derivable);
+      const q = flow
+        ? `${kindWord} ${signedAmt} ${direction === 'out' ? 'out of' : 'into'} ${X.esc(k.acct)}, dated ${X.esc(v.date)}${v.note ? ` (“${X.esc(v.note)}”)` : ''}?`
+        : `Set ${X.esc(k.acct)} cash to ${signedAmt} as of now?${noBal ? ' The hub has no balance for this account, so this becomes its first anchor: there will be nothing to compare against.' : ' The hub will show what it had and the difference.'}`;
+      return `<div class="pp-ticket pp-cashform" data-cash-form><div>${head}</div><div class="pp-cash-q">${q}<div class="pp-dim">This writes money to the hub. One confirmation.</div></div>
+        ${k.err ? `<div class="pp-cash-err" role="alert">${X.esc(k.err)}</div>` : ''}
+        <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-confirm="1"${k.busy ? ' disabled aria-busy="true"' : ''}>${k.busy ? 'Recording…' : (k.err ? 'Confirm again' : 'Confirm and record')}</button><button type="button" class="pp-btn" data-cash-back="1"${k.busy ? ' disabled' : ''}>Back</button></div></div>`;
+    }
+    return `<div class="pp-ticket pp-cashform" data-cash-form role="group" aria-label="${flow ? 'Add deposit or withdrawal' : 'Set cash to broker figure'}"><div>${head}</div>
       <label>Account<select data-cf="acct">${accts}</select></label>
-      ${flow ? `<label>Type<select data-cf="type"><option value="deposit"${v.type === 'deposit' ? ' selected' : ''}>Deposit</option><option value="withdrawal"${v.type === 'withdrawal' ? ' selected' : ''}>Withdrawal</option></select></label>` : ''}
+      ${flow ? `<label>Type<select data-cf="type"><option value="deposit"${v.type === 'deposit' ? ' selected' : ''}>Deposit</option><option value="withdrawal"${v.type === 'withdrawal' ? ' selected' : ''}>Withdrawal</option><option value="other"${v.type === 'other' ? ' selected' : ''}>Other</option></select></label>
+        ${v.type === 'other' ? `<label>Direction<select data-cf="dir"><option value="in"${v.dir === 'in' ? ' selected' : ''}>Money in (+)</option><option value="out"${v.dir === 'out' ? ' selected' : ''}>Money out (−)</option></select></label>` : ''}` : ''}
       <label>${flow ? 'Amount ($)' : "Broker's cash figure ($)"}<input data-cf="amount" inputmode="decimal" autocomplete="off" value="${X.esc(v.amount)}" placeholder="0.00"></label>
-      ${flow ? `<label>Date<input data-cf="date" type="date" value="${X.esc(v.date)}"></label><label>Note<input data-cf="note" value="${X.esc(v.note)}" placeholder="optional"></label>` : ''}
+      ${flow ? `<label>Date the money moved<input data-cf="date" type="date" value="${X.esc(v.date)}"></label>` : ''}
+      <label>Note<input data-cf="note" value="${X.esc(v.note)}" placeholder="optional"></label>
       ${k.err ? `<div class="pp-cash-err" role="alert">${X.esc(k.err)}</div>` : ''}
       <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-review="1">Continue</button><button type="button" class="pp-btn" data-cash-cancel="1">Cancel</button></div></div>`;
   }
   function gaugeC(s) {
-    const k = st.cash;
-    const open = k && k.acct === s.account;
-    return X.gauge(s) + `<div class="pp-cash-actions"><button type="button" class="pp-btn" data-cash-open="flow" data-acct="${X.esc(s.account)}"${open && k.busy ? ' disabled' : ''}>Deposit / withdrawal</button><button type="button" class="pp-btn" data-cash-open="set" data-acct="${X.esc(s.account)}"${open && k.busy ? ' disabled' : ''}>Set cash to broker's figure</button></div>` + cashPanel(s);
+    const k = st.cash, open = k && k.acct === s.account, off = open && k.busy ? ' disabled' : '';
+    return X.gauge(s) + cashLive(s) + `<div class="pp-cash-actions"><button type="button" class="pp-btn" data-cash-open="flow" data-acct="${X.esc(s.account)}"${off}>Deposit / withdrawal</button><button type="button" class="pp-btn" data-cash-open="set" data-acct="${X.esc(s.account)}"${off}>Set cash to broker's figure</button></div>` + cashPanel(s);
   }
   function cashInput(e) {
     const f = e.target.closest && e.target.closest('[data-cf]');
-    if (!f || !st.cash) return;
+    if (!f || !st.cash || st.cash.busy) return;
     const name = f.dataset.cf;
-    if (name === 'acct') { st.cash.acct = f.value; st.cash.focus = 'acct'; render(); return; }
     st.cash.v[name] = f.value;
+    if (name === 'acct') { st.cash.acct = f.value; st.cash.focus = 'acct'; render(); }
+    else if (name === 'type') { st.cash.focus = 'type'; render(); }
+  }
+  // The result of a successful call, in words. Server figures only.
+  function entryResult(k, r) {
+    const b = r.body;
+    if (b.status === 'already_recorded' && b.conflict) {
+      const rows = Object.keys(b.conflict).map((f) => { const c = b.conflict[f] || {}; return `<li>${X.esc(f)}: recorded ${X.esc(c.recorded)}, this press sent ${X.esc(c.sent)}</li>`; }).join('');
+      return `<div class="pp-cash-res pp-cash-warn" role="alert"><b>Not booked: this key already recorded a different movement.</b><ul>${rows}</ul>${X.esc(b.conflict_note || '')}<div class="pp-dim">The first entry stands and nothing was changed.</div></div><button type="button" class="pp-btn" data-cash-newkey="1">Book this one as a new movement</button>`;
+    }
+    const what = b.status === 'recorded' ? 'Recorded' : 'Already recorded: the same entry, nothing was booked twice';
+    return `<div class="pp-cash-res" role="status"><b>${what}.</b> ${X.esc(b.account_name)} ${X.esc(String(b.kind || '').toLowerCase())} of ${money2(b.amount)} dated ${X.esc(b.event_date)}.</div>` + balanceAfter(b);
+  }
+  function reanchorResult(k, r, sentAmt) {
+    const b = r.body;
+    if (b.status === 'already_reanchored') {
+      const changed = k.attempts.length > 1 && k.attempts.some((x) => x !== sentAmt);
+      return `<div class="pp-cash-res pp-cash-warn" role="status"><b>Already recorded under this entry's key: nothing was written this time.</b>${changed ? ` <b>You sent a different figure than an earlier press of this same entry, so the recorded figure may not be ${money2(sentAmt)}.</b>` : ''}<div class="pp-dim">A repeat shows no difference: the hub reports the figure it holds now, not the gap the first press revealed.</div></div>${changed ? '<button type="button" class="pp-btn" data-cash-newkey="1">Set it as a new entry</button>' : ''}` + balanceAfter(b);
+    }
+    const line = b.derived_before == null
+      ? `First balance: nothing to compare. The hub had no balance to compare with; you entered ${money2(b.entered)}.`
+      : `Hub had ${money2(b.derived_before)}; you entered ${money2(b.entered)}; difference ${signed2(b.difference)}.`;
+    return `<div class="pp-cash-res" role="status"><b>${line}</b>${b.difference_note ? `<div class="pp-dim">${X.esc(b.difference_note)}</div>` : ''}</div>` + balanceAfter(b);
+  }
+  function balanceAfter(b) {
+    const d = b.derived, rc = b.reconciliation;
+    if (!d) return '';
+    return `<div class="pp-cash-cmp">${d.derivable ? 'Hub balance now ' + money2(d.balance) : 'Hub still has no balance: ' + X.esc(d.reason || '')}${rc && rc.stored != null ? ' · stored figure ' + money2(rc.stored) + (rc.difference != null ? ' · difference ' + signed2(rc.difference) : '') : ''}</div>`;
+  }
+  async function cashSubmit(k) {
+    const flow = k.kind === 'flow', a = cleanAmt(k.v.amount);
+    let path, payload;
+    if (flow) {
+      const neg = k.v.type === 'withdrawal' || (k.v.type === 'other' && k.v.dir === 'out');
+      path = '/api/portfolio/cash-entry';
+      payload = { account_name: k.acct, kind: k.v.type.toUpperCase(), amount: neg ? -Number(a) : Number(a), event_date: k.v.date, idempotency_key: k.key, note: k.v.note || null };
+    } else {
+      path = '/api/portfolio/cash-reanchor';
+      payload = { account_name: k.acct, cash: Number(a), as_of: new Date().toISOString(), idempotency_key: k.key, note: k.v.note || null };
+    }
+    k.attempts.push(a);
+    const r = await postCash(path, payload);
+    k.busy = false;
+    if (r.ok && r.body && (r.body.status || '').indexOf('already_') !== 0 && r.body.status !== 'recorded' && r.body.status !== 'reanchored') { k.err = 'The hub answered with an unexpected status (' + r.body.status + '); check the ledger before repeating.'; render(); return; }
+    if (!r.ok) { const f = refusal(r.status, r.body, r.err); k.err = f.text; k.focus = null; render(); return; }
+    if (r.body.derived) st.cb.accounts[k.acct] = { derived: r.body.derived, reconciliation: r.body.reconciliation, flow: r.body.flow, event_count: r.body.event_count };
+    k.resultHtml = flow ? entryResult(k, r) : reanchorResult(k, r, a);
+    k.step = 'result'; k.err = null; render();
   }
   function cashClick(t) {
+    if (t.closest('[data-cash-reload]')) { loadCash(); return true; }
     const open = t.closest('[data-cash-open]');
-    if (open) { if (st.cash && st.cash.busy) return true; st.cash = { acct: open.dataset.acct, kind: open.dataset.cashOpen, step: 'form', err: null, busy: false, focus: 'amount', v: { type: 'deposit', amount: '', date: todayMT(), note: '' } }; render(); return true; }
+    if (open) { if (st.cash && st.cash.busy) return true; st.cash = { acct: open.dataset.acct, kind: open.dataset.cashOpen, step: 'form', err: null, busy: false, focus: 'amount', key: newKey(), attempts: [], resultHtml: '', v: { type: 'deposit', dir: 'in', amount: '', date: todayMT(), note: '' } }; render(); return true; }
     if (!st.cash) return false;
     const k = st.cash;
+    if (t.closest('[data-cash-newkey]')) { k.key = newKey(); k.attempts = []; k.step = 'confirm'; k.err = null; render(); return true; }
     if (t.closest('[data-cash-cancel],[data-cash-done]')) { if (!k.busy) { st.cash = null; render(); } return true; }
-    if (t.closest('[data-cash-back]')) { if (!k.busy) { k.step = 'form'; k.focus = 'amount'; render(); } return true; }
+    if (t.closest('[data-cash-back]')) { if (!k.busy) { k.step = 'form'; k.err = null; k.focus = 'amount'; render(); } return true; }
     if (t.closest('[data-cash-review]')) {
-      const a = Number(String(k.v.amount).replace(/[$,\s]/g, ''));
-      const s = acctSleeve(k.acct);
-      if (!Number.isFinite(a) || String(k.v.amount).trim() === '') k.err = 'Enter an amount.';
-      else if (k.kind === 'flow' && a <= 0) k.err = 'Enter an amount above zero; pick Deposit or Withdrawal for the direction.';
-      else if (k.kind === 'set' && a < 0) k.err = 'A cash figure cannot be negative.';
-      else if (k.kind === 'flow' && !/^\d{4}-\d{2}-\d{2}$/.test(k.v.date || '')) k.err = 'Pick a date.';
-      else if (k.kind === 'flow' && k.v.date > todayMT()) k.err = 'The date cannot be in the future.';
-      else if (k.kind === 'flow' && k.v.type === 'withdrawal' && a > s.cash) k.err = 'That withdrawal is more than the ' + money2(s.cash) + ' of cash the hub shows.';
-      else { k.err = null; k.v.amount = String(Math.round(a * 100) / 100); k.step = 'confirm'; }
+      const a = cleanAmt(k.v.amount), flow = k.kind === 'flow', cb = st.cb.accounts[k.acct];
+      const derivable = !!(cb && cb.derived && cb.derived.derivable);
+      if (a === '') k.err = 'Enter an amount.';
+      else if (!CASH_AMOUNT.test(a)) k.err = 'Enter a plain amount in dollars and cents, like 88.15. The direction comes from the Type, not a minus sign.';
+      else if (flow && Number(a) === 0) k.err = 'The amount must be above zero.';
+      else if (flow && !/^\d{4}-\d{2}-\d{2}$/.test(k.v.date || '')) k.err = 'Pick the date the money moved.';
+      else if (flow && k.v.date > todayMT()) k.err = 'The date cannot be in the future.';
+      else if (flow && derivable && (k.v.type === 'withdrawal' || (k.v.type === 'other' && k.v.dir === 'out')) && Number(a) > cb.derived.balance) k.err = 'That is more than the ' + money2(cb.derived.balance) + ' the hub derives for this account.';
+      else { k.err = null; k.step = 'confirm'; }
       k.focus = k.err ? 'amount' : null; render(); return true;
     }
     if (t.closest('[data-cash-confirm]')) {
       if (k.busy) return true;                       // a second press is ignored, not queued
-      k.busy = true; render();
-      const f = { account: k.acct, type: k.v.type, amount: parseFloat(k.v.amount), date: k.v.date, note: k.v.note };
-      (k.kind === 'flow' ? mockPostCashFlow(f) : mockPostCashSet(f)).then((r) => { k.busy = false; k.step = 'result'; k.result = r; k.focus = null; render(); });
+      k.busy = true; k.err = null; render();
+      cashSubmit(k);
       return true;
     }
     return false;
@@ -2122,7 +2207,7 @@ const X = (function () {
   }
   function head() {
     return `<div class="pp-head"><h2>Positions</h2>${X.chip('unknown', 'mock', 'Every figure here is invented')}<span class="pp-dim">skeleton · no live data</span><button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
-      <div class="pp-banner">Mock data — a working skeleton. Nothing here is your book. The roll action stays disabled until R-IV.452 lands.</div>
+      <div class="pp-banner">Mock data — a working skeleton: the positions, gauges and ticket are invented. The cash lines and the two cash actions are LIVE and write to the hub. Roll stays disabled until R-IV.452 lands.</div>
       ${st.note ? `<div class="pp-note pp-warn">${X.esc(st.note)}${st.live != null ? ` <button type="button" class="pp-btn pp-link" data-live="${st.live}">Open the live detail</button>` : ''}</div>` : ''}`;
   }
   function legend() { return `<details class="pp-legend"><summary>Legend: provenance ladder and buckets</summary>${X.ladder()}${X.buckets()}</details>`; }
@@ -2198,6 +2283,7 @@ const X = (function () {
     if (mq.matches && opts.id != null) st.mtab = 'Book';
     render();
     liftBook();
+    loadCash();
     const first = !panel.classList.contains('open');
     requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); document.documentElement.classList.add('pp-open'); if (first) { const x = panel.querySelector('.pp-x'); if (x) x.focus(); } });
   }
