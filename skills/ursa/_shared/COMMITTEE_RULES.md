@@ -55,7 +55,7 @@ Source: Marty Zweig, Market Technicians Association, 4/11/90 (Shearson Lehman Hu
 **Minimum binding — in force from the day this section is filed.**
 
 1. PIVOT's SYNTHESIS names the tape's direction (from PYTHAGORAS) and the trade's direction. If they oppose, it names Rule 1 as strained and the evidence that the trend has broken.
-2. Every agent that recommends a trade states the exit **before** the entry: where the stop lives (a broker order or a hub alert), the invalidation (Rule 3), and the time stop.
+2. Every agent that recommends a trade states the exit **before** the entry: where the stop lives (a broker stop order, a daily-close stop written in the position's notes, or a hub alert), the invalidation (Rule 3), and the time stop.
 
 **Reversal setups.** A reversal setup is valid on a **confirmed trend break** — PYTHAGORAS's definition of confirmed governs — never in anticipation of one. "It's extended," "it's due," and "the divergence is obvious" are anticipation, and Rule 9 covers them.
 
@@ -195,7 +195,7 @@ When URSA's THESIS GROUPING pre-check or THALES's THESIS WORLD-CHECK classify th
 
 These rules apply to every committee agent:
 
-- Never hardcode account dollar amounts in output — pull from hub at runtime or describe by role only.
+- Never hardcode account dollar amounts in output — read them from the broker apps at runtime (§ Account Context) or describe by role only.
 - Never produce price-anchored or tape-anchored output without completing the Pre-Output Data Checklist for the current runtime context. In Claude.ai chat (Context B), web_search verification is mandatory and the GROUND TRUTH block is required at the top of every output.
 - Never let training-data priors or "feel of the market" override verified web_search ground truth. If web_search says SPX is red and your prior says it's green, web_search wins. Update the analysis accordingly.
 - Never simulate other committee members' output. Each agent produces only its own block. Other agents speak for themselves when installed.
@@ -207,10 +207,12 @@ These additional rules apply only to agents that recommend specific trade entrie
 
 - **Sizing is governed by the ROBINHOOD sleeve ceiling** (§ Account Context), not by per-bucket dollar caps. The B2 $200–300 cap and the B3 $100 cap are **retired** as of 2026-09-23. What survives from the bucket rules: B3 keeps max 2 concurrent, max 3/day, same-day close, and a structural PYTHIA VA trigger.
 - **B3 daily circuit breaker — UNCHANGED.** Two consecutive B3 losses in a single session triggers a circuit breaker — no further B3 entries that day, regardless of direction or which agent surfaces the setup. **The $300 daily max loss cap remains, regardless of trade count.** Applies to TORO long-B3 and URSA short-B3 entries equally; PIVOT enforces at synthesis time.
-- **Two contracts minimum, whenever the sleeve allows it.** Size a long-premium options trade so one contract can be sold into a quick pop to recover the ticket's cost while the rest runs. A one-contract ticket has no scale-out and forces an all-or-nothing exit; prefer a cheaper strike or a later expiry that admits two over a single expensive one. This is X3's scale-out applied to long premium.
+- **Stops — the principal's guideline (2026-09-23).** Default: a stop order at the broker at entry on ETF and stock positions. Where volatility argues against one, a daily-close stop is written in the position's notes instead. Either way the invalidation is written on the row.
+- **No averaging down.** An add to a losing position needs either an add planned at entry, or a named change in market conditions written on the row before the add.
+- **Two contracts minimum, whenever the sleeve allows it.** Size a long-premium options trade so one contract can be sold into a quick pop to recover the ticket's cost — at 2× to 3× what it cost, the principal's call by how fast and dramatic the move is — while the rest runs. A one-contract ticket has no scale-out and forces an all-or-nothing exit; prefer a cheaper strike or a later expiry that admits two over a single expensive one. This is X3's scale-out applied to long premium.
 - **X3 — exits by structure.** Capped structures (verticals, condors, any defined-max-value spread) keep the **60–70% of max value under 21 DTE** rule; don't hold for perfection. Uncapped trend positions do the opposite: **take part off at a target and trail the rest** (a 20-day close or 2× ATR). Rule 2 cuts both ways — capped profits get taken, uncapped profits get run.
 - **X4 — reachability (DAEDALUS hard rule).** Break-even must sit within **1.5× the implied expected move to expiry**. A strike the underlying cannot plausibly reach is Rule 4 — the values don't make sense, so don't participate. **Applies to every bucket EXCEPT TAIL**; the tail sleeve buys unreachable strikes on purpose and is exempt by design.
-- **X7 — max loss for the portfolio cap.** An ETF or stock position counts its loss **to its written stop**: a stop order at the broker, or a daily-close stop recorded in the position's notes. **Only when neither exists does it count 100%** of the position. A stop that lives solely in someone's head is not written and does not count.
+- **X7 — max loss for the portfolio cap (principal's ruling, 2026-09-24).** A FIDELITY_ROTH position with a live stop order at the broker counts its loss to that stop. A position without one counts **100%** of its value until the hub's loss alert is live. Once it is, the position counts to whichever alert fires first — its written daily-close stop, or a loss of **2% of the Fidelity account value**, the principal's alert level for any position without a broker stop. A stop that nothing enforces does not lower the count.
 - **20% portfolio risk cap — FIDELITY_ROTH only.** Sum of max losses across open positions must not exceed 20% of the **FIDELITY_ROTH** balance (read from the broker app, per § Account Context). ROBINHOOD is governed by its sleeve ceiling instead, not by this cap. DAEDALUS enforces at structure proposal; URSA surfaces in portfolio coherence check; PIVOT vetos via DON'T TRADE if a new position would push the book over.
 - **X10 — flow confirms, it does not originate.** On B1 and B2 trades, an options-flow read may only *confirm* a thesis that already stands on trend and structure. A trade whose entire reason is "there was flow" is Rule 16 — short-term information flow mistaken for an edge — and does not pass.
 

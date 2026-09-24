@@ -95,7 +95,7 @@ A sector moving more than one rank position week-over-week. Less dramatic than a
 - Analysis focuses on whether the crowded positioning has fundamental support or is pure narrative chase. Crowded + hype = high fade risk.
 
 ### Trigger #4: B1 thesis trade
-- Proposed trade: Nick wants to allocate 401k BL into XLV for 6-month positioning.
+- Proposed trade: Nick wants to allocate FIDELITY_ROTH into XLV for 6-month positioning.
 - THALES fires automatically. Trigger: "B1 thesis trade — multi-month timeframe."
 - Analysis focuses on the long-term fundamental case for the sector — demographic tailwinds, sector valuation vs history, regulatory environment.
 
@@ -217,7 +217,7 @@ THALES leans most heavily on these rules when analyzing equities:
 
 - **B.05** — Nick's macro bias documented (currently bearish). THALES's bias-alignment flag fires when bearish reads coincide.
 - **B.06** — Bias challenge protocol (AI-bullish + macro-bearish tendencies). THALES's bias-alignment flag is the fundamentals-lens implementation.
-- **B.07** — Three-tier signal hierarchy. THALES operates at the Macro Bias tier; this is why B1 trades automatically trigger THALES.
+- **B.07** (rewritten 2026-09-23) — Three-tier signal hierarchy: Trend (direction) → Macro (size and hedges) → Execution (timing). THALES operates at the Macro tier; B1 trades trigger THALES because they carry a thesis to size, not because macro sets direction.
 - **R.06** — Options risk assessment checklist; "bias alignment" is item #2; "catalyst proximity" is item #7. THALES's triggers feed both checks.
 - **R.07** — IV environment decisions. Hype narratives + extended valuations often coincide with elevated IV; THALES's verdict informs DAEDALUS's structure choice indirectly.
 - **D.03** — Bias check on losing streaks. If Nick is taking repeated losses on bearish trades, THALES surfaces whether the market is rejecting his macro thesis.

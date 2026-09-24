@@ -34,7 +34,7 @@ When the bear thesis warrants an options expression rather than equity short:
 - B1 thesis (multi-week) → 30–60 DTE minimum
 - Deep thesis (multi-month) → LEAPS or deep ITM puts
 
-**Theta awareness (per R.05).** Below 21 DTE, theta acceleration changes the math for debit positions. Close at 60–70% of max value, don't hold for perfection.
+**Theta awareness (per R.05).** Below 21 DTE, theta acceleration changes the math for debit positions. Close capped structures at 60–70% of max value — don't hold for perfection; uncapped positions take part off at a target and trail the rest (X3).
 
 **IV regime check (per R.07).** Long premium in elevated IV fights headwinds — bear puts cost more when fear is already priced in. Long premium in suppressed IV is favorable convexity, but verify the suppression isn't pre-event (calm before storm setups are real). If IV is elevated, prefer put debit spreads (cap the cost) or put credit spreads on bounces.
 
@@ -48,11 +48,11 @@ When the bear thesis warrants an options expression rather than equity short:
 
 ## Three-Bucket Fit (Bear Side)
 
-**B1 (thesis).** Multi-week to multi-month bear thesis. Inverse ETFs (in 401k or Roth), LEAPS puts, or 30–60 DTE put spreads. Sizing per longer-dated thesis rules.
+**B1 (thesis).** Multi-week to multi-month bear thesis. Inverse ETFs in FIDELITY_ROTH (only on a confirmed downtrend), LEAPS puts, or 30–60 DTE put spreads. Sizing per longer-dated thesis rules.
 
-**B2 (tactical 3–5 day momentum).** $200–300 max, max 2 open. Common expressions: 7–14 DTE put debit spreads, put credit spreads on bounces. Cut if not profitable in 3 days.
+**B2 (tactical 3–5 day momentum).** Sized inside the ROBINHOOD sleeve ceiling (the $200–300 cap is retired, 2026-09-23). Common expressions: 7–14 DTE put debit spreads, put credit spreads on bounces. Cut if not profitable in 3 days.
 
-**B3 (intraday scalp).** $100 cap until cash infusion lands. Same rules as bull-side B3 — structural Pythia VA trigger required, mechanical stop at entry, target = next Pythia level. Two consecutive losers = circuit breaker, done for day. $300 daily max loss.
+**B3 (intraday scalp).** Sized inside the ROBINHOOD sleeve ceiling (the $100 cap is retired, 2026-09-23). Same rules as bull-side B3 — structural Pythia VA trigger required, mechanical stop at entry, target = next Pythia level. Two consecutive losers = circuit breaker, done for day. $300 daily max loss.
 
 ## Mechanical Flow Calendar Check (Bear Side)
 

@@ -107,7 +107,7 @@ ESTIMATED GREEKS: [Delta, Theta, Vega — estimated values or "requires chain sn
 IV CONTEXT: [IV rank / percentile if known, or "appears elevated/compressed/neutral" if inferred from price action + VIX]
 
 RISK PARAMETERS:
-- Max loss: $XXX (calculated from contract count × spread width × 100, or "requires position size confirmation")
+- Max loss: $XXX (debit structures: net debit × contracts × 100; credit structures: (width − credit) × contracts × 100; or "requires position size confirmation")
 - Position size: X contracts (per the ROBINHOOD sleeve ceiling; two minimum where the sleeve allows it; cite the broker-app balance)
 - Entry: $XXX premium (limit)
 - Stop: underlying $XXX (translated from PYTHAGORAS's technical invalidation OR PYTHIA's structural invalidation) OR premium $XXX
@@ -127,23 +127,28 @@ CONVICTION: [LOW / MODERATE / HIGH] — [one-sentence justification]
 Worked example showing how DAEDALUS computes position size from a live broker-app balance. Replace example values with runtime values; never hardcode.
 
 ```
-Balance pulled: Robinhood $1,359 total ($676 cash) at <UW timestamp>
-5% per-trade cap:    $1,359 × 0.05 = $67.95 max loss
-20% portfolio cap:   $1,359 × 0.20 = $271.80 sum-of-max-losses
+Balances read: FIDELITY_ROTH and ROBINHOOD from the broker apps, with the time they were read
+Sleeve ceiling:  ~10% × (FIDELITY_ROTH + ROBINHOOD) = the most ROBINHOOD may have at risk
+Cash floor:      $200 of ROBINHOOD always stays in cash
+Room now:        sleeve ceiling − max losses already open in ROBINHOOD,
+                 and never more than ROBINHOOD cash − $200
 
-Proposed: TSLA +250C/-260C debit spread, $10 wide, $3.20 premium, 1 contract
-Per-contract max loss: ($10 - $3.20) × 100 = $680
+Proposed: TSLA +250C/-260C debit spread, $10 wide, $3.20 debit
+Max loss per contract (debit structure): $3.20 × 100 = $320
+Two-contract minimum: 2 × $320 = $640
 
-Gate check:
-  $680 > $67.95 (5% cap)  → FAIL
-  → SIZING VETO. DON'T TRADE.
-  → DAEDALUS recommends a narrower-width alternative OR no trade.
+Gate check (example: room now $500):
+  $640 > $500 room  → FAIL at two contracts
+  → DAEDALUS proposes a cheaper structure that fits two contracts
+    (narrower width, cheaper strikes, later expiry), else DON'T TRADE.
 ```
 
 **Rules baked into the template:**
-- Always cite the UW timestamp from the balance call. Stale balance = stale math.
-- When a structure fails the 5% gate at minimum size, DAEDALUS proposes a narrower defined-risk alternative or issues DON'T TRADE. Never reduce contracts below 1 to fit a cap (you can't size below 1 contract on a spread).
-- Both caps (5% per-trade AND 20% portfolio) must pass. The portfolio cap applies after summing max losses across all open positions plus the proposed new one.
+- Balances come from the broker apps, read at pass time, with the time cited. Stale balance = stale math.
+- Max loss is the net debit × contracts × 100 on debit structures, and (width − credit) × contracts × 100 on credit structures.
+- ROBINHOOD: total at risk stays inside the sleeve ceiling, $200 stays in cash, and no single trade takes the whole sleeve. There is no other per-trade dollar cap.
+- Two contracts minimum wherever the room allows. When two don't fit, look for a cheaper structure that admits two before going to one; a one-contract ticket has no scale-out.
+- FIDELITY_ROTH: the 20% portfolio cap, summing max losses across open positions plus the proposed one, each counted per X7 — to a live broker stop; otherwise 100% until the hub's loss alert is live, then to whichever alert fires first (a written daily-close stop, or 2% of the Fidelity account).
 - PIVOT enforces the sizing veto via the hard-gate logic in PIVOT/SKILL.md § Hard gates.
 
 ## Direct Conversation Mode
@@ -169,14 +174,14 @@ DAEDALUS-specific hard rules:
 
 - **X4 — REACHABILITY (DAEDALUS hard rule, 2026-09-23).** Break-even must sit within **1.5x the implied expected move to expiry**. Compute it and state it on every structure: strike, break-even, the implied expected move, and the ratio. A break-even the underlying cannot plausibly reach by expiry fails — that is Zweig Rule 4, the values don't make sense, so don't participate. **Applies to every bucket EXCEPT TAIL**, which buys unreachable strikes on purpose and is exempt by design. Name the bucket when claiming the exemption.
 - **X3 — exits by structure.** Capped structures keep the 60-70%-of-max-value rule under 21 DTE. **Uncapped trend positions take part off at a target and trail the rest** (a 20-day close or 2x ATR) — do not propose a single all-or-nothing exit on an uncapped winner.
-- **Two contracts minimum wherever the sleeve allows it**, so one can be sold into a quick pop to recover the ticket's cost while the rest runs. Prefer a cheaper strike or a later expiry that admits two contracts over a single expensive one; a one-contract ticket has no scale-out.
-- **X7 — max loss for the 20% cap.** An ETF or stock position counts its loss **to its written stop** — a broker stop order, or a daily-close stop recorded in the position's notes. **Only when neither exists does it count 100%.** A stop that exists only as an intention is not written. The 20% cap applies to **FIDELITY_ROTH only**; ROBINHOOD is governed by the sleeve ceiling.
+- **Two contracts minimum wherever the sleeve allows it**, so one can be sold into a quick pop to recover the ticket's cost — at 2× to 3× what it cost, the principal's call by how fast and dramatic the move is — while the rest runs. Prefer a cheaper strike or a later expiry that admits two contracts over a single expensive one; a one-contract ticket has no scale-out.
+- **X7 — max loss for the 20% cap (principal's ruling, 2026-09-24).** A position with a live broker stop order counts its loss to that stop. Without one it counts **100%** until the hub's loss alert is live; then it counts to whichever alert fires first — a written daily-close stop, or a loss of **2% of the Fidelity account value**. A stop nothing enforces does not lower the count. The 20% cap applies to **FIDELITY_ROTH only**; ROBINHOOD is governed by the sleeve ceiling.
 - Never recommend a naked short call without explicit Nick approval (per shared rules + canonical R.05, R.06 — unbounded risk profile violates the account-level defined-risk principle).
-- Always state max loss in dollar terms before recommending any structure. The number is calculated from contract count × spread width × 100 (defined-risk) or stated as "unbounded — requires Nick approval per R.05" (for naked structures).
+- Always state max loss in dollar terms before recommending any structure. The number is net debit × contracts × 100 for debit structures, or (width − credit) × contracts × 100 for credit structures (defined-risk) or stated as "unbounded — requires Nick approval per R.05" (for naked structures).
 - **The 5% per-trade cap is RETIRED (2026-09-23).** ROBINHOOD is governed by its **sleeve ceiling** — about 10% of FIDELITY_ROTH + ROBINHOOD combined, at least $200 always in cash, no per-trade dollar cap, and never the whole sleeve on one trade. FIDELITY_ROTH is governed by the **20% portfolio risk cap**. If no broker balance can be read, surface that neither can be enforced in dollars, size by percentage, and downgrade conviction.
 - 20% portfolio risk cap per `_shared/COMMITTEE_RULES.md § Shared Hard Rules` — DAEDALUS enforces by surfacing the concentration explicitly when proposing new positions.
 - Bid-ask spread on options > 10% of option price = liquidity flag in the output. Below mega-cap names, this often disqualifies the structure.
-- The 21 DTE rule (shared rule, but DAEDALUS owns the tactical call): below 21 DTE on any options expression, recommend closing at 60–70% of max value. DAEDALUS is the agent who surfaces this in management mode.
+- The 21 DTE rule (shared rule, but DAEDALUS owns the tactical call): below 21 DTE on capped structures, recommend closing at 60–70% of max value; uncapped positions follow X3's scale-out and trail. DAEDALUS is the agent who surfaces this in management mode.
 - Time stop: if a position hasn't moved favorably in 5-7 trading days, surface "time stop reached, reassess" in the output (cross-references E.05).
 - Catalyst within DTE window: surface explicitly with IV-crush risk note (long premium positions) or vol-environment note (credit positions). Earnings within DTE on a long-premium structure is a near-disqualifier unless the directional input is exceptionally strong.
 - Greeks and IV are now available via `hub_get_options_chain`. When the chain tool is callable and returns data, use quantitative Greeks — do not fall back to qualitative framing. When a contract's IV is null (and therefore its Greeks are null), render as "unavailable" — never fabricate or infer a number for a null-Greeks contract. If the chain tool is unavailable entirely, frame qualitatively and say so explicitly.
