@@ -269,3 +269,66 @@ def test_the_fresh_grade_command_refuses_an_unknown_cohort():
 
     res = asyncio.run(fresh_grade(cohort="W9"))
     assert "unknown cohort" in res["error"]
+
+
+# -- a NaN is an absent bar, not a price -------------------------------------
+#
+# Found in the live table on 2026-09-24, AFTER Amendment 4's first deploy: 62
+# in-window row-horizons hold `NaN` in triton_flow_shadow, on horizons 2026-09-22
+# and 2026-09-23. `float("nan")` succeeds, so the price converter admitted it, and
+# every downstream guard was written as `if not x` — and `not nan` is False.
+
+NAN = float("nan")
+INF = float("inf")
+
+
+@pytest.mark.parametrize("bad", [NAN, INF, -INF, "nan", "inf", "-Infinity"])
+def test_the_price_converter_refuses_a_non_finite_value(bad):
+    assert common._f(bad) is None
+    # Positive control: it still converts a real price, from either type.
+    assert common._f("123.45") == 123.45
+    assert common._f(7) == 7.0
+
+
+@pytest.mark.parametrize("bad", [NAN, INF, -INF])
+def test_a_non_finite_close_is_an_absent_bar_in_both_lookups(bad):
+    idx = {SESSION: bad, date(2026, 9, 23): 120.0}
+    assert common.close_on_session(idx, SESSION) is None
+    # The neighbour probe skips it and keeps looking, rather than returning NaN.
+    close, used = common.close_on_or_near(idx, SESSION)
+    assert (close, used) == (120.0, date(2026, 9, 23))
+
+
+@pytest.mark.asyncio
+async def test_a_non_finite_bar_is_retried_and_then_called_a_gap():
+    """The whole point: the session's key EXISTS in the index, so a presence check
+    would have passed. It is the value that is not a price."""
+    pool = _Pool()
+    idx = {date(2026, 9, 21): 100.0, SESSION: NAN, date(2026, 9, 23): 120.0}
+    seen = []
+    for _ in range(grader.SESSION_GAP_MIN_ATTEMPTS):
+        close, used, gap = await grader._close_for_session(
+            pool, idx, SESSION, ticker="AAA", provider="yfinance", strict=True)
+        assert close is None and used is None
+        seen.append(gap)
+    assert seen[-1] == grader.SESSION_GAP
+
+
+def test_a_return_that_is_not_a_number_is_not_a_grade():
+    assert grader._dir_adj(100.0, 110.0, "BULL") == 10.0        # positive control
+    assert grader._dir_adj(100.0, 110.0, "BEAR") == -10.0       # positive control
+    assert grader._dir_adj(100.0, NAN, "BULL") is None
+    assert grader._dir_adj(NAN, 110.0, "BULL") is None
+    assert grader._dir_adj(0.0, 110.0, "BULL") is None
+    assert grader._dir_adj(100.0, INF, "BULL") is None
+
+
+def test_a_nan_entry_would_have_passed_the_old_entry_guard():
+    """Why `_f` is the right place for the fix, kept as a standing note.
+
+    The grader's entry check is `if not entry or entry <= 0`. Against NaN both
+    halves are False, so the guard passes it — which is how a NaN entry produced
+    NaN grades. The fix is that `_f` never hands one over in the first place."""
+    entry = NAN
+    assert not (not entry or entry <= 0)        # the old guard DID let it through
+    assert common._f(NAN) is None               # and now it cannot arrive

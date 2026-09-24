@@ -32,12 +32,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import math
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from jobs.triton_shadow_grader import (
     HORIZONS, SESSION_GAP, SESSION_GAP_MIN_ATTEMPTS, SESSION_BAR_RETRYING,
-    HORIZON_NOT_A_SESSION, _count_bar_absence, _dir_adj, _gap_text,
+    HORIZON_NOT_A_SESSION, NON_FINITE_RETURN, _count_bar_absence, _dir_adj,
+    _gap_text,
     _bounded_lookback, _split_ex_dates, spans_corporate_action,
 )
 from jobs.triton_shadow_common import (
@@ -212,7 +214,12 @@ async def fresh_grade(*, row_ids: Optional[List[int]] = None,
                     gaps[k] = tgt
                     _skip(SESSION_GAP if tries >= attempts else SESSION_BAR_RETRYING)
                     continue
-                vals[k] = _dir_adj(entry, close_k, direction)
+                _v = _dir_adj(entry, close_k, direction)
+                if _v is None:
+                    gaps[k] = tgt
+                    _skip(NON_FINITE_RETURN)
+                    continue
+                vals[k] = _v
                 sess[k] = tgt
 
             record = {
