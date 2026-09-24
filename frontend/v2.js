@@ -1976,7 +1976,7 @@ const X = (function () {
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
-  const st = { cb: { status: 'idle', accounts: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, note: null, live: null, opener: null };
+  const st = { cb: { status: 'idle', accounts: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
@@ -2007,12 +2007,6 @@ const X = (function () {
     const need = right - (panelLeft - 14);
     const shift = Math.max(0, Math.min(need, left));
     root.style.setProperty('--pp-shift', String(Math.round(shift)));
-  }
-  // R-IV.527 #3: mark, in the Book strip, the row whose position the panel is showing.
-  function markRow() {
-    const rows = document.querySelectorAll('#bookPositions .pos-row');
-    const sel = st.open ? byId(st.id) : null;
-    rows.forEach((r) => { const on = !!sel && realTicker(r) === sel.ticker; r.classList.toggle('pp-cur', on); if (on) r.setAttribute('aria-current', 'true'); else r.removeAttribute('aria-current'); });
   }
   // ── Cash actions (R-IV.550) — LIVE ──────────────────────────────────────────
   // These two forms write real money through BUILD's routes (relay f689efb70dbce557da6d):
@@ -2208,7 +2202,7 @@ const X = (function () {
   function head() {
     return `<div class="pp-head"><h2>Positions</h2>${X.chip('unknown', 'mock', 'Every figure here is invented')}<span class="pp-dim">skeleton · no live data</span><button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
       <div class="pp-banner">Mock data — a working skeleton: the positions, gauges and ticket are invented. The cash lines and the two cash actions are LIVE and write to the hub. Roll stays disabled until R-IV.452 lands.</div>
-      ${st.note ? `<div class="pp-note pp-warn">${X.esc(st.note)}${st.live != null ? ` <button type="button" class="pp-btn pp-link" data-live="${st.live}">Open the live detail</button>` : ''}</div>` : ''}`;
+`;
   }
   function legend() { return `<details class="pp-legend"><summary>Legend: provenance ladder and buckets</summary>${X.ladder()}${X.buckets()}</details>`; }
   // Desktop arrangement (R-IV.520). Column 1, at the screen's center: the chosen position's
@@ -2254,15 +2248,12 @@ const X = (function () {
     panel.innerHTML = head() + `<div class="pp-body">${mq.matches ? phone() : desktop()}</div>`;
     panel.querySelectorAll('tr.pp-row').forEach((r) => r.classList.toggle('sel', Number(r.dataset.id) === st.id));
     const body = panel.querySelector('.pp-body'); if (body) body.scrollTop = keepTop;
-    markRow();
     if (st.cash && st.cash.focus) { const el = panel.querySelector('[data-cf="' + st.cash.focus + '"]'); if (el) el.focus(); st.cash.focus = null; }
   }
   function onPanelClick(e) {
     const t = e.target;
     if (t.closest('.pp-x')) return close();
     if (cashClick(t)) return;
-    const live = t.closest('[data-live]');
-    if (live) { const fn = window.__v2 && window.__v2.openPositionDrawerAt; if (fn) { close(); fn(Number(live.dataset.live)); } return; }
     if (t.closest('[data-allpos]')) { st.id = null; st.card = null; if (st.tab === 'Detail' || st.tab === 'Actions') st.tab = 'Detail'; setHash(true); return render(); }
     const tab = t.closest('[data-tab]');
     if (tab) { st.tab = tab.dataset.tab; setHash(true); return render(); }
@@ -2277,7 +2268,6 @@ const X = (function () {
   function show(opts) {
     build();
     st.open = true;
-    st.note = opts.note || null; st.live = opts.live != null ? opts.live : null;
     if (opts.id != null) { st.id = opts.id; st.card = opts.id; }
     if (opts.tab) st.tab = opts.tab;
     if (mq.matches && opts.id != null) st.mtab = 'Book';
@@ -2299,7 +2289,6 @@ const X = (function () {
     if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); }
     document.documentElement.classList.remove('pp-open');
     document.documentElement.style.removeProperty('--pp-shift');
-    markRow();
     if (st.opener && st.opener.focus) { try { st.opener.focus(); } catch (_) {} }
   }
   function close() {
@@ -2312,28 +2301,14 @@ const X = (function () {
     if (h) { if (!st.open) show({ id: h.id, tab: h.tab }); else { st.id = h.id; st.tab = h.tab; render(); } }
     else if (st.open) hide();
   }
-  // The doorway: the Book strip, or a row in it. Capture phase, so it precedes the live drawer's own row handler.
-  function realTicker(row) { const n = row.querySelector('.ptk'); return n && n.firstChild ? String(n.firstChild.textContent || '').trim().toUpperCase() : ''; }
+  // The doorway (R-IV.555): the "Positions" button on the Book tile, or the #positions address. A Book row is NOT a
+  // doorway: it opens the live position drawer (Close position lives there), exactly as before the panel existed.
   document.addEventListener('click', (e) => {
-    const row = e.target.closest && e.target.closest('#bookPositions .pos-row');
-    if (row) {
-      e.preventDefault(); e.stopPropagation();
-      const tk = realTicker(row), m = X.open.find((p) => p.ticker === tk);
-      open(m ? { id: m.id } : { note: (tk || 'That position') + ' is not in the mock data. This skeleton shows invented positions only.', live: row.dataset.pi != null ? Number(row.dataset.pi) : null });
-      return;
-    }
-    if (e.target.closest && e.target.closest('#bookStrip')) { e.preventDefault(); open({}); }
-  }, true);
-  document.addEventListener('keydown', (e) => {
-    if (e.target && e.target.id === 'bookStrip' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open({}); }
+    if (e.target.closest && e.target.closest('#bookPanelBtn')) { e.preventDefault(); open({}); }
   });
   window.addEventListener('popstate', sync);
   window.addEventListener('hashchange', sync);
   function init() {
-    const strip = document.getElementById('bookStrip');
-    if (strip) { strip.setAttribute('tabindex', '0'); strip.setAttribute('role', 'button'); strip.setAttribute('aria-label', 'Open the positions panel (mock data)'); strip.classList.add('pp-door'); }
-    const pos = document.getElementById('bookPositions');
-    if (pos) { pos.classList.add('pp-door'); new MutationObserver(markRow).observe(pos, { childList: true }); }
     window.addEventListener('resize', () => { if (st.open) liftBook(); });
     sync();
   }
