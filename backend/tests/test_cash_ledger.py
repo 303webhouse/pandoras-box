@@ -375,3 +375,95 @@ def test_the_anchor_route_touches_no_stored_balance():
 def test_the_anchor_route_is_idempotent():
     live = _portfolio_live_strings()
     assert "ON CONFLICT" in live and "DO NOTHING" in live
+
+
+# -- R-IV.553(a) / R-IV.557(b): an anchor is never a movement ----------------
+#
+# The Robinhood double count, reproduced. The principal re-anchored twice, two
+# minutes apart (ids 96 and 97, both 491.49 on 2026-09-24, distinct idempotency keys
+# so both landed). The reader took 97 as the opening and walked 96 as an ordinary
+# same-day event: 491.49 + 491.49 - 16.00 = 966.98, exactly what was served.
+
+def test_a_superseded_anchor_is_not_counted_as_cash():
+    """THE DEFECT, by its real figures. 475.49 is the answer; 966.98 was served."""
+    events = [
+        ev(cl.TRADE_DEBIT, "-16.00", 24, 84),
+        ev(cl.ANCHOR, "491.49", 24, 96),
+        ev(cl.ANCHOR, "491.49", 24, 97),
+    ]
+    out = cl.balance_from_events(events)
+    assert out["opening_balance"] == 491.49        # the later anchor
+    assert out["balance"] == 475.49                # not 966.98
+    assert out["movement_since_opening"] == -16.00
+    assert out["events_counted"] == 1              # the trade only
+
+
+def test_the_double_count_is_not_merely_hidden_by_ordering():
+    """Whichever order they arrive in, and whichever is chosen as the opening, no
+    anchor row is ever summed."""
+    a = [ev(cl.ANCHOR, "491.49", 24, 97), ev(cl.ANCHOR, "491.49", 24, 96),
+         ev(cl.TRADE_DEBIT, "-16.00", 24, 84)]
+    assert cl.balance_from_events(a)["balance"] == 475.49
+
+
+def test_three_anchors_still_leave_one_opening_and_no_movement():
+    events = [ev(cl.ANCHOR, "100.00", 1, 1), ev(cl.ANCHOR, "200.00", 2, 2),
+              ev(cl.ANCHOR, "300.00", 3, 3), ev(cl.DIVIDEND, "1.00", 4, 4)]
+    out = cl.balance_from_events(events)
+    assert out["opening_balance"] == 300.00
+    assert out["balance"] == 301.00
+    assert out["events_counted"] == 1
+
+
+def test_an_earlier_dated_anchor_is_still_not_a_movement():
+    """A superseded anchor BEFORE the chosen one was already skipped as pre-anchor;
+    this keeps it skipped for the right reason rather than by accident of date."""
+    events = [ev(cl.ANCHOR, "100.00", 1, 1), ev(cl.ANCHOR, "150.00", 3, 2),
+              ev(cl.TRANSFER_IN, "10.00", 4, 3)]
+    out = cl.balance_from_events(events)
+    assert out["balance"] == 160.00
+    assert out["events_counted"] == 1
+
+
+def test_a_single_anchor_still_behaves_exactly_as_before():
+    """POSITIVE CONTROL: the ordinary one-anchor case is untouched."""
+    out = cl.balance_from_events([ev(cl.ANCHOR, "6007.29", 24, 1),
+                                  ev(cl.DIVIDEND, "0.64", 24, 2)])
+    assert out["balance"] == 6007.93
+
+
+# -- R-IV.557(c): the key must not depend on how the amount was typed --------
+
+@pytest.mark.parametrize("a,b", [
+    (-16.0, "-16.00"), (88.15, "88.1500"), ("0.64", 0.64), (60.93, "60.930"),
+])
+def test_the_same_movement_keys_the_same_however_the_amount_arrives(a, b):
+    """A form sends the float -16.0; the same row read back from NUMERIC(10,2) is
+    Decimal('-16.00'); a CSV sends "-16.00". Three keys for one movement meant a
+    re-imported file would not dedup against what was already there."""
+    from datetime import date as _date
+
+    ka = cl.dedup_key("R", cl.TRADE_DEBIT, a, _date(2026, 9, 24), "POS")
+    kb = cl.dedup_key("R", cl.TRADE_DEBIT, b, _date(2026, 9, 24), "POS")
+    assert ka == kb
+
+
+def test_two_genuinely_different_amounts_still_key_apart():
+    """POSITIVE CONTROL: normalising must not collapse real differences."""
+    from datetime import date as _date
+
+    assert cl.dedup_key("R", cl.TRADE_DEBIT, -16.00, _date(2026, 9, 24), "P") != \
+        cl.dedup_key("R", cl.TRADE_DEBIT, -16.01, _date(2026, 9, 24), "P")
+
+
+def test_a_sub_cent_difference_inside_the_scale_still_keys_apart():
+    from datetime import date as _date
+
+    assert cl.dedup_key("R", cl.FEE, "0.0001", _date(2026, 9, 24), "P") != \
+        cl.dedup_key("R", cl.FEE, "0.0002", _date(2026, 9, 24), "P")
+
+
+def test_an_unreadable_amount_does_not_raise():
+    from datetime import date as _date
+
+    assert cl.dedup_key("R", cl.FEE, "not a number", _date(2026, 9, 24), "P")
