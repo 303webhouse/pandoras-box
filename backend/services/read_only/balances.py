@@ -71,18 +71,54 @@ async def _attach_derived_cash(pool, rows: List[Dict[str, Any]]) -> None:
     so on the row, rather than blanking a balances screen.
     """
     from services.cash_ledger import balance_from_events, reconcile
+    from services.position_economics import account_value
+
+    for d in rows:
+        d["cash_stored"] = d.get("cash")
+        d["cash_source"] = "stored"
+        d["balance_stored"] = d.get("balance")
+
+    # ONE ROUND TRIP FOR EVERY ACCOUNT, not one per account (R-IV.559(c)1).
+    #
+    # This loop used to acquire a pool connection inside it, so an unfiltered call
+    # made N+1 acquisitions while the mark job and the strip job were holding the
+    # same small pool. That is the shape of the intermittent failure SPINE measured:
+    # unfiltered errored twice and filtered answered, then the other way round
+    # earlier the same day -- which is contention, not a bug in either path. Two
+    # queries now, whatever the account count, and the committee calls it unfiltered.
+    names = [d.get("account_name") for d in rows if d.get("account_name")]
+    events_by: Dict[str, List[Dict[str, Any]]] = {}
+    positions: List[Dict[str, Any]] = []
+    ledger_error = None
+    try:
+        async with pool.acquire() as conn:
+            evs = await conn.fetch(
+                """SELECT id, account_name, flow_type, amount, activity_date
+                     FROM cash_flows WHERE account_name = ANY($1::text[])
+                    ORDER BY account_name, activity_date, id""", names)
+        for e in evs:
+            events_by.setdefault(e["account_name"], []).append(dict(e))
+    except Exception as exc:  # noqa: BLE001
+        ledger_error = type(exc).__name__
+
+    try:
+        from services.read_only.positions import list_positions
+
+        positions = await list_positions(status="OPEN") or []
+    except Exception as exc:  # noqa: BLE001
+        positions = []
+        logger.warning("balances: open positions unavailable (%s)", type(exc).__name__)
 
     for d in rows:
         name = d.get("account_name")
-        d["cash_stored"] = d.get("cash")
-        d["cash_source"] = "stored"
-        try:
-            async with pool.acquire() as conn:
-                events = await conn.fetch(
-                    """SELECT id, flow_type, amount, activity_date
-                         FROM cash_flows WHERE account_name = $1
-                        ORDER BY activity_date, id""", name)
-            derived = balance_from_events([dict(e) for e in events])
+        if ledger_error:
+            d["cash_derivable"] = None
+            d["cash_derived_reason"] = ("the ledger could not be read this cycle (%s)"
+                                        % ledger_error)
+            d["balance"] = None
+            d["balance_reason"] = "the cash ledger could not be read this cycle"
+        else:
+            derived = balance_from_events(events_by.get(name) or [])
             rec = reconcile(derived, d.get("cash_stored"))
             d["cash_derived"] = derived["balance"]
             d["cash_derivable"] = derived["derivable"]
@@ -91,7 +127,30 @@ async def _attach_derived_cash(pool, rows: List[Dict[str, Any]]) -> None:
             if derived["derivable"]:
                 d["cash"] = derived["balance"]
                 d["cash_source"] = "derived"
-        except Exception as exc:  # noqa: BLE001
-            d["cash_derivable"] = None
-            d["cash_derived_reason"] = ("the ledger could not be read this cycle (%s)"
-                                        % type(exc).__name__)
+
+            # R-IV.559(c)2: `balance` is derived cash plus this account's open
+            # positions at their marks -- through the SAME arithmetic the loss
+            # alert's threshold uses, so a committee sizing off one and an alert
+            # firing off the other cannot disagree about the account.
+            av = account_value(derived["balance"], positions, account=name,
+                               cash_reason=derived["reason"])
+            d["balance"] = av["value"]
+            d["balance_source"] = "derived" if av["value"] is not None else None
+            d["balance_partial"] = av["partial"]
+            d["balance_reason"] = av["reason"]
+            d["balance_cash"] = av["cash"]
+            d["balance_positions_value"] = av["positions_value"]
+            d["balance_positions_counted"] = av["positions_counted"]
+            d["balance_positions_unvalued"] = av["positions_unvalued"]
+
+        # R-IV.559(c)3: buying power is a BROKER figure. The hub cannot derive it --
+        # it depends on margin rules, settlement and the broker's own haircuts --
+        # so it serves null with the reason rather than a stored number that was
+        # true on whatever day it was last typed in.
+        d["buying_power_stored"] = d.get("buying_power")
+        d["buying_power"] = None
+        d["buying_power_reason"] = (
+            "buying power is the broker's own figure and the hub cannot derive it: "
+            "it depends on margin rules, settlement and the broker's haircuts. The "
+            "last stored value is kept as `buying_power_stored` and is not served "
+            "as current.")

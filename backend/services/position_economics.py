@@ -275,6 +275,57 @@ def capital_at_risk(
     ])
 
 
+def account_value(cash: Any, rows: Sequence[Dict[str, Any]],
+                  account: Optional[str] = None,
+                  cash_reason: Optional[str] = None) -> Dict[str, Any]:
+    """An account's value: its cash plus its OPEN positions at their marks.
+
+    R-IV.551(c) and R-IV.559(c)2, in one place. The loss alert's threshold and the
+    balances tool's `balance` are the same question asked twice, and two arithmetics
+    answering it is how a committee sizing off one figure and an alert firing off
+    another come to disagree about the same account.
+
+    PARTIAL RATHER THAN GUESSED. A position with no market value -- no lots, or no
+    live mark -- contributes nothing and is NAMED. The total is still returned,
+    deliberately: an understated account makes a 2%% trigger smaller, which errs
+    toward alerting, and a sizing figure that is too small is the safe direction too.
+    What it must never do is fill the hole with a number.
+
+    NO CASH, NO VALUE. With no derived cash there is no account value and the reason
+    travels with the None. Inventing zero cash would make the figure the positions
+    alone, which is not the account.
+    """
+    c = _d(cash)
+    positions = Decimal("0")
+    missing: List[Any] = []
+    counted = 0
+    for r in rows:
+        if account and (r.get("account") or "").upper() != account.upper():
+            continue
+        if (r.get("status") or "OPEN").upper() != "OPEN":
+            continue
+        mv = (r.get("derived") or {}).get("market_value")
+        if mv is None:
+            missing.append(r.get("position_id") or r.get("id"))
+            continue
+        positions += Decimal(str(mv))
+        counted += 1
+
+    partial = bool(missing)
+    if c is None:
+        return {"value": None, "cash": None, "positions_value": money(positions),
+                "positions_counted": counted, "positions_unvalued": missing,
+                "partial": partial,
+                "reason": cash_reason or "there is no derived cash for this account"}
+    return {
+        "value": money(c + positions), "cash": money(c),
+        "positions_value": money(positions), "positions_counted": counted,
+        "positions_unvalued": missing, "partial": partial,
+        "reason": ("%d position(s) could not be valued, so this figure is PARTIAL "
+                   "and understates the account" % len(missing)) if partial else None,
+    }
+
+
 def capital_at_risk_from_derived(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """The same figure, for rows that already carry their `derived` block.
 
