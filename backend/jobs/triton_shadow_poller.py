@@ -43,6 +43,7 @@ async def run_triton_shadow_poller() -> None:
     from config.liquid_universe import LIQUID_UNIVERSE, SEMIS_AI_TECH
     from jobs.triton_shadow_common import (
         _f, classify_bucket, classify_direction, fetch_r_close_index,
+        triton_row_pinned,
     )
 
     pool = await get_postgres_client()
@@ -104,7 +105,11 @@ async def run_triton_shadow_poller() -> None:
                 # and has no provider column to write to, so the provider is
                 # discarded HERE, deliberately and visibly, rather than by an
                 # unpacking that hides it.
-                idx, _provider = await fetch_r_close_index(ticker, PRIOR_LOOKBACK_DAYS)
+                # R-IV.497(d): the poller's prior-5d must come from the same vendor the
+                # grader will use for this row, or the display figure and the graded
+                # figure describe different series. Decided from the row's own session.
+                idx, _provider = await fetch_r_close_index(
+                    ticker, PRIOR_LOOKBACK_DAYS, pinned=triton_row_pinned(today))
                 p5 = None
                 ds = sorted(idx)
                 if len(ds) >= 6 and idx[ds[-6]]:

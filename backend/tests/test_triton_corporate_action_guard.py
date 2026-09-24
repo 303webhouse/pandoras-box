@@ -134,4 +134,9 @@ def test_one_held_row_does_not_stop_its_neighbours():
     out, conn, _ = _run([_row(1, "KORU", fire_held), _row(2, "KORU", fire_ok)],
                         {date(2026, 7, 15)}, closes=closes)
     assert out["held"] == 1 and out["graded"] == 1
-    assert [u[0] for u in conn.updates] == [2]
+    # R-IV.497(d): a graded row now writes TWICE — the UPDATE, which is conditional
+    # on the row still being ungraded, and the append to triton_grade_versions that
+    # keeps every grade beside its predecessors. What matters here is unchanged:
+    # only row 2 is written, and the held row is not touched at all.
+    assert {u[0] for u in conn.updates} == {2}
+    assert len(conn.updates) == 2, "expected one UPDATE and one version append"

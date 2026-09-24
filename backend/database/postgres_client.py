@@ -1722,6 +1722,30 @@ async def init_database():
                 ON triton_flow_shadow (fired_at DESC)
         """)
 
+        # R-IV.497(d): the append-only ledger of Triton grades. triton_flow_shadow
+        # keeps the LATEST grade, so every existing reader is unchanged; this table
+        # keeps EVERY grade ever written, including the one a Friday read consumed.
+        # A re-grade lands beside its predecessor instead of replacing it, because a
+        # figure a read has already stood on is not ours to rewrite.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS triton_grade_versions (
+                id          BIGSERIAL PRIMARY KEY,
+                row_id      INTEGER     NOT NULL,
+                version     INTEGER     NOT NULL,
+                fwd_ret_1d  NUMERIC(8,4),
+                fwd_ret_3d  NUMERIC(8,4),
+                fwd_ret_5d  NUMERIC(8,4),
+                provider    TEXT,
+                pinned      BOOLEAN,
+                graded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (row_id, version)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_triton_grade_versions_row
+                ON triton_grade_versions (row_id, version)
+        """)
+
         # Migration 031 (S8, R-IV.361): forward option-chain collection.
         # raw_contract_count/truncated exist because UW caps the chain call at
         # 500 and a censored capture is indistinguishable from a thin market.

@@ -6,13 +6,13 @@ Triton's UW bar-fetches go through get_ohlc(caller="triton_flow_shadow") + the
 when the over-quota ohlc_bars caller throttles). SHADOW-ONLY: no
 scoring/pipeline coupling.
 
-R-IV.482(c) / R-IV.485(e) — THE PIN, which overrides everything below: while
-Triton's registered window is open (through 2026-11-06, `TRITON_BARS_PIN_UNTIL`)
-`fetch_r_close_index` returns yfinance UNCONDITIONALLY and makes no UW request
-at all. Grading a registered population on a series that changes vendor
-mid-window is not grading one population. Read the pin before reading the
-fallback: from 2026-09-14 the two produced the same outcome by accident, and
-04f6480 ended that by repairing UW for every consumer.
+R-IV.497(d) / R-IV.485(e) — THE PIN, which overrides everything below: a row
+whose `fired_at` session falls in the registered window (2026-09-15 .. 2026-10-30)
+grades on yfinance WHENEVER it is graded, and `fetch_r_close_index(..., pinned=True)`
+makes no UW request at all. Grading a registered population on a series that
+changes vendor mid-window is not grading one population. The caller decides from
+the ROW, not from the clock — an earlier form keyed on the run date and would have
+reverted to UW for a run after the window closed.
 
 R-IV.324 — THE FALLBACK, and what it does NOT change: when UW yields no
 regular-session bar, `fetch_r_close_index` falls through to
@@ -36,33 +36,38 @@ TRITON_CALLER = "triton_flow_shadow"
 
 ET = ZoneInfo("America/New_York")
 
-# ── R-IV.482(c) / R-IV.485(e): THE TRITON BAR PIN ────────────────────────────
-# Triton's registered window grades on yfinance, END TO END. Until 04f6480 that
-# happened by accident: UW yielded no usable regular-session bar, so every row
-# from 2026-09-14 took the fallback. 04f6480 repaired the UW path for every
-# consumer, which silently UN-PINNED Triton — measured 2026-09-23 19:1xZ,
-# `triton_grader.bars` read state=primary primary_ok=27 subs=0, i.e. back on UW
-# with the window still open.
+# ── R-IV.497(d) / R-IV.485(e): THE PIN IS KEYED TO THE ROW, NOT THE RUN ──────
+# Triton's registered window grades on yfinance, END TO END.
 #
-# A population whose bar vendor changes mid-window is not one population. The
-# hypothesis was registered against a yfinance series and must be graded against
-# a yfinance series, whatever UW returns and however healthy UW is.
+# The first form of this pin keyed on the RUN date, and QUERY found the hole: a
+# grader run after the window closed would revert to UW and re-grade in-window
+# rows on a vendor the registration does not name. A row's vendor is a property
+# of the ROW, so it is keyed to the row's fired_at session and is true whenever
+# that row is graded — today, next month, or in a backfill years from now.
 #
-# Expressed as DATA — a date anyone can read against the registration without
-# running anything — and INCLUSIVE of its last day. It lapses on its own: a pin
-# that needs a second deploy to remove is a pin that outlives its window.
-TRITON_BARS_PIN_UNTIL = date(2026, 11, 6)
+# The window is the registration's, not the reader's: cohorts W1 (Tue 2026-09-15,
+# T_clock) through W7 (ends Fri 2026-10-30) — 34 sessions, R-IV.485(b). The seven
+# Friday READS run to 2026-11-06, one week behind their cohort (R-IV.485(a)); the
+# last read date is not the last session, and keying on it was the earlier error.
+#
+# Data, not logic: two dates readable against the registration without running
+# anything.
+TRITON_WINDOW_FIRST_SESSION = date(2026, 9, 15)
+TRITON_WINDOW_LAST_SESSION = date(2026, 10, 30)
 
 
-def triton_bars_pinned(session_date: Optional[date] = None) -> bool:
-    """True while Triton's bars are held on yfinance by ruling.
+def triton_row_pinned(fired_session) -> bool:
+    """True when THIS ROW belongs to the registered window and must grade on yfinance.
 
-    The session date is the EXCHANGE's, not the server's: the grader runs at
-    20:00 ET, which is already the next UTC day, and a pin that lapses a day
-    early on a UTC clock would hand the last session of the window to UW.
+    Takes the row's own session — a date, or anything with .date(). Not a clock:
+    nothing here reads the current time, which is the whole point. A row outside
+    the window is not pinned and takes the ordinary UW-first path.
     """
-    d = session_date or datetime.now(ET).date()
-    return d <= TRITON_BARS_PIN_UNTIL
+    if fired_session is None:
+        return False
+    d = fired_session.date() if hasattr(fired_session, "date") else fired_session
+    return TRITON_WINDOW_FIRST_SESSION <= d <= TRITON_WINDOW_LAST_SESSION
+
 
 # Mega/index premium bucket (flow_scanner INDEX_TICKERS — the $2M tier).
 INDEX_TICKERS = {"SPY", "QQQ", "SMH", "NVDA", "AVGO", "MSFT", "GOOGL", "AMZN", "META"}
@@ -98,13 +103,16 @@ PROVIDER_NONE = "none"
 
 
 async def fetch_r_close_index(
-    ticker: str, lookback_days: int, session_date: Optional[date] = None
+    ticker: str, lookback_days: int, *, pinned: bool
 ) -> Tuple[Dict[date, float], str]:
     """{date: regular-session close}, AND the provider that produced it.
 
-    R-IV.482(c)/R-IV.485(e): while the Triton window is open this returns
-    yfinance UNCONDITIONALLY and never calls UW — see TRITON_BARS_PIN_UNTIL.
-    Everything below describes the path taken once the pin lapses.
+    `pinned` is REQUIRED and keyword-only: the caller must decide, from the row's
+    own session (`triton_row_pinned`), which vendor the registration names. There
+    is deliberately no default — a default is how the run-date form got it wrong,
+    by answering for rows it had never looked at. When pinned, this returns
+    yfinance unconditionally and never calls UW. Everything below describes the
+    unpinned path.
 
     R-IV.324: the grader gets the fallback. UW via `get_ohlc` is tried first and
     remains the preferred source; only when it yields NO usable regular-session
@@ -142,7 +150,7 @@ async def fetch_r_close_index(
     # pin yfinance is not a fallback and this consumer's primary_ok is not a
     # statement about UW's health. R-IV.489(a) — the primary_ok=1 check applies
     # to the other consumers, never to this one.
-    if triton_bars_pinned(session_date):
+    if pinned:
         record_primary("triton_grader.bars", PROVIDER_YFINANCE)
         idx, prov = await _yfinance_close_index(ticker)
         if not idx:

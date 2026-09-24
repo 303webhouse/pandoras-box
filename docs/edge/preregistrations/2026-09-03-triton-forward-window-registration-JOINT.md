@@ -478,3 +478,104 @@ nothing else.
 - **S6 stays deferred to SINKS-B**, as declared. Its tide-sign stratum needs
   `market_tide_history`, which does not exist until the sinks build ships, and SINKS-B is
   itself gated on the quota layer and the transfer.
+
+---
+
+# AMENDMENT 3 · R-IV.485 — READ CADENCE, WINDOW OF RECORD, AND THE BAR VENDOR
+
+**Filed on the face by CC-BUILD, 2026-09-23, per R-IV.485(f).**
+**Supersedes for cadence:** R-IV.382(b)'s read schedule. Everything else in this manifest stands.
+**Prior:** Amendment 1 (observational strata, R-IV.275); Amendment 2 (bar vendor as a pinned
+instrument property, 2026-09-23).
+
+**BLINDNESS LINE, carried verbatim as R-IV.485 requires:**
+
+> Blind: no hit rate, grade or outcome from the forward window has reached spine; QUERY reported
+> only definition-independent facts.
+
+**Why this amendment exists.** The read schedule as previously written implied a read was due
+2026-09-18, and the bar vendor was held to the window only by accident. Both are corrected here so
+the registration says on its own face what a reader must execute, without reconstructing it from
+rulings.
+
+## A3(a) · C3 stands — reads LAG their cohort by one week
+
+A read evaluates a **Mon–Fri fired cohort** once its **3d horizons are complete**. A Friday signal
+completes the following **Wednesday**, so a Friday read cannot evaluate that same Friday's cohort.
+**Each Friday read evaluates the PREVIOUS week's cohort.** The lag is one week, always, and it is a
+property of the 3d horizon, not a scheduling choice.
+
+## A3(b) · WINDOW OF RECORD — amending R-IV.382(b)
+
+**Cohorts (7):**
+
+| cohort | fired sessions |
+|---|---|
+| W1 | Tue 2026-09-15 → Fri 2026-09-18 — **partial, 4 sessions** (T_clock is a Tuesday) |
+| W2 | 2026-09-21 → 2026-09-25 |
+| W3 | 2026-09-28 → 2026-10-02 |
+| W4 | 2026-10-05 → 2026-10-09 |
+| W5 | 2026-10-12 → 2026-10-16 |
+| W6 | 2026-10-19 → 2026-10-23 |
+| W7 | 2026-10-26 → 2026-10-30 |
+
+**34 sessions, unchanged.**
+
+**Reads (7 Fridays), each evaluating the cohort one week behind it:**
+
+| read | date | evaluates |
+|---|---|---|
+| 1 | 2026-09-25 | W1 |
+| 2 | 2026-10-02 | W2 |
+| 3 | 2026-10-09 | W3 |
+| 4 | 2026-10-16 | W4 |
+| 5 | 2026-10-23 | W5 |
+| 6 | 2026-10-30 | W6 |
+| 7 | 2026-11-06 | W7 |
+
+**C3's "≥5 of 7" counts these reads**, and no others.
+
+**The last read date (2026-11-06) is NOT the last cohort session (2026-10-30).** They differ by
+exactly the one-week lag, and conflating them is a live error this build already made once: the
+first bar pin keyed on 11-06 as though it were the window's end.
+
+## A3(c) · NO READ WAS DUE 2026-09-18
+
+Read 1 falls on **2026-09-25**. Nothing is late, and **no extension is consumed.**
+
+## A3(d) · EXTENSION MECHANICS
+
+An extension adds **one cohort week at the end**. Its read follows **one week after that cohort
+closes**, on the same lag as every other read. An extension therefore adds one cohort AND one read,
+never a read without a cohort.
+
+Unchanged and still binding, §8's anti-drift clause: *"No third EXTEND without a new instrument
+class: a leg, not more of the same."*
+
+## A3(e) · THE BAR VENDOR IS PART OF THE INSTRUMENT
+
+**Triton's bars stay on yfinance for the whole window. A UW fix elsewhere does not switch Triton
+mid-window.** A population whose bar vendor changes mid-window is not one population.
+
+**As implemented (R-IV.497(d)):** the pin is keyed to the **row's own `fired_at` session**, not to
+the date the grader runs. A row fired in 2026-09-15 … 2026-10-30 grades on yfinance **whenever it
+is graded** — in this window, after it, or in a backfill years later. The earlier form keyed on the
+run date and would have reverted an in-window row to UW on any run after the window closed; QUERY
+found that, and it is fixed rather than documented around.
+
+`fetch_r_close_index(..., pinned=...)` is required and keyword-only, so no caller can inherit a
+default that answers for rows it never looked at. A ticker whose rows span the window boundary
+fetches **two series and never merges them** — mixing providers inside one measurement is the
+cross-adjustment seam this repo forbids elsewhere and would forbid here.
+
+**And the grades are append-only.** A grade a read has consumed is **never overwritten**: the
+update is conditional on the row still being ungraded, and every grade — first or re-grade — is
+appended to `triton_grade_versions`, so a re-grade lands **beside** its predecessor and both stay
+readable. Enforced at the write, because the selection's `graded_at IS NULL` is today's caller and
+not a guarantee.
+
+## A3(f) · HOW A READ CITES THIS
+
+QUERY executes each read **from this blob, as of the read**, and **names the blob on the read's
+face**. The blob is this file's git object id; the id in force before this amendment was
+`57cb26a3`.
