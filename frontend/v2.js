@@ -1160,7 +1160,7 @@
         ${greekCell('V', 'vega', 0)}
       </div>
       ${greekNote}
-      ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration · ${esc(conc.theme)}</span><span>${conc.pct}%</span></div>` : ''}
+      ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration${conc.theme ? ' · ' + esc(conc.theme) : ''}</span><span>${conc.pct != null ? conc.pct + '%' : ''}${conc.skipped ? ' ' + vintageChip({ unknownLabel: conc.pct != null ? 'partial: ' + conc.skipped + ' of ' + conc.total + ' left out' : 'no figures: ' + conc.skipped + ' of ' + conc.total + ' left out', unknownTitle: conc.skipped + ' of ' + conc.total + ' positions have no dollar figure and are left out of this percentage; it covers only the rest, and stays partial until every row has one' }) : ''}</span></div>` : ''}
       <div class="acct-chips">${accts.filter((a) => a.in_scope !== false).map((a) => {
           const tag = esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase());
           return `<span class="acct-chip">${tag} ${fmt$(a.balance)}</span>`;
@@ -1401,23 +1401,23 @@
   function computeConcentration(positions) {
     const list = (positions && positions.positions) || [];
     if (!list.length) return null;
-    const byTheme = {}, invTheme = {}; let totalRisk = 0;
+    const byTheme = {}, invTheme = {}; let totalRisk = 0, skipped = 0;   // R-IV.544: rows with no figure are counted, never silent
     list.forEach((p) => {
       const risk = Math.abs(Number(p.current_value != null ? p.current_value : (p.cost_basis != null ? p.cost_basis : p.max_loss)) || 0);
-      if (!risk) return;
+      if (!risk) { skipped++; return; }
       const tm = _themeMap[(p.ticker || '').toUpperCase()];
       const theme = (tm && tm.theme) || 'Unmapped';
       byTheme[theme] = (byTheme[theme] || 0) + risk; totalRisk += risk;
       if (tm && tm.inverse) invTheme[theme] = (invTheme[theme] || 0) + risk;
     });
-    if (!totalRisk) return null;
+    if (!totalRisk) return { theme: null, pct: null, hot: false, skipped, total: list.length };
     let top = null;
     Object.keys(byTheme).forEach((t) => { if (!top || byTheme[t] > byTheme[top]) top = t; });
     const pct = Math.round((byTheme[top] / totalRisk) * 100);
     // Netting is deferred (post-flip): if the top theme is majority-inverse, say so rather
     // than imply long exposure. This is honest labeling, not direction-aware offsetting.
     const invHeavy = (invTheme[top] || 0) > byTheme[top] / 2;
-    return { theme: top + (invHeavy ? ' (inverse)' : ''), pct, hot: pct > 50 && top !== 'Unmapped' };
+    return { theme: top + (invHeavy ? ' (inverse)' : ''), pct, hot: pct > 50 && top !== 'Unmapped', skipped, total: list.length };
   }
   async function refreshThemeMap(positions) {
     const list = (positions && positions.positions) || [];
