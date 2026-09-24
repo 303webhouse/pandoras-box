@@ -59,7 +59,7 @@ REGIME_WINDOWS: tuple = (
     (252, "new_high_52w, new_low_52w"),
 )
 
-_COMPLETENESS_CACHE: dict = {"metrics_date": None, "windows": None}
+_COMPLETENESS_CACHE: dict = {"metrics_date": None, "windows": None, "lag": None}
 
 
 def _coverage_floor_pct() -> float:
@@ -92,22 +92,82 @@ def _sessions_back(anchor_date, n: int) -> list:
     return sorted(out)
 
 
-def completeness_verdict(windows: dict):
-    """(degraded, reason) from a window-completeness block.
+def completeness_verdict(windows: dict, lag: dict = None):
+    """(degraded, reason) from a window-completeness block and the anchor lag.
 
     A row-based window absorbs a gap by reaching further back, so an incomplete
     window is not an empty one — it is a WRONG one, and the figure it produced looks
     entirely ordinary. Naming which windows, and by how much, is the whole point of
     the flag; a bare `degraded: true` would send a reader looking at the feed age.
     """
+    reasons = []
     short = sorted((w for w in (windows or {}).values() if w.get("below_floor")),
                    key=lambda w: w.get("sessions") or 0)
-    if not short:
+    if short:
+        reasons.append(
+            ("window completeness below %g%%: " % _coverage_floor_pct()) + ", ".join(
+                "%dd at %s%%" % (w.get("sessions"),
+                                 "unknown" if w.get("pct") is None else w.get("pct"))
+                for w in short))
+    behind = (lag or {}).get("sessions_behind")
+    if behind:
+        reasons.append(
+            "the anchor is %d session%s behind: serving %s while %s is complete"
+            % (behind, "" if behind == 1 else "s", (lag or {}).get("metrics_date"),
+               (lag or {}).get("newest_complete_session")))
+    if not reasons:
         return False, None
-    return True, ("window completeness below %g%%: " % _coverage_floor_pct()) + ", ".join(
-        "%dd at %s%%" % (w.get("sessions"),
-                         "unknown" if w.get("pct") is None else w.get("pct"))
-        for w in short)
+    return True, "; ".join(reasons)
+
+
+async def _anchor_lag(conn, metrics_date) -> dict:
+    """How far the regime's anchor sits behind the newest session it could have used.
+
+    ONE STEP BEYOND R-IV.522(c) — say if it is unwanted. Measured live on
+    2026-09-24: `as_of` was 1.6 hours old, `flatline` false, `degraded` false, and
+    the read was serving 2026-09-21 — three sessions back. The nightly had run an
+    hour earlier and simply re-published 09-21's numbers, so every staleness signal
+    on the envelope said healthy. The only field carrying the truth was
+    `metrics_date`, which nothing keys on.
+
+    A row-based window absorbing a gap and an anchor stuck behind one are the same
+    fault wearing different clothes: in both cases the figure is computed from the
+    wrong days and looks completely ordinary.
+    """
+    from stable_engine.market_calendar import trading_days_between
+    from stable_engine.scoring import ANCHOR_MIN_COVERAGE, ANCHOR_MIN_TICKERS_FLOOR
+
+    universe = await conn.fetchval(
+        """SELECT COUNT(DISTINCT u.ticker) FROM stable_universe u
+            WHERE u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')"""
+    ) or 0
+    required = max(ANCHOR_MIN_TICKERS_FLOOR, int(universe * ANCHOR_MIN_COVERAGE))
+    newest = await conn.fetchval(
+        """SELECT b.date
+             FROM stable_daily_bars b
+             JOIN stable_universe u ON u.ticker = b.ticker
+            WHERE u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')
+            GROUP BY b.date
+           HAVING COUNT(DISTINCT b.ticker) >= $1
+            ORDER BY b.date DESC
+            LIMIT 1""",
+        required,
+    )
+    if newest is None or metrics_date is None:
+        return {"metrics_date": str(metrics_date) if metrics_date else None,
+                "newest_complete_session": None, "sessions_behind": None,
+                "required_tickers": required, "universe": universe}
+    try:
+        behind = max(0, trading_days_between(metrics_date, newest))
+    except Exception:
+        behind = None
+    return {
+        "metrics_date": str(metrics_date),
+        "newest_complete_session": str(newest),
+        "sessions_behind": behind,
+        "required_tickers": required,
+        "universe": universe,
+    }
 
 
 async def _window_completeness(conn, metrics_date) -> dict:
@@ -318,19 +378,22 @@ async def get_regime() -> dict:
             # R-IV.522(c): how many symbols hold each window whole, and DEGRADED
             # below scoring's floor. Cached on metrics_date like breadth — it cannot
             # change until the next nightly writes a new one.
-            windows = {}
+            windows, lag = {}, {}
             if latest_metric_date is not None:
                 if _COMPLETENESS_CACHE["metrics_date"] == metrics_date_key:
                     windows = _COMPLETENESS_CACHE["windows"]
+                    lag = _COMPLETENESS_CACHE["lag"]
                 else:
                     windows = await _window_completeness(conn, latest_metric_date)
+                    lag = await _anchor_lag(conn, latest_metric_date)
                     _COMPLETENESS_CACHE["metrics_date"] = metrics_date_key
                     _COMPLETENESS_CACHE["windows"] = windows
+                    _COMPLETENESS_CACHE["lag"] = lag
 
             as_of = snap["as_of"] if snap else None
             anchor = snap["anchor"] if snap else None
             degraded = snap["degraded"] if snap else True
-            short_degraded, reason = completeness_verdict(windows)
+            short_degraded, reason = completeness_verdict(windows, lag)
             degraded = bool(degraded) or short_degraded
             return _envelope(
                 as_of, anchor, degraded, feed="nightly",
@@ -340,6 +403,7 @@ async def get_regime() -> dict:
                             "window_complete_floor_pct": _coverage_floor_pct()},
                 breadth=breadth,
                 window_completeness=windows,
+                anchor_lag=lag,
                 degraded_reason=reason,
                 dominant=dominant[:8], emerging=emerging[:8], fading=fading[:8],
                 metrics_date=str(latest_metric_date) if latest_metric_date else None,

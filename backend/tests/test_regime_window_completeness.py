@@ -145,3 +145,85 @@ async def test_an_empty_universe_does_not_divide_by_zero_or_claim_health():
     out = await st._window_completeness(conn, date(2026, 9, 23))
     assert out["20"]["pct"] is None
     assert out["20"]["below_floor"] is True
+
+
+# -- the anchor lag ----------------------------------------------------------
+#
+# ONE STEP BEYOND the ruling, flagged in the report. Measured live 2026-09-24: the
+# envelope said as_of 1.6h, flatline false, degraded false, while metrics_date was
+# 2026-09-21 -- three sessions back. The nightly had run an hour before and simply
+# re-published 09-21's numbers, so every staleness signal read healthy.
+
+def test_an_anchor_that_is_current_does_not_degrade_the_read():
+    """POSITIVE CONTROL for the lag arm."""
+    lag = {"metrics_date": "2026-09-23", "newest_complete_session": "2026-09-23",
+           "sessions_behind": 0}
+    assert st.completeness_verdict({}, lag) == (False, None)
+
+
+def test_an_anchor_behind_a_complete_session_degrades_and_says_both_dates():
+    lag = {"metrics_date": "2026-09-21", "newest_complete_session": "2026-09-23",
+           "sessions_behind": 2}
+    degraded, reason = st.completeness_verdict({}, lag)
+    assert degraded is True
+    assert "2 sessions behind" in reason
+    assert "2026-09-21" in reason and "2026-09-23" in reason
+
+
+def test_one_session_behind_reads_as_singular():
+    lag = {"metrics_date": "2026-09-22", "newest_complete_session": "2026-09-23",
+           "sessions_behind": 1}
+    _d, reason = st.completeness_verdict({}, lag)
+    assert "1 session behind" in reason
+
+
+def test_both_faults_are_reported_together_not_one_instead_of_the_other():
+    windows = {"20": _w(20, 40.4, True)}
+    lag = {"metrics_date": "2026-09-21", "newest_complete_session": "2026-09-23",
+           "sessions_behind": 2}
+    degraded, reason = st.completeness_verdict(windows, lag)
+    assert degraded is True
+    assert "20d at 40.4%" in reason and "2 sessions behind" in reason
+
+
+def test_an_unmeasurable_lag_is_not_read_as_a_healthy_one():
+    """None means the calendar could not answer, which is not zero."""
+    lag = {"metrics_date": "2026-09-21", "newest_complete_session": None,
+           "sessions_behind": None}
+    # It does not fabricate a lag reason it cannot support...
+    degraded, reason = st.completeness_verdict({}, lag)
+    assert (degraded, reason) == (False, None)
+    # ...and a real lag still fires, so the guard above is not just always-quiet.
+    assert st.completeness_verdict({}, dict(lag, sessions_behind=3))[0] is True
+
+
+class _LagConn:
+    def __init__(self, universe, newest):
+        self.universe = universe
+        self.newest = newest
+        self.required = None
+
+    async def fetchval(self, sql, *args):
+        if "stable_daily_bars" in sql:
+            self.required = args[0]
+            return self.newest
+        return self.universe
+
+
+@pytest.mark.asyncio
+async def test_the_lag_uses_scorings_own_required_ticker_count():
+    from stable_engine.scoring import ANCHOR_MIN_COVERAGE, ANCHOR_MIN_TICKERS_FLOOR
+
+    conn = _LagConn(255, date(2026, 9, 23))
+    out = await st._anchor_lag(conn, date(2026, 9, 21))
+    assert conn.required == max(ANCHOR_MIN_TICKERS_FLOOR, int(255 * ANCHOR_MIN_COVERAGE))
+    assert out["sessions_behind"] == 2          # 09-22 and 09-23 are both sessions
+    assert out["newest_complete_session"] == "2026-09-23"
+
+
+@pytest.mark.asyncio
+async def test_no_complete_session_at_all_reports_nothing_rather_than_zero():
+    conn = _LagConn(255, None)
+    out = await st._anchor_lag(conn, date(2026, 9, 21))
+    assert out["sessions_behind"] is None
+    assert out["newest_complete_session"] is None
