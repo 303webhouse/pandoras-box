@@ -1700,7 +1700,7 @@
       const acked = _rvAcked.has(it.id);
       const pulse = acked ? '' : (it.sev === 'down' ? ' pulse-vermilion' : it.sev === 'up' ? ' pulse-lime' : ' pulse-teal');
       const cls = it.tier === 'action' ? 'action sev-' + (it.sev === 'up' ? 'up' : it.sev === 'down' ? 'down' : 'teal') + pulse + (acked ? ' acked' : '') : it.tier;
-      return `<div class="rv-item ${cls}" data-rid="${esc(it.id)}"><div class="rv-head"><span class="rv-dot t-${it.type}"></span><span class="rv-type">${it.type}</span><span class="rv-time">${hh}</span></div><div class="rv-txt">${it.text}</div></div>`;
+      return `<div class="rv-item ${cls}" data-rid="${esc(it.id)}"><div class="rv-head"><span class="rv-dot t-${it.type}"></span><span class="rv-type">${it.type}</span><span class="rv-time">${hh}</span>${it.tier === 'shadow' ? '<span class="shadow-tag">shadow</span>' : ''}</div><div class="rv-txt">${it.text}</div></div>`;
     }).join('');
     // Click an action item to acknowledge — stops its pulse (nothing pulses forever).
     el.querySelectorAll('.rv-item.action[data-rid]').forEach((n) => n.addEventListener('click', () => { _rvAcked.add(n.dataset.rid); renderRiver(); }));
@@ -1767,32 +1767,32 @@ const PM = {
     { account: 'FIDELITY_ROTH', kind: 'equity sleeve', rule: 'cap: max losses within 20% of its balance', measure: 'max loss', ceiling: 1768, atRisk: 1210, cashFloor: null, cash: 1980.0, balance: 8842.09 },
   ],
   open: [
-    { id: 517, account: 'ROBINHOOD', ticker: 'AVGO', bucket: 'B2 tactical', structure: 'put debit spread 300/290', qty: 2, cost: 148, mark: 171, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-10-16',
+    { id: 517, account: 'ROBINHOOD', ticker: 'AVGO', rule: { kind: 'act', text: 'Harvest zone: 64% of max. The rule says take it.' }, bucket: 'B2 tactical', structure: 'put debit spread 300/290', qty: 2, cost: 148, mark: 171, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-10-16',
       stop: { type: 'daily-close', level: 'close < 305' }, invalidation: 'Daily close above 312 voids the bearish read', timeStop: '09-29 (5 days, B2 window)', tags: ['semis', 'committee'],
       lots: [{ id: 1, when: '09-22 10:41', qty: 2, price: 0.74, fees: 1.30, prov: 'BROKER_VERIFIED', ref: 'RH-…7f2a' }],
       legs: [{ seq: 1, side: 'long', type: 'put', strike: 300, price: 3.10 }, { seq: 2, side: 'short', type: 'put', strike: 290, price: 2.36 }],
       evidence: ['Broker fill 09-22 10:41: BUY 2 AVGO 10/16 300P @3.10, SELL 2 290P @2.36 (broker_ref RH-…7f2a)', 'Cost check: (3.10 − 2.36) × 2 × 100 = 148.00, matches recorded basis'] },
-    { id: 519, account: 'ROBINHOOD', ticker: 'TSLA', bucket: 'B2 tactical', structure: 'put debit spread 260/250', qty: 1, cost: 96, mark: null, markState: 'unknown', prov: 'SCREEN_VERIFIED', expiry: '2026-10-16',
+    { id: 519, account: 'ROBINHOOD', ticker: 'TSLA', rule: { kind: 'act', text: 'No stop written: write one before the next close. Unstopped, it counts at its full max loss toward the ceiling.' }, bucket: 'B2 tactical', structure: 'put debit spread 260/250', qty: 1, cost: 96, mark: null, markState: 'unknown', prov: 'SCREEN_VERIFIED', expiry: '2026-10-16',
       stop: { type: 'none', level: '—' }, invalidation: 'not written', timeStop: 'not set', tags: [],
       lots: [{ id: 2, when: '09-22 11:05', qty: 1, price: 0.96, fees: 0.65, prov: 'SCREEN_VERIFIED', ref: '—' }],
       legs: [{ seq: 1, side: 'long', type: 'put', strike: 260, price: null }, { seq: 2, side: 'short', type: 'put', strike: 250, price: null }],
       evidence: ['Read from a broker screen (fields + capture time recorded); no fill reference yet', 'Export line will supersede this and promote it to BROKER_VERIFIED'] },
-    { id: 520, account: 'ROBINHOOD', ticker: 'NVDA', bucket: 'B1 thesis', structure: '3-leg put fly 415', qty: 1, cost: 168, mark: 121, markState: 'stale', prov: 'PRINCIPAL_REPORTED', expiry: '2026-11-20', basisIncomplete: 'quantity 3, basis covers 2 structures; third has no recorded fill',
+    { id: 520, account: 'ROBINHOOD', ticker: 'NVDA', rule: { kind: 'watch', text: 'Basis under review: settle the third leg\'s fill before deciding anything.' }, bucket: 'B1 thesis', structure: '3-leg put fly 415', qty: 1, cost: 168, mark: 121, markState: 'stale', prov: 'PRINCIPAL_REPORTED', expiry: '2026-11-20', basisIncomplete: 'quantity 3, basis covers 2 structures; third has no recorded fill',
       stop: { type: 'broker order', level: 'stop @ 60% of debit' }, invalidation: 'Thesis dead if NVDA reclaims 430 on volume', timeStop: '11-06', tags: ['thesis'],
       lots: [{ id: 3, when: '09-15', qty: 1, price: 1.68, fees: 0, prov: 'PRINCIPAL_REPORTED', ref: '—' }],
       legs: [{ seq: 1, side: 'long', type: 'put', strike: 425, price: null }, { seq: 2, side: 'short', type: 'put', strike: 415, price: null }, { seq: 3, side: 'long', type: 'put', strike: 405, price: null }],
       evidence: ['Basis incomplete by ruling — counted in the census, never averaged into realized or win rate'] },
-    { id: 516, account: 'ROBINHOOD', ticker: 'HYG', bucket: 'HEDGE', structure: 'put debit spread 76/73', qty: 5, cost: 70, mark: 96, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-11-20', rolledFrom: 218,
+    { id: 516, account: 'ROBINHOOD', ticker: 'HYG', rule: { kind: 'act', text: 'Time stop in 2 sessions.' }, bucket: 'HEDGE', structure: 'put debit spread 76/73', qty: 5, cost: 70, mark: 96, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-11-20', rolledFrom: 218,
       stop: { type: 'daily-close', level: 'close < 77.2' }, invalidation: 'Credit spreads tighten below 3.1', timeStop: '11-13',
       tags: ['credit', 'roll'],
       lots: [{ id: 4, when: '09-22 09:58', qty: 3, price: 0.14, fees: 0.9, prov: 'BROKER_VERIFIED', ref: 'RH-…1c90' }, { id: 5, when: '09-22 10:02', qty: 2, price: 0.13, fees: 0.6, prov: 'BROKER_VERIFIED', ref: 'RH-…1c91' }],
       legs: [{ seq: 1, side: 'long', type: 'put', strike: 76, price: 0.58 }, { seq: 2, side: 'short', type: 'put', strike: 73, price: 0.39 }],
       evidence: ['Roll: closed #218 (−110.00) and opened #516 in one motion', 'Roll cost 30.00 recorded on lot 1 only'] },
-    { id: 601, account: 'FIDELITY_ROTH', ticker: 'PDBC', bucket: 'CORE', structure: 'equity', qty: 50, cost: 690, mark: 702, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
+    { id: 601, account: 'FIDELITY_ROTH', ticker: 'PDBC', rule: { kind: 'act', text: 'No broker stop: counts 100% toward the 20% cap.' }, bucket: 'CORE', structure: 'equity', qty: 50, cost: 690, mark: 702, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
       stop: { type: 'daily-close', level: 'close < 13.2' }, invalidation: 'Commodity sleeve breaks its 200-day', timeStop: 'none (holding)', tags: ['commodity'],
       lots: [{ id: 6, when: '09-01', qty: 50, price: 13.80, fees: 0, prov: 'BROKER_VERIFIED', ref: 'FID-…22b0' }], legs: [],
       evidence: ['Fidelity confirmation 09-01: BUY 50 PDBC @13.80'] },
-    { id: 602, account: 'FIDELITY_ROTH', ticker: 'SOXS', bucket: 'HEDGE', structure: 'equity', qty: 25, cost: 420, mark: 391, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
+    { id: 602, account: 'FIDELITY_ROTH', ticker: 'SOXS', rule: { kind: 'ok', text: 'Broker stop is resting: nothing to do today.' }, bucket: 'HEDGE', structure: 'equity', qty: 25, cost: 420, mark: 391, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
       stop: { type: 'broker order', level: 'stop @ 14.40' }, invalidation: 'Semis trend resumes: SMH closes above its 20-day', timeStop: 'review when SMH resets', tags: ['semis', 'inverse'],
       lots: [{ id: 7, when: '09-10', qty: 25, price: 16.80, fees: 0, prov: 'BROKER_VERIFIED', ref: 'FID-…31c4' }], legs: [],
       evidence: ['Fidelity confirmation 09-10: BUY 25 SOXS @16.80'] },
@@ -1981,6 +1981,26 @@ const X = (function () {
     if (location.hash === h) return;
     history[replace ? 'replaceState' : 'pushState'](null, '', url);
   }
+  // R-IV.527 #2: how far the Book tile must slide to clear the panel, measured from its real rectangle
+  // (offsets, so an in-flight transition cannot skew it). None if it is already clear: tiles move and
+  // the layout is saved, so the right third is not a safe assumption.
+  function liftBook() {
+    const root = document.documentElement;
+    const tile = document.querySelector('.grid-stack-item[gs-id="book"]');
+    if (!tile || !st.open || mq.matches || !panel) { root.style.removeProperty('--pp-shift'); return; }
+    const parent = tile.offsetParent ? tile.offsetParent.getBoundingClientRect().left : 0;
+    const left = parent + tile.offsetLeft, right = left + tile.offsetWidth;
+    const panelLeft = document.documentElement.clientWidth - panel.offsetWidth;
+    const need = right - (panelLeft - 14);
+    const shift = Math.max(0, Math.min(need, left));
+    root.style.setProperty('--pp-shift', String(Math.round(shift)));
+  }
+  // R-IV.527 #3: mark, in the Book strip, the row whose position the panel is showing.
+  function markRow() {
+    const rows = document.querySelectorAll('#bookPositions .pos-row');
+    const sel = st.open ? byId(st.id) : null;
+    rows.forEach((r) => { const on = !!sel && realTicker(r) === sel.ticker; r.classList.toggle('pp-cur', on); if (on) r.setAttribute('aria-current', 'true'); else r.removeAttribute('aria-current'); });
+  }
   function build() {
     if (panel) return;
     backdrop = document.createElement('div'); backdrop.className = 'pp-backdrop';
@@ -1990,7 +2010,7 @@ const X = (function () {
     backdrop.addEventListener('click', close);
     panel.addEventListener('click', onPanelClick);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st.open) close(); });
-    mq.addEventListener('change', () => { if (st.open) render(); });
+    mq.addEventListener('change', () => { if (st.open) { render(); liftBook(); } });
   }
   function head() {
     return `<div class="pp-head"><h2>Positions</h2>${X.chip('unknown', 'mock', 'Every figure here is invented')}<span class="pp-dim">skeleton · no live data</span><button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
@@ -2008,6 +2028,7 @@ const X = (function () {
       <div class="pp-sum-top"><span class="pp-sum-tk">${X.esc(p.ticker)}</span>${X.prov(p.prov)}</div>
       <div class="pp-sum-sub">${X.esc(p.bucket)} · ${X.esc(p.account)}</div>
       <div class="pp-sum-st">${X.esc(p.structure)}${p.expiry ? ' · exp ' + X.esc(p.expiry.slice(5)) : ''}</div>
+      ${p.rule ? `<div class="pp-rule" data-kind="${p.rule.kind}"><span class="pp-k">Rule now · mock</span><div class="pp-rule-t">${X.esc(p.rule.text)}</div></div>` : ''}
       <div class="pp-sum-grid">${cell('Qty', p.qty)}${cell('Cost', X.usd(p.cost))}${cell('Mark', X.markCell(p))}${cell('P&amp;L', X.pnlCell(p))}</div>
       <div class="pp-sum-stop">${X.stopBadge(p.stop)}</div>
       <button type="button" class="pp-btn pp-link" data-allpos="1">← All positions</button>
@@ -2040,6 +2061,7 @@ const X = (function () {
     panel.innerHTML = head() + `<div class="pp-body">${mq.matches ? phone() : desktop()}</div>`;
     panel.querySelectorAll('tr.pp-row').forEach((r) => r.classList.toggle('sel', Number(r.dataset.id) === st.id));
     const body = panel.querySelector('.pp-body'); if (body) body.scrollTop = keepTop;
+    markRow();
   }
   function onPanelClick(e) {
     const t = e.target;
@@ -2065,6 +2087,7 @@ const X = (function () {
     if (opts.tab) st.tab = opts.tab;
     if (mq.matches && opts.id != null) st.mtab = 'Book';
     render();
+    liftBook();
     const first = !panel.classList.contains('open');
     requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); document.documentElement.classList.add('pp-open'); if (first) { const x = panel.querySelector('.pp-x'); if (x) x.focus(); } });
   }
@@ -2079,6 +2102,8 @@ const X = (function () {
     st.open = false;
     if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); }
     document.documentElement.classList.remove('pp-open');
+    document.documentElement.style.removeProperty('--pp-shift');
+    markRow();
     if (st.opener && st.opener.focus) { try { st.opener.focus(); } catch (_) {} }
   }
   function close() {
@@ -2111,7 +2136,9 @@ const X = (function () {
   function init() {
     const strip = document.getElementById('bookStrip');
     if (strip) { strip.setAttribute('tabindex', '0'); strip.setAttribute('role', 'button'); strip.setAttribute('aria-label', 'Open the positions panel (mock data)'); strip.classList.add('pp-door'); }
-    const pos = document.getElementById('bookPositions'); if (pos) pos.classList.add('pp-door');
+    const pos = document.getElementById('bookPositions');
+    if (pos) { pos.classList.add('pp-door'); new MutationObserver(markRow).observe(pos, { childList: true }); }
+    window.addEventListener('resize', () => { if (st.open) liftBook(); });
     sync();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
