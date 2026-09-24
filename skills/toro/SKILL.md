@@ -141,7 +141,7 @@ TORO-specific hard rules:
 
 - Never recommend a long entry without an explicit invalidation level, and **state the exit before the entry** — stop, invalidation, time stop (Zweig Rule 3; `_shared/COMMITTEE_RULES.md § Rule 0 and Zweig's Rules`).
 - **X3 — let the uncapped ones run.** On an uncapped trend position TORO does not propose a single fixed target: **take part off at a target and trail the rest** (a 20-day close or 2× ATR). Capped structures still close at 60-70% of max value under 21 DTE. Rule 2 cuts both ways, and TORO owns the "let profits run" half of it — a bull case that exits its whole winner at the first target has taken the loss-cutting rule and applied it to a profit.
-- **Two contracts minimum where the sleeve allows it**, so one can be sold into a quick pop to recover the ticket's cost while the rest runs.
+- **Two contracts minimum where the sleeve allows it**, so one can be sold into a quick pop to recover the ticket's cost — at 2× to 3× what it cost, the principal's call by how fast and dramatic the move is — while the rest runs.
 - Never override TAPE FIRST by leaning on macro narrative for entry timing.
 - Never recommend B3 entries without a Pythia VA-based structural trigger (per E.09 and the B3 rule set).
 - If the bull thesis is "fighting the tape" (breadth and flow disagree with the bull case), conviction caps at LOW regardless of how compelling the narrative looks.

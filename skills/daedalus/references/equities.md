@@ -25,7 +25,7 @@ Theta is the daily dollar decay of the position (negative for long premium; posi
 
 **Theta burn threshold:** if theta burn on a long-premium position exceeds 5% of position value per day, flag it explicitly. That's an unsustainable bleed rate — the position needs to work within days or it dies.
 
-**Theta acceleration:** theta accelerates non-linearly as DTE approaches zero. Below 21 DTE, theta becomes the dominant Greek on long premium positions — this is why the 21 DTE rule (close at 60-70% of max) exists.
+**Theta acceleration:** theta accelerates non-linearly as DTE approaches zero. Below 21 DTE, theta becomes the dominant Greek on long premium positions — this is why the 21 DTE rule for capped structures (close at 60-70% of max) exists; uncapped long premium scales out and trails instead (X3).
 
 ### Gamma — rate of delta change
 
@@ -187,8 +187,8 @@ ESTIMATED GREEKS: Delta -0.35 per contract (capped by spread), Theta -$3/contrac
 IV CONTEXT: Inferred neutral-to-elevated — VIX at 17, recent realized vol modestly above implied. Debit structure acceptable.
 
 RISK PARAMETERS:
-- Max loss: net debit × contracts × 100. At debit $1.80 × 2 contracts × 100 = $360 (assumes balance supports 2 contracts within 5% cap; verify via live balance call)
-- Position size: 2 contracts (within three-bucket B2 cap of $200-300 if debit $1.80 × 2 = $360 — slightly over; recommend 1 contract to stay strict, or downgrade B2 to its $300 ceiling)
+- Max loss: net debit × contracts × 100. At debit $1.80 × 2 contracts × 100 = $360 (check it against the ROBINHOOD sleeve ceiling and the $200 cash floor, from the broker-app balance)
+- Position size: 2 contracts (the two-contract minimum — sell one into a quick pop to recover the ticket's cost, let the other run)
 - Entry: $1.80 debit (limit)
 - Stop: underlying reclaim above 587.40 (URSA's invalidation) → close the spread, accept partial loss
 - Target: T1 underlying $583.80 (PYTHIA's VAL — partial close at 50% of max gain), T2 underlying $580.00 (full close at max gain)
@@ -213,8 +213,8 @@ ESTIMATED GREEKS: Delta +0.30 per contract (capped), Theta -$4/day, Vega +$10. C
 IV CONTEXT: NVDA IV elevated post-recent moves but below earnings spike levels. Debit structure acceptable but spread caps the IV cost.
 
 RISK PARAMETERS:
-- Max loss: net debit × contracts × 100. At debit $2.20 × 2 contracts × 100 = $440 (verify supports 5% cap on live balance)
-- Position size: 2 contracts (B2 fit; need balance > $8,800 to fit within 5% cap)
+- Max loss: net debit × contracts × 100. At debit $2.20 × 2 contracts × 100 = $440 (check against the sleeve ceiling on the broker-app balance)
+- Position size: 2 contracts (the two-contract minimum; fits if the sleeve has $440 of room)
 - Entry: $2.20 debit (limit)
 - Stop: underlying close back below 148.20 (PYTHAGORAS's invalidation) → close the spread
 - Target: T1 underlying $152.80 (PYTHAGORAS's next resistance, 50% close), T2 underlying $155.00 (max gain at short strike)
@@ -240,11 +240,11 @@ IV CONTEXT: VIX at 16, IV neutral. Iron condor needs IV elevated enough to justi
 
 RISK PARAMETERS:
 - Max loss: (3 wing width − net credit) × 100 per contract per side. At net credit $1.10 × 2 contracts × 100 = $220 credit collected; max loss per side = ($3 − $1.10) × 100 × 2 = $380
-- Position size: 2 contracts (B2 fit; max loss $380 must clear 5% live balance check)
+- Position size: 2 contracts (max loss $380 must fit the sleeve's room on the broker-app balance)
 - Entry: $1.10 net credit (limit; if fill <$1.00, the trade math fails — pass)
 - Stop: underlying close above 590 or below 582 → close the breached side and reassess
-- Target: T1 50% of max profit = close for $0.55 debit, T2 close at 21 DTE per shared rule
-- Time stop: standard — close at 21 DTE regardless of profit per shared rule
+- Target: T1 50% of max profit = close for $0.55 debit, T2 by 21 DTE (capped structure — the shared 60-70% rule)
+- Time stop: 21 DTE (capped structure — close at 60-70% of max value or reassess, per the shared rule)
 
 CATALYST AWARENESS: No major catalyst within 10 days. SPY direct catalyst risk minimal (no earnings); macro CPI/FOMC outside window per current calendar.
 LIQUIDITY: SPY options highly liquid. No flag.
@@ -265,8 +265,8 @@ ESTIMATED GREEKS: Delta -0.30 per contract (capped), Theta -$2/day, Vega -$5. Ch
 IV CONTEXT: IBIT IV elevated (BTC-tracking ETFs run high IV). Debit structure caps the cost; spread compresses the IV impact.
 
 RISK PARAMETERS:
-- Max loss: net debit × contracts × 100. At debit $0.80 × 3 contracts × 100 = $240 (B2 fit; verify 5% cap live)
-- Position size: 3 contracts (Robinhood max; B2 cap respected)
+- Max loss: net debit × contracts × 100. At debit $0.80 × 3 contracts × 100 = $240 (check against the sleeve ceiling on the broker-app balance)
+- Position size: 3 contracts (fits the sleeve's room; the old 3-contract maximum is retired)
 - Entry: $0.80 debit (limit)
 - Stop: underlying close back above 52.50 (URSA's invalidation) → close
 - Target: T1 underlying $50.20, T2 underlying $49.00 (max gain at short strike)
@@ -284,7 +284,7 @@ SCENARIO: Nick asks DAEDALUS to evaluate an existing SPY 580/575 bear put spread
 
 DAEDALUS read:
 - Current value $2.40 vs entry $1.50 = 60% of max value reached.
-- Per 21 DTE shared rule: close at 60-70% of max value below 21 DTE — we're AT the threshold.
+- Per the 21 DTE shared rule for capped structures: close at 60-70% of max value below 21 DTE — we're AT the threshold.
 - Greeks check: theta now eating into the position (~$3/day going forward), gamma still manageable but accelerating in 2-3 days.
 - Recommendation: CLOSE NOW or set GTC at $2.55 (70% of max). Don't hold for $3.00 expiry max — the math says lock the win.
 
@@ -312,5 +312,5 @@ If Nick wants to hold: surface that the additional 16% upside (from $2.40 to $3.
 - Overriding TORO/URSA directional input with DAEDALUS's own directional view (out of lane).
 - Recommending iron condors in trending auctions per PYTHIA's read (condor is a range structure).
 - Not flagging bid-ask spread as a liquidity concern on mid-cap and below.
-- Missing the 21 DTE management call — holding positions past the close-at-60-70% threshold and watching the win evaporate.
+- Missing the 21 DTE management call on a capped structure — holding positions past the close-at-60-70% threshold and watching the win evaporate.
 - Recommending naked structures without explicit Nick approval flag (violates R.05).

@@ -32,7 +32,7 @@ When the bull thesis warrants an options expression rather than equity:
 - B1 thesis (multi-week) → 30–60 DTE minimum
 - Deep thesis (multi-month) → LEAPS or deep ITM
 
-**Theta awareness.** Below 21 DTE, theta acceleration changes the math. Hard rule from the user's framework: close at 60–70% of max value, don't hold for perfection.
+**Theta awareness.** Below 21 DTE, theta acceleration changes the math. Hard rule from the user's framework: close capped structures at 60–70% of max value — don't hold for perfection. Uncapped positions take part off at a target and trail the rest (X3).
 
 **IV regime.** Check the `iv_regime v2` reading. Long premium in elevated IV fights headwinds; consider spreads or risk reversals to neutralize the IV layer. Long premium in suppressed IV is favorable convexity — but verify IV isn't compressed for a reason (low-volume holiday, pre-event suppression, etc.).
 
@@ -47,9 +47,9 @@ When the bull thesis warrants an options expression rather than equity:
 
 **B1 (thesis).** Multi-week to multi-month bull thesis. Equity, LEAPS, or 30–60 DTE calls/spreads. Sizing per longer-dated thesis rules.
 
-**B2 (tactical 3–5 day momentum).** $200–300 max, max 2 open. Common expressions: 7–14 DTE calls or call debit spreads. Cut if not profitable in 3 days.
+**B2 (tactical 3–5 day momentum).** Sized inside the ROBINHOOD sleeve ceiling (the $200–300 cap is retired, 2026-09-23). Common expressions: 7–14 DTE calls or call debit spreads. Cut if not profitable in 3 days.
 
-**B3 (intraday scalp).** $100 cap until cash infusion lands, max 2 concurrent, max 3/day, same-day close. Requires structural Pythia VA trigger (break or rejection). Mechanical stop at entry. Target = next Pythia level. Two consecutive losers = circuit breaker, done for the day. $300 daily max loss.
+**B3 (intraday scalp).** Sized inside the ROBINHOOD sleeve ceiling (the $100 cap is retired, 2026-09-23); max 2 concurrent, max 3/day, same-day close. Requires structural Pythia VA trigger (break or rejection). Mechanical stop at entry. Target = next Pythia level. Two consecutive losers = circuit breaker, done for the day. $300 daily max loss.
 
 ## Mechanical Flow Calendar Check
 
