@@ -42,10 +42,45 @@ def _all_tickers() -> list[str]:
     return sorted(set(universe.universe_tickers()) | set(config.BENCHMARK_SYMBOLS))
 
 
+# R-IV.517(b) — an incomplete session is re-requested, but not forever.
+#
+# A vendor that dropped a session sometimes fills it in over the following days:
+# on 2026-09-22 Yahoo went from 1 ticker to 135 to partial coverage that varied
+# between identical requests. So the nightly re-asks, and stops asking after a
+# stated number of sessions rather than retrying until the end of time.
+#
+# Past the horizon the date keeps its MUST-NOT-ANCHOR mark **for good**. That is
+# the point: a hole that never fills must stay a named hole, not an open retry
+# that quietly looks like progress.
+INCOMPLETE_RETRY_SESSIONS = 5
+
+
 def _nightly_work() -> dict:
+    from datetime import date as _date, timedelta
     from stable_engine import bars_yf, metrics, scoring
+    from stable_engine.market_calendar import trading_days_between, CalendarHorizonError
     tickers = _all_tickers()
     coverage = bars_yf.download_and_store(tickers, days=15)   # incremental refresh
+
+    # Re-request any session the gate marked incomplete, while it is still inside
+    # the retry horizon. Counted in TRADING days off the calendar, never in
+    # calendar days — five weekdays and five sessions differ across every holiday.
+    retried, abandoned = [], []
+    for d, held, required in (bars_yf.incomplete_sessions(lookback_days=30) or []):
+        try:
+            gap = trading_days_between(_date.fromisoformat(d), _date.today())
+        except (CalendarHorizonError, ValueError):
+            gap = None
+        if gap is None or gap > INCOMPLETE_RETRY_SESSIONS:
+            abandoned.append({"date": d, "bars": held, "required": required})
+            logger.warning("[stable_jobs] %s is %s sessions past its retry horizon — it keeps "
+                           "MUST NOT ANCHOR for good; no further re-requests", d, gap)
+            continue
+        logger.info("[stable_jobs] re-requesting incomplete session %s (%d/%d bars, %s "
+                    "session(s) old)", d, held, required, gap)
+        one = bars_yf.download_and_store(tickers, days=2, end=_date.fromisoformat(d) + timedelta(days=1))
+        retried.append({"date": d, "bars_before": held, "rows_written": one.get("rows_written", 0)})
+
     m = metrics.compute_metrics()
     scores = scoring.compute_theme_scores()
     stored = scoring.store_theme_scores(scores, anchor="close", degraded=coverage["degraded"])
@@ -56,7 +91,12 @@ def _nightly_work() -> dict:
     return {"coverage": coverage["coverage_pct"], "degraded": coverage["degraded"],
             "metrics_rows": m.get("rows_written", 0), "themes_stored": stored,
             "held_dates": m.get("held_dates") or [],
-            "themes_backfilled": backfilled}
+            "themes_backfilled": backfilled,
+            # R-IV.517(b): both lists on the face. `abandoned` is the one that
+            # matters — a hole nobody is retrying any more, named rather than
+            # silently dropped off the end of a loop.
+            "incomplete_retried": retried,
+            "incomplete_abandoned": abandoned}
 
 
 def _provisional_work() -> dict:
