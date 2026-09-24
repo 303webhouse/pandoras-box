@@ -267,12 +267,85 @@ def nth_trading_day(anchor: date, n: int) -> date:
     return day
 
 
-def close_on_or_near(idx: Dict[date, float], target: date) -> Optional[float]:
-    """Close at target, else ±1/±2 calendar-day tolerance (holiday/missing bar)."""
+def close_on_or_near(idx: Dict[date, float],
+                     target: date) -> Tuple[Optional[float], Optional[date]]:
+    """(close, THE SESSION IT CAME FROM). Target first, else ±1/±2 calendar days.
+
+    Amendment 4(a) is this function's history. It returned a bare float, so a close
+    borrowed from a neighbouring session was indistinguishable from the session's own
+    — and 15 W1 rows were graded across the 2026-09-22 gap with nothing recorded to
+    show it. The substitution behaviour is UNCHANGED for the callers that want it
+    (R-IV.522(b)2); what changed is that it can no longer hide. The date comes back,
+    and a caller that must not substitute compares it to `target` — or uses
+    `close_on_session`, which cannot substitute at all.
+    """
     if target in idx:
-        return idx[target]
+        return idx[target], target
     for delta in (1, -1, 2, -2):
-        v = idx.get(target + timedelta(days=delta))
+        d = target + timedelta(days=delta)
+        v = idx.get(d)
         if v is not None:
-            return v
+            return v, d
+    return None, None
+
+
+def close_on_session(idx: Dict[date, float], target: date) -> Optional[float]:
+    """The close for EXACTLY that session, or None. Amendment 4(c): no substitution.
+
+    Inside the registered window this is the only lookup the grader may use. A
+    missing bar here is a fact to record, not a hole to paper over: a neighbour's
+    close is a different session's price, and naming it as this one's is the fault
+    Amendment 4 exists to close.
+    """
+    return idx.get(target)
+
+
+# ── Amendment 4(c): a horizon session is a weekday THE EXCHANGE TRADED ──────────
+#
+# `nth_trading_day` walks Mon-Fri with no holiday calendar (it mirrors a3, v0). That
+# is only safe while no exchange holiday falls inside the window, which R-IV.522(b)4
+# required be confirmed before deploying: measured 2026-09-24, there is NONE between
+# 2026-09-15 and 2026-09-15's last read horizon 2026-11-06. So the weekday walk and
+# the calendar agree across the whole window, and no grade moves.
+#
+# This guard is what makes that a checked fact rather than a remembered one. It does
+# NOT change any horizon — it refuses to grade one that is not a session, loudly,
+# which is what an extended window would need.
+
+def horizon_is_session(d: date) -> Optional[bool]:
+    """True/False/None (the calendar cannot answer for that date)."""
+    try:
+        from stable_engine.market_calendar import is_trading_day_or_none
+        return is_trading_day_or_none(d)
+    except Exception:
+        return None
+
+
+# Cohort boundaries, read off the registration rather than stored: W1 starts at
+# T_clock (Tue 2026-09-15) and each later cohort is that Mon-Fri week, through W7
+# ending 2026-10-30. 4 + 5*6 = 34 sessions, which is R-IV.485(b)'s figure — the
+# arithmetic is the check.
+def cohort_bounds(name: str) -> Optional[Tuple[date, date]]:
+    """(first_session, last_session) for W1..W7, or None."""
+    n = str(name or "").strip().upper()
+    if not (len(n) == 2 and n[0] == "W" and n[1].isdigit()):
+        return None
+    k = int(n[1])
+    if not 1 <= k <= 7:
+        return None
+    if k == 1:
+        return TRITON_WINDOW_FIRST_SESSION, date(2026, 9, 18)
+    monday = date(2026, 9, 21) + timedelta(days=7 * (k - 2))
+    return monday, monday + timedelta(days=4)
+
+
+def cohort_of(session) -> Optional[str]:
+    """Which cohort a session belongs to, or None when it is outside the window."""
+    if session is None:
+        return None
+    d = session.date() if hasattr(session, "date") else session
+    for k in range(1, 8):
+        lo, hi = cohort_bounds("W%d" % k)
+        if lo <= d <= hi:
+            return "W%d" % k
     return None

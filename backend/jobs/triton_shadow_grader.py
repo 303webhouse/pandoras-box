@@ -123,11 +123,83 @@ def spans_corporate_action(ex_dates, fire_date, through):
     return any(fire_date < d <= through for d in (ex_dates or ()))
 
 
+# ── AMENDMENT 4 (R-IV.521, ordered by R-IV.522(b)) ────────────────────────────
+#
+# (c) NO SUBSTITUTION INSIDE THE WINDOW. A horizon whose pinned-vendor bar is absent
+# stays ungraded. It is called a gap only after THREE SEPARATE REQUESTS have failed
+# to return it — separate in time, not three calls in one pass: the vendor served
+# different coverage to identical requests days apart (R-IV.517(b)), so a same-pass
+# retry would mostly re-ask a cache and name a recoverable absence permanent.
+SESSION_GAP_MIN_ATTEMPTS = 3
+SESSION_GAP = "UNGRADEABLE-SESSION-GAP"          # Amendment 4(d)'s §P2 class
+SESSION_BAR_RETRYING = "session_bar_absent_retrying"
+HORIZON_NOT_A_SESSION = "horizon_not_a_session"
+
+
+async def _count_bar_absence(pool, ticker: str, session_date, provider: str) -> int:
+    """Record ONE failed request for that session's bar; return the running total.
+
+    Returns SESSION_GAP_MIN_ATTEMPTS when the store cannot be read. An unreadable
+    counter must not be able to hold a horizon open forever — that would convert a
+    database blip into an indefinite postponement of the read, and 4(f) already has
+    a stated route for a gap. Being loud about a gap is recoverable; silently never
+    resolving is not.
+    """
+    try:
+        async with pool.acquire() as conn:
+            n = await conn.fetchval(
+                """
+                INSERT INTO triton_session_bar_attempts
+                    (ticker, session_date, provider, attempts)
+                VALUES ($1, $2, $3, 1)
+                ON CONFLICT (ticker, session_date, provider) DO UPDATE
+                   SET attempts = triton_session_bar_attempts.attempts + 1,
+                       last_attempt_at = NOW()
+                RETURNING attempts
+                """,
+                ticker, session_date, provider,
+            )
+        return int(n or SESSION_GAP_MIN_ATTEMPTS)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("triton_grader: attempt counter unreadable for %s %s: %s — "
+                       "treating the absence as a gap", ticker, session_date,
+                       type(exc).__name__)
+        return SESSION_GAP_MIN_ATTEMPTS
+
+
+async def _close_for_session(pool, idx, target, *, ticker: str, provider: str,
+                             strict: bool):
+    """(close, session_used, gap_reason). `strict` is Amendment 4(c): in-window rows.
+
+    Out-of-window rows keep the neighbour probe exactly as it was (R-IV.522(b)2),
+    and now carry the date it used, so a substitution there is recorded rather than
+    invisible.
+    """
+    from jobs.triton_shadow_common import close_on_or_near, close_on_session
+
+    if not strict:
+        close, used = close_on_or_near(idx, target)
+        return close, used, None
+    close = close_on_session(idx, target)
+    if close is not None:
+        return close, target, None
+    n = await _count_bar_absence(pool, ticker, target, provider)
+    return None, None, (SESSION_GAP if n >= SESSION_GAP_MIN_ATTEMPTS
+                        else SESSION_BAR_RETRYING)
+
+
+def _gap_text(gaps) -> "str | None":
+    """Amendment 4(d)'s pairs: "3d@2026-09-22", so the face needs no re-derivation."""
+    if not gaps:
+        return None
+    return ",".join("%dd@%s" % (k, gaps[k]) for k in sorted(gaps))
+
+
 async def run_triton_shadow_grader() -> dict:
     """One grading pass. Never raises (fail-open). Returns a small summary."""
     from database.postgres_client import get_postgres_client
     from jobs.triton_shadow_common import (
-        fetch_r_close_index, nth_trading_day, close_on_or_near, _f,
+        fetch_r_close_index, nth_trading_day, horizon_is_session, _f,
         triton_row_pinned, PROVIDER_NONE,
     )
     from jobs.instrument_class import classify, is_gradeable
@@ -200,6 +272,9 @@ async def run_triton_shadow_grader() -> dict:
     today = datetime.now(timezone.utc).date()
     graded = fully = skipped = held = 0
     providers_used: dict = {}
+    # Amendment 4(d): the gaps themselves, so the read's face can list ticker,
+    # horizon and session. A count would say how many and never which.
+    session_gaps: list = []
 
     for ticker, group in by_ticker.items():
         if not ticker:
@@ -292,10 +367,16 @@ async def run_triton_shadow_grader() -> dict:
                 providers_used[provider] = providers_used.get(provider, 0) + 1
                 fire_d = g["fired_at"].date() if hasattr(g["fired_at"], "date") else g["fired_at"]
                 direction = g["direction"] or "BULL"
-                # entry reference: fire-time spot, else fire-date 'r' close
+                # entry reference: fire-time spot, else fire-date 'r' close.
+                # Amendment 4(b): whichever it is, the session it belongs to is
+                # recorded. The fire-time spot IS the fire session's price, so that
+                # branch is provenance too, not an absence of it.
                 entry = _f(g["spot_at_fire"])
+                entry_session = fire_d if (entry and entry > 0) else None
                 if not entry or entry <= 0:
-                    entry = close_on_or_near(idx, fire_d)
+                    entry, entry_session, _egap = await _close_for_session(
+                        pool, idx, fire_d, ticker=ticker, provider=provider,
+                        strict=is_pinned)
                 if not entry or entry <= 0:
                     _skip("no_entry_price")
                     skipped += 1
@@ -308,14 +389,38 @@ async def run_triton_shadow_grader() -> dict:
                 # A single "skipped" count cannot tell them apart, which is how a
                 # real bar gap hides inside an expected wait.
                 any_reachable = False
+                sess = {1: None, 3: None, 5: None}
+                gaps: dict = {}
                 for k in HORIZONS:
                     tgt = nth_trading_day(fire_d, k)
                     if tgt > today:
                         continue  # horizon not reached yet
                     any_reachable = True
-                    close_k = close_on_or_near(idx, tgt)
+                    # Amendment 4(c) defines a horizon session as a weekday THE
+                    # EXCHANGE TRADED. nth_trading_day walks Mon-Fri with no holiday
+                    # calendar, which is only safe while the window holds no holiday
+                    # — confirmed, and this refuses rather than trusts the memory.
+                    if is_pinned and horizon_is_session(tgt) is not True:
+                        gaps[k] = tgt
+                        _skip(HORIZON_NOT_A_SESSION)
+                        logger.error("triton_grader: row %s horizon %dd lands on %s, "
+                                     "which the calendar does not call a session — "
+                                     "NOT graded", g["id"], k, tgt)
+                        continue
+                    close_k, used_k, gap = await _close_for_session(
+                        pool, idx, tgt, ticker=ticker, provider=provider,
+                        strict=is_pinned)
+                    if gap:
+                        gaps[k] = tgt
+                        _skip(gap)
+                        continue
                     if close_k is not None:
                         vals[k] = _dir_adj(entry, close_k, direction)
+                        sess[k] = used_k
+
+                for _k, _d in gaps.items():
+                    session_gaps.append({"row_id": g["id"], "ticker": ticker,
+                                         "horizon": "%dd" % _k, "session": str(_d)})
 
                 if all(v is None for v in vals.values()):
                     _skip("bars_missing_for_reached_horizon" if any_reachable
@@ -347,11 +452,14 @@ async def run_triton_shadow_grader() -> dict:
                         """
                         INSERT INTO triton_grade_versions
                             (row_id, version, fwd_ret_1d, fwd_ret_3d, fwd_ret_5d,
-                             provider, pinned)
-                        SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3, $4, $5, $6
+                             provider, pinned, entry_session,
+                             session_1d, session_3d, session_5d, session_gaps)
+                        SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3, $4, $5, $6,
+                               $7, $8, $9, $10, $11
                         FROM triton_grade_versions WHERE row_id = $1
                         """,
                         g["id"], vals[1], vals[3], vals[5], provider, is_pinned,
+                        entry_session, sess[1], sess[3], sess[5], _gap_text(gaps),
                     )
                     if status and status.strip().endswith(" 0"):
                         logger.info("triton_grader: row %s was already graded — a new "
@@ -374,6 +482,8 @@ async def run_triton_shadow_grader() -> dict:
     # apart. Returned so the caller can record it without re-deriving it.
     return {"graded": graded, "fully_graded": fully, "skipped": skipped, "held": held,
             "skips": skips, "providers": providers_used,
+            # Amendment 4(d): the gaps, not a count of them.
+            "session_gaps": session_gaps,
             # `selected` is what this pass looked at; `ungraded_total` is what
             # exists. When censored is True the skip reasons describe the
             # SELECTION and say nothing about the remainder.
