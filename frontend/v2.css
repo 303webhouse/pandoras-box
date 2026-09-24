@@ -482,7 +482,7 @@ body {
 .kairos-title { color: var(--teal); }
 .kairos-cards { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
 .k-card { border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; background: var(--panel-2); }
-.k-card.shadow { opacity: 0.6; border-style: dashed; }
+.k-card.shadow { border-style: dashed; }
 .k-card .top { display: flex; align-items: baseline; gap: 6px; }
 .k-card .nm { font-family: var(--mono); font-weight: 700; color: var(--text); font-size: 13px; }
 .k-card .desc { font-size: 10px; color: var(--text-3); }
@@ -500,13 +500,15 @@ body {
 .btn-committee:hover { background: rgba(20,184,166,0.12); }
 .clock { width: 9px; height: 9px; border-radius: 50%; background: var(--teal); }
 .clock-chip { font-family: var(--mono); font-size: 10px; color: var(--teal); border: 1px solid rgba(20,184,166,0.4); border-radius: 999px; padding: 1px 7px; }
-.k-card.acked .clock-chip { animation: none; opacity: 0.55; }
+.k-card.acked .clock-chip { animation: none; border-style: dashed; }
 
 /* b9 River */
 .river { display: flex; flex-direction: column; }
 .rv-item { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .rv-item.info { color: var(--text-2); }
-.rv-item.shadow { opacity: 0.5; }
+/* H-13 / R-IV.527: opacity dimming fails AA (--text-2 at .5 = 2.49:1). Shadow is carried by a dashed NEUTRAL left rule
+   and the mono .shadow-tag, at full opacity. Neutral, not amber: amber means "cannot confirm", and a shadow is not that. */
+.rv-item.shadow { border-left: 2px dashed var(--text-2); }
 /* R-IV.427(b): a bannered shadow (CIRCE'S STEW) stays at full opacity so its warning is
    legible; "shadow" is carried by the dashed amber rule and the banner instead of dimming. */
 .rv-item.shadow-banner { border-left: 2px dashed var(--amber); }
@@ -528,8 +530,8 @@ body {
 .rv-item.action.sev-down { border-color: rgba(255,92,51,0.5); }
 .rv-item.action.sev-teal { border-color: rgba(20,184,166,0.5); }
 .rv-item.action { cursor: pointer; }
-.rv-item.action.acked { animation: none; opacity: 0.6; }
-.rv-item.action.acked::after { content: '✓'; float: right; color: var(--text-3); font-size: 10px; margin-top: -14px; }
+.rv-item.action.acked { animation: none; border-left: 2px dashed var(--text-2); }
+.rv-item.action.acked::after { content: '✓'; float: right; color: var(--text-2); font-size: 10px; margin-top: -14px; }
 .rv-item .rv-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
 .rv-item .rv-type { font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-3); }
 .rv-item .rv-time { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--text-3); }
@@ -763,7 +765,7 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 @media (min-width: 821px) {
   .pp-panel { width: 50vw; }
   .grid-stack-item[gs-id="book"] { transition: translate 0.22s ease; }
-  html.pp-open .grid-stack-item[gs-id="book"] { translate: calc(-50vw + 14px) 0; z-index: 58; }
+  html.pp-open .grid-stack-item[gs-id="book"] { translate: calc(var(--pp-shift, 0) * -1px) 0; z-index: 58; }
   html.pp-open .grid-stack-item[gs-id="book"] .tile { box-shadow: 0 0 0 1px var(--teal); }
   .pp-backdrop { z-index: 57; }
 }
@@ -781,6 +783,12 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .pp-sv { font-family: var(--mono); font-size: 18px; font-variant-numeric: tabular-nums; }
 .pp-sum-stop { margin: 14px 0 6px; font-size: 13px; }
 .pp-sum .pp-link { margin: 8px 0 0; }
+.pos-row.pp-cur { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--teal); }
+.pp-rule { border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; margin: 12px 0 0; }
+.pp-rule[data-kind="act"] { border-color: var(--teal); }
+.pp-rule[data-kind="watch"] { border-style: dashed; }
+.pp-rule .pp-k { display: block; margin-bottom: 3px; }
+.pp-rule-t { font-size: 14px; line-height: 1.35; }
 @media (max-width: 820px) { .pp-backdrop { z-index: 94; } .pp-panel { width: 100vw; border-left: 0; z-index: 95; } .pp-body { padding: 10px 12px 24px; } }
 .pp-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
 .pp-dim { color: var(--text-3); font-size: 11px; }
