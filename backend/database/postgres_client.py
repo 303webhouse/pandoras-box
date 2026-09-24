@@ -1095,6 +1095,104 @@ async def init_database():
                     BEFORE INSERT OR UPDATE OF status ON unified_positions
                     FOR EACH ROW EXECUTE FUNCTION unified_positions_terminal_needs_exit()
             """),
+            # R-IV.517(c) — a leg's qty must equal the OPEN REMAINDER on an OPEN row.
+            #
+            # Twice a live row's quantity changed while its legs did not (R-IV.494, and
+            # WEAT 367 on 2026-09-24), and the MARK PATH READS THE LEGS. So the mark went
+            # on being computed from a size the position no longer held, and nothing
+            # disagreed out loud.
+            #
+            # A CHECK cannot span tables, so this is a trigger, and it fires from BOTH
+            # sides — a leg write and a lot write can each break the same invariant, and
+            # guarding only one leaves the other as the way in.
+            #
+            # The remainder is SUM(qty) including negative disposal lots (convention #29),
+            # because a leg describes what is still OPEN, not what was once opened.
+            #
+            # Census before adding, 2026-09-24: 18 OPEN rows carry legs, 35 legs, **zero**
+            # disagreements, and **zero** ratio structures — every multi-leg OPEN row holds
+            # the same qty on every leg. So no backfill, and no ratio term is written today
+            # rather than guessed at; when a ratio structure first appears this refuses it
+            # loudly, which is the right way to find out.
+            #
+            # Two OPEN rows carry legs and NO lots. They are exempt by construction: with
+            # no lots there is no remainder to equal, and firing on them would block the
+            # ordinary case of a position booked before its fills.
+            ("legs-match-remainder function", """
+                CREATE OR REPLACE FUNCTION position_legs_match_open_remainder()
+                RETURNS trigger AS $$
+                DECLARE
+                    v_position_id TEXT;
+                    v_status      TEXT;
+                    v_lots        INT;
+                    v_remainder   NUMERIC;
+                    v_bad         INT;
+                BEGIN
+                    v_position_id := COALESCE(NEW.position_id, OLD.position_id);
+
+                    SELECT status INTO v_status FROM unified_positions
+                     WHERE position_id = v_position_id;
+                    IF v_status IS DISTINCT FROM 'OPEN' THEN
+                        RETURN COALESCE(NEW, OLD);
+                    END IF;
+
+                    SELECT COUNT(*), COALESCE(SUM(qty), 0) INTO v_lots, v_remainder
+                      FROM position_lots WHERE position_id = v_position_id;
+
+                    IF v_lots = 0 THEN
+                        -- A row with NO lots is exempt: a position can be booked with its
+                        -- legs before its fills are lotted, and two live OPEN rows (IWM,
+                        -- META, booked 2026-09-23) are exactly that.
+                        --
+                        -- But "never had lots" and "had lots, all of them just deleted" are
+                        -- not the same state, and the exemption must not be reachable by
+                        -- emptying the table under legs that still assert a size. A probe
+                        -- found this: the target held ONE lot, so deleting it landed in the
+                        -- exempt arm and the delete was accepted. Told apart by the
+                        -- operation, which is the only thing here that knows the difference.
+                        IF TG_TABLE_NAME = 'position_lots' AND TG_OP = 'DELETE'
+                           AND EXISTS (SELECT 1 FROM position_legs
+                                        WHERE position_id = v_position_id
+                                          AND COALESCE(qty, 0) <> 0) THEN
+                            RAISE EXCEPTION
+                                'R-IV.517(c): deleting that lot would leave % with no lots while its legs still assert a non-zero size. The mark path reads the legs, so this leaves a mark with nothing behind it. Zero the legs in the same transaction, or close the position.',
+                                v_position_id
+                                USING ERRCODE = 'check_violation';
+                        END IF;
+                        RETURN COALESCE(NEW, OLD);
+                    END IF;
+
+                    SELECT COUNT(*) INTO v_bad FROM position_legs
+                     WHERE position_id = v_position_id
+                       AND qty IS DISTINCT FROM v_remainder;
+
+                    IF v_bad > 0 THEN
+                        RAISE EXCEPTION
+                            'R-IV.517(c): % has % leg(s) whose qty does not equal the open remainder (%). The mark path reads the legs, so a leg that disagrees with the lots marks a size the position does not hold. Update the legs and the lots together.',
+                            v_position_id, v_bad, v_remainder
+                            USING ERRCODE = 'check_violation';
+                    END IF;
+                    RETURN COALESCE(NEW, OLD);
+                END $$ LANGUAGE plpgsql
+            """),
+            ("legs-match-remainder trigger drop (legs)", """
+                DROP TRIGGER IF EXISTS trg_position_legs_match_remainder ON position_legs
+            """),
+            ("legs-match-remainder trigger create (legs)", """
+                CREATE CONSTRAINT TRIGGER trg_position_legs_match_remainder
+                    AFTER INSERT OR UPDATE OR DELETE ON position_legs
+                    DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW EXECUTE FUNCTION position_legs_match_open_remainder()
+            """),
+            ("legs-match-remainder trigger drop (lots)", """
+                DROP TRIGGER IF EXISTS trg_position_lots_match_legs ON position_lots
+            """),
+            ("legs-match-remainder trigger create (lots)", """
+                CREATE CONSTRAINT TRIGGER trg_position_lots_match_legs
+                    AFTER INSERT OR UPDATE OR DELETE ON position_lots
+                    DEFERRABLE INITIALLY DEFERRED
+                    FOR EACH ROW EXECUTE FUNCTION position_legs_match_open_remainder()
+            """),
             ("backfill exemption column", """
                 ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS backfill_exempt_reason TEXT
             """),
