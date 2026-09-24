@@ -849,3 +849,13 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 @media (max-width: 820px) { .pp-split { grid-template-columns: 1fr; } .pp-split .pp-side { position: static; } .pp-table { font-size: 12px; } .pp-scroll { overflow-x: auto; } }
 /* R-IV.540: the reason chip beside/instead of a null money figure in the Book strip. */
 .pos-row .amt .vintage-chip { margin-left: 4px; }
+/* R-IV.547: cash actions under a sleeve gauge (mock). */
+.pp-cash-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: -4px 0 12px; }
+.pp-cash-actions .pp-btn { min-width: 0; min-height: 40px; }
+.pp-cashform { border: 1px solid var(--teal); border-radius: 10px; padding: 12px; margin: 0 0 12px; background: var(--panel-2); }
+.pp-cash-q, .pp-cash-res { font-size: 14px; line-height: 1.4; }
+.pp-cash-res { border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; }
+.pp-cash-err { color: var(--down); font-size: 12px; }
+.pp-cash-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.pp-cash-btns .pp-btn { margin-top: 4px; }
+.pp-cashform h4 { font-family: var(--mono); font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text-2); font-weight: 400; margin: 0 0 4px; }
