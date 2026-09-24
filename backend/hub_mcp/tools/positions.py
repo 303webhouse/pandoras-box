@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from ..decorators import mcp_tool
 from ..envelope import make_response
+from services.position_economics import capital_at_risk_from_derived
 from services.read_only.positions import list_positions
 
 DESCRIPTION = (
@@ -83,8 +84,15 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         "entry_price": row.get("entry_price"),
         "current_price": row.get("current_price"),
         "current_value": row.get("current_value"),
+        # Both arrive already derived from the lots (R-IV.526(b)). The old
+        # `max_loss or cost_basis` fallback is gone: it put a stored figure back
+        # under a lot-derived name for exactly the rows that have no lots, which is
+        # the substitution the ruling removes. A row that cannot state its own
+        # basis says None, and `basis_reason` says why.
         "unrealized_pnl": row.get("unrealized_pnl"),
-        "max_loss": row.get("max_loss") or row.get("cost_basis"),
+        "max_loss": row.get("max_loss"),
+        "open_remainder": row.get("open_remainder"),
+        "basis_reason": (row.get("derived") or {}).get("basis_reason"),
         "long_strike": row.get("long_strike"),
         "short_strike": row.get("short_strike"),
         "expiry": expiry,
@@ -130,11 +138,21 @@ async def hub_get_positions(
         )
 
     positions: List[Dict[str, Any]] = [_build_position(r) for r in rows]
-    total_at_risk = sum(
-        float(p.get("max_loss") or 0)
-        for p in positions
-        if p.get("max_loss") is not None
-    )
+
+    # R-IV.207(d) / R-IV.526(b): THIS LINE NO LONGER SUMS max_loss.
+    #
+    # It used to read `max_loss or cost_basis` across every open row, which was not
+    # one number: a row with a max_loss contributed a worst case while its
+    # neighbour contributed a cost. And max_loss itself carried the wrong contract
+    # scope on ten of the seventeen lotted open rows -- WEAT 367 at six-contract
+    # scope on three, GUSH frozen at its first lot -- so the published total was
+    # understated by $632.08, 13.7%, when measured on 2026-09-24.
+    #
+    # What is published instead is cost-derived at the open remainder and says so.
+    # Rows without lots are excluded and counted, never estimated: the figure is
+    # labelled incomplete rather than quietly dropping five positions.
+    risk = capital_at_risk_from_derived(rows)
+    total_at_risk = risk["capital_at_risk_cost_basis"] or 0.0
 
     data = {
         "account": account,
@@ -142,11 +160,14 @@ async def hub_get_positions(
         "ticker": ticker.upper() if ticker else None,
         "positions": positions,
         "position_count": len(positions),
-        "total_capital_at_risk": round(total_at_risk, 2),
+        **risk,
     }
     summary = (
         f"{len(positions)} {status.lower()} positions, "
-        f"${total_at_risk:,.0f} capital at risk."
+        f"${total_at_risk:,.0f} capital at risk (cost at the open remainder"
+        + ("" if risk["complete"]
+           else f"; {risk['positions_excluded']} excluded for want of lots")
+        + ")."
     )
     if ticker:
         summary = f"{ticker.upper()}: " + summary
