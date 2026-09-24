@@ -1958,7 +1958,7 @@ const X = (function () {
       <div class="pp-dim">Exist today: list, summary, single, lots (list/add), legs (list/add/edit), verify / screen-verify, close, reduce, patch, correct-realized, closed-from-evidence.</div></details>`;
   }
 
-  return { ladder, buckets, esc, usd, prov, chip, mockBanner, gauge, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, sleeves: P.sleeves, open: P.open };
+  return { ladder, buckets, esc, usd, prov, chip, mockBanner, gauge, markCell, pnlCell, stopBadge, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, sleeves: P.sleeves, open: P.open };
 })();
 
   // ── Panel ────────────────────────────────────────────────────────────────
@@ -1998,13 +1998,29 @@ const X = (function () {
       ${st.note ? `<div class="pp-note pp-warn">${X.esc(st.note)}${st.live != null ? ` <button type="button" class="pp-btn pp-link" data-live="${st.live}">Open the live detail</button>` : ''}</div>` : ''}`;
   }
   function legend() { return `<details class="pp-legend"><summary>Legend: provenance ladder and buckets</summary>${X.ladder()}${X.buckets()}</details>`; }
+  // Desktop arrangement (R-IV.520). Column 1, at the screen's center: the chosen position's
+  // summary card, or the book list until one is chosen. Column 2: the work pane. Two columns
+  // need a viewport of 1400px or more (CSS); narrower, they stack inside the same 50% panel.
+  function summaryCard(p) {
+    const cell = (k, v) => `<div class="pp-sc"><span class="pp-k">${k}</span><span class="pp-sv">${v}</span></div>`;
+    const acct = X.sleeves.find((s) => s.account === p.account);
+    return `<div class="pp-sum pp-card">
+      <div class="pp-sum-top"><span class="pp-sum-tk">${X.esc(p.ticker)}</span>${X.prov(p.prov)}</div>
+      <div class="pp-sum-sub">${X.esc(p.bucket)} · ${X.esc(p.account)}</div>
+      <div class="pp-sum-st">${X.esc(p.structure)}${p.expiry ? ' · exp ' + X.esc(p.expiry.slice(5)) : ''}</div>
+      <div class="pp-sum-grid">${cell('Qty', p.qty)}${cell('Cost', X.usd(p.cost))}${cell('Mark', X.markCell(p))}${cell('P&amp;L', X.pnlCell(p))}</div>
+      <div class="pp-sum-stop">${X.stopBadge(p.stop)}</div>
+      <button type="button" class="pp-btn pp-link" data-allpos="1">← All positions</button>
+    </div>${acct ? X.gauge(acct) : ''}`;
+  }
   function desktop() {
     const sel = byId(st.id);
-    const none = '<div class="pp-dim">Pick a row.</div>';
+    const none = '<div class="pp-dim">Pick a position in the Book strip.</div>';
     const pane = st.tab === 'Detail' ? (sel ? X.detail(sel) : none) : st.tab === 'Actions' ? (sel ? X.actions(sel) : none) : st.tab === 'New' ? X.ticket() : X.history();
-    const books = X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(s.account)} · open</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
-    return `<div class="pp-split"><div class="pp-left">${X.sleeves.map(X.gauge).join('')}${books}</div>
-      <div class="pp-side pp-card"><div class="pp-tabs" role="tablist">${TABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.tab}" data-tab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${pane}</div></div>${legend()}${X.missing()}`;
+    const col1 = sel ? summaryCard(sel)
+      : X.sleeves.map(X.gauge).join('') + X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(s.account)} · open</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
+    return `<div class="pp-cols"><div class="pp-col1">${col1}</div>
+      <div class="pp-col2 pp-card"><div class="pp-tabs" role="tablist">${TABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.tab}" data-tab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${pane}</div></div>${legend()}${X.missing()}`;
   }
   function card(p) {
     const on = st.card === p.id;
@@ -2030,6 +2046,7 @@ const X = (function () {
     if (t.closest('.pp-x')) return close();
     const live = t.closest('[data-live]');
     if (live) { const fn = window.__v2 && window.__v2.openPositionDrawerAt; if (fn) { close(); fn(Number(live.dataset.live)); } return; }
+    if (t.closest('[data-allpos]')) { st.id = null; st.card = null; if (st.tab === 'Detail' || st.tab === 'Actions') st.tab = 'Detail'; setHash(true); return render(); }
     const tab = t.closest('[data-tab]');
     if (tab) { st.tab = tab.dataset.tab; setHash(true); return render(); }
     const mtab = t.closest('[data-mtab]');
@@ -2046,20 +2063,22 @@ const X = (function () {
     st.note = opts.note || null; st.live = opts.live != null ? opts.live : null;
     if (opts.id != null) { st.id = opts.id; st.card = opts.id; }
     if (opts.tab) st.tab = opts.tab;
-    if (!st.id && !mq.matches) st.id = X.open[0].id;
     if (mq.matches && opts.id != null) st.mtab = 'Book';
     render();
-    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); const x = panel.querySelector('.pp-x'); if (x) x.focus(); });
+    const first = !panel.classList.contains('open');
+    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); document.documentElement.classList.add('pp-open'); if (first) { const x = panel.querySelector('.pp-x'); if (x) x.focus(); } });
   }
   function open(opts, push) {
     opts = opts || {};
-    st.opener = document.activeElement;
+    const was = st.open;
+    if (!was) st.opener = document.activeElement;
     show(opts);
-    if (push !== false) setHash(false);
+    if (push !== false) setHash(was);
   }
   function hide() {
     st.open = false;
     if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); }
+    document.documentElement.classList.remove('pp-open');
     if (st.opener && st.opener.focus) { try { st.opener.focus(); } catch (_) {} }
   }
   function close() {
