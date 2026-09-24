@@ -181,6 +181,7 @@ def economics(
     """
     is_option = (row.get("asset_type") or "").upper() == "OPTION"
     mult = OPTION_MULTIPLIER if is_option else Decimal("1")
+    status = (row.get("status") or "").upper()
 
     out: Dict[str, Any] = {
         "open_remainder": None,
@@ -193,6 +194,25 @@ def economics(
         "basis_reason": None,
         "multiplier": int(mult),
     }
+
+    # R-IV.548(b): A CLOSED ROW HOLDS NO RISK, WHATEVER ITS LOTS SAY.
+    #
+    # Most closures in this book were booked without a disposal lot -- 308 of them --
+    # so `SUM(lot qty)` stays POSITIVE on a position that is over. The arithmetic
+    # below is correct and the question was wrong: asking a closed row for its open
+    # remainder at all. POSITIONS measured what that cost: 301 non-OPEN rows carrying
+    # a positive remainder, $88,016.87 of risk that does not exist, published to four
+    # committee seats for sizing by a tool whose own description sends them there.
+    #
+    # A closed position carries REALIZED P&L only. No remainder, no max_loss, no
+    # unrealized -- and the reason says which status refused it, so a reader is never
+    # left wondering whether the lots were simply missing.
+    if status and status != "OPEN":
+        out["status"] = status
+        out["basis_reason"] = (
+            "this row is %s; a position that is over carries realized P&L only, and "
+            "no open remainder, max_loss or unrealized figure" % status)
+        return out
 
     rem = open_remainder(lots)
     if rem is None:
@@ -265,9 +285,19 @@ def capital_at_risk_from_derived(rows: Sequence[Dict[str, Any]]) -> Dict[str, An
     total = Decimal("0")
     included: List[Any] = []
     excluded: List[Dict[str, Any]] = []
+    not_open = 0
     for r in rows:
         pid = r.get("position_id")
         e = r.get("derived") or {}
+        # R-IV.548(b): OPEN rows only, WHATEVER THE FILTER. A caller asking for
+        # status=ALL or status=CLOSED is asking to SEE those rows, never to add them
+        # to the book's risk -- and both are documented inputs to a tool four
+        # committee seats size off. Skipped rather than "excluded": an excluded row
+        # is one that should have counted and could not, and reporting 400 closures
+        # that way would bury the handful that actually need lots.
+        if (r.get("status") or "").upper() not in ("", "OPEN"):
+            not_open += 1
+            continue
         if e.get("cost_at_remainder") is None:
             excluded.append({"position_id": pid, "ticker": r.get("ticker"),
                              "reason": e.get("basis_reason") or NO_LOTS})
@@ -275,6 +305,7 @@ def capital_at_risk_from_derived(rows: Sequence[Dict[str, Any]]) -> Dict[str, An
         total += Decimal(str(e["cost_at_remainder"]))
         included.append(pid)
     return {
+        "positions_not_open": not_open,
         "capital_at_risk_cost_basis": money(total),
         "basis": "cost at the open remainder (SUM lot qty x price), by R-IV.526(b)",
         "positions_included": len(included),

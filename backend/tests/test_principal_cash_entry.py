@@ -249,3 +249,184 @@ def test_a_first_anchor_reports_no_difference_rather_than_zero(client, test_api_
 def test_the_reanchor_touches_no_stored_balance(client, test_api_key):
     r = client.post(REANCHOR, json=reanchor_body(), headers=hdr(test_api_key))
     assert r.json()["stored_balance_untouched"] is True
+
+
+# -- R-IV.548(c): the evidence-backed ledger event ---------------------------
+#
+# POSITIONS had to write the Roth's six events by audited SQL, because no route took
+# a dated event with a source_ref. A lane reaching for raw SQL to record money is the
+# signal that the route it needed does not exist.
+
+EVENT = "/api/portfolio/cash-event"
+
+
+def event_body(**kw):
+    return dict({"account_name": "FIDELITY_ROTH", "event_type": "TRANSFER_IN",
+                 "amount": 88.15, "event_date": "2026-08-31",
+                 "source_ref": "74436e3c08a3", "actor": "CC-POSITIONS",
+                 "note": "TRANSFERRED FROM TO BROKERAGE OPTION"}, **kw)
+
+
+def test_the_evidence_route_needs_a_credential(client):
+    assert client.post(EVENT, json=event_body()).status_code == 401
+
+
+def test_the_evidence_route_accepts_a_typed_dated_sourced_event(client, test_api_key):
+    """POSITIVE CONTROL for everything below."""
+    r = client.post(EVENT, json=event_body(), headers=hdr(test_api_key))
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["event_type"] == "TRANSFER_IN"
+    assert out["source_ref"] == "74436e3c08a3"
+    assert out["actor"] == "CC-POSITIONS"
+    assert out["stored_balance_untouched"] is True
+
+
+@pytest.mark.parametrize("ref", ["", "   "])
+def test_an_event_without_a_source_ref_is_refused(client, test_api_key, ref):
+    """It names the document it was read out of, or it is not evidence."""
+    r = client.post(EVENT, json=event_body(source_ref=ref), headers=hdr(test_api_key))
+    assert r.status_code == 400
+    assert "source_ref is required" in r.text
+
+
+@pytest.mark.parametrize("actor", ["", " "])
+def test_an_event_with_no_actor_is_refused(client, test_api_key, actor):
+    """A movement recorded by nobody cannot be asked about later."""
+    r = client.post(EVENT, json=event_body(actor=actor), headers=hdr(test_api_key))
+    assert r.status_code == 400
+    assert "actor is required" in r.text
+
+
+def test_an_opening_balance_may_not_be_written_here(client, test_api_key):
+    """An anchor has its own evidence rules and its own two routes."""
+    r = client.post(EVENT, json=event_body(event_type="OPENING_BALANCE"),
+                    headers=hdr(test_api_key))
+    assert r.status_code == 400
+    assert "/cash-anchor" in r.text
+
+
+@pytest.mark.parametrize("bad", ["", "GIFT", "REBATE", "deposit-ish"])
+def test_an_event_type_outside_the_vocabulary_is_refused(client, test_api_key, bad):
+    r = client.post(EVENT, json=event_body(event_type=bad), headers=hdr(test_api_key))
+    assert r.status_code == 400
+    assert "event_type must be one of" in r.text
+
+
+@pytest.mark.parametrize("etype,amount", [
+    ("TRANSFER_IN", 88.15), ("TRANSFER_OUT", -88.15), ("DIVIDEND", 0.64),
+    ("FEE", -1.25), ("ADJUSTMENT", -22.79), ("OTHER", 5.0), ("ACH", 60.93),
+])
+def test_the_vocabulary_including_the_legacy_words_is_accepted(client, test_api_key,
+                                                               etype, amount):
+    """POSITIVE CONTROL for the type check, and the legacy `ACH` resolves by sign."""
+    r = client.post(EVENT, json=event_body(event_type=etype, amount=amount),
+                    headers=hdr(test_api_key))
+    assert r.status_code == 200, r.text
+
+
+def test_a_zero_amount_event_is_refused(client, test_api_key):
+    r = client.post(EVENT, json=event_body(amount=0), headers=hdr(test_api_key))
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("bad", ["", "31/08/2026", "last tuesday"])
+def test_an_event_with_a_bad_date_is_refused(client, test_api_key, bad):
+    r = client.post(EVENT, json=event_body(event_date=bad), headers=hdr(test_api_key))
+    assert r.status_code == 400
+    assert "ISO date" in r.text
+
+
+# -- R-IV.548(c): the legacy route no longer edits the quarantined total ------
+
+def test_cash_flows_defaults_to_no_mutation():
+    """The default is the whole point: an old caller that says nothing now mutates
+    nothing."""
+    from api.portfolio import CashFlowCreate
+
+    assert CashFlowCreate(amount=10.0).adjust_balance is False
+
+
+def test_cash_flows_answers_an_explicit_request_rather_than_obeying_it():
+    """Ignoring the flag without saying so would be a different kind of lie from
+    mutating the total, so the route still answers it -- in the response body."""
+    import inspect
+
+    from api import portfolio
+
+    src = inspect.getsource(portfolio.log_cash_flow)
+    assert "balance_adjusted" in src
+    assert "NOT applied" in src
+    assert "cash-balance" in src
+
+
+def test_cash_flows_says_so_when_the_row_did_not_land():
+    """An INSERT ... RETURNING that returns nothing is not a success with an empty
+    body. It used to raise a TypeError three lines later on a None."""
+    import inspect
+
+    from api import portfolio
+
+    assert "returned no row" in inspect.getsource(portfolio.log_cash_flow)
+
+
+def test_the_legacy_route_writes_no_account_balances_update():
+    """Source-level, because the mocked pool would swallow the UPDATE silently."""
+    import ast
+    import inspect
+
+    from api import portfolio
+
+    tree = ast.parse(inspect.getsource(portfolio.log_cash_flow).lstrip())
+    docs = {id(n.body[0].value) for n in ast.walk(tree)
+            if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
+            and getattr(n, "body", None) and isinstance(n.body[0], ast.Expr)
+            and isinstance(n.body[0].value, ast.Constant)}
+    live = " ".join(n.value for n in ast.walk(tree)
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                    and id(n) not in docs).upper()
+    assert "UPDATE ACCOUNT_BALANCES" not in live
+    assert "INSERT INTO CASH_FLOWS" in live        # positive control
+
+
+# -- R-IV.548(d): status is a vocabulary, and the column says so -------------
+
+def test_the_status_constraint_is_generated_from_the_one_vocabulary():
+    """Two copies of a vocabulary is how the second one gets forgotten."""
+    import inspect
+
+    from database import postgres_client as pc
+    from models.position_status import STATUSES
+
+    assert pc._POSITION_STATUSES is STATUSES
+    src = inspect.getsource(pc)
+    assert "unified_positions_status_check" in src
+    # The list is generated, not retyped beside the constraint.
+    assert '"\'%s\'" % s for s in _POSITION_STATUSES' in src
+
+
+def test_the_vocabulary_is_exactly_what_the_census_found():
+    """Census 2026-09-24 over 489 rows: CLOSED 408, EXPIRED 34, DUPLICATE_OF 24,
+    OPEN 23, and nothing else. A fifth word here without a census is the defect."""
+    from models.position_status import STATUSES
+
+    assert set(STATUSES) == {"OPEN", "CLOSED", "EXPIRED", "DUPLICATE_OF"}
+
+
+def test_no_query_filters_positions_on_a_lowercase_status():
+    """Found during the census: ticker_profile asked for status = 'open' against a
+    column that only ever holds uppercase, so it matched nothing, silently, forever."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    offenders = []
+    for path in root.rglob("*.py"):
+        if "tests" in path.parts or ".venv" in str(path):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "unified_positions" not in text:
+            continue
+        for bad in ("status = 'open'", "status='open'", 'status = "open"'):
+            if bad in text:
+                offenders.append("%s: %s" % (path.name, bad))
+    assert not offenders, offenders
