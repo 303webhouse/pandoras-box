@@ -29,9 +29,28 @@ def row(**kw):
     return base
 
 
+ACCOUNT_VALUE = 11_319.53          # the Roth figure the tests are written around
+THRESHOLD = 226.39                  # 2% of it
+
+
 def triggers(rows, **kw):
     kw.setdefault("now", NOW)
+    # R-IV.551(c): the threshold is COMPUTED and passed in now, so the tests state
+    # the account value they mean instead of inheriting a module constant.
+    kw.setdefault("threshold", THRESHOLD)
     return [a["trigger"] for a in la.evaluate_rows(rows, **kw)]
+
+
+@pytest.fixture
+def account_value(monkeypatch):
+    """A known account value for the end-to-end tick, without a database."""
+    async def _av(rows):
+        return {"value": ACCOUNT_VALUE, "cash": 6007.93, "positions_value": 5311.60,
+                "positions_counted": 1, "positions_unvalued": [], "partial": False,
+                "reason": None}
+
+    monkeypatch.setattr(la, "_account_value_now", _av)
+    return ACCOUNT_VALUE
 
 
 # -- the columns this job may not read ---------------------------------------
@@ -86,9 +105,65 @@ def test_the_whole_module_never_reads_those_columns():
 # -- T1, the unstopped loss --------------------------------------------------
 
 def test_threshold_is_two_percent_of_the_account_value():
-    """R-IV.539(c): the Roth total in the principal's positions file, 2026-09-24."""
-    assert la.DEFAULT_ACCOUNT_VALUE_USD == 11_319.53
-    assert la.loss_threshold_usd() == 226.39       # 2% of 11,319.53
+    assert la.loss_threshold_usd(11_319.53) == 226.39
+    assert la.loss_threshold_usd(6_007.93) == 120.16
+
+
+def test_without_an_account_value_there_is_no_threshold():
+    """R-IV.551(c). 2% of an unknown number is not a number, and T1 must not fire on
+    a guess -- the tick reports the absence instead."""
+    assert la.loss_threshold_usd(None) is None
+
+
+def test_a_loss_cannot_fire_when_the_account_value_is_unknown():
+    assert la.TRIGGER_UNSTOPPED_LOSS not in triggers([row(current_price=1.0)],
+                                                     threshold=None)
+    # POSITIVE CONTROL: the same row WITH a threshold does fire.
+    assert la.TRIGGER_UNSTOPPED_LOSS in triggers([row(current_price=1.0)])
+
+
+# -- R-IV.551(c): the account value is computed, not typed --------------------
+
+def _av_row(**kw):
+    return dict({"id": 1, "account": "FIDELITY_ROTH", "status": "OPEN",
+                 "asset_type": "EQUITY", "remainder": 100.0, "lot_cost": 1000.0,
+                 "current_price": 12.0}, **kw)
+
+
+def test_the_account_value_is_derived_cash_plus_positions_at_their_marks():
+    out = la.account_value([_av_row()], derived_cash="6007.93")
+    assert out["cash"] == 6007.93
+    assert out["positions_value"] == 1200.00         # 100 x 12.00
+    assert out["value"] == 7207.93
+    assert out["partial"] is False and out["reason"] is None
+
+
+def test_a_position_with_no_mark_makes_the_value_partial_not_wrong():
+    """R-IV.551(c): it says the value is partial rather than guessing. An understated
+    account makes the 2% trigger smaller, so it errs toward alerting."""
+    out = la.account_value([_av_row(), _av_row(id=2, current_price=None)],
+                           derived_cash="6007.93")
+    assert out["partial"] is True
+    assert out["positions_unvalued"] == [2]
+    assert out["value"] == 7207.93                   # the one it could value
+    assert "PARTIAL" in out["reason"]
+
+
+def test_without_derived_cash_there_is_no_account_value_at_all():
+    """Inventing zero cash would make the threshold a function of the positions
+    alone, which is not the account."""
+    out = la.account_value([_av_row()], derived_cash=None, cash_reason="no anchor")
+    assert out["value"] is None
+    assert out["reason"] == "no anchor"
+
+
+def test_only_this_account_and_only_its_open_rows_are_counted():
+    rows = [_av_row(),
+            _av_row(id=2, account="ROBINHOOD"),
+            _av_row(id=3, status="CLOSED")]
+    out = la.account_value(rows, derived_cash="0")
+    assert out["positions_counted"] == 1
+    assert out["positions_value"] == 1200.00
 
 
 def test_a_loss_past_two_percent_fires():
@@ -369,7 +444,7 @@ def stub_webhook(monkeypatch, no_redis):
 
 
 @pytest.mark.asyncio
-async def test_a_firing_row_is_pushed_once_and_the_status_code_is_recorded(stub_webhook):
+async def test_a_firing_row_is_pushed_once_and_the_status_code_is_recorded(stub_webhook, account_value):
     """POSITIVE CONTROL for the whole tick: a real loss, a real post, 204 captured."""
     rows = [row(current_price=7.70)]
     r1 = await la.run_loss_alert(injected_rows=rows, now=NOW)
@@ -388,14 +463,14 @@ async def test_a_firing_row_is_pushed_once_and_the_status_code_is_recorded(stub_
 
 
 @pytest.mark.asyncio
-async def test_a_quiet_book_posts_nothing(stub_webhook):
+async def test_a_quiet_book_posts_nothing(stub_webhook, account_value):
     r = await la.run_loss_alert(injected_rows=[row()], now=NOW)
     assert r["alerts"] == 0 and r["pushed"] == 0
     assert stub_webhook.posted == []
 
 
 @pytest.mark.asyncio
-async def test_with_no_webhook_configured_nothing_is_sent_and_it_is_logged(monkeypatch, no_redis):
+async def test_with_no_webhook_configured_nothing_is_sent_and_it_is_logged(monkeypatch, no_redis, account_value):
     monkeypatch.delenv("DISCORD_WEBHOOK_ALERTS", raising=False)
     monkeypatch.delenv("DISCORD_WEBHOOK_CB", raising=False)
     la._SENT_IN_PROCESS.clear()
@@ -406,7 +481,7 @@ async def test_with_no_webhook_configured_nothing_is_sent_and_it_is_logged(monke
 
 
 @pytest.mark.asyncio
-async def test_the_blind_rows_leave_as_a_single_post(stub_webhook):
+async def test_the_blind_rows_leave_as_a_single_post(stub_webhook, account_value):
     rows = [row(id=1, position_id="A", ticker="AAA", remainder=None, lot_cost=None),
             row(id=2, position_id="B", ticker="BBB", remainder=None, lot_cost=None),
             row(id=3, position_id="C", ticker="CCC", remainder=None, lot_cost=None)]

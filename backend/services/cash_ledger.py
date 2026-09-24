@@ -247,6 +247,32 @@ def balance_from_events(events: Sequence[Dict[str, Any]],
     }
 
 
+async def stored_cash_is_retired(conn, account_name: str) -> bool:
+    """True once this account has an anchor. R-IV.551(b).
+
+    An anchor is the moment the derived figure becomes answerable, so it is also the
+    moment the stored running total stops being the answer. After it the column is
+    READ-ONLY HISTORY: no writer touches it, and every reader is served the derived
+    figure instead.
+
+    Why an anchor and not a hard-coded account name: R-IV.551(b)2 says Robinhood
+    follows "the moment its first anchor lands", and a list of account names would
+    have to be edited on the day that happens. The condition IS the anchor.
+
+    Fail-closed toward the old behaviour: if the ledger cannot be read, the stored
+    total keeps being maintained. A write that silently stops is worse than one that
+    continues, because the figure then drifts with nothing recording that it did.
+    """
+    try:
+        found = await conn.fetchval(
+            """SELECT 1 FROM cash_flows
+                WHERE account_name = $1 AND flow_type = $2 LIMIT 1""",
+            account_name, ANCHOR)
+        return bool(found)
+    except Exception:
+        return False
+
+
 def reconcile(derived: Dict[str, Any], stored_cash: Any) -> Dict[str, Any]:
     """Derived against stored, with the difference STATED.
 

@@ -6,6 +6,7 @@ Brief 10: Gap fixes — signal_id/account columns, partial sync, single create,
           closed_positions table with proper P&L, rewritten close endpoint.
 """
 
+import json
 import os
 from datetime import date, datetime
 from decimal import Decimal
@@ -65,6 +66,24 @@ async def get_balances():
         # periodic broker-CSV cleanup goes looking for.
         try:
             led = await _derived_balance(d.get("account_name"))
+            # R-IV.551(b)1: WHERE THE STORED FIGURE WAS SHOWN, SHOW THE DERIVED ONE.
+            #
+            # The Roth's stored cash reached -1,229.51, which a Roth cannot hold --
+            # there is no margin in one -- while the derived figure moved in step
+            # with the day's trades. The gap is the stored figure's own error, so no
+            # cash event closes it and only retiring it does.
+            #
+            # `cash` therefore carries the DERIVED figure once an account is
+            # anchored, and the stored number moves to `cash_stored` as history. An
+            # unanchored account is unchanged: it still shows what it has, because
+            # the alternative there is nothing at all.
+            if led["derived"]["derivable"]:
+                d["cash_stored"] = d.get("cash")
+                d["cash"] = led["derived"]["balance"]
+                d["cash_source"] = "derived"
+            else:
+                d["cash_stored"] = d.get("cash")
+                d["cash_source"] = "stored"
             d["cash_derived"] = led["derived"]["balance"]
             d["cash_derivable"] = led["derived"]["derivable"]
             d["cash_derived_reason"] = led["derived"]["reason"]
@@ -96,7 +115,18 @@ class BalanceUpdate(BaseModel):
 
 @router.post("/balances/update")
 async def update_balance(body: BalanceUpdate, _=Depends(require_api_key)):
-    pool = await get_postgres_client()
+    from services.cash_ledger import stored_cash_is_retired
+
+    pool = await _pool()
+    # R-IV.551(b): an anchored account's stored CASH is read-only history. The rest
+    # of the row -- balance, buying power, margin -- is still the screenshot's to
+    # set, so only the cash field is dropped, and the response says it was.
+    cash_retired = False
+    if body.cash is not None:
+        async with pool.acquire() as conn:
+            cash_retired = await stored_cash_is_retired(conn, body.account_name)
+    if cash_retired:
+        body.cash = None
     # COALESCE on optional fields so a balance-only POST (e.g., from the RH
     # balance modal) preserves cash/buying_power/margin_total instead of
     # NULLing them. Backward-compatible — existing callers that send cash
@@ -117,7 +147,15 @@ async def update_balance(body: BalanceUpdate, _=Depends(require_api_key)):
     row = await pool.fetchrow(
         "SELECT * FROM account_balances WHERE account_name = $1", body.account_name
     )
-    return _row_to_dict(row)
+    out = _row_to_dict(row)
+    if cash_retired:
+        out["cash_not_applied"] = True
+        out["cash_not_applied_reason"] = (
+            "this account is anchored, so its stored cash total is read-only history "
+            "(R-IV.551(b)). The cash figure served everywhere is derived from the "
+            "ledger; to set it to what the broker shows, use "
+            "POST /api/portfolio/cash-reanchor, which reports the difference.")
+    return out
 
 
 # ── 3. GET /positions (reads from unified_positions, mapped to legacy shape) ──
@@ -538,6 +576,21 @@ async def get_cash_flows(
     return [_row_to_dict(r) for r in rows]
 
 
+async def _pool():
+    """The pool, resolved on the MODULE at call time.
+
+    `from database.postgres_client import get_postgres_client` at the top of this
+    file binds the real function into this namespace at import time, so a test that
+    patches `database.postgres_client.get_postgres_client` never reaches it -- the
+    routes below then opened REAL connections from a mocked test run, which showed up
+    as "password authentication failed" 500s only when these files ran beside their
+    neighbours. Resolving the attribute here, per call, is what makes the patch land.
+    """
+    from database import postgres_client
+
+    return await postgres_client.get_postgres_client()
+
+
 # ── 10. The cash anchor, and a balance derived from it (R-IV.542(b)) ──
 #
 # MONEY INTEGRITY'S STARTING POINT. `account_balances.cash` is a stored running
@@ -617,7 +670,7 @@ async def write_cash_anchor(body: CashAnchorCreate, _=Depends(require_api_key)):
         as_of.isoformat(), ref, body.ruling.strip(),
         (" | " + body.evidence_note.strip()) if body.evidence_note else "")
 
-    pool = await get_postgres_client()
+    pool = await _pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """INSERT INTO cash_flows
@@ -653,7 +706,7 @@ async def _derived_balance(account_name: str) -> dict:
     """The ledger's answer for one account, reconciled against the stored figure."""
     from services.cash_ledger import balance_from_events, performance_inputs, reconcile
 
-    pool = await get_postgres_client()
+    pool = await _pool()
     async with pool.acquire() as conn:
         events = await conn.fetch(
             """SELECT id, account_name, flow_type, amount, activity_date,
@@ -681,7 +734,7 @@ async def get_cash_balance(account_name: Optional[str] = Query(None)):
     be reconstructed; the derived one is only as complete as the events written
     down. Publishing one without the other would hide which.
     """
-    pool = await get_postgres_client()
+    pool = await _pool()
     if account_name:
         names = [account_name]
     else:
@@ -768,7 +821,7 @@ async def record_principal_cash_entry(body: CashEntryCreate, _=Depends(require_a
     desc = "%s by principal%s | key %s" % (
         kind, (" | " + body.note.strip()) if body.note else "", key_raw)
 
-    pool = await get_postgres_client()
+    pool = await _pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """INSERT INTO cash_flows
@@ -882,7 +935,7 @@ async def record_evidence_backed_event(body: CashLedgerEventCreate,
         resolved, ref, body.actor.strip(),
         (" | " + body.note.strip()) if body.note else "")
 
-    pool = await get_postgres_client()
+    pool = await _pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """INSERT INTO cash_flows
@@ -951,23 +1004,6 @@ async def principal_reanchor(body: CashReanchorCreate, _=Depends(require_api_key
     desc = "OPENING BALANCE as of %s | evidence %s | R-IV.546(a)2 principal re-anchor%s" % (
         as_of.isoformat(), ref, (" | " + body.note.strip()) if body.note else "")
 
-    pool = await get_postgres_client()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """INSERT INTO cash_flows
-                   (account_name, flow_type, amount, description, activity_date,
-                    imported_from, source_ref, dedup_key)
-               VALUES ($1, $2, $3, $4, $5::date, 'PRINCIPAL_ANCHOR', $6, $7)
-               ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
-               DO NOTHING
-               RETURNING id""",
-            acct, ANCHOR, body.cash, desc, as_of.date(), ref, key)
-        created = row is not None
-        if not created:
-            row = await conn.fetchrow(
-                "SELECT id FROM cash_flows WHERE account_name = $1 AND dedup_key = $2",
-                acct, key)
-
     if derived_before is None:
         difference = None
         note = ("the hub could not derive a balance before this anchor, so there is "
@@ -978,15 +1014,61 @@ async def principal_reanchor(body: CashReanchorCreate, _=Depends(require_api_key
                 "CSV cleanup should account for" % (derived_before, body.cash)
                 if difference else "the hub and the broker already agreed")
 
+    # R-IV.551(d)2: the result travels WITH the row. `entered` is the row's own
+    # amount, but `derived_before` and `difference` are computed here and gone by the
+    # next read -- so a repeat key could only have answered with a fresh zero, which
+    # is a different claim from "you asked this before and here is what it said".
+    meta = json.dumps({"derived_before": derived_before, "entered": body.cash,
+                       "difference": difference, "difference_note": note,
+                       "as_of": as_of.isoformat(), "actor": "principal"})
+
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO cash_flows
+                   (account_name, flow_type, amount, description, activity_date,
+                    imported_from, source_ref, dedup_key, meta)
+               VALUES ($1, $2, $3, $4, $5::date, 'PRINCIPAL_ANCHOR', $6, $7, $8::jsonb)
+               ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+               DO NOTHING
+               RETURNING id, amount, meta""",
+            acct, ANCHOR, body.cash, desc, as_of.date(), ref, key, meta)
+        created = row is not None
+        if not created:
+            row = await conn.fetchrow(
+                """SELECT id, amount, meta FROM cash_flows
+                    WHERE account_name = $1 AND dedup_key = $2""", acct, key)
+
+    conflict = None
+    if not created and row is not None:
+        # R-IV.551(d)3: the same key with a DIFFERENT figure is a conflict, reported
+        # the way /cash-entry reports one -- never a silent no-op. The first anchor
+        # stands; re-anchoring to a new figure is a new key.
+        original = row["meta"]
+        if isinstance(original, str):
+            original = json.loads(original)
+        original = original or {}
+        if float(row["amount"]) != float(body.cash):
+            conflict = {"cash": {"recorded": float(row["amount"]), "sent": body.cash}}
+        # The ORIGINAL answer, not a fresh one computed against a ledger this very
+        # anchor has since changed.
+        derived_before = original.get("derived_before", derived_before)
+        difference = original.get("difference", difference)
+        note = original.get("difference_note", note)
+
     after = await _derived_balance(acct)
     return {
         "status": "reanchored" if created else "already_reanchored",
         "cash_flow_id": row["id"] if row else None,
         "account_name": acct,
-        "entered": body.cash,
+        "entered": float(row["amount"]) if (not created and row) else body.cash,
         "derived_before": derived_before,
         "difference": difference,
         "difference_note": note,
+        "conflict": conflict,
+        "conflict_note": None if not conflict else
+            "this key already anchored a different figure; the first one stands and "
+            "nothing was changed - send a new idempotency_key to re-anchor again",
         "as_of": as_of.isoformat(),
         "evidence_ref": ref,
         "actor": "principal",

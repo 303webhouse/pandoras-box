@@ -64,7 +64,11 @@ class _Txn:
     async def __aexit__(self, *a): return False
 
 
-def _adjust(monkeypatch, **body):
+def _adjust(monkeypatch, anchored=False, **body):
+    """`anchored` is R-IV.551(b): once an account has an OPENING_BALANCE event its
+    stored cash total is read-only history, so an adjustment records itself and moves
+    nothing. The default is UNANCHORED, which is what these tests were written
+    against and what every account was before the anchors landed."""
     from api import unified_positions as U
     conn = MagicMock()
     conn.calls = []
@@ -75,6 +79,8 @@ def _adjust(monkeypatch, **body):
 
     async def fetchval(sql, *args):
         conn.calls.append((" ".join(sql.split()), args))
+        if "OPENING_BALANCE" in str(args) or "flow_type = $2" in sql:
+            return 1 if anchored else None
         return 1
 
     conn.execute, conn.fetchval = execute, fetchval
@@ -100,10 +106,33 @@ def test_an_adjustment_moves_the_snapshot_and_records_itself(monkeypatch):
     assert len(ins) == 1 and ins[0][1][5] == "R-IV.456(b)"
 
 
+def test_an_adjustment_on_an_anchored_account_records_itself_and_moves_nothing(monkeypatch):
+    """R-IV.551(b). The adjustment is still EVIDENCE either way -- it is recorded
+    exactly as before -- but on an anchored account it no longer moves a total that
+    nothing reads."""
+    out, conn = _adjust(monkeypatch, anchored=True)
+    assert out["cash_before"] == 367.39
+    assert out["cash_after"] == 367.39                      # unmoved
+    ins = [c for c in conn.calls if "INSERT INTO cash_adjustments" in c[0]]
+    assert len(ins) == 1                                    # still recorded
+    assert not [c for c in conn.calls if "UPDATE account_balances" in c[0]]
+
+
 def test_an_adjustment_never_writes_a_cash_flow(monkeypatch):
-    """cash_flows is read as external money by every return figure."""
+    """cash_flows is read as external money by every return figure.
+
+    WRITES, not mentions: the anchor check added at R-IV.551(b) SELECTs from
+    cash_flows to decide whether the stored total is retired, and a read is not a
+    write. The original assertion banned the word, which would now fail on a query
+    that puts nothing in the table."""
     _, conn = _adjust(monkeypatch)
-    assert not [c for c in conn.calls if "cash_flows" in c[0]]
+    writes = [c for c in conn.calls
+              if "cash_flows" in c[0]
+              and any(w in c[0].upper() for w in ("INSERT", "UPDATE", "DELETE"))]
+    assert not writes
+    # Positive control: the read the guard makes IS there, so this is not passing
+    # because the fixture stopped exercising cash_flows altogether.
+    assert [c for c in conn.calls if "cash_flows" in c[0]]
 
 
 @pytest.mark.parametrize("field", ["reason", "ruling"])

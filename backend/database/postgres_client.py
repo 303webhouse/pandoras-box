@@ -1741,7 +1741,14 @@ async def init_database():
         # a row is (`source_ref`: the position, the broker reference, the file) and a
         # way to refuse the same movement twice (`dedup_key`), which is what makes a
         # re-import safe and therefore what makes the history completable at all.
-        for _col, _type in (("source_ref", "TEXT"), ("dedup_key", "TEXT")):
+        # R-IV.551(d)2: a re-anchor must be able to return its ORIGINAL result on a
+        # repeat key -- the derived figure before, the figure entered, the difference.
+        # The entered figure is the row's own amount, but the other two are computed
+        # at write time and gone by the next read, so the row keeps them. Encoding
+        # them into the description and parsing prose back out is the fragility this
+        # avoids.
+        for _col, _type in (("source_ref", "TEXT"), ("dedup_key", "TEXT"),
+                            ("meta", "JSONB")):
             await conn.execute(
                 "ALTER TABLE cash_flows ADD COLUMN IF NOT EXISTS %s %s" % (_col, _type))
         # PARTIAL, so the rows already in the table -- which have no key and cannot be

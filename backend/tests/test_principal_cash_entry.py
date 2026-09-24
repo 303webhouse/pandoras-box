@@ -6,7 +6,6 @@ refusal is paired with a request that must SUCCEED, because a route that 400s on
 everything would pass every negative test and accept no deposit at all.
 """
 
-import importlib
 import uuid
 
 import pytest
@@ -60,20 +59,22 @@ def test_the_right_key_is_accepted(client, test_api_key, path, body):
 
 @pytest.fixture
 def session_cookie(monkeypatch):
-    """A real signed cookie, minted the way the dashboard mints one."""
-    monkeypatch.setenv("DASHBOARD_SESSION_SECRET", "test-session-secret-for-cash-entry")
+    """A real signed cookie, minted the way the dashboard mints one.
+
+    The secret is monkeypatched ON THE MODULE, not reloaded into it. Reloading
+    `utils.session` and `utils.pivot_auth` worked in isolation and silently broke
+    other files under random ordering: the reload rebinds `require_api_key` to a new
+    function object while the FastAPI app still holds the old one, so the app and the
+    module drift apart for the rest of the session. Caught by running these tests
+    beside their neighbours -- 69 passing alone, 24 failing together.
+    """
     import utils.session as session
 
-    importlib.reload(session)
-    import utils.pivot_auth as pivot_auth
-
-    importlib.reload(pivot_auth)
+    monkeypatch.setattr(session, "SESSION_SECRET",
+                        "test-session-secret-for-cash-entry")
     token = session.issue_session("test")
     assert token, "the session helper produced no cookie"
-    yield session.COOKIE_NAME, token
-    monkeypatch.delenv("DASHBOARD_SESSION_SECRET", raising=False)
-    importlib.reload(session)
-    importlib.reload(pivot_auth)
+    return session.COOKIE_NAME, token
 
 
 def test_a_session_mutation_without_the_csrf_header_is_refused(client, session_cookie):
