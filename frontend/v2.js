@@ -1184,6 +1184,17 @@
     const qty = p.quantity != null ? ' ×' + p.quantity : '';
     return `${exp} ${strikes}${type}${qty}`.trim();
   }
+  // R-IV.540 (BUILD gap 1) -- a money field is null WITH a reason (derived.basis_reason), and a dash
+  // reads as zero at a glance. So a null figure renders the reason as an unknown-state chip, the reason
+  // in full in its title. `field` matters: "no live mark" explains a missing P&L, not a missing max loss.
+  function noMoney(p, field) {
+    const why = p && p.derived && p.derived.basis_reason ? String(p.derived.basis_reason) : '';
+    const markOnly = /no live mark/i.test(why);
+    const label = /no lots|open remainder/i.test(why) ? 'no lots'
+      : markOnly ? (field === 'pnl' ? 'no mark' : 'not recorded')
+      : why ? 'not recorded' : 'no reason sent';
+    return vintageChip({ unknownLabel: label, unknownTitle: why || 'the source sent no figure and no reason for its absence' });
+  }
   function pnlPct(p) {
     const cb = Math.abs(Number(p.cost_basis) || 0);
     if (!cb || p.unrealized_pnl == null) return null;
@@ -1237,7 +1248,8 @@
       const pnl = anyPnl ? pnls.reduce((a, v) => a + (v || 0), 0) : null;
       const cb = rows.reduce((a, r) => a + Math.abs(Number(r.cost_basis) || 0), 0);
       const pct = anyPnl && cb ? (pnl / cb) * 100 : null;
-      return { head: rows[0], rows, idx: g.idx, count: rows.length, pnl, pct,
+      const nullRow = rows.find((r) => r.unrealized_pnl == null) || null;
+      return { head: rows[0], rows, idx: g.idx, count: rows.length, pnl, pct, nullRow, partial: anyPnl && !!nullRow,
                suspect: rows.map((r) => basisSuspect(r, pnlPct(r))).find(Boolean) || null };
     });
   }
@@ -1255,7 +1267,7 @@
       return `<div class="pos-row" data-pi="${g.idx}">
         <span class="ptk">${esc(p.ticker)}${g.count > 1 ? `<span class="dup-count" title="${g.count} rows share this ticker, expiry and structure — the legs model decides whether that is one position or several">×${g.count}</span>` : ''}</span>
         <span class="pmid"><span class="pstruct">${esc(structureStr(p))}</span><span class="pdte ${dteCls}">${dteStr}</span></span>
-        <span class="ppnl ${g.suspect ? '' : signCls(pnl)}"><span class="amt">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(0) : '--'}</span>${g.suspect ? `<span class="pct struck">${esc(pctTxt)}</span>${basisChip(g.suspect)}` : `<span class="pct">${pctTxt}</span>`}</span>
+        <span class="ppnl ${g.suspect ? '' : signCls(pnl)}"><span class="amt">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(0) : noMoney(g.nullRow || p, 'pnl')}${g.partial ? vintageChip({ unknownLabel: 'partial', unknownTitle: 'some rows in this group have no figure; the sum leaves them out, so it is a floor' }) : ''}</span>${g.suspect ? `<span class="pct struck">${esc(pctTxt)}</span>${basisChip(g.suspect)}` : `<span class="pct">${pctTxt}</span>`}</span>
       </div>`;
     }).join('');
     el.querySelectorAll('.pos-row[data-pi]').forEach((r) => r.addEventListener('click', () => openPositionDrawer(_openPositions[+r.dataset.pi])));
@@ -1266,6 +1278,7 @@
     const title = $('drawerTitle'), body = $('drawerBody');
     title.textContent = p.ticker + ' · position';
     const kv = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
+    const kvh = (k, html) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${html}</span></div>`;
     const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : null; const pct = pnlPct(p);
     const suspect = basisSuspect(p, pct);
     const tm = _themeMap[(p.ticker || '').toUpperCase()];
@@ -1276,8 +1289,8 @@
       kv('Stop', p.stop_loss != null ? p.stop_loss : '—') + kv('Target', p.target_1 != null ? p.target_1 : '—') +
       kv('Qty', p.quantity != null ? p.quantity : '—') + kv('DTE', p.dte != null ? p.dte : '—') +
       kv('Cost basis', p.cost_basis != null ? '$' + Number(p.cost_basis).toFixed(2) : '—') +
-      kv('Max loss', p.max_loss != null ? '$' + Number(p.max_loss).toFixed(2) : '—') +
-      `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${suspect ? '' : signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : '—'}${pct != null ? (suspect ? ' <span class="struck">(' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)</span> ' + basisChip(suspect) : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') : ''}</span></div>` +
+      (p.max_loss != null ? kv('Max loss', '$' + Number(p.max_loss).toFixed(2)) : kvh('Max loss', noMoney(p, 'max_loss'))) +
+      `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${suspect ? '' : signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : noMoney(p, 'pnl')}${pct != null ? (suspect ? ' <span class="struck">(' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)</span> ' + basisChip(suspect) : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') : ''}</span></div>` +
       kv('Bucket', p.bucket || '—') + kv('Theme', tm && tm.theme ? (tm.theme + (tm.inverse ? ' (inverse)' : '')) : '—') +
       '<div id="posEarn" class="kv"><span class="k">Earnings</span><span class="v">…</span></div>' +
       `<div class="drawer-actions">
@@ -1369,10 +1382,10 @@
     if (exit == null) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'Exit price required'; return; }
     const qty = parseInt($('c_qty').value, 10) || p.quantity || 1;
     const reason = $('c_reason').value;
-    const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : 0;
+    const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : null;   // null is unknown, never a $0 breakeven
     const body = {
       exit_price: exit, quantity: qty, exit_value: exit * mult * qty,
-      trade_outcome: pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BREAKEVEN',
+      trade_outcome: pnl == null ? null : pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BREAKEVEN',
       close_reason: reason, notes: $('c_notes').value || null,
     };
     $('c_msg').className = 'form-msg'; $('c_msg').textContent = 'closing…';
