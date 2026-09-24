@@ -175,19 +175,36 @@ def balance_from_events(events: Sequence[Dict[str, Any]],
     external = Decimal("0")
     unknown: List[Any] = []
     undated: List[Any] = []
-    started = anchor is None            # with no anchor, nothing is "after" it
+    same_day: List[Any] = []
+    anchor_day = anchor["_d"] if anchor is not None else None
 
     for r in rows:
         if anchor is not None and r is anchor:
-            started = True
             continue
         if r["_d"] is None:
             # A movement with no date cannot be placed before or after the anchor.
             # It is reported, never quietly summed in.
             undated.append(r.get("id"))
             continue
-        if not started:
+        if anchor_day is None:
+            # No opening point, so nothing is "since" one. The totals below all say
+            # `since_opening`, and populating them without an opening would make
+            # every one of those names a lie. What is IN the ledger regardless of an
+            # anchor is `performance_inputs`' question, and it answers it separately.
             continue
+        if anchor_day is not None:
+            if r["_d"] < anchor_day:
+                # Pre-anchor. Written for the record, ignored by the reader
+                # (R-IV.542(b)) -- the statement already contains it.
+                continue
+            if r["_d"] == anchor_day:
+                # The anchor is an INSTANT (11:09 ET) while an event carries only a
+                # date, so a same-day event cannot be ordered against it by its own
+                # data. It is COUNTED -- R-IV.542(b) puts the pending dividend after
+                # the anchor -- and it is FLAGGED, because the one thing worse than
+                # counting it would be counting it silently. Ordering by row id
+                # instead would make the answer depend on insertion order.
+                same_day.append(r.get("id"))
         t = r["_t"]
         if t is None:
             unknown.append({"id": r.get("id"), "flow_type": r.get("flow_type")})
@@ -213,6 +230,7 @@ def balance_from_events(events: Sequence[Dict[str, Any]],
         "by_type": {k: money(v) for k, v in sorted(by_type.items())},
         "unknown_types": unknown,
         "undated_events": undated,
+        "same_day_as_anchor": same_day,
         "as_of": as_of.isoformat() if as_of else None,
         "derivable": balance is not None,
         "reason": None if balance is not None else

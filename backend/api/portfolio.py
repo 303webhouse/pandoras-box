@@ -496,3 +496,139 @@ async def get_cash_flows(
         LIMIT $2
     """, account, limit)
     return [_row_to_dict(r) for r in rows]
+
+
+# ── 10. The cash anchor, and a balance derived from it (R-IV.542(b)) ──
+#
+# MONEY INTEGRITY'S STARTING POINT. `account_balances.cash` is a stored running
+# total six writers mutate in place; a balance derived from an audited anchor plus
+# the events after it can be reconstructed by anyone holding the same rows. These
+# two routes are that path: one writes the anchor, one reads what it implies.
+#
+# THE ANCHOR IS EVIDENCE, NOT A NUMBER. Both `evidence_ref` and `ruling` are
+# REQUIRED. An opening balance with no statement behind it and no authority for it
+# is a guess wearing a timestamp, and it would be indistinguishable from the stored
+# total it exists to replace.
+#
+# Convention #32: `evidence_ref` is the hash of the file AS RECEIVED, on its raw
+# bytes. Nothing normalises a broker export before hashing it.
+
+class CashAnchorCreate(BaseModel):
+    account_name: str
+    cash: float                      # the account's cash on the statement
+    as_of: str                       # ISO instant the statement was taken
+    evidence_ref: str                # raw-bytes hash of the source file (#32)
+    ruling: str                      # what authorised this anchor
+    evidence_note: Optional[str] = None
+    actor: Optional[str] = None
+
+
+@router.post("/cash-anchor")
+async def write_cash_anchor(body: CashAnchorCreate, _=Depends(require_api_key)):
+    """Write an OPENING_BALANCE event. Idempotent; touches no stored balance.
+
+    Deliberately does NOT update `account_balances`. The anchor's whole purpose is
+    to make the balance derivable without that row, and writing both would leave two
+    figures free to disagree.
+    """
+    from services.cash_ledger import ANCHOR, dedup_key
+
+    if not (body.evidence_ref or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="evidence_ref is required - an anchor with no source "
+                                   "is a guess with a timestamp (convention #32: hash "
+                                   "the file as received, raw bytes)")
+    if not (body.ruling or "").strip():
+        raise HTTPException(status_code=400,
+                            detail="ruling is required - an opening balance cites what "
+                                   "authorised it")
+    try:
+        as_of = datetime.fromisoformat(body.as_of)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail="as_of must be an ISO instant, e.g. "
+                                   "2026-09-24T11:09:00-04:00")
+
+    acct = body.account_name
+    day = as_of.date()
+    ref = body.evidence_ref.strip()
+    key = dedup_key(acct, ANCHOR, body.cash, day, ref)
+    desc = "OPENING BALANCE as of %s | evidence %s | %s%s" % (
+        as_of.isoformat(), ref, body.ruling.strip(),
+        (" | " + body.evidence_note.strip()) if body.evidence_note else "")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO cash_flows
+                   (account_name, flow_type, amount, description, activity_date,
+                    imported_from, source_ref, dedup_key)
+               VALUES ($1, $2, $3, $4, $5::date, 'ANCHOR', $6, $7)
+               ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+               DO NOTHING
+               RETURNING id""",
+            acct, ANCHOR, body.cash, desc, day, ref, key)
+        created = row is not None
+        if not created:
+            row = await conn.fetchrow(
+                "SELECT id FROM cash_flows WHERE account_name = $1 AND dedup_key = $2",
+                acct, key)
+
+    derived = await _derived_balance(acct)
+    return {
+        "status": "anchored" if created else "already_anchored",
+        "cash_flow_id": row["id"] if row else None,
+        "account_name": acct,
+        "opening_balance": body.cash,
+        "as_of": as_of.isoformat(),
+        "evidence_ref": ref,
+        "ruling": body.ruling.strip(),
+        "actor": body.actor or "unstated",
+        "stored_balance_untouched": True,
+        **derived,
+    }
+
+
+async def _derived_balance(account_name: str) -> dict:
+    """The ledger's answer for one account, reconciled against the stored figure."""
+    from services.cash_ledger import balance_from_events, performance_inputs, reconcile
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        events = await conn.fetch(
+            """SELECT id, account_name, flow_type, amount, activity_date,
+                      imported_from, source_ref, description
+                 FROM cash_flows WHERE account_name = $1
+                ORDER BY activity_date, id""",
+            account_name)
+        stored = await conn.fetchval(
+            "SELECT cash FROM account_balances WHERE account_name = $1", account_name)
+    evs = [dict(e) for e in events]
+    derived = balance_from_events(evs)
+    return {
+        "derived": derived,
+        "reconciliation": reconcile(derived, stored),
+        "flow": performance_inputs(evs),
+        "event_count": len(evs),
+    }
+
+
+@router.get("/cash-balance", dependencies=[Depends(require_api_key)])
+async def get_cash_balance(account_name: Optional[str] = Query(None)):
+    """The balance the ledger derives, per account, with the stored one beside it.
+
+    Both figures, always, and the difference between them. The stored total cannot
+    be reconstructed; the derived one is only as complete as the events written
+    down. Publishing one without the other would hide which.
+    """
+    pool = await get_postgres_client()
+    if account_name:
+        names = [account_name]
+    else:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT account_name FROM account_balances
+                   UNION SELECT DISTINCT account_name FROM cash_flows
+                   ORDER BY 1""")
+        names = [r["account_name"] for r in rows]
+    return {"accounts": {n: await _derived_balance(n) for n in names}}

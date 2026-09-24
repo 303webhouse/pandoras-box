@@ -1252,3 +1252,39 @@ it before committing. When another lane's dirt blocks a rebase, stash it by path
 rather than committing around it.
 
 **Kin:** the lane convention that held commits go on a branch, not on local main.
+
+---
+
+## #32 EVIDENCE IS HASHED ON ITS RAW BYTES, AS RECEIVED
+
+**R-IV.542(d), standing. Authored by SPINE, for every lane.**
+
+> **Anything received from outside — broker files, uploads, exports — is hashed on its raw bytes
+> exactly as received, and never normalized first. LF normalization applies only to text we
+> author.**
+
+The two hashes answer two different questions and must not be confused.
+
+**Authored text** is ours, and we care whether the *content* matches across checkouts. This repo
+checks out CRLF on Windows, so the same committed file has different bytes on disk than in the
+object store — one byte per line. Normalizing to LF before hashing is what makes a filed gate hash
+comparable at all; without it every Windows checkout would report drift that is not there. That is
+why the pickups manifest and the skill packages hash LF-normalised text, and they keep doing so.
+
+**Evidence is not ours.** A broker export, a confirmation PDF, an uploaded statement: the question
+is whether *this is the file the principal sent*, byte for byte. Normalizing it first destroys the
+only property being asserted. A CRLF-to-LF pass silently changes the file, so the hash then names a
+document that never existed anywhere, and two different originals can normalize to the same bytes.
+An evidence hash that does not identify the artefact is worse than no hash, because it is trusted.
+
+**The practical rule.** Hash the bytes off the wire or off the disk, before any decoder, any
+`splitlines()`, any `.strip()`, any `open()` in text mode. Record which hash a reference is: a
+filing that cites `sha12 74436e3c08a3` for a broker file means the raw bytes, and one that cites a
+gate hash for an authored doc means LF-normalised. Where both could be read, say which.
+
+**Worked case.** The Roth cash anchor (R-IV.542(b)) cites `74436e3c08a3` — the principal's
+positions file as downloaded. The anchor route requires that reference and refuses without it: an
+opening balance whose source cannot be identified is a guess wearing a timestamp.
+
+**Kin:** the gate-hash convention for authored text (LF normalisation before comparison), and the
+broker-PDF whitelist (what may be read OUT of an outside file, as against how it is identified).
