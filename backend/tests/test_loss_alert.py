@@ -86,7 +86,9 @@ def test_the_whole_module_never_reads_those_columns():
 # -- T1, the unstopped loss --------------------------------------------------
 
 def test_threshold_is_two_percent_of_the_account_value():
-    assert la.loss_threshold_usd() == 224.00       # 2% of 11,200 (R-IV.517(d))
+    """R-IV.539(c): the Roth total in the principal's positions file, 2026-09-24."""
+    assert la.DEFAULT_ACCOUNT_VALUE_USD == 11_319.53
+    assert la.loss_threshold_usd() == 226.39       # 2% of 11,319.53
 
 
 def test_a_loss_past_two_percent_fires():

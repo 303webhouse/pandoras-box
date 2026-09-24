@@ -1708,6 +1708,28 @@ async def init_database():
             )
         """)
 
+        # Money integrity (R-IV.493(f) / R-IV.497(c)): `cash_flows` IS the ledger.
+        # Not a rival table — a second ledger is the two-authors failure this
+        # codebase keeps paying for. What it lacked was a way to say WHICH movement
+        # a row is (`source_ref`: the position, the broker reference, the file) and a
+        # way to refuse the same movement twice (`dedup_key`), which is what makes a
+        # re-import safe and therefore what makes the history completable at all.
+        for _col, _type in (("source_ref", "TEXT"), ("dedup_key", "TEXT")):
+            await conn.execute(
+                "ALTER TABLE cash_flows ADD COLUMN IF NOT EXISTS %s %s" % (_col, _type))
+        # PARTIAL, so the rows already in the table -- which have no key and cannot be
+        # given one retroactively without inventing their provenance -- are not forced
+        # to collide with each other.
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_flows_dedup
+                ON cash_flows (account_name, dedup_key)
+             WHERE dedup_key IS NOT NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cash_flows_account_date
+                ON cash_flows (account_name, activity_date)
+        """)
+
         # Brief 07: RH trade history imported from CSV exports
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS rh_trade_history (
