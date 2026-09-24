@@ -1137,3 +1137,118 @@ and the reference beside the figure are exactly what it has not thought of.
 **Kin:** conventions #18 (a negative read reports the partition) -- an absent field is a partition
 of the read, not an empty result; and the handling rule in the local security register: **the
 masking script, every time, without exception** -- of which this convention is the general form.
+
+---
+
+## #27 MONEY ROUNDS HALF-UP IN DECIMAL WHEREVER QUANTITY × PRICE BECOMES MONEY
+
+**R-IV.493(e), standing. Authored by CC-BUILD.**
+
+> **Wherever a quantity times a price becomes money, compute it in `Decimal` and round half-up.
+> Never `round()` on a float.**
+
+Python's `round()` is banker's rounding on a binary float: it rounds half to EVEN, and the value it
+rounds is often not the decimal you wrote. Two sightings, both real order lines:
+
+- `35 × 36.2350` — the exact product is `1268.225`. Half-up gives `1268.23`; `round(1268.225, 2)`
+  gives `1268.22`, because the float nearest `1268.225` is slightly below it.
+- `10 × 43.9685` — the exact product is `439.685`. Half-up gives `439.69`; `round()` gives `439.68`.
+
+A cent per line is not a rounding preference. It is the difference between a book that reconciles
+against a broker statement and one that drifts by an amount nobody can attribute, and the drift
+compounds in the direction of whichever half the float happened to land on.
+
+```python
+from decimal import Decimal, ROUND_HALF_UP
+amount = (Decimal(str(qty)) * Decimal(str(price))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+```
+
+`Decimal(str(x))`, not `Decimal(x)` — the latter imports the float's error rather than the number.
+
+**Kin:** #29 (quantity is the size opened) — both are about a figure meaning exactly one thing.
+
+---
+
+## #28 AN EXPORT'S LINE NUMBERS ARE CSV RECORD NUMBERS
+
+**R-IV.493(e), standing. Authored by CC-BUILD.**
+
+> **In an export reference, `L<n>` is a CSV RECORD number, not a physical line number. The header is
+> `L1`. A record whose fields contain embedded newlines counts ONCE.**
+
+Robinhood wraps some rows over two physical lines — an ETF description and its CUSIP — so a text
+editor's line numbers and the CSV's record numbers diverge the moment such a row appears above the
+one being referenced. A reference counted by physical lines silently points at the wrong order, and
+it points at a real order, so nothing looks broken.
+
+Count with a CSV reader, never with `enumerate(open(f))`:
+
+```python
+import csv
+with open(path, newline="", encoding="utf-8") as fh:
+    for n, record in enumerate(csv.reader(fh), start=1):   # header == 1
+        ...
+```
+
+**Kin:** the `broker_ref` form in POSITIONS' SPEC.md, which consumes these numbers; and #23
+(evidence lines beside the verdict) — a line number that cannot be resolved is not evidence.
+
+---
+
+## #29 QUANTITY IS THE SIZE OPENED; THE OPEN REMAINDER IS WHAT THE LOTS NET TO
+
+**R-IV.511(c), standing. Authored by CC-BUILD.**
+
+> **`unified_positions.quantity` is the size OPENED and does not move when a position is reduced.
+> `SUM(position_lots.qty)` is the OPEN REMAINDER, because a disposal is its own negative lot.
+> `SUM(qty) WHERE qty > 0` is the size opened, and THAT is what equals `quantity`.**
+
+Measured 2026-09-23: 350 positions carry lots; **350 of 350** satisfy
+`SUM(qty WHERE qty>0) = quantity`. **14** are partially closed, so `SUM(all qty)` differs from
+`quantity` by exactly the amount disposed. Migration 040's comment claimed "SUM(qty) still equals
+the position", and those fourteen rows are what it described wrongly.
+
+Any check of the lots invariant reads the filtered sum. Reading the unfiltered one reports a
+partially-closed position at its remainder while `quantity` reads the opened size — two numbers
+that disagree, both correct about different questions.
+
+---
+
+## #30 A PROBE THAT EXPECTS FAILURES CARRIES POSITIVE CONTROLS IN THE SAME RUN
+
+**R-IV.517(h), standing. Authored by SPINE, for every lane.**
+
+> **A probe whose expected result is a failure must include, in the SAME run, a case expected to
+> succeed. A dead service fails everything, so "all 401" means nothing without a 200 beside it.**
+
+An auth sweep that returns 401 everywhere proves the gate works, or proves the host is down, and
+the output looks identical. The control is what distinguishes them.
+
+This lane has the receipts, from one session: a constraint probe reported "rejected" three times
+for three wrong reasons — `NoActiveSqlTransaction` from the prober's own autocommit, then
+`NotNullViolation` from a column it never supplied, then `UniqueViolation` because the values
+already existed. Each read as a pass. Only a run that also contained cases expected to SUCCEED
+exposed that the constraint had never been reached.
+
+**Kin:** verification-laws (the instrument itself must be checked, not just obeyed), and #18
+(a negative read reports the partition).
+
+---
+
+## #31 IN THE SHARED WORKING COPY, STAGE FILES BY NAME
+
+**R-IV.517(h), standing. Authored by SPINE, for every lane.**
+
+> **Never `git add -A`, `git add .`, or `git commit -a` in a shared checkout. Stage explicit
+> pathspecs. Other lanes' uncommitted work sits in the same tree.**
+
+`C:\trading-hub` is one working copy that several lanes edit. A blanket stage sweeps whatever
+happens to be dirty — another lane's half-finished edit, a runtime mirror like `data/watchlist.json`
+that is written at runtime and always dirty, a docs file mid-handover — into a commit whose message
+describes none of it. It then deploys, because a push to main redeploys the app.
+
+The safe shape, every time: `git add <path> <path>`, then `git diff --cached --name-only` and read
+it before committing. When another lane's dirt blocks a rebase, stash it by path and pop it after,
+rather than committing around it.
+
+**Kin:** the lane convention that held commits go on a branch, not on local main.
