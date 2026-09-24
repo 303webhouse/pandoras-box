@@ -133,7 +133,17 @@ def dedup_key(account: str, event_type: str, amount: Any, event_date: Any,
     same-amount events with nothing to tell them apart (Phase-1 D4).
     """
     d = event_date.isoformat() if hasattr(event_date, "isoformat") else str(event_date)
-    amt = format(Decimal(str(amount or 0)), "f")
+    # NORMALISED TO A FIXED SCALE, because the same movement arrives typed two ways.
+    # A form sends the float -16.0; the same row read back from NUMERIC(10,2) is
+    # Decimal('-16.00'); a CSV sends the string "-16.00". Formatting each as written
+    # gave three different keys for one movement, so a re-imported file would not
+    # have deduped against what was already there -- the exact failure the key
+    # exists to prevent. Four places is past the two the column stores and short of
+    # any float noise.
+    try:
+        amt = format(Decimal(str(amount or 0)).quantize(Decimal("0.0001")), "f")
+    except Exception:
+        amt = format(Decimal(0), "f")
     raw = "|".join([str(account or ""), str(event_type or ""), amt, d,
                     str(source_ref or ""), str(occurrence or 0)])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
@@ -188,7 +198,20 @@ def balance_from_events(events: Sequence[Dict[str, Any]],
     anchor_day = anchor["_d"] if anchor is not None else None
 
     for r in rows:
-        if anchor is not None and r is anchor:
+        # AN ANCHOR IS NEVER A MOVEMENT. Not the chosen one, and not a superseded
+        # one either -- an opening balance is a statement of position, never cash
+        # crossing a boundary.
+        #
+        # This was the Robinhood double count. The principal re-anchored twice, two
+        # minutes apart (ids 96 and 97, both 491.49 on 2026-09-24, distinct
+        # idempotency keys so both landed). The reader took 97 as the opening and
+        # then walked 96 as an ordinary same-day event: 491.49 + 491.49 - 16.00 =
+        # 966.98, which is exactly what was served. The right answer is 475.49.
+        #
+        # Skipping only `r is anchor` was the bug: it assumed one anchor per account,
+        # and the route that writes them is deliberately idempotent-per-key rather
+        # than one-per-account, because re-anchoring is the normal workflow.
+        if r["_t"] == ANCHOR:
             continue
         if r["_d"] is None:
             # A movement with no date cannot be placed before or after the anchor.

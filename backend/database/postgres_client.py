@@ -1764,6 +1764,38 @@ async def init_database():
                 ON cash_flows (account_name, activity_date)
         """)
 
+        # R-IV.557(c): `occurrence` DEFAULTED TO 1 while every route keys on 0.
+        #
+        # The column's only job is to tell two identical same-day movements apart,
+        # so it has to describe the key that identifies the row -- and a row whose
+        # key encodes 0 while the column says 1 describes nothing. Nothing in this
+        # book is a second occurrence of anything: a census over all 42 rows found
+        # one duplicated (account, type, amount, date) group, and its two rows are
+        # distinguished by their idempotency keys rather than by a counter.
+        await conn.execute(
+            "ALTER TABLE cash_flows ALTER COLUMN occurrence SET DEFAULT 0")
+
+        # Every correction to a ledger row leaves a row of its own. A money table
+        # that can be edited without a trace is one nobody can audit, and "we fixed
+        # some of them" is not a statement anyone can check afterwards.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS cash_flow_corrections (
+                id           BIGSERIAL   PRIMARY KEY,
+                cash_flow_id INTEGER     NOT NULL,
+                column_name  TEXT        NOT NULL,
+                old_value    TEXT,
+                new_value    TEXT,
+                reason       TEXT        NOT NULL,
+                ruling       TEXT        NOT NULL,
+                actor        TEXT        NOT NULL,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cash_flow_corrections_row
+                ON cash_flow_corrections (cash_flow_id)
+        """)
+
         # Brief 07: RH trade history imported from CSV exports
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS rh_trade_history (
