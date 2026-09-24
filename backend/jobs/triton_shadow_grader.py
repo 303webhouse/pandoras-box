@@ -128,6 +128,7 @@ async def run_triton_shadow_grader() -> dict:
     from database.postgres_client import get_postgres_client
     from jobs.triton_shadow_common import (
         fetch_r_close_index, nth_trading_day, close_on_or_near, _f,
+        triton_row_pinned, PROVIDER_NONE,
     )
     from jobs.instrument_class import classify, is_gradeable
 
@@ -141,6 +142,7 @@ async def run_triton_shadow_grader() -> dict:
     pool = await get_postgres_client()
     if not pool:
         return {"graded": 0, "skipped": 0, "skips": {"no_db_pool": 1}}
+
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -253,21 +255,41 @@ async def run_triton_shadow_grader() -> dict:
             continue
         group = gradable
 
-        idx, provider = await fetch_r_close_index(ticker, lookback_days)
-        if not idx:
+        # R-IV.497(d): the bar vendor is a property of the ROW, not of the run, so
+        # a ticker's rows can need two different series. They are fetched
+        # separately and never merged — mixing providers inside one measurement is
+        # the cross-adjustment seam uw_api.py forbids — and each row reads the one
+        # its own fired_at session entitles it to, below.
+        _need_pinned = any(triton_row_pinned(g.get("fired_at")) for g in group)
+        _need_open = any(not triton_row_pinned(g.get("fired_at")) for g in group)
+        idx_pinned, prov_pinned = (
+            await fetch_r_close_index(ticker, lookback_days, pinned=True)
+            if _need_pinned else ({}, PROVIDER_NONE))
+        idx_open, prov_open = (
+            await fetch_r_close_index(ticker, lookback_days, pinned=False)
+            if _need_open else ({}, PROVIDER_NONE))
+
+        if not idx_pinned and not idx_open:
             # Still reachable AFTER the fallback: UW empty AND yfinance empty.
             # The reason string is unchanged so the 944-row backlog stays
             # comparable across the fix -- a renamed reason would reset the
             # series and make the fallback look effective by discontinuity.
-            logger.warning("triton_grader: no 'r' bars for %s (provider=%s) — skip %d",
-                           ticker, provider, len(group))
+            logger.warning("triton_grader: no 'r' bars for %s (pinned=%s/open=%s) — skip %d",
+                           ticker, prov_pinned, prov_open, len(group))
             _skip("no_regular_session_bars", len(group))
             skipped += len(group)
             continue
-        providers_used[provider] = providers_used.get(provider, 0) + len(group)
 
         for g in group:
             try:
+                # This row's series, chosen by its OWN session (R-IV.497(d)).
+                is_pinned = triton_row_pinned(g.get("fired_at"))
+                idx, provider = (idx_pinned, prov_pinned) if is_pinned else (idx_open, prov_open)
+                if not idx:
+                    _skip("no_regular_session_bars")
+                    skipped += 1
+                    continue
+                providers_used[provider] = providers_used.get(provider, 0) + 1
                 fire_d = g["fired_at"].date() if hasattr(g["fired_at"], "date") else g["fired_at"]
                 direction = g["direction"] or "BULL"
                 # entry reference: fire-time spot, else fire-date 'r' close
@@ -302,7 +324,14 @@ async def run_triton_shadow_grader() -> dict:
                     continue
 
                 async with pool.acquire() as conn:
-                    await conn.execute(
+                    # R-IV.497(d): a grade a READ has consumed is never overwritten.
+                    # The UPDATE is conditional on the row still being ungraded, so a
+                    # re-grade cannot replace the figure a Friday read already stood
+                    # on. Every grade — first or re-grade — is ALSO appended to
+                    # triton_grade_versions, so a re-grade lands beside its
+                    # predecessor and both stay readable. Enforced at the WRITE: the
+                    # SELECT's `graded_at IS NULL` is today's caller, not a guarantee.
+                    status = await conn.execute(
                         """
                         UPDATE triton_flow_shadow
                         SET fwd_ret_1d = COALESCE($2, fwd_ret_1d),
@@ -310,10 +339,24 @@ async def run_triton_shadow_grader() -> dict:
                             fwd_ret_5d = COALESCE($4, fwd_ret_5d),
                             provider = $5,
                             graded_at  = CASE WHEN $4 IS NOT NULL THEN NOW() ELSE graded_at END
-                        WHERE id = $1
+                        WHERE id = $1 AND graded_at IS NULL
                         """,
                         g["id"], vals[1], vals[3], vals[5], provider,
                     )
+                    await conn.execute(
+                        """
+                        INSERT INTO triton_grade_versions
+                            (row_id, version, fwd_ret_1d, fwd_ret_3d, fwd_ret_5d,
+                             provider, pinned)
+                        SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3, $4, $5, $6
+                        FROM triton_grade_versions WHERE row_id = $1
+                        """,
+                        g["id"], vals[1], vals[3], vals[5], provider, is_pinned,
+                    )
+                    if status and status.strip().endswith(" 0"):
+                        logger.info("triton_grader: row %s was already graded — a new "
+                                    "version is recorded beside it and the consumed "
+                                    "grade is untouched", g["id"])
                 graded += 1
                 if vals[5] is not None:
                     fully += 1
