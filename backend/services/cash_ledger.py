@@ -67,7 +67,16 @@ INCOME_TYPES = frozenset({DIVIDEND, INTEREST})
 
 TRADE_TYPES = frozenset({TRADE_DEBIT, TRADE_CREDIT})
 
-ALL_TYPES = frozenset({ANCHOR}) | EXTERNAL_TYPES | INCOME_TYPES | TRADE_TYPES | {FEE, ADJUSTMENT}
+# A real movement of cash the principal could not classify (R-IV.546(a)1's "other").
+# It counts toward the balance and belongs to NONE of the three buckets above -- not
+# external, not income, not a trade. That is the point: we do not know what it is, so
+# nothing claims to. Filing it under TRANSFER would wrongly exclude it from every
+# return; filing it under ADJUSTMENT would call it a correction of an error. It is
+# neither, and it stays visible as its own line until someone says what it was.
+OTHER = "OTHER"
+
+ALL_TYPES = (frozenset({ANCHOR, OTHER}) | EXTERNAL_TYPES | INCOME_TYPES | TRADE_TYPES
+             | {FEE, ADJUSTMENT})
 
 # The legacy vocabulary `cash_flows` already holds, mapped onto the above so one
 # reader covers the whole history instead of two readers disagreeing about it.
