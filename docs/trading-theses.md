@@ -7,6 +7,10 @@
      Expiry completeness is now a QUERY, not this header (R-IV.251(c)): each session close,
      every row WHERE expiry <= today AND status='OPEN' is stamped. The hand-enumerated
      dated-action line is retired as the completeness instrument; id 408 is why.
+     TA-044/TA-045 (2026-09-24): reachability exemption follows the TICKET, not the account —
+     TAIL is exempt, CONVEXITY or a thesis must pass break-even within 1.5x the implied
+     expected move. Bucket is set AT ENTRY and a retrospective change names its author.
+     Applies to tickets opened on or after 2026-09-25; nothing existing is retagged.
      TA-042 (2026-09-24): D5 cap-test integrity rule added — where a confirmed exit is pending
      and unbooked, the test runs against the broker-true roster and the hub figure is
      indicative. GUSH id 441 is the live instance: member by composition, not a breach.
@@ -50,6 +54,36 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
 
 ## Standing rules
 (Rules that bind without a session. Added by ruling; each carries its ruling id.)
+
+### Reachability and the TAIL tag · TA-044 (R-IV.531(b))
+
+The **ROBINHOOD sleeve is the budget for long shots** and carries **no separate cap** (TA-039).
+X4's reachability exemption **follows the TICKET, not the account**:
+
+- a ticket tagged **TAIL** is **exempt**;
+- a ticket tagged **CONVEXITY**, or carrying a thesis, **must pass reachability** — break-even within
+  **1.5× the implied expected move to expiry**.
+
+**Nothing limits long shots.** A far-OTM ticket is tagged **TAIL when it is bought**.
+
+**BUCKET IS SET AT ENTRY.** The tag is a claim made **before the fill** about what the ticket is. **A
+bucket is not changed to fit the outcome:** if a CONVEXITY ticket is retagged TAIL after entry, **the
+row records who ruled it and why.**
+
+The documented pattern was never knowingly buying lotteries — it was **thesis legs** that became
+lotteries only in hindsight:
+
+| the named instances | as the rows now read |
+|---|---|
+| **UVXY 40/45 at +120%** | id **376**, ×9, basis 65.00 — **expired worthless 09-18, realized −65.00** |
+| **BX 60p on a 142 stock** | id **303**, ×8, basis 66.00 — **expired worthless 09-18, realized −66.00** |
+| **QQQ 510/500** | id **355**, ×8, basis 185.00 — **still OPEN**, expiry 10/16 |
+
+**A retrospective tag reproduces that pattern exactly** — it relabels the thesis as a lottery after the
+outcome is known, which is why the tag is fixed at entry and a change must name its author.
+
+**TA-045 — scope.** Applies to tickets **opened on or after 2026-09-25**. **Existing rows keep their
+tags and run to their existing exits; nothing is retagged or closed on account of this rule.**
 
 ### Source hierarchy for passes · TA-043
 
