@@ -332,3 +332,60 @@ def test_a_nan_entry_would_have_passed_the_old_entry_guard():
     entry = NAN
     assert not (not entry or entry <= 0)        # the old guard DID let it through
     assert common._f(NAN) is None               # and now it cannot arrive
+
+
+# -- a horizon is reached only once its session is over ----------------------
+#
+# Found by the first control run: KLAC's 5d horizon, 2026-09-24, was called a
+# permanent SESSION_GAP at 02:30 ET that morning -- before the session had opened.
+# `tgt > today` compared against the UTC date, which is already tomorrow's from
+# 20:00 ET. Survivable before Amendment 4 (the row retried); not survivable now
+# that a failed request counts toward a permanent gap.
+
+from datetime import datetime, timezone
+
+
+def _utc(y, m, d, hh, mm=0):
+    return datetime(y, m, d, hh, mm, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("now_utc,tgt,reached", [
+    # 2026-09-24 06:30 UTC is 02:30 ET on the 24th: the session has not opened.
+    (_utc(2026, 9, 24, 6, 30), date(2026, 9, 24), False),
+    (_utc(2026, 9, 24, 6, 30), date(2026, 9, 23), True),
+    # 20:30 UTC is 16:30 ET, after the close -- still not counted, by choice.
+    (_utc(2026, 9, 24, 20, 30), date(2026, 9, 24), False),
+    # 2026-09-25 02:00 UTC is 22:00 ET on the 24th: the UTC date has rolled, the
+    # ET one has not. The old check would have called the 25th reached.
+    (_utc(2026, 9, 25, 2, 0), date(2026, 9, 25), False),
+    # 22:00 ET on the 24th: the 24th's session is over, but the rule is strictly
+    # BEFORE the current ET date, so its horizon grades from the 25th's pass. One
+    # session of latency, bought deliberately -- see horizon_reached's note.
+    (_utc(2026, 9, 25, 2, 0), date(2026, 9, 24), False),
+    (_utc(2026, 9, 25, 14, 0), date(2026, 9, 24), True),
+])
+def test_a_horizon_is_reached_only_after_its_session(now_utc, tgt, reached):
+    assert common.horizon_reached(tgt, now_utc) is reached
+
+
+def test_the_utc_date_rollover_no_longer_reaches_a_future_session():
+    """The exact shape of the defect: at 22:00 ET the UTC date is already tomorrow's,
+    so a UTC-date comparison calls tomorrow's session reached."""
+    now = _utc(2026, 9, 25, 2, 0)                 # 22:00 ET on the 24th
+    assert now.date() == date(2026, 9, 25)        # the UTC date HAS rolled
+    assert common.horizon_reached(date(2026, 9, 25), now) is False
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_has_not_happened_cannot_be_counted_against():
+    """A counter at three IS a permanent gap, so a count against an unopened session
+    is a gap waiting to fire. The horizon check stops that happening; this stops it
+    being possible at all."""
+    from datetime import timedelta
+
+    pool = _Pool()
+    future = (datetime.now(timezone.utc) + timedelta(days=2)).date()
+    assert await grader._count_bar_absence(pool, "AAA", future, "yfinance") == 0
+    assert pool.counts == {}
+    # Positive control: a past session still counts.
+    assert await grader._count_bar_absence(pool, "AAA", SESSION, "yfinance") == 1
