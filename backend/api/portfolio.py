@@ -513,6 +513,31 @@ async def get_cash_flows(
 # Convention #32: `evidence_ref` is the hash of the file AS RECEIVED, on its raw
 # bytes. Nothing normalises a broker export before hashing it.
 
+def _iso_instant(value: str) -> datetime:
+    """Parse an ISO INSTANT, and refuse a bare date.
+
+    `datetime.fromisoformat("2026-09-24")` succeeds and hands back midnight, which
+    would silently anchor the account at 00:00 — and every event that same day would
+    then count as after it, including the ones already inside the broker's figure.
+    That is a double-count the caller never asked for. An anchor is a moment; the
+    events are dated; the distinction is the whole reason the reader flags same-day
+    rows at all.
+    """
+    s = (value or "").strip()
+    try:
+        parsed = datetime.fromisoformat(s)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail="as_of must be an ISO instant, e.g. "
+                                   "2026-09-24T11:09:00-04:00")
+    if "T" not in s and " " not in s:
+        raise HTTPException(status_code=400,
+                            detail="as_of must be an ISO instant with a time, not a "
+                                   "bare date - an anchor is a moment, and a date "
+                                   "alone would place that day's events after it")
+    return parsed
+
+
 class CashAnchorCreate(BaseModel):
     account_name: str
     cash: float                      # the account's cash on the statement
@@ -542,12 +567,7 @@ async def write_cash_anchor(body: CashAnchorCreate, _=Depends(require_api_key)):
         raise HTTPException(status_code=400,
                             detail="ruling is required - an opening balance cites what "
                                    "authorised it")
-    try:
-        as_of = datetime.fromisoformat(body.as_of)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400,
-                            detail="as_of must be an ISO instant, e.g. "
-                                   "2026-09-24T11:09:00-04:00")
+    as_of = _iso_instant(body.as_of)
 
     acct = body.account_name
     day = as_of.date()
@@ -632,3 +652,209 @@ async def get_cash_balance(account_name: Optional[str] = Query(None)):
                    ORDER BY 1""")
         names = [r["account_name"] for r in rows]
     return {"accounts": {n: await _derived_balance(n) for n in names}}
+
+
+# ── 11. The principal's own two inputs (R-IV.546(a)) ──
+#
+# The workflow these serve: the hub tracks cash from the trades he enters, he adds
+# deposits and withdrawals himself, and when the broker shows a different figure he
+# re-anchors. The difference at that moment is the signal for the periodic CSV
+# cleanup, so it is RETURNED and never silently absorbed.
+#
+# Both accept the session cookie as well as X-API-Key, because he types them on the
+# page. A session-authed mutation must also carry `X-Requested-With: XMLHttpRequest`
+# -- that is `require_api_key`'s CSRF rule, not a new one, and the form must send it.
+#
+# IDEMPOTENT ON A KEY THE FORM SENDS. A double-click must not book two deposits, and
+# the client is the only party that knows the two clicks were one intent: retrying
+# after a timeout looks identical to the server otherwise.
+
+_ENTRY_KINDS = {
+    "DEPOSIT": ("TRANSFER_IN", 1),      # must be positive
+    "WITHDRAWAL": ("TRANSFER_OUT", -1),  # must be negative
+    "OTHER": ("OTHER", 0),              # either sign, but not zero
+}
+
+
+class CashEntryCreate(BaseModel):
+    account_name: str
+    kind: str                            # DEPOSIT | WITHDRAWAL | OTHER
+    amount: float                        # SIGNED: + into the account, - out of it
+    event_date: str                      # ISO date the money actually moved
+    idempotency_key: str                 # the form's, so a double-click collides
+    note: Optional[str] = None
+
+
+@router.post("/cash-entry")
+async def record_principal_cash_entry(body: CashEntryCreate, _=Depends(require_api_key)):
+    """The principal's own deposit / withdrawal / other. Idempotent on the form's key."""
+    from services.cash_ledger import dedup_key
+
+    kind = (body.kind or "").strip().upper()
+    if kind not in _ENTRY_KINDS:
+        raise HTTPException(status_code=400,
+                            detail="kind must be DEPOSIT, WITHDRAWAL or OTHER")
+    key_raw = (body.idempotency_key or "").strip()
+    if not key_raw:
+        raise HTTPException(status_code=400,
+                            detail="idempotency_key is required - without one a "
+                                   "double-click books the deposit twice")
+    if body.amount == 0:
+        raise HTTPException(status_code=400, detail="amount must be non-zero")
+
+    ledger_type, want_sign = _ENTRY_KINDS[kind]
+    # The SIGN is authoritative and the kind must agree with it. A DEPOSIT of -88.15
+    # is not a withdrawal politely mislabelled: it is two statements that contradict
+    # each other, and guessing which the principal meant is how money goes missing
+    # in the direction nobody checks.
+    if want_sign > 0 and body.amount < 0:
+        raise HTTPException(status_code=400,
+                            detail="a DEPOSIT is positive; use WITHDRAWAL for money "
+                                   "leaving the account")
+    if want_sign < 0 and body.amount > 0:
+        raise HTTPException(status_code=400,
+                            detail="a WITHDRAWAL is negative; use DEPOSIT for money "
+                                   "entering the account")
+    try:
+        when = date.fromisoformat(body.event_date[:10])
+    except (TypeError, ValueError, IndexError):
+        raise HTTPException(status_code=400,
+                            detail="event_date must be an ISO date, e.g. 2026-09-24")
+
+    acct = body.account_name
+    # Scoped to the account and to the key alone: the same key MUST collide even if
+    # the payload differs, because that is a resubmission, not a second movement.
+    key = dedup_key(acct, "PRINCIPAL_ENTRY", 0, "", key_raw)
+    desc = "%s by principal%s | key %s" % (
+        kind, (" | " + body.note.strip()) if body.note else "", key_raw)
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO cash_flows
+                   (account_name, flow_type, amount, description, activity_date,
+                    imported_from, source_ref, dedup_key)
+               VALUES ($1, $2, $3, $4, $5::date, 'PRINCIPAL_UI', $6, $7)
+               ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+               DO NOTHING
+               RETURNING id, flow_type, amount, activity_date""",
+            acct, ledger_type, body.amount, desc, when, key_raw, key)
+        created = row is not None
+        if not created:
+            row = await conn.fetchrow(
+                """SELECT id, flow_type, amount, activity_date FROM cash_flows
+                    WHERE account_name = $1 AND dedup_key = $2""", acct, key)
+
+    conflict = None
+    if not created and row is not None:
+        # The key came back, so this is a resubmission. If it carries a DIFFERENT
+        # movement the first one stands and the difference is REPORTED -- silently
+        # accepting would double the money, silently dropping would hide an edit.
+        differs = {}
+        if float(row["amount"]) != float(body.amount):
+            differs["amount"] = {"recorded": float(row["amount"]), "sent": body.amount}
+        if row["activity_date"] != when:
+            differs["event_date"] = {"recorded": row["activity_date"].isoformat(),
+                                     "sent": when.isoformat()}
+        if row["flow_type"] != ledger_type:
+            differs["kind"] = {"recorded": row["flow_type"], "sent": ledger_type}
+        conflict = differs or None
+
+    derived = await _derived_balance(acct)
+    return {
+        "status": "recorded" if created else "already_recorded",
+        "cash_flow_id": row["id"] if row else None,
+        "account_name": acct, "kind": kind, "ledger_type": ledger_type,
+        "amount": body.amount, "event_date": when.isoformat(),
+        "actor": "principal", "idempotency_key": key_raw,
+        "conflict": conflict,
+        "conflict_note": None if not conflict else
+            "this key already recorded a different movement; the first one stands "
+            "and nothing was changed - send a new idempotency_key to book another",
+        **derived,
+    }
+
+
+class CashReanchorCreate(BaseModel):
+    account_name: str
+    cash: float                          # what the broker shows right now
+    idempotency_key: str
+    as_of: Optional[str] = None          # ISO instant; defaults to now
+    note: Optional[str] = None
+
+
+@router.post("/cash-reanchor")
+async def principal_reanchor(body: CashReanchorCreate, _=Depends(require_api_key)):
+    """"Set cash to what my broker shows now." Returns the difference it revealed.
+
+    THE DIFFERENCE IS THE PRODUCT. It is what the periodic CSV cleanup goes looking
+    for: the gap between what the hub derived from its own events and what the broker
+    actually holds. Absorbing it silently would make a re-anchor a way of hiding
+    exactly the drift it exists to surface.
+    """
+    from services.cash_ledger import ANCHOR, dedup_key
+
+    key_raw = (body.idempotency_key or "").strip()
+    if not key_raw:
+        raise HTTPException(status_code=400,
+                            detail="idempotency_key is required - without one a "
+                                   "double-click writes two anchors")
+    as_of = _iso_instant(body.as_of) if body.as_of else datetime.now().astimezone()
+
+    acct = body.account_name
+    # What the hub believed BEFORE this anchor. Read first: afterwards the new anchor
+    # is the opening balance and the old answer is unrecoverable.
+    before = await _derived_balance(acct)
+    derived_before = before["derived"]["balance"]
+
+    # The evidence IS the principal's entry and its instant (R-IV.546(a)2). There is
+    # no file here, so the reference says so plainly rather than borrowing the shape
+    # of a hash it does not have.
+    ref = "principal-entry@%s" % as_of.isoformat()
+    key = dedup_key(acct, ANCHOR, 0, "", key_raw)
+    desc = "OPENING BALANCE as of %s | evidence %s | R-IV.546(a)2 principal re-anchor%s" % (
+        as_of.isoformat(), ref, (" | " + body.note.strip()) if body.note else "")
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO cash_flows
+                   (account_name, flow_type, amount, description, activity_date,
+                    imported_from, source_ref, dedup_key)
+               VALUES ($1, $2, $3, $4, $5::date, 'PRINCIPAL_ANCHOR', $6, $7)
+               ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+               DO NOTHING
+               RETURNING id""",
+            acct, ANCHOR, body.cash, desc, as_of.date(), ref, key)
+        created = row is not None
+        if not created:
+            row = await conn.fetchrow(
+                "SELECT id FROM cash_flows WHERE account_name = $1 AND dedup_key = $2",
+                acct, key)
+
+    if derived_before is None:
+        difference = None
+        note = ("the hub could not derive a balance before this anchor, so there is "
+                "no difference to report - this is a first anchor, not a correction")
+    else:
+        difference = round(float(body.cash) - float(derived_before), 2)
+        note = ("the hub derived %.2f and the broker shows %.2f; this gap is what the "
+                "CSV cleanup should account for" % (derived_before, body.cash)
+                if difference else "the hub and the broker already agreed")
+
+    after = await _derived_balance(acct)
+    return {
+        "status": "reanchored" if created else "already_reanchored",
+        "cash_flow_id": row["id"] if row else None,
+        "account_name": acct,
+        "entered": body.cash,
+        "derived_before": derived_before,
+        "difference": difference,
+        "difference_note": note,
+        "as_of": as_of.isoformat(),
+        "evidence_ref": ref,
+        "actor": "principal",
+        "idempotency_key": key_raw,
+        "stored_balance_untouched": True,
+        **after,
+    }
