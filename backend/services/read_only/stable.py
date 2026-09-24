@@ -33,6 +33,126 @@ logger = logging.getLogger(__name__)
 # --workers flag, so in-process is coherent; would need Redis if that ever changes).
 _BREADTH_CACHE: dict = {"metrics_date": None, "breadth": None}
 
+# ── R-IV.522(c): WINDOW COMPLETENESS, AND WHAT IT IS FOR ──────────────────────
+#
+# Every window the regime reads is ROW-BASED: `close.rolling(20)` over a per-ticker
+# frame. A symbol missing a session does not lose a day — it silently reaches one
+# further back, and by a different amount from its neighbours. Measured at R-IV.517:
+# of 685 symbols, the 135 holding the 2026-09-22 bar all windowed back to 2026-08-26,
+# while the 550 without it windowed back to anywhere between 2026-04-10 and
+# 2026-09-04, some on as few as 12 rows. The regime was comparing symbols whose
+# windows spanned different date ranges and saying nothing about it.
+#
+# Session windows are the real fix and are queued behind money integrity. Until then
+# the regime at least STATES the damage: for each window length, how many symbols
+# hold every one of the last N exchange sessions. Below scoring's own coverage floor
+# the read is DEGRADED — the same 80% that decides whether a date may anchor at all.
+#
+# Completeness is measured against the EXCHANGE CALENDAR, never against row counts:
+# counting rows is the very approximation that hides a gap.
+REGIME_WINDOWS: tuple = (
+    (1, "ret_1d — the big-move counts"),
+    (5, "ret_5d"),
+    (20, "ret_20d, above_ma20, new_high_20d, new_low_20d"),
+    (50, "above_ma50 — the regime label's own input"),
+    (200, "above_ma200"),
+    (252, "new_high_52w, new_low_52w"),
+)
+
+_COMPLETENESS_CACHE: dict = {"metrics_date": None, "windows": None}
+
+
+def _coverage_floor_pct() -> float:
+    """scoring's own anchor-coverage floor, as a percentage. One author for that
+    number (conventions #9) -- a second copy here would drift from the one that
+    decides whether a date may anchor at all."""
+    try:
+        from stable_engine.scoring import ANCHOR_MIN_COVERAGE
+        return round(ANCHOR_MIN_COVERAGE * 100.0, 1)
+    except Exception:
+        return 80.0
+
+
+def _sessions_back(anchor_date, n: int) -> list:
+    """The last n exchange sessions ending at anchor_date, oldest first.
+
+    Raises rather than guessing: `market_calendar` fails loudly past its stated
+    horizon, and a completeness figure built on a guessed calendar would be worse
+    than none — it would read as reassurance.
+    """
+    from stable_engine.market_calendar import is_trading_day, previous_trading_day
+
+    out = []
+    d = anchor_date
+    if not is_trading_day(d):
+        d = previous_trading_day(d)
+    for _ in range(n):
+        out.append(d)
+        d = previous_trading_day(d)
+    return sorted(out)
+
+
+def completeness_verdict(windows: dict):
+    """(degraded, reason) from a window-completeness block.
+
+    A row-based window absorbs a gap by reaching further back, so an incomplete
+    window is not an empty one — it is a WRONG one, and the figure it produced looks
+    entirely ordinary. Naming which windows, and by how much, is the whole point of
+    the flag; a bare `degraded: true` would send a reader looking at the feed age.
+    """
+    short = sorted((w for w in (windows or {}).values() if w.get("below_floor")),
+                   key=lambda w: w.get("sessions") or 0)
+    if not short:
+        return False, None
+    return True, ("window completeness below %g%%: " % _coverage_floor_pct()) + ", ".join(
+        "%dd at %s%%" % (w.get("sessions"),
+                         "unknown" if w.get("pct") is None else w.get("pct"))
+        for w in short)
+
+
+async def _window_completeness(conn, metrics_date) -> dict:
+    """{window: {sessions, complete, universe, pct, below_floor}} for each window.
+
+    A symbol's N-window is complete when it holds a bar for EVERY one of the last N
+    exchange sessions. Not "N bars": a symbol with N bars spread over N+3 sessions
+    has an incomplete window, and that is exactly the case being measured.
+    """
+    from stable_engine.scoring import ANCHOR_MIN_COVERAGE
+
+    universe = await conn.fetchval(
+        """SELECT COUNT(DISTINCT u.ticker) FROM stable_universe u
+            WHERE u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')"""
+    ) or 0
+    out: dict = {}
+    for n, feeds in REGIME_WINDOWS:
+        try:
+            sessions = _sessions_back(metrics_date, n)
+        except Exception as exc:
+            out[str(n)] = {"sessions": n, "feeds": feeds, "complete": None,
+                           "universe": universe, "pct": None, "below_floor": True,
+                           "error": "calendar could not answer: %s" % type(exc).__name__}
+            continue
+        complete = await conn.fetchval(
+            """SELECT COUNT(*) FROM (
+                   SELECT b.ticker
+                     FROM stable_daily_bars b
+                     JOIN stable_universe u ON u.ticker = b.ticker
+                    WHERE b.date = ANY($1::date[])
+                      AND u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')
+                    GROUP BY b.ticker
+                   HAVING COUNT(DISTINCT b.date) = $2
+               ) t""",
+            sessions, n,
+        ) or 0
+        pct = round(100.0 * complete / universe, 1) if universe else None
+        out[str(n)] = {
+            "sessions": n, "feeds": feeds, "complete": complete, "universe": universe,
+            "first_session": str(sessions[0]), "last_session": str(sessions[-1]),
+            "pct": pct,
+            "below_floor": pct is None or pct < ANCHOR_MIN_COVERAGE * 100.0,
+        }
+    return out
+
 
 def _age_seconds(as_of) -> float | None:
     if as_of is None:
@@ -195,14 +315,32 @@ async def get_regime() -> dict:
             if p50 is not None:
                 regime_label = "RISK-ON" if p50 >= 60 else "RISK-OFF" if p50 <= 40 else "NEUTRAL"
 
+            # R-IV.522(c): how many symbols hold each window whole, and DEGRADED
+            # below scoring's floor. Cached on metrics_date like breadth — it cannot
+            # change until the next nightly writes a new one.
+            windows = {}
+            if latest_metric_date is not None:
+                if _COMPLETENESS_CACHE["metrics_date"] == metrics_date_key:
+                    windows = _COMPLETENESS_CACHE["windows"]
+                else:
+                    windows = await _window_completeness(conn, latest_metric_date)
+                    _COMPLETENESS_CACHE["metrics_date"] = metrics_date_key
+                    _COMPLETENESS_CACHE["windows"] = windows
+
             as_of = snap["as_of"] if snap else None
             anchor = snap["anchor"] if snap else None
             degraded = snap["degraded"] if snap else True
+            short_degraded, reason = completeness_verdict(windows)
+            degraded = bool(degraded) or short_degraded
             return _envelope(
                 as_of, anchor, degraded, feed="nightly",
                 regime_label=regime_label,
-                thresholds={"risk_on_pct_above_50dma": 60, "risk_off_pct_above_50dma": 40, "big_move_pct": 3.0},
+                thresholds={"risk_on_pct_above_50dma": 60, "risk_off_pct_above_50dma": 40,
+                            "big_move_pct": 3.0,
+                            "window_complete_floor_pct": _coverage_floor_pct()},
                 breadth=breadth,
+                window_completeness=windows,
+                degraded_reason=reason,
                 dominant=dominant[:8], emerging=emerging[:8], fading=fading[:8],
                 metrics_date=str(latest_metric_date) if latest_metric_date else None,
             )
