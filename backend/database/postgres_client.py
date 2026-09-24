@@ -1159,6 +1159,33 @@ async def init_database():
                                               'BROKER_VERIFIED', 'IMPORTED', 'UNKNOWN'));
                 END $$
             """),
+            # R-IV.512(c)1 — broker_ref FORM, to POSITIONS' SPEC.md (sha256 1edbc39c…).
+            #
+            # TWO forms, and admitting only the first would silently invalidate seven live
+            # lots. A Fidelity confirmation number is not an export line; it is the broker's
+            # own document reference, which is STRONGER evidence than a CSV record, and all
+            # seven are FIDELITY_ROTH / IMPORTED.
+            #
+            #   <sha12>:L<a>-L<b>            span — only when every record in it is the lot's
+            #   <sha12>:L<a>,L<b>,…          record list (R-IV.504(b)) — the normal roll case
+            #   <sha12>:L<a>-L<b>#<i>-<j>    contract slice (R-IV.507(c)), FIFO ordinals
+            #   NNNNN-XXXXXX                 Fidelity confirmation
+            #
+            # No backfill: measured 2026-09-24, 114 lots carry a ref, 114 distinct, 107 export
+            # form + 7 confirmation form, 0 malformed. The form is what makes a ref unique and
+            # resolvable; it does NOT make it true — that is the re-derivation test beside it.
+            ("broker_ref form: position_lots", """
+                DO $$
+                BEGIN
+                    ALTER TABLE position_lots DROP CONSTRAINT IF EXISTS position_lots_broker_ref_form;
+                    ALTER TABLE position_lots ADD CONSTRAINT position_lots_broker_ref_form
+                        CHECK (
+                            broker_ref IS NULL
+                            OR broker_ref ~ '^[0-9a-f]{12}:L[0-9]+(-L[0-9]+|(,L[0-9]+)*)(#[0-9]+-[0-9]+)?$'
+                            OR broker_ref ~ '^[0-9]{5}-[A-Z0-9]{6}$'
+                        );
+                END $$
+            """),
             ("provenance vocabulary: position_legs", """
                 DO $$
                 BEGIN
