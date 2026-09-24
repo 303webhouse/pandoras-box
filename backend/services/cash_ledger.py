@@ -151,6 +151,32 @@ def dedup_key(account: str, event_type: str, amount: Any, event_date: Any,
 
 # ── the derived balance ──────────────────────────────────────────────────────
 
+def _recorded_before(event: Dict[str, Any], anchor: Optional[Dict[str, Any]]) -> bool:
+    """Was this row written before the anchor row was? R-IV.559(b)3.
+
+    `id` is a serial assigned at insert, so it IS the recording order, and it answers
+    the question for every row in the table including those written before any
+    timestamp column existed. `created_at` is preferred when both rows carry one,
+    because a backfill can insert an old movement with a new id.
+
+    Unknown reads as NOT before: an event that cannot be placed is counted and
+    flagged, because dropping a real movement is worse than double-counting one that
+    the next re-anchor will correct anyway.
+    """
+    if anchor is None:
+        return False
+    ea, aa = event.get("created_at"), anchor.get("created_at")
+    if ea is not None and aa is not None:
+        try:
+            return ea < aa
+        except TypeError:
+            pass
+    ei, ai = event.get("id"), anchor.get("id")
+    if isinstance(ei, int) and isinstance(ai, int):
+        return ei < ai
+    return False
+
+
 def balance_from_events(events: Sequence[Dict[str, Any]],
                         as_of: Optional[date] = None) -> Dict[str, Any]:
     """The balance those events add to, plus everything needed to audit it.
@@ -230,12 +256,29 @@ def balance_from_events(events: Sequence[Dict[str, Any]],
                 # (R-IV.542(b)) -- the statement already contains it.
                 continue
             if r["_d"] == anchor_day:
-                # The anchor is an INSTANT (11:09 ET) while an event carries only a
-                # date, so a same-day event cannot be ordered against it by its own
-                # data. It is COUNTED -- R-IV.542(b) puts the pending dividend after
-                # the anchor -- and it is FLAGGED, because the one thing worse than
-                # counting it would be counting it silently. Ordering by row id
-                # instead would make the answer depend on insertion order.
+                # R-IV.559(b)3: ON THE ANCHOR'S DATE, RECORDING ORDER DECIDES.
+                #
+                # The anchor is an instant and an event carries only a date, so the
+                # date alone cannot order them. What can is WHEN THE ROW WAS
+                # RECORDED: the principal reads his broker figure and types it, so
+                # everything already in the ledger at that moment is inside the
+                # figure, and everything entered afterwards is not.
+                #
+                # This was the remaining Robinhood gap. His anchor went in at 20:16Z,
+                # after the close, so the day's trades were already inside his 491.49
+                # -- but they had been recorded BEFORE it, and counting every
+                # same-day event added them a second time: 491.49 + 74.00 = 565.49
+                # against a broker figure of 491.49.
+                #
+                # `id` is the recording order. It is a serial assigned at insert, so
+                # it answers exactly the question the rule asks -- which row was
+                # written first -- and it answers it for rows written before any
+                # timestamp column existed. An earlier form of this reader ordered
+                # same-day rows by id to decide which anchor won, and that was wrong
+                # for a different reason: WHICH anchor is a question about dates, not
+                # about who typed faster. This is the other question.
+                if _recorded_before(r, anchor):
+                    continue
                 same_day.append(r.get("id"))
         t = r["_t"]
         if t is None:

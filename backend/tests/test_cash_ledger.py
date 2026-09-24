@@ -299,13 +299,43 @@ def test_a_same_day_event_is_counted_and_flagged():
     assert out["same_day_as_anchor"] == [2]
 
 
-def test_the_answer_does_not_depend_on_the_order_rows_were_inserted():
-    """Ordering same-day events by row id would make the balance a function of who
-    wrote first. The dividend counts whether it was inserted before or after."""
-    before = [ev(cl.DIVIDEND, "0.64", 24, 1), ev(cl.ANCHOR, "6007.29", 24, 2)]
-    after = [ev(cl.ANCHOR, "6007.29", 24, 1), ev(cl.DIVIDEND, "0.64", 24, 2)]
-    assert cl.balance_from_events(before)["balance"] == 6007.93
-    assert cl.balance_from_events(after)["balance"] == 6007.93
+def test_on_the_anchors_date_the_recording_order_decides():
+    """R-IV.559(b)3 REVERSED an earlier reading of this. The principal reads his
+    broker figure and types it, so everything already in the ledger at that moment is
+    INSIDE the figure and everything entered afterwards is not. Recording order is
+    the only thing that can tell them apart -- the date cannot.
+
+    This test previously asserted the opposite, that insertion order must not matter.
+    That was right about WHICH anchor wins (a question about dates) and wrong about
+    which same-day events count (a question about who was recorded first)."""
+    recorded_before = [ev(cl.DIVIDEND, "0.64", 24, 1), ev(cl.ANCHOR, "6007.29", 24, 2)]
+    recorded_after = [ev(cl.ANCHOR, "6007.29", 24, 1), ev(cl.DIVIDEND, "0.64", 24, 2)]
+    assert cl.balance_from_events(recorded_before)["balance"] == 6007.29   # inside it
+    assert cl.balance_from_events(recorded_after)["balance"] == 6007.93    # after it
+
+
+def test_a_created_at_beats_the_row_id_when_both_rows_carry_one():
+    """A backfill can insert an old movement with a new id, so a timestamp wins
+    where both rows have one."""
+    from datetime import datetime as _dt, timezone as _tz
+
+    anchor = dict(ev(cl.ANCHOR, "100.00", 24, 2),
+                  created_at=_dt(2026, 9, 24, 20, 16, tzinfo=_tz.utc))
+    early = dict(ev(cl.TRANSFER_IN, "10.00", 24, 9),        # higher id...
+                 created_at=_dt(2026, 9, 24, 18, 30, tzinfo=_tz.utc))  # ...earlier write
+    assert cl.balance_from_events([anchor, early])["balance"] == 100.00
+
+
+def test_an_event_that_cannot_be_placed_is_counted_and_flagged():
+    """Unknown reads as NOT before: dropping a real movement is worse than
+    double-counting one the next re-anchor will correct."""
+    anchor = {"id": None, "flow_type": cl.ANCHOR, "amount": "100.00",
+              "activity_date": ev(cl.FEE, 0, 24)["activity_date"]}
+    e = {"id": None, "flow_type": cl.TRANSFER_IN, "amount": "10.00",
+         "activity_date": anchor["activity_date"]}
+    out = cl.balance_from_events([anchor, e])
+    assert out["balance"] == 110.00
+    assert out["same_day_as_anchor"] == [None]
 
 
 def test_nothing_is_flagged_same_day_when_nothing_is():
@@ -393,9 +423,12 @@ def test_a_superseded_anchor_is_not_counted_as_cash():
     ]
     out = cl.balance_from_events(events)
     assert out["opening_balance"] == 491.49        # the later anchor
-    assert out["balance"] == 475.49                # not 966.98
-    assert out["movement_since_opening"] == -16.00
-    assert out["events_counted"] == 1              # the trade only
+    assert out["balance"] == 491.49                # not 966.98
+    # The trade was recorded BEFORE the anchor (id 84 < 97), so it is already inside
+    # the principal's typed figure -- R-IV.559(b)3. Neither anchor is summed, which
+    # is what this test is named for, and the trade is not double-counted either.
+    assert out["events_counted"] == 0
+    assert 491.49 + 491.49 - 16.00 == 966.98       # the figure that was served
 
 
 def test_the_double_count_is_not_merely_hidden_by_ordering():
@@ -403,7 +436,11 @@ def test_the_double_count_is_not_merely_hidden_by_ordering():
     anchor row is ever summed."""
     a = [ev(cl.ANCHOR, "491.49", 24, 97), ev(cl.ANCHOR, "491.49", 24, 96),
          ev(cl.TRADE_DEBIT, "-16.00", 24, 84)]
-    assert cl.balance_from_events(a)["balance"] == 475.49
+    assert cl.balance_from_events(a)["balance"] == 491.49
+    # POSITIVE CONTROL: a trade recorded AFTER the anchor does count, so the 491.49
+    # above is the rule working rather than every same-day row being dropped.
+    b = a + [ev(cl.TRADE_CREDIT, "90.00", 24, 98)]
+    assert cl.balance_from_events(b)["balance"] == 581.49
 
 
 def test_three_anchors_still_leave_one_opening_and_no_movement():
