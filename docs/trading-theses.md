@@ -7,6 +7,10 @@
      Expiry completeness is now a QUERY, not this header (R-IV.251(c)): each session close,
      every row WHERE expiry <= today AND status='OPEN' is stamped. The hand-enumerated
      dated-action line is retired as the completeness instrument; id 408 is why.
+     TA-041 (2026-09-24): D5 carried TWO caps, $3,750 at the head of the section and $3,850
+     below the roster. $3,850 is in force (R-IV.386(d): 3,003.50 + 846.50 = 3,850.00). The
+     $3,750 line is struck and its all-wrapper scope folded into the surviving statement.
+     TA-038 (2026-09-24): TA-020 VOID — GDXJ is not held and all four rows are closed.
      TA-004 (2026-09-07): id 411 entry updated by the Trade Analysis lane — invalidation
      resolved (volume leg NOT FIRED, TA-002), price stop set (TA-002/TA-003), companion lot
      id 409 recorded. Book-writes now originate at Trade Analysis; data-integrity at spine.
@@ -42,7 +46,6 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
 (Rules that bind without a session. Added by ruling; each carries its ruling id.)
 
 ### D5 — commodity / inflation sleeve cap · R-IV.192(e), R-IV.201(c)
-- **Cap: $3,750 across ALL wrappers** (every account, every structure).
 - **The cap BINDS AT ADD.** Any order that would breach it is **declined by rule** — no
   session, no committee pass, no override needed to refuse. Refusal is the default.
 - **Worst case, on its face:** de-escalation *and* a hike anyway. The sleeve can be wrong
@@ -59,7 +62,14 @@ One entry per active thesis (B1 longer-dated, B2 tactical). Every entry MUST hav
 | 367 | WEAT | ROBINHOOD | call_debit_spread 29/30 ×3 | 15.00 |
 | | | | **TOTAL** | **3,003.50** |
 
-- **Cap $3,850 — headroom $846.50.** Down from $1,164.80.
+- **CAP: $3,850 all-wrapper cost basis — headroom $846.50.** Every account, every
+  structure. Down from $1,164.80. **This is the single cap statement for D5 (TA-041).**
+- **TA-041: this section carried two caps ($3,750 and $3,850) a few paragraphs apart.**
+  $3,850 is in force per R-IV.386(d)'s arithmetic — the five members' $3,003.50 plus the
+  $846.50 headroom is **$3,850.00 exactly**. One cap, one place. The stale $3,750 line has
+  been struck from the head of this section; the scope it carried ("across ALL wrappers,
+  every account, every structure") is preserved in the surviving statement above, so
+  striking it removed an amount and not a rule.
 - **FIVE members, not seven (R-IV.386(d), corrected on execution).** TA's line said seven; two
   members **exited 2026-09-10** and are no longer in the sleeve:
   **id 412 USO** (basis 38.00, realized **+512.00**) and **id 365 XLE** (basis 23.10, realized
