@@ -122,7 +122,14 @@ def _compute_distance(direction: str, current_price: float, entry_target: float)
 def _row_to_dict(row) -> dict:
     d = dict(row)
     for k, v in d.items():
-        if hasattr(v, "isoformat"):
+        if isinstance(v, datetime):
+            # RV1 (R-IV.566(e)1): through the one helper, so a naive value carries
+            # its UTC offset. `hasattr(v, "isoformat")` also catches a plain date,
+            # which has no time to place -- so the two are told apart here.
+            from database.postgres_client import iso_utc
+
+            d[k] = iso_utc(v)
+        elif hasattr(v, "isoformat"):
             d[k] = v.isoformat()
         elif isinstance(v, uuid.UUID):
             d[k] = str(v)

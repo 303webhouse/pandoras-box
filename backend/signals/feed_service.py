@@ -18,6 +18,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
+from config.strategy_class import attach_strategy_class, strategy_class  # R-IV.577(b)
+from config.asset_class import EXCLUDE_CRYPTO_SQL  # RV4, R-IV.566(e)2
+from stable_engine.sessions import session_at  # RV5, R-IV.566(e)3
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +63,56 @@ def _dedup_related_signals(related: list) -> list:
     return keep
 
 
+def session_of(row) -> Optional[str]:
+    """The session a signal FIRED in, from the one session calendar. RV5.
+
+    Reads the row's own fire time -- `timestamp`, falling back to `created_at` -- and
+    parses a string back to a datetime, because by the time some callers reach here
+    the row has already been through `serialize_db_row` while others hand over a raw
+    record. Both must land on the same answer, so the parse happens in ONE place.
+
+    None when there is no readable instant, or when the calendar cannot answer. That
+    is not `closed`: "the market was shut" and "nobody knows" are different claims,
+    and R-IV.565's drop/hold policy must not drop a signal on a missing answer.
+    """
+    ts = row.get("timestamp") or row.get("created_at")
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts)
+        except ValueError:
+            return None
+    if not isinstance(ts, datetime):
+        return None
+    return session_at(ts)
+
+
+def tag_row(d: dict) -> dict:
+    """The two fields the River needs the SERVER to state, not the page to infer.
+
+    RV5 (R-IV.566(e)3) -- `session`: which session the signal fired in. The drop/hold
+    policy keys on it, so it is computed once, here, rather than by each reader from a
+    timestamp it may have mis-parsed.
+
+    R-IV.577(b) -- `strategy_class`: roster, shadow or non-roster. The page used to
+    infer roster membership from whether a `codename` had been attached, so "not on
+    the roster" and "the display layer did not run" reached it as one thing, and a
+    whole family could drop out of Watch in silence looking exactly like a family that
+    had never been there.
+
+    One author for both, imported by the routes, so the flat feed and the grouped feed
+    cannot come to different answers about the same signal.
+    """
+    attach_strategy_class(d)
+    d["session"] = session_of(d)
+    return d
+
+
 async def get_active_trade_ideas(
     pool,
     min_score: Optional[float] = 65.0,
     feed_tier: Optional[str] = None,
     direction: Optional[str] = None,
+    include_crypto: bool = False,
 ) -> Tuple[List[Dict[str, Any]], bool]:
     """Fetch and group active trade ideas from the signals table.
 
@@ -107,6 +155,13 @@ async def get_active_trade_ideas(
         # surface (hub_get_trade_ideas) and REST /trade-ideas — both route here.
         "(enrichment_data -> 'quarantine') IS NULL",
     ]
+    # RV4 (R-IV.566(e)2). This function is BOTH the grouped page feed and the
+    # committee's MCP surface (hub_get_trade_ideas), and the swamping is the same on
+    # each: 43 of 51 crypto rows were one family. `include_crypto` exists so a future
+    # caller that genuinely wants them has a named way to ask, rather than a second
+    # copy of the query without the predicate.
+    if not include_crypto:
+        conditions.append(EXCLUDE_CRYPTO_SQL)
     params: List[Any] = []
     idx = 1
 
@@ -198,6 +253,9 @@ async def get_active_trade_ideas(
                 "signal_id": r.get("signal_id"),
                 "strategy": r.get("strategy") or r.get("signal_type"),
                 "codename": codename(r.get("signal_type"), r.get("strategy")),  # L0.4 additive
+                "strategy_class": strategy_class(r.get("signal_type"),
+                                                 r.get("strategy")),  # R-IV.577(b)
+                "session": session_of(r),                             # RV5
                 "signal_category": r.get("signal_category"),
                 "score": float(r.get("score_v2") or r.get("score") or 0),
                 "timestamp": r.get("timestamp") or r.get("created_at"),
@@ -221,7 +279,7 @@ async def get_active_trade_ideas(
 
     # Dedup scan-based strategies, recount, rebuild strategy list
     for g in groups_map.values():
-        attach_codename(g["primary_signal"])  # L0.4 additive (raw fields untouched)
+        tag_row(attach_codename(g["primary_signal"]))  # L0.4 + R-IV.577(b) + RV5
         g["related_signals"] = _dedup_related_signals(g["related_signals"])
         g["signal_count"] = 1 + len(g["related_signals"])
         strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]

@@ -430,7 +430,14 @@ def _row_to_dict(row) -> dict:
     for k, v in d.items():
         if isinstance(v, Decimal):
             d[k] = float(v)
-        elif isinstance(v, (datetime, date)):
+        elif isinstance(v, datetime):
+            # RV1 (R-IV.566(e)1): through the one helper, so a naive value carries
+            # its UTC offset. A bare isoformat() emits none, and the page reads an
+            # offset-less string as LOCAL -- six hours late in Mountain Time.
+            from database.postgres_client import iso_utc
+
+            d[k] = iso_utc(v)
+        elif isinstance(v, date):
             d[k] = v.isoformat()
         elif isinstance(v, list) and v and isinstance(v[0], Decimal):
             d[k] = [float(x) for x in v]

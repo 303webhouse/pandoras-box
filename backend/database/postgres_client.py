@@ -23,12 +23,44 @@ from utils.audit_actor import BOOT_MIGRATION, name_actor  # R-IV.462(b): boot wr
 logger = logging.getLogger(__name__)
 
 
+def iso_utc(value: datetime) -> str:
+    """A datetime as ISO text WITH an offset. RV1's rule, in one place.
+
+    A naive value is read as UTC, because that is what this database stores and what
+    the writer puts there. Six modules had their own `_row_to_dict` doing a bare
+    `.isoformat()`, which is the same defect copied five more times: the page's
+    `Date.parse` reads an offset-less string as LOCAL, so every one of them showed
+    Mountain Time readers six hours late.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
 def serialize_db_row(row_dict: Dict) -> Dict:
-    """Convert database row to JSON-serializable dict"""
+    """Convert a database row to a JSON-serializable dict.
+
+    RV1 (R-IV.566(e)1): A NAIVE TIMESTAMP IS SERIALIZED AS UTC, WITH THE OFFSET.
+
+    Ten of the twelve timestamp columns on `signals` are `timestamp without time
+    zone`, and `_normalize_timestamp_for_db` below writes them as UTC-naive on
+    purpose. `isoformat()` on a naive datetime emits no offset, so the page's
+    `Date.parse` reads "2026-09-24T19:45:00" as LOCAL time -- and in Mountain Time
+    every signal on the River showed six hours late. A signal fired at 19:45Z read
+    19:45 MT instead of 13:45 MT.
+
+    Stamping UTC here is the narrow fix and it is correct for every column this
+    serializer touches, because the writer is the one that made them naive-UTC. The
+    wide fix is migrating the columns to `timestamptz`, which is a data migration on
+    a 23,000-row table and a separate piece of work.
+
+    An AWARE datetime is untouched: its offset is already right, and re-stamping one
+    would be the same error in the other direction.
+    """
     result = {}
     for key, value in row_dict.items():
         if isinstance(value, datetime):
-            result[key] = value.isoformat()
+            result[key] = iso_utc(value)
         elif isinstance(value, Decimal):
             result[key] = float(value)
         elif value is None:
