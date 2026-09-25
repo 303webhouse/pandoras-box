@@ -107,8 +107,13 @@ class _Conn:
     async def fetchval(self, sql, *args):
         if "stable_universe u" in sql and "stable_daily_bars" not in sql:
             return self.universe
-        sessions, n = args
+        sessions, required = args
+        n = len(sessions)
         self.asked.append((n, tuple(sessions)))
+        # What the query ASKED for, which is where the tolerance shows up.
+        if not hasattr(self, "required"):
+            self.required = {}
+        self.required[n] = required
         return self.complete.get(n, 0)
 
 
@@ -227,3 +232,116 @@ async def test_no_complete_session_at_all_reports_nothing_rather_than_zero():
     out = await st._anchor_lag(conn, date(2026, 9, 21))
     assert out["sessions_behind"] is None
     assert out["newest_complete_session"] is None
+
+
+# -- R-IV.535(c)2: the tolerance ---------------------------------------------
+
+@pytest.mark.parametrize("n,allowed", [
+    (1, 0), (5, 0), (10, 0), (19, 0), (20, 1), (39, 1), (40, 2), (50, 2),
+    (200, 10), (252, 12),
+])
+def test_the_tolerance_is_floor_n_over_twenty(n, allowed):
+    """R-IV.535(c)2, on every window length, no exclusions."""
+    assert st.window_tolerance(n) == allowed
+
+
+def test_the_windows_the_regime_reads_get_the_ruled_tolerances():
+    expected = {1: 0, 5: 0, 20: 1, 50: 2, 200: 10, 252: 12}
+    for n, _feeds in st.REGIME_WINDOWS:
+        assert st.window_tolerance(n) == expected[n]
+
+
+@pytest.mark.asyncio
+async def test_a_window_asks_for_n_minus_its_tolerance_sessions():
+    """The query must use `>= n - allowed`, not `= n`. Asserted by what it ASKS for,
+    because the fixture's counts cannot tell the two apart."""
+    conn = _Conn(255, {})
+    await st._window_completeness(conn, date(2026, 9, 23))
+    asked = {n: req for n, req in getattr(conn, "required", {}).items()}
+    assert asked == {1: 1, 5: 5, 20: 19, 50: 48, 200: 190, 252: 240}
+
+
+@pytest.mark.asyncio
+async def test_the_tolerance_is_served_so_a_reader_need_not_infer_it():
+    conn = _Conn(255, {1: 250, 5: 103, 20: 250, 50: 250, 200: 249, 252: 249})
+    out = await st._window_completeness(conn, date(2026, 9, 23))
+    assert out["5"]["misses_allowed"] == 0 and out["5"]["sessions_required"] == 5
+    assert out["20"]["misses_allowed"] == 1 and out["20"]["sessions_required"] == 19
+
+
+@pytest.mark.asyncio
+async def test_one_hole_leaves_the_short_window_short_and_the_long_ones_whole():
+    """THE INTENDED ASYMMETRY (R-IV.535(c)2), on the live shape of 2026-09-22: the
+    5-day window reads on the 103 symbols that hold it, the longer ones tolerate it."""
+    conn = _Conn(255, {1: 250, 5: 103, 20: 250, 50: 250, 200: 249, 252: 249})
+    out = await st._window_completeness(conn, date(2026, 9, 23))
+    assert out["5"]["pct"] == 40.4 and out["5"]["below_floor"] is True
+    for n in ("20", "50", "200", "252"):
+        assert out[n]["below_floor"] is False, n
+    # And the read stays DEGRADED, naming only the window that is short.
+    degraded, reason = st.completeness_verdict(out)
+    assert degraded is True
+    assert "5d at 40.4%" in reason
+    assert "20d" not in reason
+
+
+# -- R-IV.535(c)1: an incomplete session never blocks a later complete one ---
+
+def test_the_anchor_takes_the_newest_complete_date_not_the_newest_date():
+    """Pinned rather than trusted. `anchor_date` orders by date DESC with a HAVING on
+    coverage, so an incomplete date is never a candidate and cannot stand in front of
+    a later complete one. On 2026-09-24 the live anchor was 09-23 with 09-22 still
+    holding 135 bars of 679, which is this rule working."""
+    import inspect
+
+    from stable_engine import scoring
+
+    src = inspect.getsource(scoring.anchor_date)
+    assert "HAVING COUNT(DISTINCT ticker) >= %s" in src
+    assert "ORDER BY date DESC" in src
+    # It must not fall back to MAX(date) when nothing qualifies -- that is the defect
+    # the docstring names, and returning None is what keeps readers empty instead of
+    # anchored on a two-ticker date.
+    assert "NOT anchoring on MAX(date)" in src
+    assert "return None, 0, required" in src
+
+
+# -- R-IV.535(c)3: a healed session makes every window over it stale ---------
+
+def test_the_span_covers_every_stored_date_at_or_after_the_healed_session():
+    import inspect
+
+    from stable_engine import scoring
+
+    src = inspect.getsource(scoring.score_dates_spanning)
+    assert "date >= %s" in src
+    assert "anchor = %s" in src
+
+
+def test_the_recompute_replaces_rather_than_adding_a_second_opinion():
+    """`store_theme_scores` deletes the whole (date, anchor) set first, so a recompute
+    replaces. Two sets of scores for one date would double every rank."""
+    import inspect
+
+    from stable_engine import scoring
+
+    assert "DELETE FROM stable_theme_scores WHERE anchor = %s" in \
+        inspect.getsource(scoring.store_theme_scores)
+    assert "store_theme_scores" in inspect.getsource(scoring.recompute_theme_scores)
+
+
+def test_the_nightly_detects_a_heal_by_difference_and_names_it():
+    """No new table and no state between passes: the gate is asked before and after
+    the re-requests, and the difference is the heal."""
+    import inspect
+
+    from jobs import stable_jobs
+
+    src = inspect.getsource(stable_jobs._nightly_work)
+    assert "incomplete_before" in src
+    assert "score_dates_spanning" in src
+    assert "recompute_theme_scores" in src
+    # On the face, so a heal reads as work done rather than a figure that changed
+    # overnight on its own.
+    assert '"healed_sessions"' in src
+    assert '"recomputed_after_heal"' in src
