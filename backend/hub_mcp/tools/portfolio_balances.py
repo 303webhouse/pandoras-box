@@ -92,7 +92,10 @@ def _build_account(row: Dict[str, Any]) -> Dict[str, Any]:
         "balance_reason": row.get("balance_reason"),
         "cash": float(row.get("cash") or 0) if row.get("cash") is not None else None,
         "cash_source": row.get("cash_source"),
-        "cash_difference": row.get("cash_difference"),
+        # R-IV.567(c): named for what it compares against. `cash_difference` reads
+        # as a live discrepancy; this is the gap against a RETIRED total and it is
+        # the cleanup's target, not a fault in the cash figure beside it.
+        "cash_vs_retired_stored": row.get("cash_vs_retired_stored"),
         "buying_power": None,
         "buying_power_reason": row.get("buying_power_reason"),
         "margin_total": float(row.get("margin_total") or 0)
