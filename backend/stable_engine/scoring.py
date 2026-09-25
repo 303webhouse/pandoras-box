@@ -346,6 +346,55 @@ BACKFILL_LOOKBACK_DAYS = 45
 BACKFILL_MAX_DATES_PER_PASS = 20
 
 
+# ── R-IV.535(c)3: A HEALED SESSION MEANS EVERY WINDOW OVER IT IS STALE ─────────
+#
+# `compute_metrics()` reads each ticker's whole price history and UPSERTs, so metrics
+# self-heal: the night 2026-09-22's bars land, every metric whose window spans it is
+# recomputed and overwritten. SCORES do not. `missing_score_dates` only fills a date
+# that has NO scores, so a date that already has some keeps the ones computed while
+# the session was missing -- which is the wrong figure, silently, for as long as
+# anyone cares to read it.
+#
+# Every stored date AT OR AFTER the healed session had it inside its windows, so
+# every one of them is stale. The list is bounded by the longest window the metrics
+# use (252 sessions), because a date further back than that never saw it.
+SPAN_LONGEST_WINDOW_SESSIONS = 252
+
+
+def score_dates_spanning(healed_session, anchor: str = "close") -> list:
+    """Stored score dates whose windows span `healed_session`, oldest first."""
+    import datetime as _dt
+
+    d = healed_session
+    if isinstance(d, str):
+        d = _dt.date.fromisoformat(d[:10])
+    df = db.read_df(
+        """
+        SELECT DISTINCT date FROM stable_theme_scores
+        WHERE anchor = %s AND date >= %s
+        ORDER BY date
+        """,
+        [anchor, d],
+    )
+    return [] if df is None or df.empty else list(df["date"])
+
+
+def recompute_theme_scores(dates, anchor: str = "close", degraded: bool = False) -> list:
+    """Recompute and REPLACE the stored scores for each date. Returns [(date, rows)].
+
+    `store_theme_scores` deletes the whole (date, anchor) set before inserting, so
+    this is a replacement rather than a second opinion sitting beside the first.
+    """
+    out = []
+    for d in dates:
+        scores = compute_theme_scores(as_of=d)
+        if scores is None or scores.empty:
+            out.append((d, 0))
+            continue
+        out.append((d, store_theme_scores(scores, anchor=anchor, degraded=degraded)))
+    return out
+
+
 def missing_score_dates(anchor: str = "close", lookback_days: int = BACKFILL_LOOKBACK_DAYS):
     """COMPLETE metrics dates inside the window that carry no stored scores for this anchor."""
     universe_n = _scalar("SELECT COUNT(DISTINCT ticker) FROM stable_universe") or 0

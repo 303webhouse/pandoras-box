@@ -66,6 +66,10 @@ def _nightly_work() -> dict:
     # the retry horizon. Counted in TRADING days off the calendar, never in
     # calendar days — five weekdays and five sessions differ across every holiday.
     retried, abandoned = [], []
+    # R-IV.535(c)3: which sessions were incomplete BEFORE the re-requests, so a heal
+    # can be detected by difference afterwards. No new table and no remembered state
+    # between passes -- the gate itself is the record, asked twice.
+    incomplete_before = {d for d, _h, _r in (bars_yf.incomplete_sessions(lookback_days=30) or [])}
     for d, held, required in (bars_yf.incomplete_sessions(lookback_days=30) or []):
         try:
             gap = trading_days_between(_date.fromisoformat(d), _date.today())
@@ -82,6 +86,24 @@ def _nightly_work() -> dict:
         retried.append({"date": d, "bars_before": held, "rows_written": one.get("rows_written", 0)})
 
     m = metrics.compute_metrics()
+
+    # R-IV.535(c)3: A HEALED SESSION MAKES EVERY WINDOW OVER IT STALE.
+    #
+    # `compute_metrics()` above reads each ticker's whole history and UPSERTs, so the
+    # metrics have already healed themselves. The SCORES have not: the backfill below
+    # only fills a date with NO scores, so a date that already has some keeps the
+    # figures it got while the session was missing.
+    healed = sorted(incomplete_before - {
+        d for d, _h, _r in (bars_yf.incomplete_sessions(lookback_days=30) or [])})
+    recomputed = []
+    for d in healed:
+        spanning = scoring.score_dates_spanning(d, anchor="close")
+        logger.warning("[stable_jobs] session %s HEALED -- recomputing %d score date(s) "
+                       "whose windows span it", d, len(spanning))
+        recomputed.extend([{"healed": d, "date": str(dd), "rows": rows}
+                           for dd, rows in scoring.recompute_theme_scores(
+                               spanning, anchor="close", degraded=coverage["degraded"])])
+
     scores = scoring.compute_theme_scores()
     stored = scoring.store_theme_scores(scores, anchor="close", degraded=coverage["degraded"])
     # R-IV.435(e): any COMPLETE metrics date with no scores is filled here, so a gap closes
@@ -96,7 +118,11 @@ def _nightly_work() -> dict:
             # matters — a hole nobody is retrying any more, named rather than
             # silently dropped off the end of a loop.
             "incomplete_retried": retried,
-            "incomplete_abandoned": abandoned}
+            "incomplete_abandoned": abandoned,
+            # R-IV.535(c)3: named, so a heal is visible as work done rather than as a
+            # figure that quietly changed overnight.
+            "healed_sessions": [str(d) for d in healed],
+            "recomputed_after_heal": recomputed}
 
 
 def _provisional_work() -> dict:

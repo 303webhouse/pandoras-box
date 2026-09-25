@@ -50,6 +50,22 @@ _BREADTH_CACHE: dict = {"metrics_date": None, "breadth": None}
 #
 # Completeness is measured against the EXCHANGE CALENDAR, never against row counts:
 # counting rows is the very approximation that hides a gap.
+def window_tolerance(n: int) -> int:
+    """How many of the last n sessions a symbol may MISS and still count. R-IV.535(c)2.
+
+    `floor(n / 20)`, on every window length, no exclusions: **0** for 1 and 5, **1**
+    for 20, **2** for 50, **10** for 200, **12** for 252.
+
+    The asymmetry is the point and it is intended (R-IV.535(c)2). A single missing
+    session is a large fraction of a five-session window and a rounding error in a
+    252-session one, so a short window reads on **only the symbols that hold every
+    one of its sessions** while a long window tolerates the hole. While 2026-09-22
+    sits inside the 5-day window that window reads on the 103 symbols that have it,
+    and the count and DEGRADED say so rather than averaging the gap away.
+    """
+    return max(0, int(n) // 20)
+
+
 REGIME_WINDOWS: tuple = (
     (1, "ret_1d — the big-move counts"),
     (5, "ret_5d"),
@@ -192,6 +208,10 @@ async def _window_completeness(conn, metrics_date) -> dict:
                            "universe": universe, "pct": None, "below_floor": True,
                            "error": "calendar could not answer: %s" % type(exc).__name__}
             continue
+        # R-IV.535(c)2: a symbol counts as complete when it misses at most
+        # floor(n/20) of those sessions. `>=` the required count, not `=` n.
+        misses_allowed = window_tolerance(n)
+        required_sessions = max(1, n - misses_allowed)
         complete = await conn.fetchval(
             """SELECT COUNT(*) FROM (
                    SELECT b.ticker
@@ -200,14 +220,19 @@ async def _window_completeness(conn, metrics_date) -> dict:
                     WHERE b.date = ANY($1::date[])
                       AND u.theme NOT IN ('Benchmark', 'Scan Only', 'Sector ETF')
                     GROUP BY b.ticker
-                   HAVING COUNT(DISTINCT b.date) = $2
+                   HAVING COUNT(DISTINCT b.date) >= $2
                ) t""",
-            sessions, n,
+            sessions, required_sessions,
         ) or 0
         pct = round(100.0 * complete / universe, 1) if universe else None
         out[str(n)] = {
             "sessions": n, "feeds": feeds, "complete": complete, "universe": universe,
             "first_session": str(sessions[0]), "last_session": str(sessions[-1]),
+            # Served so a reader never has to work out why a 5-day window is short
+            # while a 200-day one is not: the tolerance is the reason, and it is
+            # stated rather than inferred.
+            "misses_allowed": misses_allowed,
+            "sessions_required": required_sessions,
             "pct": pct,
             "below_floor": pct is None or pct < ANCHOR_MIN_COVERAGE * 100.0,
         }
