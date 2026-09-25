@@ -37,6 +37,7 @@ performed. `EXTERNAL_TYPES` is what keeps them out of any return.
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence
@@ -150,6 +151,57 @@ def dedup_key(account: str, event_type: str, amount: Any, event_date: Any,
 
 
 # ── the derived balance ──────────────────────────────────────────────────────
+
+# ── R-IV.566(d): WHAT KIND OF ANCHOR IT IS ─────────────────────────────────────
+#
+# Two routes write one. `/cash-reanchor` is the principal typing what his broker
+# shows him right now; `/cash-anchor` is a figure read out of a statement file. The
+# card needs to say "set from your broker figure - 4:16 PM" or "from your statement -
+# 24 Sep", and it cannot tell them apart from the amount.
+#
+# Derived from `imported_from`, which is what each route stamps, rather than parsed
+# out of the description -- a sentence is not a field, and reading one back is how a
+# reworded log line becomes a wrong label.
+ANCHOR_KIND_BROKER = "broker_figure"
+ANCHOR_KIND_STATEMENT = "statement"
+
+_ANCHOR_KIND_BY_SOURCE = {
+    "PRINCIPAL_ANCHOR": ANCHOR_KIND_BROKER,
+    "ANCHOR": ANCHOR_KIND_STATEMENT,
+}
+
+
+def anchor_kind(imported_from: Optional[str]) -> Optional[str]:
+    """`broker_figure`, `statement`, or None when the row does not say.
+
+    None is deliberate: an anchor whose origin is unrecorded must not be labelled as
+    either, because the card would then state something nobody wrote down.
+    """
+    return _ANCHOR_KIND_BY_SOURCE.get((imported_from or "").strip().upper())
+
+
+def _anchor_block(anchor: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """{kind, as_of, evidence_ref} for the anchor in force, or None."""
+    if anchor is None:
+        return None
+    meta = anchor.get("meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:  # noqa: BLE001
+            meta = None
+    meta = meta or {}
+    d = anchor.get("_d")
+    return {
+        "kind": anchor_kind(anchor.get("imported_from")),
+        # The INSTANT where one was recorded; the date otherwise, because the anchor
+        # rows written before `meta` existed have only that. Never invented.
+        "as_of": meta.get("as_of") or (d.isoformat() if d else None),
+        "as_of_is_instant": bool(meta.get("as_of")),
+        "evidence_ref": anchor.get("source_ref"),
+        "cash_flow_id": anchor.get("id"),
+    }
+
 
 def _recorded_before(event: Dict[str, Any], anchor: Optional[Dict[str, Any]]) -> bool:
     """Was this row written before the anchor row was? R-IV.559(b)3.
@@ -307,6 +359,7 @@ def balance_from_events(events: Sequence[Dict[str, Any]],
         "undated_events": undated,
         "same_day_as_anchor": same_day,
         "as_of": as_of.isoformat() if as_of else None,
+        "anchor": _anchor_block(anchor),
         "derivable": balance is not None,
         "reason": None if balance is not None else
                   "no OPENING_BALANCE event — this ledger has no audited starting point",

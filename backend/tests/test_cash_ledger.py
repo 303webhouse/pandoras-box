@@ -504,3 +504,79 @@ def test_an_unreadable_amount_does_not_raise():
     from datetime import date as _date
 
     assert cl.dedup_key("R", cl.FEE, "not a number", _date(2026, 9, 24), "P")
+
+
+# -- R-IV.566(d): the anchor's kind, for the card's source line --------------
+
+@pytest.mark.parametrize("imported_from,kind", [
+    ("PRINCIPAL_ANCHOR", cl.ANCHOR_KIND_BROKER),
+    ("principal_anchor", cl.ANCHOR_KIND_BROKER),
+    ("ANCHOR", cl.ANCHOR_KIND_STATEMENT),
+])
+def test_the_kind_comes_from_the_route_that_wrote_it(imported_from, kind):
+    assert cl.anchor_kind(imported_from) == kind
+
+
+@pytest.mark.parametrize("unknown", [None, "", "TRADE_ENTRY", "EVIDENCE", "csv"])
+def test_an_anchor_whose_origin_is_unrecorded_is_labelled_neither(unknown):
+    """The card would otherwise state something nobody wrote down."""
+    assert cl.anchor_kind(unknown) is None
+
+
+def test_the_block_carries_the_instant_when_the_row_recorded_one():
+    events = [dict(ev(cl.ANCHOR, "491.49", 24, 97),
+                   imported_from="PRINCIPAL_ANCHOR",
+                   source_ref="principal-entry@2026-09-24T16:16:21-04:00",
+                   meta={"as_of": "2026-09-24T16:16:21-04:00", "kind": "broker_figure"})]
+    a = cl.balance_from_events(events)["anchor"]
+    assert a["kind"] == "broker_figure"
+    assert a["as_of"] == "2026-09-24T16:16:21-04:00"
+    assert a["as_of_is_instant"] is True
+    assert a["evidence_ref"].startswith("principal-entry@")
+    assert a["cash_flow_id"] == 97
+
+
+def test_a_json_string_meta_is_read_the_same_as_a_dict():
+    """asyncpg hands JSONB back as a string on some paths, and a card that worked on
+    one connection and not the other would be a mystery to debug."""
+    import json as _json
+
+    events = [dict(ev(cl.ANCHOR, "100.00", 24, 1), imported_from="ANCHOR",
+                   source_ref="74436e3c08a3",
+                   meta=_json.dumps({"as_of": "2026-09-24T11:09:00-04:00"}))]
+    a = cl.balance_from_events(events)["anchor"]
+    assert a["as_of"] == "2026-09-24T11:09:00-04:00"
+    assert a["kind"] == "statement"
+
+
+def test_without_a_recorded_instant_the_date_stands_and_says_so():
+    """The anchors written before `meta` existed have only a date. It is served, and
+    flagged as not an instant, rather than a time being invented for it."""
+    events = [dict(ev(cl.ANCHOR, "6007.29", 24, 85), imported_from="ANCHOR",
+                   source_ref="74436e3c08a3")]
+    a = cl.balance_from_events(events)["anchor"]
+    assert a["as_of"] == "2026-09-24"
+    assert a["as_of_is_instant"] is False
+
+
+def test_unparseable_meta_does_not_take_the_block_down():
+    events = [dict(ev(cl.ANCHOR, "100.00", 24, 1), imported_from="ANCHOR",
+                   meta="{not json")]
+    a = cl.balance_from_events(events)["anchor"]
+    assert a["kind"] == "statement" and a["as_of"] == "2026-09-24"
+
+
+def test_no_anchor_means_no_block():
+    """POSITIVE CONTROL that the block is not fabricated: an unanchored ledger has
+    none, which is what the card needs to know to say nothing at all."""
+    assert cl.balance_from_events([ev(cl.TRANSFER_IN, "10.00", 24, 1)])["anchor"] is None
+
+
+def test_the_block_describes_the_anchor_IN_FORCE_not_the_first_one():
+    events = [dict(ev(cl.ANCHOR, "100.00", 20, 1), imported_from="ANCHOR",
+                   source_ref="statement-a"),
+              dict(ev(cl.ANCHOR, "150.00", 24, 2), imported_from="PRINCIPAL_ANCHOR",
+                   source_ref="principal-entry@2026-09-24T16:16:21-04:00")]
+    a = cl.balance_from_events(events)["anchor"]
+    assert a["kind"] == "broker_figure"
+    assert a["cash_flow_id"] == 2

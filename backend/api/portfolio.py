@@ -638,12 +638,18 @@ async def write_cash_anchor(body: CashAnchorCreate, _=Depends(require_api_key)):
         row = await conn.fetchrow(
             """INSERT INTO cash_flows
                    (account_name, flow_type, amount, description, activity_date,
-                    imported_from, source_ref, dedup_key)
-               VALUES ($1, $2, $3, $4, $5::date, 'ANCHOR', $6, $7)
+                    imported_from, source_ref, dedup_key, meta)
+               VALUES ($1, $2, $3, $4, $5::date, 'ANCHOR', $6, $7, $8::jsonb)
                ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
                DO NOTHING
                RETURNING id""",
-            acct, ANCHOR, body.cash, desc, day, ref, key)
+            acct, ANCHOR, body.cash, desc, day, ref, key,
+            # R-IV.566(d): the instant as a FIELD, not only inside the sentence. A
+            # card that has to parse a log line to print a time is one reworded
+            # message away from printing the wrong one.
+            json.dumps({"as_of": as_of.isoformat(), "evidence_ref": ref,
+                        "kind": "statement", "ruling": body.ruling.strip(),
+                        "actor": body.actor or "unstated"}))
         created = row is not None
         if not created:
             row = await conn.fetchrow(
@@ -673,7 +679,7 @@ async def _derived_balance(account_name: str) -> dict:
     async with pool.acquire() as conn:
         events = await conn.fetch(
             """SELECT id, account_name, flow_type, amount, activity_date,
-                      imported_from, source_ref, description
+                      imported_from, source_ref, description, meta
                  FROM cash_flows WHERE account_name = $1
                 ORDER BY activity_date, id""",
             account_name)
@@ -983,7 +989,8 @@ async def principal_reanchor(body: CashReanchorCreate, _=Depends(require_api_key
     # is a different claim from "you asked this before and here is what it said".
     meta = json.dumps({"derived_before": derived_before, "entered": body.cash,
                        "difference": difference, "difference_note": note,
-                       "as_of": as_of.isoformat(), "actor": "principal"})
+                       "as_of": as_of.isoformat(), "actor": "principal",
+                       "kind": "broker_figure"})
 
     pool = await _pool()
     async with pool.acquire() as conn:

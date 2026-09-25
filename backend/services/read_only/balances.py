@@ -93,7 +93,8 @@ async def _attach_derived_cash(pool, rows: List[Dict[str, Any]]) -> None:
     try:
         async with pool.acquire() as conn:
             evs = await conn.fetch(
-                """SELECT id, account_name, flow_type, amount, activity_date
+                """SELECT id, account_name, flow_type, amount, activity_date,
+                          imported_from, source_ref, meta
                      FROM cash_flows WHERE account_name = ANY($1::text[])
                     ORDER BY account_name, activity_date, id""", names)
         for e in evs:
@@ -123,6 +124,8 @@ async def _attach_derived_cash(pool, rows: List[Dict[str, Any]]) -> None:
             d["cash_derived"] = derived["balance"]
             d["cash_derivable"] = derived["derivable"]
             d["cash_derived_reason"] = derived["reason"]
+            # R-IV.566(d): the source line ABACUS's card needs.
+            d["cash_anchor"] = derived.get("anchor")
             # R-IV.567(c): NAMED FOR WHAT IT COMPARES AGAINST. Served as
             # `cash_difference` a committee seat reads it as a live discrepancy in the
             # cash figure, when it is the gap against a total that has been RETIRED --
