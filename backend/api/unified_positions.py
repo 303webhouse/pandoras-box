@@ -113,6 +113,23 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     return accounts_match(account_filter, balance_name)
 
 
+def _entry_fill_time(req, row):
+    """When the position was actually filled, for its opening lot.
+
+    The entry DATE the principal gave, when he gave one -- his fill happened on his
+    clock, not on the write's. Falling back to the row's creation stamp is a last
+    resort and is the one case where the two can differ by a day: R-IV.474(b) already
+    had to correct a RAMZ row whose entry_date was the write's own clock.
+    """
+    for candidate in (getattr(req, "entry_date", None), (row or {}).get("entry_date")):
+        if candidate:
+            try:
+                return _when(candidate, "entry_date")
+            except Exception:  # noqa: BLE001
+                continue
+    return (row or {}).get("created_at") or datetime.now(timezone.utc)
+
+
 async def _adjust_account_cash_with_conn(conn, account: str, delta: float,
                                          *, source_ref: str = None,
                                          description: str = None,
@@ -703,6 +720,41 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             _combine_notes(req.notes, req.thesis, req.bucket),
             req.tags if req.tags else None,
         )
+
+        # R-IV.566(c): A POSITION IS MEASURED THE MOMENT IT EXISTS.
+        #
+        # Rows entered here carried no lots until a cleanup ran, so they had no open
+        # remainder and no value: the loss alert was blind to a position on the day
+        # it opened, and every balance went PARTIAL for it. Measured 2026-09-24, the
+        # only two open rows without lots were both created through this path today.
+        #
+        # Same transaction as the position, because a position without its lot is
+        # the state this removes -- creating one and then failing to lot it would
+        # reproduce the defect with an extra step.
+        #
+        # `source` carries the instant; `broker_ref` stays NULL for the cleanup to
+        # fill when it matches the row against the export, which is the "upgrades
+        # the reference" step. `provenance` is PRINCIPAL_REPORTED -- the weakest
+        # claim in the vocabulary, which is what "he said so, nothing checked it"
+        # means.
+        if req.entry_price is not None and req.quantity:
+            from models.position_lots import PRINCIPAL_REPORTED, principal_entry_source
+
+            try:
+                await conn.execute(
+                    """INSERT INTO position_lots
+                           (position_id, fill_time, qty, price, fees, source, provenance)
+                       VALUES ($1, $2, $3, $4, 0, $5, $6)""",
+                    position_id, _entry_fill_time(req, row),
+                    req.quantity, abs(float(req.entry_price)),
+                    principal_entry_source(datetime.now(timezone.utc)),
+                    PRINCIPAL_REPORTED)
+            except Exception as exc:  # noqa: BLE001
+                # LOUD, and it fails the whole create. A position that exists without
+                # its lot is exactly what this is here to stop.
+                logger.error("position %s: opening lot could not be written (%s)",
+                             position_id, type(exc).__name__)
+                raise
 
     # Auto-adjust cash: deduct cost for debit, add premium for credit
     # Short stock: selling shares generates cash proceeds (like a credit)
@@ -2054,6 +2106,45 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                     """, req.exit_price, now, realized_pnl, trade_outcome,
                         trade_id, req.notes, position_id)
 
+                # R-IV.566(c): THE CLOSE WRITES ITS DISPOSAL LOT, partial or full.
+                #
+                # Without it the open remainder never falls: 308 closures in this
+                # book have lots that still sum to a positive quantity, which is how
+                # $88,016.87 of phantom risk came to be published (R-IV.548(b)). The
+                # status filter stops that being read as risk; the disposal is what
+                # makes the remainder true.
+                #
+                # It also gives R-IV.517(e) its close date -- the fill_time of the
+                # disposal that takes the remainder to zero -- on rows created from
+                # here on, rather than leaving it derivable for 24 closures of 432.
+                #
+                # Negative qty, because a disposal is a movement out. Only where the
+                # position already carries lots: writing a disposal against a row
+                # with no acquisitions would make the remainder negative, and the
+                # legs constraint would refuse the whole close.
+                _has_lots = await conn.fetchval(
+                    "SELECT 1 FROM position_lots WHERE position_id = $1 LIMIT 1",
+                    position_id)
+                if _has_lots and close_qty:
+                    from models.position_lots import (PRINCIPAL_REPORTED,
+                                                      principal_entry_source)
+
+                    try:
+                        await conn.execute(
+                            """INSERT INTO position_lots
+                                   (position_id, fill_time, qty, price, fees, source,
+                                    provenance)
+                               VALUES ($1, $2, $3, $4, 0, $5, $6)""",
+                            position_id, now, -abs(float(close_qty)),
+                            abs(float(req.exit_price or 0)),
+                            principal_entry_source(datetime.now(timezone.utc)),
+                            PRINCIPAL_REPORTED)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error("position %s: disposal lot could not be written "
+                                     "(%s)", position_id, type(exc).__name__)
+                        raise
+
+                if not is_partial:
                     # INSERT closed_positions inside main transaction — full atomicity with position update.
                     # Failure rolls back the entire close, keeping unified_positions and closed_positions in sync.
                     exit_val = req.exit_value or round(abs(req.exit_price) * (1 if is_stock else 100) * close_qty, 2)

@@ -64,6 +64,32 @@ IMPORT_PARENT_SOURCES = frozenset({
 # writable through the API.
 LOT_SOURCE_PROVENANCE = {"MANUAL": PRINCIPAL_REPORTED, "IMPORT": IMPORTED}
 
+# R-IV.566(c): a lot written by the live form as the principal enters or closes a
+# position, stamped with the instant he did it.
+#
+# It goes in `source` rather than `broker_ref` because `broker_ref` is the BROKER's
+# reference and a principal entry has none -- it stays NULL for the cleanup to fill
+# when it matches the row against the export, which is the "upgrades the reference"
+# step. `provenance` stays PRINCIPAL_REPORTED, the weakest claim in the vocabulary,
+# which is exactly what "he said so and nothing has checked it" means.
+PRINCIPAL_ENTRY_PREFIX = "principal-entry@"
+
+# The fixed members. The regex arm for PRINCIPAL_ENTRY_PREFIX is separate because it
+# carries an instant, and the database CHECK is GENERATED from both rather than
+# retyped beside them -- two copies of a vocabulary is how the second gets forgotten.
+LOT_SOURCES = ("MANUAL", "IMPORT", "LEGACY-SINGLE-LOT")
+PRINCIPAL_ENTRY_SOURCE_REGEX = r"^principal-entry@[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+$"
+
+
+def principal_entry_source(instant) -> str:
+    """`principal-entry@<ISO instant>` for a lot the live form wrote."""
+    return PRINCIPAL_ENTRY_PREFIX + (
+        instant.isoformat() if hasattr(instant, "isoformat") else str(instant))
+
+
+def is_principal_entry(source: Optional[str]) -> bool:
+    return (source or "").startswith(PRINCIPAL_ENTRY_PREFIX)
+
 CONTRACT_MULTIPLIER = 100
 CONTRACT_ASSET_TYPES = frozenset({"OPTION", "SPREAD"})
 

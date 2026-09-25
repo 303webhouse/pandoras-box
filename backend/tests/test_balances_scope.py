@@ -34,8 +34,11 @@ def balances(client, test_api_key):
     # each row, so the service is what is stubbed, with copies because the route tags rows in place.
     with patch("services.read_only.balances.get_account_balances",
                new=AsyncMock(side_effect=lambda *a, **k: [dict(r) for r in ROWS])):
+    # And it is a STRONGER assertion than the pool patch it replaces: if the route ever went back
+    # to querying for itself, this stub would have no effect and every case below would fail on an
+    # empty list rather than quietly passing.
         r = client.get(PATH, headers={"X-API-Key": test_api_key})
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     return {row["account_name"]: row for row in r.json()}
 
 
