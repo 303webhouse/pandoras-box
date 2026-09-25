@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=31">
+    <link rel="stylesheet" href="/v2.css?v=32">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -217,11 +217,12 @@
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="RIVER">River</span>
                             <div class="spacer"></div>
+                            <button type="button" class="btn-add" id="riverViewBtn" aria-pressed="false" title="Show the classic single stream instead of the five lanes. Same items, one list.">Classic view</button>
                             <button type="button" class="btn-add" id="riverPreviewBtn" title="Preview a redesigned River: a mockup on sample data. Your River is unchanged.">Preview</button>
                             <span class="seg" id="riverPills"></span>
                             <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
-                        <div class="tile-body pad-0"><div id="riverStream" class="river"></div></div>
+                        <div class="tile-body pad-0"><div id="riverLanes" class="river-lanes"></div><div id="riverStream" class="river"></div></div>
                     </div>
                 </div>
             </div>
@@ -278,6 +279,6 @@
     <script src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
-    <script src="/v2.js?v=36"></script>
+    <script src="/v2.js?v=37"></script>
 </body>
 </html>

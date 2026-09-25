@@ -1447,6 +1447,14 @@
   // Grade v1 — validated-cell table (promotions are a data edit, not code). A ONLY on a
   // validated cell; else B if ≥2 real evidence icons lit, C otherwise. Shadow never exceeds shadow.
   const VALIDATED_A_CELLS = [{ side: 'SHORT', regime: 'URSA', liquid: true }];
+  // The table in words, for the Actionable lane's empty reason. Read off the table so a
+  // promotion (a data edit) rewrites the sentence with it.
+  const validatedCellText = () => VALIDATED_A_CELLS.map((c) =>
+    (c.liquid === true ? 'liquid ' : c.liquid === false ? 'illiquid ' : '') + String(c.side || '').toLowerCase() + ' in ' + c.regime).join(', or a ');
+  // currentRegime() collapses a missing read to NEUTRAL, which is the safe direction for GRADING
+  // (no A) and the wrong one for SAYING WHY: "no A is possible in NEUTRAL" would assert a regime
+  // nobody read. Anything that prints the reason asks this first.
+  const regimeKnown = () => !!(_lastRegime.composite && (_lastRegime.composite.bias_level || _lastRegime.composite.level));
   function currentRegime() {
     const bias = (_lastRegime.composite && (_lastRegime.composite.bias_level || _lastRegime.composite.level)) || '';
     return /URSA|BEAR/.test(bias) ? 'URSA' : /TORO|BULL/.test(bias) ? 'TORO' : 'NEUTRAL';
@@ -1478,11 +1486,80 @@
     return { side, rOk, rWarn, rCls, fCls, lCls, lChar, litCount };
   }
 
+  // ── R-IV.569 · the River in lanes ──────────────────────────────────────────
+  // The five lanes read the same rows the classic stream reads; what changes is that each row
+  // is placed by what the principal can DO with it. `_laneData` is the last measurement
+  // loadKairos took — the graded roster, the classes that never grade, and the counts the
+  // lanes are obliged to disclose (what was read, and what was excluded).
+  let _laneData = null;
+  const LANE_LEVEL_MAX = 24;      // how many names one cycle reads level evidence for
+  // Level evidence is one read per ticker and the desk refreshes every two minutes, so reading
+  // 24 names every cycle would put 24 concurrent requests against a pool of 10. Cache each
+  // ticker's levels briefly and fetch a few at a time; MP levels move on Pine events, not on
+  // this page's clock, and nothing displays a time taken from them.
+  const LEVEL_TTL_MS = 4 * 60 * 1000, LEVEL_CONCURRENCY = 4;
+  const _levelCache = new Map();   // TICKER -> { at, data }
+  async function readLevels(tickers) {
+    const now = Date.now(), out = {}, todo = [];
+    tickers.forEach((tk) => {
+      const hit = _levelCache.get(tk);
+      if (hit && now - hit.at < LEVEL_TTL_MS) { if (hit.data) out[tk] = hit.data; } else todo.push(tk);
+    });
+    for (let i = 0; i < todo.length; i += LEVEL_CONCURRENCY) {
+      await Promise.all(todo.slice(i, i + LEVEL_CONCURRENCY).map(async (tk) => {
+        let d = null;
+        try { const r = await apiFetch('/api/board/levels/' + encodeURIComponent(tk)); if (r.ok) d = await r.json(); } catch (_) {}
+        _levelCache.set(tk, { at: Date.now(), data: d });
+        if (d) out[tk] = d;
+      }));
+    }
+    return out;
+  }
+  const LANE_CONTEXT_MAX = 12;    // how many context items the Context lane shows
+  const RIVER_VIEW_KEY = 'agora.river.view';
+  let _riverView = 'lanes';
+  try { const v = localStorage.getItem(RIVER_VIEW_KEY); if (v === 'classic' || v === 'lanes') _riverView = v; } catch (_) {}
+
+  // R-IV.569(b) — the River is the equity desk. NOTE this is the FIRST crypto exclusion in the
+  // River; none existed before (measured 2026-09-24: 45 of the 50 rows one page returns were
+  // crypto). A row is crypto when the feed says so; with no asset_class at all, a crypto pair
+  // ticker is the fallback. Nothing else is dropped — an unrecognised asset_class stays visible.
+  const CRYPTO_PAIR = /(-USD|-USDT|-USDC|USDT|-PERP)$/;
+  function isCryptoIdea(s) {
+    const ac = String(s.asset_class == null ? '' : s.asset_class).trim().toUpperCase();
+    if (ac) return ac === 'CRYPTO';
+    return CRYPTO_PAIR.test(String(s.ticker || '').trim().toUpperCase());
+  }
+
+  // The feed serves 50 rows a page, ordered by score, and crypto can fill a whole page — so a
+  // single page is not "today's ideas", it is "today's crypto". Page until the feed is read out
+  // or the ceiling is hit, dedupe, and hand back what was read AND what the feed says exists,
+  // so a truncated read can be said out loud instead of looking like a quiet day.
+  const IDEA_PAGE = 50, IDEA_MAX_PAGES = 3;
+  async function fetchIdeaPages() {
+    const seen = new Set(), out = [];
+    let total = null, pages = 0, answered = false;
+    for (let p = 0; p < IDEA_MAX_PAGES; p++) {
+      let d = null;
+      try {
+        const r = await apiFetch('/api/trade-ideas?status=ACTIVE&limit=' + IDEA_PAGE + '&offset=' + (p * IDEA_PAGE));
+        if (r.ok) d = await r.json();
+      } catch (_) {}
+      if (!d) break;
+      answered = true; pages++;
+      if (total == null && d.total != null && Number.isFinite(Number(d.total))) total = Number(d.total);
+      const rows = d.signals || [];
+      rows.forEach((s) => { const k = s.signal_id || (s.ticker + ':' + s.timestamp); if (!seen.has(k)) { seen.add(k); out.push(s); } });
+      if (rows.length < IDEA_PAGE) break;
+    }
+    return { signals: out, read: out.length, total: total, pages, answered };
+  }
+
   async function loadKairos() {
-    let data = null;
-    try { const r = await apiFetch('/api/trade-ideas?status=ACTIVE&limit=50'); if (r.ok) data = await r.json(); } catch (_) {}
+    const feed = await fetchIdeaPages();
     const el = $('kairosCards'); if (!el) return;
-    const signals = (data && data.signals) || [];
+    const cryptoRows = feed.signals.filter(isCryptoIdea);   // named, not `crypto`: that is window.crypto
+    const signals = feed.signals.filter((s) => !isCryptoIdea(s));
     const tickers = [...new Set(signals.map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
     let smap = {};
     if (tickers.length) { try { const r = await apiFetch('/api/stable/enrich?tickers=' + tickers.join(',')); if (r.ok) smap = (await r.json()).enrichment || {}; } catch (_) {} }
@@ -1497,10 +1574,12 @@
     });
     roster.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
 
-    // L-evidence for the roster cards we might show (top ~6).
-    const visTickers = [...new Set(roster.slice(0, 6).map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
-    const levelMap = {};
-    await Promise.all(visTickers.map(async (tk) => { try { const r = await apiFetch('/api/board/levels/' + encodeURIComponent(tk)); if (r.ok) levelMap[tk] = await r.json(); } catch (_) {} }));
+    // L-evidence for every roster row the LANES will print, not just the top cards: the Watch
+    // lane shows each row's grade, and a grade computed without its L evidence can read one step
+    // low. Capped — a row past the cap says "grade pending" rather than a grade it cannot stand.
+    const lvlTickers = [...new Set(roster.map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))].slice(0, LANE_LEVEL_MAX);
+    const lvlAsked = new Set(lvlTickers);
+    const levelMap = await readLevels(lvlTickers);
     const bias = _lastRegime.composite ? (_lastRegime.composite.bias_level || '') : '';
     const biasBull = /TORO|BULL/.test(bias), biasBear = /URSA|BEAR/.test(bias);
 
@@ -1510,6 +1589,9 @@
       const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
       s._ev = evalEvidence(s, levelMap, biasBull, biasBear);
       s._grade = disp.shadow ? '—' : gradeV1(s, s._ev.litCount);
+      // A is decided by the validated cell alone, and B is already reached on R+F — so only a C
+      // computed WITHOUT this ticker's levels is in doubt (its L could have been the second icon).
+      s._gradePending = s._grade === 'C' && !lvlAsked.has((s.ticker || '').toUpperCase());
     });
     roster.sort((a, b) => (gradeRank[b._grade] || 0) - (gradeRank[a._grade] || 0) || (scoreOf(b) || 0) - (scoreOf(a) || 0));
 
@@ -1529,6 +1611,15 @@
     addRiverItems(visible.map((s) => signalRiverItem(s, smap)));
     addRiverItems(nonRoster.map((s) => nonRosterRiverItem(s)));
     addRiverItems(riverOnly.map((s) => signalRiverItem(s, smap)));
+    // What the lanes render, and the disclosures they owe: this is a MEASUREMENT of one read,
+    // never a carry-over. A failed read publishes read:0 and answered:false, and the Actionable
+    // lane says the feed did not answer instead of naming a regime as the reason.
+    _laneData = {
+      at: Date.now(), roster, nonRoster, riverOnly,
+      cryptoExcluded: cryptoRows.length, read: feed.read, total: feed.total,
+      pages: feed.pages, answered: feed.answered,
+      levelCapped: Math.max(0, new Set(roster.map((s) => (s.ticker || '').toUpperCase())).size - LANE_LEVEL_MAX),
+    };
     renderRiver();
 
     function card(s, smap) {
@@ -1708,7 +1799,156 @@
     addRiverItems(items);
     renderRiver();
   }
+  // Notice rows belong to the River, not to one of its views: both render them at the top.
+  function noticeRowsHtml(now) {
+    return activeNotices(now).map((n) =>
+      `<div class="rv-notice" data-nid="${esc(n.id)}">`
+      + (n.title ? `<span class="rv-notice-t">${esc(n.title)}</span>` : '')
+      + (n.body ? `<span class="rv-notice-b">${esc(n.body)}</span>` : '')
+      + '</div>').join('');
+  }
+
+  // Two views of one River. `hidden` alone is not enough: .river and .river-lanes set display,
+  // which beats the UA's [hidden] rule — the CSS carries the matching [hidden] resets (the
+  // sign-in overlay shipped covering the page for exactly this reason). And the lanes are the
+  // default only where there IS a lanes container: a browser holding a cached copy of the older
+  // markup must get the stream it can render, not an empty tile.
+  const lanesView = () => _riverView === 'lanes' && !!$('riverLanes');
+  function applyRiverView() {
+    const lanes = lanesView();
+    const L = $('riverLanes'), S = $('riverStream'), P = $('riverPills'), B = $('riverViewBtn');
+    if (L) L.hidden = !lanes;
+    if (S) S.hidden = lanes;
+    if (P) P.hidden = lanes;
+    if (B) {
+      B.textContent = lanes ? 'Classic view' : 'Lanes';
+      B.title = lanes ? 'Show the classic single stream instead of the five lanes. Same items, one list.'
+        : 'Show the five lanes: Actionable, Your book, Watch, Unproven, Context.';
+      B.setAttribute('aria-pressed', String(!lanes));
+    }
+  }
+  function setRiverView(v) {
+    _riverView = v === 'classic' ? 'classic' : 'lanes';
+    try { localStorage.setItem(RIVER_VIEW_KEY, _riverView); } catch (_) {}
+    renderRiver();
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('#riverViewBtn');
+    if (b) { e.preventDefault(); setRiverView(_riverView === 'lanes' ? 'classic' : 'lanes'); }
+  });
+
   function renderRiver() {
+    applyRiverView();
+    if (lanesView()) renderLanes(); else renderClassicRiver();
+  }
+
+  // ── The five lanes (R-IV.569) ─────────────────────────────────────────────
+  // Placement, not new data: every row here is a row the classic stream also has. A lane says
+  // what the row is FOR — act on it, defend the book, watch it, or just know it.
+  function laneShell(title, count, body, opts) {
+    const o = opts || {};
+    const head = `<span class="rl-t">${esc(title)}</span>`
+      + `<span class="rl-count${o.countUnknown ? ' unknown' : ''}"${o.countTitle ? ` title="${esc(o.countTitle)}"` : ''}>${esc(String(count))}</span>`
+      + (o.note ? `<span class="rl-note">${esc(o.note)}</span>` : '');
+    if (o.collapsed) return `<details class="rl-lane" data-lane="${esc(o.key || title)}"><summary>${head}</summary>${body}</details>`;
+    return `<section class="rl-lane" data-lane="${esc(o.key || title)}"><h3 class="rl-h">${head}</h3>${body}</section>`;
+  }
+  function laneTime(s) {
+    const t = riverTime(firstTime(s.timestamp, s.created_at));
+    return t ? `<span class="rl-time">${esc(t)}</span>`
+      : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This idea carries no time of its own, so none is shown.' });
+  }
+  function laneGrade(s) {
+    if (s._gradePending) return `<span class="rl-grade pending" title="This row's level evidence was not read this cycle (the read is capped at ${LANE_LEVEL_MAX} names), so its grade would be a guess between B and C.">grade pending</span>`;
+    return `<span class="rl-grade${s._grade === 'A' ? ' a' : ''}" data-gloss="GRADE">grade ${esc(s._grade)}</span>`;
+  }
+  function laneSigRow(s, opts) {
+    const o = opts || {};
+    const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
+    const side = (s.direction || '').toUpperCase();
+    const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b>${esc(disp.name)}</b>`;
+    return `<div class="rl-row" data-sid="${esc(s.signal_id || '')}">
+        <div class="rl-main">${name} <span class="rl-tkr">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
+        <div class="rl-sub">${o.grade ? laneGrade(s) : ''}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
+        ${disp.banner ? `<div class="rl-banner">${esc(disp.banner)}</div>` : ''}
+      </div>`;
+  }
+  // Why the Actionable lane is empty, computed from the read that produced it — never a stock
+  // sentence. The order is the order the constraints actually bind in.
+  function actionableReason(d, graded) {
+    if (!d.answered) return 'The idea feed did not answer this cycle, so nothing could be graded. This is not a quiet day; it is an unread one.';
+    if (!d.read) return 'The idea feed answered with no active ideas at all.';
+    if (!regimeKnown()) return 'The regime has not been read this cycle, and the grade turns on it — so no idea can be graded A yet. Nothing here is a judgement about the ideas.';
+    const reg = currentRegime();
+    const cell = validatedCellText();
+    if (!VALIDATED_A_CELLS.some((c) => c.regime === reg)) {
+      return `Nothing actionable: no validated setup exists for a ${reg} regime. The one validated cell is a ${cell}.`;
+    }
+    const want = VALIDATED_A_CELLS.filter((c) => c.regime === reg);
+    const sided = graded.filter((s) => want.some((c) => c.side === (s.direction || '').toUpperCase()));
+    if (!sided.length) return `Nothing actionable: the regime is ${reg} and the validated cell is a ${cell}, but no setup on that side fired today.`;
+    const liquid = sided.filter((s) => want.some((c) => c.side === (s.direction || '').toUpperCase() && (c.liquid === undefined || c.liquid === !!s.is_liquid)));
+    if (!liquid.length) return `Nothing actionable: ${sided.length} setup${sided.length === 1 ? '' : 's'} fired on the validated side, ${sided.length === 1 ? 'and it is' : 'and every one is'} outside the liquid universe. The validated cell is a ${cell}.`;
+    return 'Nothing actionable: no idea cleared the A grade this cycle.';
+  }
+  function renderLanes() {
+    const el = $('riverLanes'); if (!el) return;
+    const now = Date.now();
+    const notices = noticeRowsHtml(now);
+    const d = _laneData;
+    if (!d) { el.innerHTML = notices + '<div class="rl-seam">The idea feed has not been read yet this session.</div>'; return; }
+
+    const graded = d.roster.filter((s) => s._grade !== '—');
+    const actionable = graded.filter((s) => s._grade === 'A');
+    const watch = graded.filter((s) => s._grade !== 'A');
+    const unproven = [...d.roster.filter((s) => s._grade === '—'), ...d.riverOnly, ...d.nonRoster];
+    const ctx = [..._river.values()].filter((i) => i.type !== 'signal')
+      .sort((a, b) => ((a.ts == null) - (b.ts == null)) || ((b.ts || 0) - (a.ts || 0))).slice(0, LANE_CONTEXT_MAX);
+
+    const empty = (msg) => `<div class="rl-empty">${esc(msg)}</div>`;
+    // Lane 2 joins when the feed says which position an idea touches and the position carries a
+    // written exit (R-IV.568). Neither field exists yet, so the count is UNKNOWN — not zero:
+    // "0 ideas touch your book" is a claim this page cannot make.
+    const bookSeam = '<div class="rl-seam">No idea in the feed names a position it touches, and no position carries a written exit, so this lane has nothing it can fill without guessing. '
+      + 'When those fields land (R-IV.568) each item reads <b>CONTRADICTS</b> or <b>CONFIRMS</b>, contradictions first, with the position\'s own exit under it — '
+      + '&ldquo;Your exit: broker stop / invalidation / time stop&rdquo;, or <b>No exit written</b>.</div>';
+
+    const circeToday = [..._river.values()].filter((i) => i.riverOnly && i.ts && etDate(i.ts) === etDate(now)).length;
+    const circeRow = circeToday
+      ? `<div class="rl-meter${circeToday > CIRCE_DAILY_CEILING ? ' over' : ''}">CIRCE'S STEW · SHADOW · ${circeToday} seen today (ET)`
+        + (circeToday > CIRCE_DAILY_CEILING ? ` — above the ~${CIRCE_DAILY_CEILING}/day ceiling: the trigger is too loose (R-IV.421(d))` : '') + '</div>'
+      : '';
+
+    const foot = [
+      d.answered
+        ? `${d.read} idea${d.read === 1 ? '' : 's'} read` + (d.total != null && d.total > d.read ? ` of ${d.total} active — the feed serves ${IDEA_PAGE} a page and ${d.pages} were taken; the rest score lower` : '')
+        : 'the idea feed did not answer',
+      d.cryptoExcluded ? `${d.cryptoExcluded} crypto idea${d.cryptoExcluded === 1 ? '' : 's'} excluded — the River is the equity desk (R-IV.569(b))` : '',
+      d.levelCapped ? `${d.levelCapped} name${d.levelCapped === 1 ? '' : 's'} past the ${LANE_LEVEL_MAX}-name evidence read show "grade pending"` : '',
+      'read ' + (riverTime(d.at) || ''),
+    ].filter(Boolean).join(' · ');
+
+    el.innerHTML = notices
+      + laneShell('Actionable', actionable.length, actionable.length
+          ? actionable.map((s) => laneSigRow(s, { grade: true })).join('')
+          : empty(actionableReason(d, graded)), { key: 'actionable', note: 'A grade only' })
+      + laneShell('Your book', '—', bookSeam, { key: 'book', countUnknown: true, note: 'waiting on the feed', countTitle: 'Unknown, not zero: the feed does not yet say which ideas touch your positions.' })
+      + laneShell('Watch', watch.length, watch.length
+          ? watch.map((s) => laneSigRow(s, { grade: true })).join('')
+          : empty('No roster setup below A fired this cycle.'), { key: 'watch', note: 'grade shown; gates later' })
+      + laneShell('Unproven', unproven.length, circeRow + (unproven.length
+          // A display-mapped class keeps its name even when it never grades (shadow, river-only);
+          // only a class the roster does not know surfaces under its raw DB identifier.
+          ? unproven.map((s) => laneSigRow(s, { raw: !setupDisplay(s.codename || s.signal_type || s.strategy).roster })).join('')
+          : empty('No shadow or non-roster class fired this cycle.')), { key: 'unproven', collapsed: true, note: 'no measured expectancy' })
+      + laneShell('Context', ctx.length, ctx.length
+          ? ctx.map((i) => `<div class="rl-row" data-rid="${esc(i.id)}"><div class="rl-main"><span class="rl-k">${esc(i.type)}</span>${i.text}</div><div class="rl-sub">${riverTime(i.ts) ? `<span class="rl-time">${esc(riverTime(i.ts))}</span>` : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This item carries no time of its own, so none is shown.' })}</div></div>`).join('')
+          : empty('Nothing in context yet.'), { key: 'context', note: 'not trades' })
+      + `<div class="rl-foot">${esc(foot)}</div>`;
+    applyGlossary(el);
+  }
+
+  function renderClassicRiver() {
     const el = $('riverStream'); if (!el) return;
     let items = [..._river.values()];
     if (_riverFilter !== 'all') items = items.filter((i) => i.type === _riverFilter);
@@ -1723,17 +1963,16 @@
     // floor on the day's fires, and the label says so.
     const today = etDate(Date.now());
     const circeToday = [..._river.values()].filter((i) => i.riverOnly && i.ts && etDate(i.ts) === today).length;
-    const noticeRows = activeNotices(Date.now()).map((n) =>
-      `<div class="rv-notice" data-nid="${esc(n.id)}">`
-      + (n.title ? `<span class="rv-notice-t">${esc(n.title)}</span>` : '')
-      + (n.body ? `<span class="rv-notice-b">${esc(n.body)}</span>` : '')
-      + '</div>').join('');
+    const noticeRows = noticeRowsHtml(Date.now());
+    // The exclusion is the whole River's, not the lanes' — so the classic view owes the same count.
+    const cryptoRow = (_laneData && _laneData.cryptoExcluded && (_riverFilter === 'all' || _riverFilter === 'signal'))
+      ? `<div class="rv-count">${_laneData.cryptoExcluded} crypto ideas excluded — the River is the equity desk (R-IV.569(b))</div>` : '';
     const countRow = circeToday && (_riverFilter === 'all' || _riverFilter === 'signal')
       ? `<div class="rv-count${circeToday > CIRCE_DAILY_CEILING ? ' over' : ''}">CIRCE'S STEW · SHADOW · ${circeToday} seen today (ET)`
         + (circeToday > CIRCE_DAILY_CEILING ? ` — above the ~${CIRCE_DAILY_CEILING}/day ceiling: the trigger is too loose (R-IV.421(d))` : '') + '</div>'
       : '';
-    if (!items.length) { el.innerHTML = noticeRows + countRow + '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
-    el.innerHTML = noticeRows + countRow + items.map((it) => {
+    if (!items.length) { el.innerHTML = noticeRows + countRow + cryptoRow + '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
+    el.innerHTML = noticeRows + countRow + cryptoRow + items.map((it) => {
       const rt = riverTime(it.ts);
       const hh = rt ? rt : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This item carries no time of its own, so none is shown.' });
       const acked = _rvAcked.has(it.id);
