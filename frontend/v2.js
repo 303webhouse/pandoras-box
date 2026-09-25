@@ -1755,6 +1755,8 @@
       ts: firstTime(s.timestamp, s.created_at),
       riverOnly: !!disp.riverOnly,
       text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
+        // The same flag in the other view: one River, and neither view is the one that omits it.
+        + (s.high_score === true ? ` · <span class="rv-high" title="${esc(highScoreNumber(s) == null ? 'Scores high, but not a validated setup. Actionable needs an A.' : 'Scores ' + highScoreNumber(s) + ': high, but not a validated setup. Actionable needs an A.')}">high score${highScoreNumber(s) == null ? '' : ' ' + highScoreNumber(s)}</span>` : '')
         + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : '')
         // R-IV.579(a)2: the same error the lanes show, so neither view is the one that hides it.
         + (rowError(s) ? `<div class="rv-err">${esc(rowError(s))}</div>` : ''),
@@ -1891,6 +1893,38 @@
     return t ? `<span class="rl-time">${esc(t)}</span>`
       : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This idea carries no time of its own, so none is shown.' });
   }
+  // R-IV.588 — the high-score badge. `high_score` is the SERVER's flag (R-IV.584(b)): the
+  // 85-point threshold that used to divert a signal out of the feed entirely now only marks it,
+  // and the row stays. The page never recomputes it — one author for the fact.
+  //
+  // THE NUMBER IS NOT THE PAGE'S RANKING NUMBER. The server flags on `score_v2 ?? score`
+  // (`models.signal_lifecycle.score_of`); this page RANKS on `adjusted_score ?? score_v2 ?? score`.
+  // They differ on 41 of today's 48 live rows — DE is 93 by the flag's number and 85 by the
+  // ranking's — so printing the ranking number beside the flag would put a figure in the tooltip
+  // that contradicts the badge it explains. This reads the flag's own number, or none.
+  const highScoreNumber = (s) => {
+    for (const k of ['score_v2', 'score']) {
+      const v = s[k];
+      if (v == null) continue;
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  };
+  // Quiet: the same neutral chip as the grade, in --text-2. Teal is "attention" in this palette
+  // and a badge that shouts is not a quiet badge (R-IV.588(a)).
+  //
+  // R-IV.588(b): the tooltip is the whole point. A 92 sitting in Watch next to an empty Actionable
+  // looks like a bug unless the page says why — the A grade turns on the validated cell, not on
+  // the score, and R-IV.588(c) keeps it that way: this touches neither the grade nor the lane.
+  function highBadge(s) {
+    if (!s || s.high_score !== true) return '';
+    const n = highScoreNumber(s);
+    const tip = n == null
+      ? 'Scores high, but not a validated setup. Actionable needs an A.'
+      : `Scores ${n}: high, but not a validated setup. Actionable needs an A.`;
+    return `<span class="rl-high" title="${esc(tip)}">high score${n == null ? '' : ' ' + n}</span>`;
+  }
   function laneGrade(s) {
     if (s._gradePending) return `<span class="rl-grade pending" title="This row's level evidence was not read this cycle (the read is capped at ${LANE_LEVEL_MAX} names), so its grade would be a guess between B and C.">grade pending</span>`;
     return `<span class="rl-grade${s._grade === 'A' ? ' a' : ''}" data-gloss="GRADE">grade ${esc(s._grade)}</span>`;
@@ -1911,7 +1945,7 @@
     const err = rowError(s);
     return `<div class="rl-row${err ? ' rl-bad' : ''}" data-sid="${esc(s.signal_id || '')}">
         <div class="rl-main">${name} <span class="rl-tkr">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
-        <div class="rl-sub">${err ? `<span class="rl-err" title="This row is being shown, not hidden, so the regression is visible: the page no longer filters it.">${esc(err)}</span>` : ''}${o.grade ? laneGrade(s) : ''}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
+        <div class="rl-sub">${err ? `<span class="rl-err" title="This row is being shown, not hidden, so the regression is visible: the page no longer filters it.">${esc(err)}</span>` : ''}${o.grade ? laneGrade(s) : ''}${highBadge(s)}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
         ${disp.banner ? `<div class="rl-banner">${esc(disp.banner)}</div>` : ''}
       </div>`;
   }
