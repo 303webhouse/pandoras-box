@@ -960,3 +960,10 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .rl-row.rl-bad { border-left: 3px solid var(--down); padding-left: 8px; }
 .rl-err { color: var(--down); border: 1px solid var(--down); border-radius: 4px; padding: 0 4px; }
 .rv-item .rv-err { margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--down); }
+
+/* R-IV.588 — the high-score badge. The neutral chip, deliberately the same shape and weight as
+   the grade beside it: the score is context, not a verdict, and it must not out-shout the grade
+   it sits next to. No teal (that is attention), no lime, no vermilion. */
+.rl-high { font-family: var(--mono); font-size: 10px; color: var(--text-2);
+  border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; }
+.rv-item .rv-high { font-family: var(--mono); font-size: 10px; color: var(--text-2); }
