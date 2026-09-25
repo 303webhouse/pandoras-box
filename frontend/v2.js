@@ -1740,6 +1740,35 @@
     const pre = new Intl.DateTimeFormat('en-US', recent ? { timeZone: tz, weekday: 'short' } : { timeZone: tz, month: 'short', day: 'numeric' }).format(d);
     return pre + ' ' + clock + ' MT';
   }
+  // ── R-IV.591 · a signal that was HELD says when it actually fired ──────────
+  // BUILD holds a signal fired outside the regular session to the next open (R-IV.587(b)):
+  // `release_at` is the hold, `fired_at` is when the setup appeared, and the fire time is never
+  // rewritten to the release.
+  //
+  // THE TEST IS `release_at`, NOT `held`. The feed only serves rows whose hold has passed
+  // (`SERVE_RELEASED_SQL`: release_at IS NULL OR release_at <= NOW()), and `held` means "still
+  // waiting" — so on this page `held` is ALWAYS false, and a label built on it would never
+  // render once. A non-null `release_at` is the durable record that this row WAS held.
+  const heldRelease = (s) => apiTime(s && s.release_at);
+  // R-IV.585(c): the phrase per session, and only these. `regular` gets the label with NO phrase
+  // (a held signal that fired in the regular session was held for some other reason, and the
+  // label must not imply one); a null — or any spelling this page does not know — gets NO LABEL,
+  // because "the market was shut" and "nobody knows" are different claims.
+  const SESSION_PHRASE = { after_hours: 'after the close', pre_market: 'before the open',
+    closed: 'while the market was closed', regular: '' };
+  // R-IV.585(b)/591(b): ONE formatter. riverTime() verbatim, never a second time format.
+  function heldLabel(s) {
+    if (heldRelease(s) == null) return '';
+    const sess = String(s.session == null ? '' : s.session).trim().toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(SESSION_PHRASE, sess)) return '';
+    const t = riverTime(firstTime(s.fired_at, s.timestamp, s.created_at));
+    if (t == null) return '';                  // no fire time to state, so nothing is stated
+    return 'fired ' + t + (SESSION_PHRASE[sess] ? ' · ' + SESSION_PHRASE[sess] : '');
+  }
+  // R-IV.591(b): the row sits where it became actionable. Both are stamps the row carries, so
+  // R-IV.563 holds either way — this is not a substituted time, it is the other real one.
+  const rowTime = (s) => { const r = heldRelease(s); return r != null ? r : firstTime(s.fired_at, s.timestamp, s.created_at); };
+
   function addRiverItems(items) { (items || []).forEach((it) => { if (it && it.id) _river.set(it.id, it); }); }
   function signalRiverItem(s, smap) {
     const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
@@ -1752,12 +1781,13 @@
       // amber banner to 3.08:1 on --panel, and a warning nobody can read is not a warning.
       tier: disp.banner ? 'shadow-banner' : shadow ? 'shadow' : (grade === 'A' || grade === 'B' ? 'action' : 'info'),
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : 'teal',
-      ts: firstTime(s.timestamp, s.created_at),
+      ts: rowTime(s),
       riverOnly: !!disp.riverOnly,
       text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
         // The same flag in the other view: one River, and neither view is the one that omits it.
         + (s.high_score === true ? ` · <span class="rv-high" title="${esc(highScoreNumber(s) == null ? 'Scores high, but not a validated setup. Actionable needs an A.' : 'Scores ' + highScoreNumber(s) + ': high, but not a validated setup. Actionable needs an A.')}">high score${highScoreNumber(s) == null ? '' : ' ' + highScoreNumber(s)}</span>` : '')
         + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : '')
+        + (heldLabel(s) ? `<div class="rv-held">${esc(heldLabel(s))}</div>` : '')
         // R-IV.579(a)2: the same error the lanes show, so neither view is the one that hides it.
         + (rowError(s) ? `<div class="rv-err">${esc(rowError(s))}</div>` : ''),
     };
@@ -1769,8 +1799,9 @@
     return {
       id: 'nr:' + (s.signal_id || raw + (s.ticker || '')), type: 'signal', tier: 'info',
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : null,
-      ts: firstTime(s.timestamp, s.created_at),
-      text: `<span class="rv-raw">${esc(raw)}</span> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`,
+      ts: rowTime(s),
+      text: `<span class="rv-raw">${esc(raw)}</span> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`
+        + (heldLabel(s) ? `<div class="rv-held">${esc(heldLabel(s))}</div>` : ''),
     };
   }
   function emitRegimeRiverItems(composite, regime, kill) {
@@ -1889,9 +1920,13 @@
     return `<section class="rl-lane" data-lane="${esc(o.key || title)}"><h3 class="rl-h">${head}</h3>${body}</section>`;
   }
   function laneTime(s) {
-    const t = riverTime(firstTime(s.timestamp, s.created_at));
-    return t ? `<span class="rl-time">${esc(t)}</span>`
-      : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This idea carries no time of its own, so none is shown.' });
+    const t = riverTime(rowTime(s));
+    if (!t) return vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This idea carries no time of its own, so none is shown.' });
+    // A held row shows TWO real times — when it was released, and when it fired — so the one on
+    // the row says which it is. Two unlabelled times beside each other would read as a
+    // contradiction rather than a disclosure.
+    const rel = heldRelease(s) != null;
+    return `<span class="rl-time"${rel ? ' title="When this signal was released to the desk. It fired earlier, outside the regular session; the line below says when."' : ''}>${rel ? 'released ' : ''}${esc(t)}</span>`;
   }
   // R-IV.588 — the high-score badge. `high_score` is the SERVER's flag (R-IV.584(b)): the
   // 85-point threshold that used to divert a signal out of the feed entirely now only marks it,
@@ -1946,6 +1981,7 @@
     return `<div class="rl-row${err ? ' rl-bad' : ''}" data-sid="${esc(s.signal_id || '')}">
         <div class="rl-main">${name} <span class="rl-tkr">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
         <div class="rl-sub">${err ? `<span class="rl-err" title="This row is being shown, not hidden, so the regression is visible: the page no longer filters it.">${esc(err)}</span>` : ''}${o.grade ? laneGrade(s) : ''}${highBadge(s)}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
+        ${heldLabel(s) ? `<div class="rl-held">${esc(heldLabel(s))}</div>` : ''}
         ${disp.banner ? `<div class="rl-banner">${esc(disp.banner)}</div>` : ''}
       </div>`;
   }
