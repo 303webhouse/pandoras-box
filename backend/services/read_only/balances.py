@@ -123,7 +123,12 @@ async def _attach_derived_cash(pool, rows: List[Dict[str, Any]]) -> None:
             d["cash_derived"] = derived["balance"]
             d["cash_derivable"] = derived["derivable"]
             d["cash_derived_reason"] = derived["reason"]
-            d["cash_difference"] = rec["difference"]
+            # R-IV.567(c): NAMED FOR WHAT IT COMPARES AGAINST. Served as
+            # `cash_difference` a committee seat reads it as a live discrepancy in the
+            # cash figure, when it is the gap against a total that has been RETIRED --
+            # the Roth's stored cash is -1,229.51, which a Roth cannot hold. It is the
+            # broker-CSV cleanup's target, not a fault in the number beside it.
+            d["cash_vs_retired_stored"] = rec["difference"]
             if derived["derivable"]:
                 d["cash"] = derived["balance"]
                 d["cash_source"] = "derived"

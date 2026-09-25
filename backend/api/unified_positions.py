@@ -3039,9 +3039,18 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
     """
     if req.qty == 0:
         raise HTTPException(status_code=400, detail="qty must be non-zero")
-    if req.source not in ("MANUAL", "IMPORT"):
+    # R-IV.566(c)/R-IV.567(b): `principal-entry@<instant>` is what the live create and
+    # close paths stamp, so the route that exists to add a lot by hand must accept the
+    # same value -- otherwise the only way to write the form's own shape would be raw
+    # SQL, which is the gap R-IV.566(c) was reported for in the first place.
+    # `provenance_for_lot` already maps an unrecognised source to PRINCIPAL_REPORTED,
+    # the weakest claim, which is the right answer for it.
+    from models.position_lots import is_principal_entry
+
+    if req.source not in ("MANUAL", "IMPORT") and not is_principal_entry(req.source):
         raise HTTPException(status_code=400,
-                            detail="source must be MANUAL or IMPORT; LEGACY-SINGLE-LOT is "
+                            detail="source must be MANUAL, IMPORT or "
+                                   "principal-entry@<ISO instant>; LEGACY-SINGLE-LOT is "
                                    "reserved for the Phase-1 backfill")
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
