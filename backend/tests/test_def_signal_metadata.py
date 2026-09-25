@@ -20,6 +20,7 @@ mocked; the timestamp checks are static-source regression guards.
 
 import asyncio
 import os
+import pytest
 import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -64,15 +65,55 @@ def _signal(**overrides):
     return base
 
 
-# log_signal()'s positional parameter tail. `source` was the LAST argument when
-# these guards were written; STRIKE-SPEC-01 (2026-09-02) appended `status` as $38,
-# and R-IV.432(f) (2026-09-17) appended `expires_at` as $39. Kept as named
-# constants rather than bare indices so the next append has exactly one place to
-# update — and so a future append that silently shifts these assertions fails
-# loudly here instead of quietly re-pointing them at the wrong column.
-SOURCE_ARG = -3
-STATUS_ARG = -2
-EXPIRES_ARG = -1
+# log_signal()'s positional parameters, READ OFF ITS OWN INSERT rather than counted
+# backwards from the end.
+#
+# These were `-3`, `-2`, `-1`, with a comment promising that a future append would "fail
+# loudly here". It did not. R-IV.587(b) appended `release_at` as $40 and all three indices
+# slid one column to the left in silence: the source assertion began reading `status`, found
+# 'ACTIVE', and reported "source not persisted". The failure named the wrong defect, which is
+# the real cost — a positional index that nothing anchors will eventually point somewhere else
+# and still look like an assertion about the thing it was named for.
+#
+# So the index is now DERIVED from the column list in the statement itself. An append moves
+# nothing; a RENAME or a removal raises here by name, which is the case worth failing on.
+
+
+def _arg_index(column: str) -> int:
+    """Which positional argument carries `column`, from log_signal's own INSERT."""
+    import inspect
+    import re
+
+    from database import postgres_client as _pc
+
+    src = inspect.getsource(_pc.log_signal)
+    match = re.search(r"INSERT INTO signals \(\s*(.*?)\)\s*VALUES", src, re.S)
+    assert match, "log_signal's INSERT could not be read"
+    columns = [c.strip() for c in match.group(1).split(",")
+               if c.strip() and not c.strip().startswith("--")]
+    assert column in columns, "%s is not a column of log_signal's INSERT; it lists %s" % (
+        column, columns)
+    # The parameters follow the SQL string, so argument 0 is the statement itself.
+    return columns.index(column) + 1
+
+
+SOURCE_ARG = _arg_index("source")
+STATUS_ARG = _arg_index("status")
+EXPIRES_ARG = _arg_index("expires_at")
+RELEASE_ARG = _arg_index("release_at")
+
+
+def test_the_parameter_indices_are_read_off_the_statement_not_counted_backwards():
+    """The guard the old `-3, -2, -1` could not give.
+
+    POSITIVE CONTROL: the derivation really does find distinct, ordered positions, and it
+    raises by name for a column that is not there — so a rename fails loudly instead of
+    re-pointing an assertion at its neighbour.
+    """
+    assert SOURCE_ARG < STATUS_ARG < EXPIRES_ARG < RELEASE_ARG
+    assert len({SOURCE_ARG, STATUS_ARG, EXPIRES_ARG, RELEASE_ARG}) == 4
+    with pytest.raises(AssertionError):
+        _arg_index("a_column_that_does_not_exist")
 
 
 def _run_log_signal(signal_data):

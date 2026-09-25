@@ -1382,6 +1382,20 @@ async def init_database():
                         CHECK (status IS NULL OR status IN (%s));
                 END $$
             """ % ", ".join("'%s'" % s for s in _SIGNAL_STATUS_VALUES)),
+            # R-IV.565 / R-IV.587(b): A HELD SIGNAL IS A ROW, NOT A TIMER.
+            #
+            # A swing or weekly signal that fires overnight is held to the next regular open.
+            # The hold lives HERE so a restart cannot lose it -- this process restarts on every
+            # deploy, and a hold kept in memory would release everything early, once, silently.
+            # NULL means "serve it now", so every row written before this rule reads correctly
+            # with no backfill.
+            ("release stamp: signals", """
+                ALTER TABLE signals ADD COLUMN IF NOT EXISTS release_at TIMESTAMP
+            """),
+            ("release stamp index: signals", """
+                CREATE INDEX IF NOT EXISTS idx_signals_release_at
+                    ON signals (release_at) WHERE release_at IS NOT NULL
+            """),
             ("signal lifecycle audit", """
                 CREATE TABLE IF NOT EXISTS signal_lifecycle_events (
                     id                BIGSERIAL   PRIMARY KEY,
@@ -2833,12 +2847,12 @@ async def log_signal(
                 day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category,
                 feed_tier, adx_value, feed_tier_ceiling, score_ceiling_reason, gate_type,
                 feed_tier_v2, feed_tier_v2_path, feed_tier_diverged, confluence_badge,
-                source, status, expires_at
+                source, status, expires_at, release_at
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                 $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                $33, $34, $35, $36, $37, $38, $39
+                $33, $34, $35, $36, $37, $38, $39, $40
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -2914,6 +2928,11 @@ async def log_signal(
             # An unreadable value is stored as NULL -- the old behaviour -- never a reason to
             # lose the signal.
             _expiry_for_db(signal_data.get("expires_at"), signal_data.get("signal_id")),
+            # $40 R-IV.587(b)2: the hold lives in the row. Through the same reader as the
+            # expiry, so a hold and an expiry cannot be stored in two different shapes, and an
+            # unreadable value becomes NULL -- which the feed reads as "serve it now". Failing
+            # OPEN is right here: a bad value should show a signal early, never hide it forever.
+            _expiry_for_db(signal_data.get("release_at"), signal_data.get("signal_id")),
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:

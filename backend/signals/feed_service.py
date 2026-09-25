@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
 from config.strategy_class import attach_strategy_class, strategy_class  # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL  # RV4, R-IV.566(e)2
+from signals.session_policy import SERVE_RELEASED_SQL, is_held  # R-IV.587(b)1
 from stable_engine.sessions import session_at  # RV5, R-IV.566(e)3
 from models.signal_lifecycle import is_high_score, score_of  # R-IV.584(b)
 
@@ -64,6 +65,21 @@ def _dedup_related_signals(related: list) -> list:
     return keep
 
 
+def _as_datetime(value):
+    """A stamp as a datetime, whatever shape it arrives in. One parser for both stamps.
+
+    Some callers hand over a raw record and some a row already through `serialize_db_row`, so a
+    stamp reaches here as either a datetime or an ISO string. Parsing it in two places is how
+    the two come to disagree about the same instant.
+    """
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, datetime) else None
+
+
 def session_of(row) -> Optional[str]:
     """The session a signal FIRED in, from the one session calendar. RV5.
 
@@ -76,15 +92,8 @@ def session_of(row) -> Optional[str]:
     is not `closed`: "the market was shut" and "nobody knows" are different claims,
     and R-IV.565's drop/hold policy must not drop a signal on a missing answer.
     """
-    ts = row.get("timestamp") or row.get("created_at")
-    if isinstance(ts, str):
-        try:
-            ts = datetime.fromisoformat(ts)
-        except ValueError:
-            return None
-    if not isinstance(ts, datetime):
-        return None
-    return session_at(ts)
+    ts = _as_datetime(row.get("timestamp") or row.get("created_at"))
+    return session_at(ts) if ts is not None else None
 
 
 def tag_row(d: dict) -> dict:
@@ -110,6 +119,12 @@ def tag_row(d: dict) -> dict:
     # 100. It now marks the row and the row stays. Derived on read from the same COALESCE the
     # ranking uses, never stored: a stored flag is one more writer to fall out of step.
     d["high_score"] = is_high_score(score_of(d))
+    # R-IV.587(b)4: BOTH stamps, so the page can say when a signal fired and when it was
+    # released. `release_at` is None for anything delivered straight away, which is the same
+    # shape as every row written before this rule -- the page shows one stamp or two, and never
+    # has to work out which case it is looking at.
+    d["fired_at"] = d.get("timestamp") or d.get("created_at")
+    d["held"] = is_held(_as_datetime(d.get("release_at")))
     return d
 
 
@@ -160,6 +175,9 @@ async def get_active_trade_ideas(
         # generalizes it across the remaining raw read paths. Covers the committee
         # surface (hub_get_trade_ideas) and REST /trade-ideas — both route here.
         "(enrichment_data -> 'quarantine') IS NULL",
+        # R-IV.587(b)1: a held signal is one whose release_at is in the future. NULL means
+        # "serve it now", so every row written before this rule reads correctly with no backfill.
+        SERVE_RELEASED_SQL,
     ]
     # RV4 (R-IV.566(e)2). This function is BOTH the grouped page feed and the
     # committee's MCP surface (hub_get_trade_ideas), and the swamping is the same on
