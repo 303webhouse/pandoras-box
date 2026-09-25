@@ -1592,6 +1592,32 @@
     renderRiver();
   }
   let _riverFilter = 'all';
+  // R-IV.563 (RV2/RV3) -- the River's clock. An item's time is the time IT carries, or nothing:
+  // never Date.now() at poll time (that made every item "new" at any hour and re-stamped it on
+  // every refresh). Anything without a time reads "time unknown", sorts last, and stays that way.
+  const OFFSETLESS_TS = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+  function apiTime(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') return Number.isFinite(v) ? (v > 1e11 ? v : v * 1000) : null;
+    const s = String(v).trim();
+    // The API's timestamps are UTC. A browser reads an offset-less "2026-09-24T19:45:00" as LOCAL
+    // time, hours off; say UTC explicitly. (BUILD's RV1 will add the offset; this is right either way.)
+    if (OFFSETLESS_TS.test(s)) { const t = Date.parse(s.replace(' ', 'T') + 'Z'); return Number.isFinite(t) ? t : null; }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;      // a date with no time of day is not a time
+    const t = Date.parse(s); return Number.isFinite(t) ? t : null;
+  }
+  const firstTime = (...vals) => { for (const v of vals) { const t = apiTime(v); if (t != null) return t; } return null; };
+  // "1:45 PM MT"; with the day when it is not today (Denver's day): "Wed 1:45 PM MT".
+  function riverTime(ms) {
+    if (ms == null) return null;
+    const tz = 'America/Denver', d = new Date(ms);
+    const ymd = (t) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(t));
+    const clock = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true }).format(d).replace(/[\u202f\u00a0]/g, ' ');
+    if (ymd(ms) === ymd(Date.now())) return clock + ' MT';
+    const recent = Math.abs(Date.now() - ms) < 6 * 864e5;
+    const pre = new Intl.DateTimeFormat('en-US', recent ? { timeZone: tz, weekday: 'short' } : { timeZone: tz, month: 'short', day: 'numeric' }).format(d);
+    return pre + ' ' + clock + ' MT';
+  }
   function addRiverItems(items) { (items || []).forEach((it) => { if (it && it.id) _river.set(it.id, it); }); }
   function signalRiverItem(s, smap) {
     const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
@@ -1604,7 +1630,7 @@
       // amber banner to 3.08:1 on --panel, and a warning nobody can read is not a warning.
       tier: disp.banner ? 'shadow-banner' : shadow ? 'shadow' : (grade === 'A' || grade === 'B' ? 'action' : 'info'),
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : 'teal',
-      ts: s.timestamp ? Date.parse(s.timestamp) : (s.created_at ? Date.parse(s.created_at) : Date.now()),
+      ts: firstTime(s.timestamp, s.created_at),
       riverOnly: !!disp.riverOnly,
       text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
         + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : ''),
@@ -1617,7 +1643,7 @@
     return {
       id: 'nr:' + (s.signal_id || raw + (s.ticker || '')), type: 'signal', tier: 'info',
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : null,
-      ts: s.timestamp ? Date.parse(s.timestamp) : (s.created_at ? Date.parse(s.created_at) : Date.now()),
+      ts: firstTime(s.timestamp, s.created_at),
       text: `<span class="rv-raw">${esc(raw)}</span> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`,
     };
   }
@@ -1629,13 +1655,13 @@
       const cDir = c100 == null ? 0 : c100 >= 55 ? 1 : c100 <= 45 ? -1 : 0;
       const sDir = rl === 'RISK-ON' ? 1 : rl === 'RISK-OFF' ? -1 : 0;
       if (cDir && sDir && cDir !== sDir) {
-        addRiverItems([{ id: 'div:' + rl + ':' + cDir, type: 'regime', tier: 'action', sev: 'teal', ts: Date.now(),
+        addRiverItems([{ id: 'div:' + rl + ':' + cDir, type: 'regime', tier: 'action', sev: 'teal', ts: null,
           text: `<b>Lens divergence</b> — Composite ${c100}/100 vs Stable ${esc(rl)}. Size with caution.` }]);
       }
     }
     const k = kill && kill.kill_switch;
     if (k && k.active) {
-      addRiverItems([{ id: 'kill:' + (k.trigger || '') + ':' + (k.triggered_at || ''), type: 'regime', tier: 'action', sev: 'down', ts: k.triggered_at ? Date.parse(k.triggered_at) : Date.now(),
+      addRiverItems([{ id: 'kill:' + (k.trigger || '') + ':' + (k.triggered_at || ''), type: 'regime', tier: 'action', sev: 'down', ts: apiTime(k.triggered_at),
         text: `<b>Kill-switch ARMED</b> — ${esc(k.trigger || 'risk-off')}${k.description ? ' · ' + esc(k.description) : ''}` }]);
     }
     renderRiver();
@@ -1651,23 +1677,23 @@
         const align = (f.alignment || '').toUpperCase();
         if (align === 'NEUTRAL' || !align) return;
         items.push({ id: 'flow:' + (f.ticker || i) + ':' + align, type: 'flow',
-          tier: f.strength === 'STRONG' ? 'action' : 'info', sev: align === 'CONFIRMING' ? 'up' : 'down', ts: Date.now(),
+          tier: f.strength === 'STRONG' ? 'action' : 'info', sev: align === 'CONFIRMING' ? 'up' : 'down', ts: null,
           text: `<b>${esc(f.ticker || '')}</b> flow ${align.toLowerCase()}${f.strength ? ' (' + esc(f.strength.toLowerCase()) + ')' : ''} vs your position` });
       });
       (flow.watchlist_unusual || []).slice(0, 5).forEach((w, i) => {
-        items.push({ id: 'unusual:' + (w.ticker || i), type: 'flow', tier: 'info', sev: 'teal', ts: Date.now(),
+        items.push({ id: 'unusual:' + (w.ticker || i), type: 'flow', tier: 'info', sev: 'teal', ts: null,
           text: `Unusual flow · <b>${esc(w.ticker || '')}</b>${w.sentiment ? ' ' + esc(w.sentiment) : ''}` });
       });
       (flow.headlines || []).slice(0, 6).forEach((h, i) => {
         const hl = h.headline || h.title || ''; if (!hl) return;
         items.push({ id: 'hl:' + hl.slice(0, 40), type: 'headline', tier: 'info', sev: null,
-          ts: h.created_at ? Date.parse(h.created_at) : Date.now(), text: esc(hl) });
+          ts: apiTime(h.created_at), text: esc(hl) });
       });
     }
     if (hermes) {
       (hermes.alerts || []).forEach((a) => {
         items.push({ id: 'herm:' + (a.id || a.trigger_ticker), type: 'catalyst',
-          tier: (a.tier <= 1 ? 'action' : 'info'), sev: 'down', ts: a.created_at ? Date.parse(a.created_at) : Date.now(),
+          tier: (a.tier <= 1 ? 'action' : 'info'), sev: 'down', ts: apiTime(a.created_at),
           text: `<b>${esc(a.trigger_ticker || '')}</b> ${esc(a.headline_summary || a.event_type || 'catalyst')}` });
       });
     }
@@ -1676,7 +1702,7 @@
       const r = await _rawFetch('/stable_digest.md', { cache: 'no-store' });
       if (r.ok) {
         const txt = (await r.text()).trim();
-        if (txt && txt[0] !== '<') items.push({ id: 'stable:digest', type: 'stable', tier: 'info', sev: 'teal', ts: Date.now(), text: '<b>Stable digest</b> · ' + esc(txt.split('\n')[0].slice(0, 160)) });
+        if (txt && txt[0] !== '<') items.push({ id: 'stable:digest', type: 'stable', tier: 'info', sev: 'teal', ts: apiTime(r.headers.get('Last-Modified')), text: '<b>Stable digest</b> · ' + esc(txt.split('\n')[0].slice(0, 160)) });
       }
     } catch (_) {}
     addRiverItems(items);
@@ -1686,7 +1712,7 @@
     const el = $('riverStream'); if (!el) return;
     let items = [..._river.values()];
     if (_riverFilter !== 'all') items = items.filter((i) => i.type === _riverFilter);
-    items.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    items.sort((a, b) => ((a.ts == null) - (b.ts == null)) || ((b.ts || 0) - (a.ts || 0)));
     items = items.slice(0, 60);
     // pills
     const types = ['all', 'signal', 'flow', 'catalyst', 'regime', 'headline'];
@@ -1708,8 +1734,8 @@
       : '';
     if (!items.length) { el.innerHTML = noticeRows + countRow + '<div class="rv-item info"><span class="rv-txt val-muted">stream quiet</span></div>'; return; }
     el.innerHTML = noticeRows + countRow + items.map((it) => {
-      const t = new Date(it.ts || Date.now());
-      const hh = isNaN(t) ? '' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const rt = riverTime(it.ts);
+      const hh = rt ? rt : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This item carries no time of its own, so none is shown.' });
       const acked = _rvAcked.has(it.id);
       const pulse = acked ? '' : (it.sev === 'down' ? ' pulse-vermilion' : it.sev === 'up' ? ' pulse-lime' : ' pulse-teal');
       const cls = it.tier === 'action' ? 'action sev-' + (it.sev === 'up' ? 'up' : it.sev === 'down' ? 'down' : 'teal') + pulse + (acked ? ' acked' : '') : it.tier;
