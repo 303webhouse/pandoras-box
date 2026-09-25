@@ -25,6 +25,7 @@ from signals.feed_service import (
 from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
 from config.strategy_class import strategy_class                 # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL                # RV4, R-IV.566(e)2
+from signals.session_policy import SERVE_RELEASED_SQL            # R-IV.587(b)1
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -57,6 +58,7 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
             SELECT * FROM signals
             WHERE status = 'ACTIVE'
               AND {EXCLUDE_CRYPTO_SQL}   -- RV4
+              AND {SERVE_RELEASED_SQL}   -- R-IV.587(b)1
               AND (expires_at IS NULL OR expires_at > NOW())
               AND created_at > NOW() - INTERVAL '24 hours'
               AND user_action IS NULL
@@ -193,6 +195,7 @@ async def get_trade_ideas_feed(
         idx += 1
 
     conditions.append(EXCLUDE_CRYPTO_SQL)      # RV4
+    conditions.append(SERVE_RELEASED_SQL)      # R-IV.587(b)1
 
     # Exclude expired signals from ACTIVE feed
     if status and status.upper() == "ACTIVE":

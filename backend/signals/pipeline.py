@@ -171,8 +171,14 @@ def calculate_expiry(signal_data: Dict[str, Any]) -> Optional[datetime]:
     from models.signal_timeframe import UnknownTimeframe, ttl_for
 
     timeframe = signal_data.get("timeframe")
+    # R-IV.587(b)3: the clock starts at the release when there is one, and at now otherwise.
+    # `release_at` is already naive UTC by the time it reaches here, the same shape `utcnow()`
+    # returns, so the two are added to a timedelta the same way.
+    start = signal_data.get("release_at") or datetime.utcnow()
+    if getattr(start, "tzinfo", None) is not None:
+        start = start.astimezone(timezone.utc).replace(tzinfo=None)
     try:
-        return datetime.utcnow() + ttl_for(timeframe)
+        return start + ttl_for(timeframe)
     except UnknownTimeframe:
         logger.error(
             "REFUSED to set an expiry: unrecognised timeframe %r on %s (%s). The row keeps no "
@@ -1256,6 +1262,38 @@ async def process_signal_unified(
     # 1. Set lifecycle fields
     signal_data["source"] = source
     signal_data["status"] = signal_data.get("status", "ACTIVE")
+
+    # 1-session. R-IV.565, decided by R-IV.587(b): WHEN may this be shown?
+    #
+    # Decided BEFORE the expiry, because a held signal's clock starts at its release
+    # (R-IV.587(b)3) -- a 24-hour swing idea held from Friday evening and counting its life from
+    # firing would be dead before Monday's bell, which is the opposite of what holding it is for.
+    #
+    # A DROP returns before persistence, following this file's existing bail-out convention. A
+    # HOLD is a stamp on the row and nothing else: the fire time is untouched, because it is the
+    # only record of when the setup appeared and every outcome study reads it.
+    from signals.session_policy import DROP, HOLD, decide as _session_decide
+
+    _fired_at = signal_data.get("timestamp") or datetime.utcnow()
+    if isinstance(_fired_at, str):
+        try:
+            _fired_at = datetime.fromisoformat(_fired_at.replace("Z", "+00:00"))
+        except ValueError:
+            _fired_at = None
+    _action, _release_at, _why = _session_decide(
+        signal_data.get("timeframe"), _fired_at, signal_data.get("signal_id"))
+    if _action == DROP and not shadow:
+        signal_data["status"] = "REJECTED"
+        signal_data["session_policy"] = {"action": _action, "reason": _why}
+        logger.info("Pipeline bail-out: %s dropped by the session policy — %s",
+                    signal_data.get("ticker"), _why)
+        return signal_data
+    if _action == HOLD:
+        signal_data["release_at"] = _release_at
+        logger.info("Session policy: %s held until %s — %s",
+                    signal_data.get("ticker"), _release_at, _why)
+    signal_data["session_policy"] = {"action": _action, "reason": _why}
+
     signal_data["expires_at"] = signal_data.get("expires_at") or calculate_expiry(signal_data)
 
     # 1a. L0.1a suppression gate (SHADOW) — compute the per-signal_type KEEP/
