@@ -248,3 +248,49 @@ class TestBothStampsAreServed:
                               "release_at": "2099-01-01T00:00:00+00:00"})
         assert as_objects["held"] == as_strings["held"] is True
         assert as_objects["session"] == as_strings["session"]
+
+
+# ───────────────────────────────── R-IV.590(b): the drop is countable
+
+class TestADropIsARow:
+
+    def test_the_pipeline_persists_it_rather_than_bailing_out(self):
+        """R-IV.565(1) keeps dropped signals for the record. I had followed this file's
+        existing 'mark REJECTED and return' pattern, which never persists — the same
+        uncountable shape R-IV.584(d) had just replaced for conflicts, reintroduced one ruling
+        later in a different function."""
+        code = _code_without_docstrings("signals/pipeline.py")
+        assert "_persist_withheld" in code
+        # The old shape, gone: a mark-and-return that never reached the table.
+        assert "return signal_data" in code
+        assert '"REJECTED"' not in code.split("_persist_withheld")[0][-1200:]
+
+    def test_it_is_written_in_two_steps_and_the_reason_is_the_insert(self):
+        """`log_signal` writes `"SHADOW" if status == "SHADOW" else "ACTIVE"`, discarding every
+        other status (DEF-SIGNAL-STATUS-DISCARDED). Passing WITHHELD straight in would land the
+        row ACTIVE — on the feed, the exact opposite of withholding it."""
+        import inspect
+
+        from database import postgres_client as pc
+        from signals import pipeline
+
+        insert = inspect.getsource(pc.log_signal)
+        assert '"SHADOW" if signal_data.get("status") == "SHADOW" else "ACTIVE"' in insert
+
+        src = inspect.getsource(pipeline._persist_withheld)
+        assert "log_signal" in src and "set_state" in src
+
+    def test_it_uses_the_same_state_a_conflict_uses(self):
+        """Same fact: nobody judged the setup, it just cannot be shown. `session_policy` says
+        WHICH withholding it was, so the two are separable without a second state."""
+        from models.signal_lifecycle import WITHHELD, columns_for
+
+        assert columns_for(WITHHELD) == ("WITHHELD", "WITHHELD")
+        code = _code_without_docstrings("signals/pipeline.py")
+        assert "intraday outside regular hours" in code
+
+    def test_a_shadow_signal_is_never_withheld_by_the_policy(self):
+        """A shadow row is not on an actionable surface, so there is nothing to withhold it
+        from, and writing one would put a policy decision in a lane that must not have one."""
+        code = _code_without_docstrings("signals/pipeline.py")
+        assert "if _action == DROP and not shadow:" in code

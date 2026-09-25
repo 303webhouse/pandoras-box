@@ -23,6 +23,7 @@ from config.asset_class import EXCLUDE_CRYPTO_SQL  # RV4, R-IV.566(e)2
 from signals.session_policy import SERVE_RELEASED_SQL, is_held  # R-IV.587(b)1
 from stable_engine.sessions import session_at  # RV5, R-IV.566(e)3
 from models.signal_lifecycle import is_high_score, score_of  # R-IV.584(b)
+from models.signal_score import CANONICAL_SCORE_SQL, score_components  # R-IV.590(c)
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,12 @@ def tag_row(d: dict) -> dict:
     # committee queue that was never drained -- 25 to 81 rows a week, every one scoring 85 to
     # 100. It now marks the row and the row stays. Derived on read from the same COALESCE the
     # ranking uses, never stored: a stored flag is one more writer to fall out of step.
-    d["high_score"] = is_high_score(score_of(d))
+    # R-IV.590(c): ONE number per row, and the flag reads that same number. `score_components`
+    # rides along so the disagreement it replaces stays visible -- a reader seeing 85 can see
+    # whether context moved it or whether a scorer was simply absent.
+    d["canonical_score"] = score_of(d)
+    d["score_components"] = score_components(d)
+    d["high_score"] = is_high_score(d["canonical_score"])
     # R-IV.587(b)4: BOTH stamps, so the page can say when a signal fired and when it was
     # released. `release_at` is None for anything delivered straight away, which is the same
     # shape as every row written before this rule -- the page shows one stamp or two, and never
@@ -239,7 +245,7 @@ async def get_active_trade_ideas(
             f"""
             SELECT * FROM signals
             WHERE {where_clause}
-            ORDER BY COALESCE(adjusted_score, score_v2, score, 0) DESC, created_at DESC
+            ORDER BY {CANONICAL_SCORE_SQL} DESC, created_at DESC
             """,
             *params,
         )

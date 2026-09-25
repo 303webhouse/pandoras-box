@@ -1213,6 +1213,35 @@ def completion_status(persisted: bool, persist_error: BaseException | None) -> t
     )
 
 
+async def _persist_withheld(signal_data: Dict[str, Any], reason: str) -> None:
+    """Write a withheld signal to the table, then move it to WITHHELD through the one author.
+
+    TWO STEPS, NOT ONE, and the reason is `log_signal`'s own INSERT: it writes
+    `"SHADOW" if status == "SHADOW" else "ACTIVE"`, discarding every other status
+    (DEF-SIGNAL-STATUS-DISCARDED, ticketed and not mine to fix here). Passing WITHHELD straight
+    into it would land the row ACTIVE -- on the feed, which is the exact opposite of withholding
+    it. So the row is inserted, then moved by `services.signal_lifecycle`, which is the only
+    thing allowed to set those columns and leaves an audit row saying why.
+
+    A failure here loses the record of a drop, not a live signal, so it is logged and swallowed
+    rather than raised into the ingest path.
+    """
+    try:
+        from database.postgres_client import get_postgres_client, log_signal
+        from models.signal_lifecycle import WITHHELD as _W
+        from services.signal_lifecycle import ACTOR_PIPELINE, set_state
+
+        if not await log_signal(signal_data):
+            return                                    # duplicate signal_id; nothing to move
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await set_state(conn, signal_data["signal_id"], _W,
+                            reason=reason, actor=ACTOR_PIPELINE, ruling="R-IV.590(b)")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not record the withheld signal %s: %s",
+                       signal_data.get("signal_id"), exc)
+
+
 async def process_signal_unified(
     signal_data: Dict[str, Any],
     source: str = "tradingview",
@@ -1272,6 +1301,7 @@ async def process_signal_unified(
     # A DROP returns before persistence, following this file's existing bail-out convention. A
     # HOLD is a stamp on the row and nothing else: the fire time is untouched, because it is the
     # only record of when the setup appeared and every outcome study reads it.
+    from models.signal_lifecycle import WITHHELD
     from signals.session_policy import DROP, HOLD, decide as _session_decide
 
     _fired_at = signal_data.get("timestamp") or datetime.utcnow()
@@ -1283,10 +1313,26 @@ async def process_signal_unified(
     _action, _release_at, _why = _session_decide(
         signal_data.get("timeframe"), _fired_at, signal_data.get("signal_id"))
     if _action == DROP and not shadow:
-        signal_data["status"] = "REJECTED"
+        # R-IV.590(b): THE DROP IS A ROW. R-IV.565(1) said dropped signals are kept in the
+        # table for the record and never shown, and the bail-out convention yields to that.
+        #
+        # I had followed this file's existing "mark REJECTED and return" pattern, which never
+        # persists. That made the drop rate uncountable -- the same shape as the bare DISMISSED
+        # R-IV.584(d) had just replaced with a countable WITHHELD, reintroduced one ruling
+        # later in a different function. So it is written as WITHHELD, with its reason, and
+        # every query can count it.
+        #
+        # It is persisted as the SAME state a conflict uses because it is the same fact:
+        # nobody judged the setup, it just cannot be shown. `session_policy` carries WHICH
+        # withholding it was, so the two are separable without a second state.
+        signal_data["status"] = WITHHELD
+        signal_data["user_action"] = "WITHHELD"
+        signal_data["withheld_reason"] = "intraday outside regular hours"
         signal_data["session_policy"] = {"action": _action, "reason": _why}
-        logger.info("Pipeline bail-out: %s dropped by the session policy — %s",
-                    signal_data.get("ticker"), _why)
+        signal_data["notes"] = ((signal_data.get("notes") or "") and
+                                signal_data["notes"] + " | ") + "Withheld: " + _why
+        logger.info("Session policy: %s withheld — %s", signal_data.get("ticker"), _why)
+        await _persist_withheld(signal_data, _why)
         return signal_data
     if _action == HOLD:
         signal_data["release_at"] = _release_at

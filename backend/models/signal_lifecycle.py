@@ -119,23 +119,16 @@ def is_high_score(score: Optional[float]) -> bool:
 
 
 def score_of(row) -> Optional[float]:
-    """The score a signal is judged on: `score_v2`, falling back to `score`.
+    """The score a signal is judged on — THE canonical one. R-IV.590(c).
 
-    The same COALESCE the feed queries use, written once so the flag and the ranking cannot
-    disagree about which number they mean.
+    This used to read `score_v2` then `score`, which is NOT what the feed ranks by. The two
+    disagreed on 46 of 54 live rows: DE read 93 by this flag and 85 by the ranking, one card,
+    two numbers. It now delegates to `models.signal_score`, which holds the ranking expression
+    as one sentence in both SQL and Python, so a flag and an ORDER BY cannot drift again.
     """
-    for key in ("score_v2", "score"):
-        value = row.get(key) if hasattr(row, "get") else None
-        if value is None:
-            continue
-        try:
-            as_float = float(value)
-        except (TypeError, ValueError):
-            continue
-        if as_float != as_float:
-            continue
-        return as_float
-    return None
+    from models.signal_score import canonical_score
+
+    return canonical_score(row)
 
 
 # ── Reading a state back off a row ────────────────────────────────────────────────────────
