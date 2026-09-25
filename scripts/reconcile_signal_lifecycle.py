@@ -101,14 +101,27 @@ async def main() -> int:
               FROM signals
              ORDER BY created_at
         """)
+        # THE SET, chosen the way R-IV.584(c) names it, NOT by "is this row stateless".
+        #
+        # A stateless scan misses the four rows that matter most. `COMMITTEE_REVIEW` with no
+        # user_action is a perfectly COHERENT state -- `state_of` returns it -- so a scan for
+        # incoherence walks straight past the only rows genuinely waiting on a committee that
+        # no longer exists. Coherent and correct are different questions, and this ruling is
+        # about the second one.
         stateless = [r for r in rows if state_of(r["status"], r["user_action"]) is None]
-        print("rows in the table      : %d" % len(rows))
-        print("rows in NO state       : %d" % len(stateless))
+        parked = [r for r in rows if (r["status"] or "").upper() == "COMMITTEE_REVIEW"]
+        by_id = {r["signal_id"]: r for r in stateless + parked}
+        candidates = list(by_id.values())
+
+        print("rows in the table       : %d" % len(rows))
+        print("rows in NO state        : %d" % len(stateless))
+        print("rows at COMMITTEE_REVIEW: %d" % len(parked))
+        print("candidates              : %d" % len(candidates))
 
         plan = Counter()
         skipped = Counter()
         work = []
-        for r in stateless:
+        for r in candidates:
             state, reason = classify(r)
             if state is None:
                 skipped["%s / %s" % (r["status"], r["user_action"])] += 1
@@ -145,15 +158,24 @@ async def main() -> int:
             for sid, why in refused[:10]:
                 print("  %s — %s" % (sid, why))
 
-        # The check that matters: nothing is in no state any more.
-        after = await conn.fetch(
-            "SELECT status, user_action FROM signals")
-        left = sum(1 for r in after if state_of(r["status"], r["user_action"]) is None)
-        print("\nrows in NO state, after: %d" % left)
+        # The checks that matter. NOT "nothing is in no state any more" -- 17,677 rows predate
+        # R-IV.434(b), when a system expiry wrote the principal's own word 'DISMISSED', and
+        # that ruling said in terms that they keep what they were written with. Rewriting them
+        # would be a history rewrite. So the checks are the two this ruling is about.
+        after = await conn.fetch("SELECT status, user_action FROM signals")
+        left_parked = sum(1 for r in after
+                          if (r["status"] or "").upper() == "COMMITTEE_REVIEW")
+        left_bare = sum(1 for r in after
+                        if (r["status"] or "").upper() == "DISMISSED" and not r["user_action"])
+        historical = sum(1 for r in after if state_of(r["status"], r["user_action"]) is None)
+        print("")
+        print("still at COMMITTEE_REVIEW : %d" % left_parked)
+        print("still a bare DISMISSED    : %d" % left_bare)
+        print("in no state (pre-R-IV.434(b) history, out of scope): %d" % historical)
         audit = await conn.fetchval(
             "SELECT COUNT(*) FROM signal_lifecycle_events WHERE ruling = $1", RULING)
         print("audit rows written     : %d" % audit)
-        return 0 if left == 0 or skipped else 0
+        return 0
 
 
 if __name__ == "__main__":
