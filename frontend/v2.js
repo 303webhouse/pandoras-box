@@ -1520,16 +1520,29 @@
   let _riverView = 'lanes';
   try { const v = localStorage.getItem(RIVER_VIEW_KEY); if (v === 'classic' || v === 'lanes') _riverView = v; } catch (_) {}
 
-  // R-IV.569(b) — the River is the equity desk. NOTE this is the FIRST crypto exclusion in the
-  // River; none existed before (measured 2026-09-24: 45 of the 50 rows one page returns were
-  // crypto). A row is crypto when the feed says so; with no asset_class at all, a crypto pair
-  // ticker is the fallback. Nothing else is dropped — an unrecognised asset_class stays visible.
-  const CRYPTO_PAIR = /(-USD|-USDT|-USDC|USDT|-PERP)$/;
-  function isCryptoIdea(s) {
-    const ac = String(s.asset_class == null ? '' : s.asset_class).trim().toUpperCase();
-    if (ac) return ac === 'CRYPTO';
-    return CRYPTO_PAIR.test(String(s.ticker || '').trim().toUpperCase());
-  }
+  // R-IV.579(a)1 — the page's crypto FILTER is gone. The server excludes crypto from every feed
+  // from one author (`backend/config/asset_class.py`, RV4), and two filters for one rule is how a
+  // regression gets hidden twice and therefore never noticed. What is left is the opposite of a
+  // filter: a test that says a row SHOULD NOT BE HERE, so the row is shown with an error on it.
+  //
+  // Exactly the server's predicate (`COALESCE(asset_class,'') <> 'CRYPTO'`) and nothing looser:
+  // the ticker-shape fallback is gone with the filter, because painting an error on a row the
+  // server never claimed was crypto would be a false alarm about a regression that did not happen.
+  const isCryptoLeak = (s) => String(s.asset_class == null ? '' : s.asset_class).trim().toUpperCase() === 'CRYPTO';
+
+  // R-IV.579(a)3 — WHERE A ROW GOES is the server's claim (`strategy_class`, R-IV.577(b)), not a
+  // guess read off `codename`. `codename` is a DISPLAY field that is null when unmapped, so
+  // "not on the roster" and "the display layer did not run" used to arrive as one thing. It still
+  // names the row; it no longer places it.
+  //
+  // A missing class is not quietly re-inferred. The field is documented as never null, so its
+  // absence is a server regression, and the row goes to Unproven and says so — because inferring
+  // it again here would restore, silently, exactly the fragility the field was added to remove.
+  const STRATEGY_CLASSES = ['roster', 'shadow', 'non-roster'];
+  const strategyClass = (s) => {
+    const c = String(s.strategy_class == null ? '' : s.strategy_class).trim().toLowerCase();
+    return STRATEGY_CLASSES.indexOf(c) >= 0 ? c : null;
+  };
 
   // The feed serves 50 rows a page, ordered by score, and crypto can fill a whole page — so a
   // single page is not "today's ideas", it is "today's crypto". Page until the feed is read out
@@ -1558,19 +1571,30 @@
   async function loadKairos() {
     const feed = await fetchIdeaPages();
     const el = $('kairosCards'); if (!el) return;
-    const cryptoRows = feed.signals.filter(isCryptoIdea);   // named, not `crypto`: that is window.crypto
-    const signals = feed.signals.filter((s) => !isCryptoIdea(s));
+    // Nothing is dropped here any more. Every row the feed returned is rendered; the ones that
+    // should not have come are rendered WITH THEIR ERROR.
+    const signals = feed.signals;
+    const cryptoLeak = signals.filter(isCryptoLeak);
     const tickers = [...new Set(signals.map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
     let smap = {};
     if (tickers.length) { try { const r = await apiFetch('/api/stable/enrich?tickers=' + tickers.join(',')); if (r.ok) smap = (await r.json()).enrichment || {}; } catch (_) {} }
     const scoreOf = (s) => (s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score);
 
-    // Roster gate: only display-map classes render as CARDS; everything else → River rows.
-    // River-only shadow classes (R-IV.427(b)) take neither path: no card, no raw-name row.
-    const roster = [], nonRoster = [], riverOnly = [];
+    // Placement, from the server's class. `roster` grades and can reach Actionable; `shadow` and
+    // `non-roster` never grade and sit in Unproven; a row with no class the server recognises is
+    // `unclassed` — held with the ungraded rows and disclosed, never promoted on a guess.
+    //
+    // The display map still gets a veto in ONE direction: a family it marks shadow is not graded
+    // even if the server calls it roster. Refusing to grade something the page believes is shadow
+    // is the safe way to disagree; grading something it believes is shadow is not.
+    const roster = [], shadow = [], nonRoster = [], unclassed = [];
     signals.forEach((s) => {
+      const cls = strategyClass(s);
       const d = setupDisplay(s.codename || s.signal_type || s.strategy);
-      (d.riverOnly ? riverOnly : d.roster ? roster : nonRoster).push(s);
+      if (cls === null) unclassed.push(s);
+      else if (cls === 'shadow' || d.shadow) shadow.push(s);
+      else if (cls === 'roster') roster.push(s);
+      else nonRoster.push(s);
     });
     roster.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
 
@@ -1586,9 +1610,8 @@
     // Grade + evidence per roster signal; order by grade (A>B>C) then score.
     const gradeRank = { A: 3, B: 2, C: 1 };
     roster.forEach((s) => {
-      const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
       s._ev = evalEvidence(s, levelMap, biasBull, biasBear);
-      s._grade = disp.shadow ? '—' : gradeV1(s, s._ev.litCount);
+      s._grade = gradeV1(s, s._ev.litCount);   // shadow never reaches this list (split above)
       // A is decided by the validated cell alone, and B is already reached on R+F — so only a C
       // computed WITHOUT this ticker's levels is in doubt (its L could have been the second icon).
       s._gradePending = s._grade === 'C' && !lvlAsked.has((s.ticker || '').toUpperCase());
@@ -1596,10 +1619,11 @@
     roster.sort((a, b) => (gradeRank[b._grade] || 0) - (gradeRank[a._grade] || 0) || (scoreOf(b) || 0) - (scoreOf(a) || 0));
 
     const visible = roster.slice(0, 3), queued = roster.length - visible.length;
+    const ungraded = shadow.length + nonRoster.length + unclassed.length;
     $('kairosQueued').textContent = [queued > 0 ? '+' + queued + ' queued' : null,
-      nonRoster.length ? '+' + nonRoster.length + ' non-roster → river' : null].filter(Boolean).join(' · ');
+      ungraded ? '+' + ungraded + ' ungraded → river' : null].filter(Boolean).join(' · ');
     el.innerHTML = visible.length ? visible.map((s) => card(s, smap)).join('')
-      : '<div class="k-card"><span class="val-muted">no roster setups' + (nonRoster.length ? ' — ' + nonRoster.length + ' non-roster in river' : '') + '</span></div>';
+      : '<div class="k-card"><span class="val-muted">no roster setups' + (ungraded ? ' — ' + ungraded + ' ungraded in river' : '') + '</span></div>';
     applyGlossary(el);
     el.querySelectorAll('.btn-committee[data-ticker]').forEach((b) => b.addEventListener('click', () => {
       const c = b.closest('.k-card'); if (c) c.classList.add('acked');  // acknowledge -> stop the decision-clock pulse
@@ -1607,16 +1631,23 @@
     }));
     el.querySelectorAll('.k-card .tkr[data-ticker]').forEach((t) => t.addEventListener('click', () => openTvPopover(t.dataset.ticker, t)));
 
-    // River: roster cards as signal items + every non-roster class as a plain row under its raw name.
+    // The classic stream: the top graded rows plus every row that never grades. Which ITEM
+    // BUILDER a row gets is a display question, not a placement one — a class the display map
+    // knows keeps its name and its standing banner (CIRCE'S STEW must carry its banner on every
+    // fire, R-IV.427(b)); only a class the map has never heard of appears under a raw identifier.
+    const streamRow = (s) => (setupDisplay(s.codename || s.signal_type || s.strategy).roster
+      ? signalRiverItem(s, smap) : nonRosterRiverItem(s));
     addRiverItems(visible.map((s) => signalRiverItem(s, smap)));
-    addRiverItems(nonRoster.map((s) => nonRosterRiverItem(s)));
-    addRiverItems(riverOnly.map((s) => signalRiverItem(s, smap)));
+    addRiverItems([...shadow, ...nonRoster, ...unclassed].map(streamRow));
+    // A row with an error is never cut by the top-3 gate. The gate is an attention budget for
+    // ideas; a regression is not an idea, and a stream that drops it is the second place it hides.
+    addRiverItems(roster.filter((s) => visible.indexOf(s) < 0 && rowError(s)).map((s) => signalRiverItem(s, smap)));
     // What the lanes render, and the disclosures they owe: this is a MEASUREMENT of one read,
     // never a carry-over. A failed read publishes read:0 and answered:false, and the Actionable
     // lane says the feed did not answer instead of naming a regime as the reason.
     _laneData = {
-      at: Date.now(), roster, nonRoster, riverOnly,
-      cryptoExcluded: cryptoRows.length, read: feed.read, total: feed.total,
+      at: Date.now(), roster, shadow, nonRoster, unclassed,
+      cryptoLeak, read: feed.read, total: feed.total,
       pages: feed.pages, answered: feed.answered,
       levelCapped: Math.max(0, new Set(roster.map((s) => (s.ticker || '').toUpperCase())).size - LANE_LEVEL_MAX),
     };
@@ -1724,7 +1755,9 @@
       ts: firstTime(s.timestamp, s.created_at),
       riverOnly: !!disp.riverOnly,
       text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
-        + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : ''),
+        + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : '')
+        // R-IV.579(a)2: the same error the lanes show, so neither view is the one that hides it.
+        + (rowError(s) ? `<div class="rv-err">${esc(rowError(s))}</div>` : ''),
     };
   }
   // Non-roster classes never render as Kairos cards — they surface here under their raw name.
@@ -1850,7 +1883,7 @@
     const head = `<span class="rl-t">${esc(title)}</span>`
       + `<span class="rl-count${o.countUnknown ? ' unknown' : ''}"${o.countTitle ? ` title="${esc(o.countTitle)}"` : ''}>${esc(String(count))}</span>`
       + (o.note ? `<span class="rl-note">${esc(o.note)}</span>` : '');
-    if (o.collapsed) return `<details class="rl-lane" data-lane="${esc(o.key || title)}"><summary>${head}</summary>${body}</details>`;
+    if (o.collapsed) return `<details class="rl-lane" data-lane="${esc(o.key || title)}"${o.open ? ' open' : ''}><summary>${head}</summary>${body}</details>`;
     return `<section class="rl-lane" data-lane="${esc(o.key || title)}"><h3 class="rl-h">${head}</h3>${body}</section>`;
   }
   function laneTime(s) {
@@ -1862,14 +1895,23 @@
     if (s._gradePending) return `<span class="rl-grade pending" title="This row's level evidence was not read this cycle (the read is capped at ${LANE_LEVEL_MAX} names), so its grade would be a guess between B and C.">grade pending</span>`;
     return `<span class="rl-grade${s._grade === 'A' ? ' a' : ''}" data-gloss="GRADE">grade ${esc(s._grade)}</span>`;
   }
+  // R-IV.579(a)2 — a row the server should have excluded is SHOWN, carrying what is wrong with
+  // it. Vermilion, not amber: this is not "we cannot confirm", it is a confirmed regression in a
+  // filter that is supposed to hold.
+  function rowError(s) {
+    if (isCryptoLeak(s)) return 'crypto — the feed should not be serving this (RV4)';
+    if (strategyClass(s) === null) return 'no strategy_class — the feed should always state one (R-IV.577(b))';
+    return '';
+  }
   function laneSigRow(s, opts) {
     const o = opts || {};
     const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
     const side = (s.direction || '').toUpperCase();
     const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b>${esc(disp.name)}</b>`;
-    return `<div class="rl-row" data-sid="${esc(s.signal_id || '')}">
+    const err = rowError(s);
+    return `<div class="rl-row${err ? ' rl-bad' : ''}" data-sid="${esc(s.signal_id || '')}">
         <div class="rl-main">${name} <span class="rl-tkr">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
-        <div class="rl-sub">${o.grade ? laneGrade(s) : ''}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
+        <div class="rl-sub">${err ? `<span class="rl-err" title="This row is being shown, not hidden, so the regression is visible: the page no longer filters it.">${esc(err)}</span>` : ''}${o.grade ? laneGrade(s) : ''}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
         ${disp.banner ? `<div class="rl-banner">${esc(disp.banner)}</div>` : ''}
       </div>`;
   }
@@ -1898,10 +1940,12 @@
     const d = _laneData;
     if (!d) { el.innerHTML = notices + '<div class="rl-seam">The idea feed has not been read yet this session.</div>'; return; }
 
-    const graded = d.roster.filter((s) => s._grade !== '—');
+    const graded = d.roster;                       // only `roster` rows grade (R-IV.577(b))
     const actionable = graded.filter((s) => s._grade === 'A');
     const watch = graded.filter((s) => s._grade !== 'A');
-    const unproven = [...d.roster.filter((s) => s._grade === '—'), ...d.riverOnly, ...d.nonRoster];
+    // Shadow is kept apart from the strategies that trade, as BUILD's relay asks, by sitting in
+    // Unproven rather than in Watch — and it is labelled there, by its own standing banner.
+    const unproven = [...d.shadow, ...d.nonRoster, ...d.unclassed];
     const ctx = [..._river.values()].filter((i) => i.type !== 'signal')
       .sort((a, b) => ((a.ts == null) - (b.ts == null)) || ((b.ts || 0) - (a.ts || 0))).slice(0, LANE_CONTEXT_MAX);
 
@@ -1919,16 +1963,27 @@
         + (circeToday > CIRCE_DAILY_CEILING ? ` — above the ~${CIRCE_DAILY_CEILING}/day ceiling: the trigger is too loose (R-IV.421(d))` : '') + '</div>'
       : '';
 
+    // R-IV.579(a)2 — the regression banner. A leaked row lands in Unproven, which is COLLAPSED,
+    // so the row's own chip is not enough on its own: this sits above every lane, and the lane
+    // holding the bad rows is opened. Nothing here is hidden behind a click.
+    const bad = [...d.cryptoLeak, ...d.unclassed];
+    const badNames = [...new Set(bad.map((s) => (s.ticker || '?').toUpperCase()))].slice(0, 6).join(', ');
+    const errBanner = bad.length
+      ? `<div class="rl-alert" role="alert"><b>The feed is serving rows it should not.</b> `
+        + (d.cryptoLeak.length ? `${d.cryptoLeak.length} crypto row${d.cryptoLeak.length === 1 ? '' : 's'} — the server excludes crypto from every feed (RV4), so these are a regression, not a filter this page dropped. ` : '')
+        + (d.unclassed.length ? `${d.unclassed.length} row${d.unclassed.length === 1 ? ' carries' : 's carry'} no <code>strategy_class</code>, which the feed states is never null (R-IV.577(b)); ${d.unclassed.length === 1 ? 'it is' : 'they are'} held out of Watch rather than guessed into it. ` : '')
+        + `Each is shown on its own row, with its error: ${esc(badNames)}${bad.length > 6 ? ' …' : ''}.</div>`
+      : '';
+
     const foot = [
       d.answered
         ? `${d.read} idea${d.read === 1 ? '' : 's'} read` + (d.total != null && d.total > d.read ? ` of ${d.total} active — the feed serves ${IDEA_PAGE} a page and ${d.pages} were taken; the rest score lower` : '')
         : 'the idea feed did not answer',
-      d.cryptoExcluded ? `${d.cryptoExcluded} crypto idea${d.cryptoExcluded === 1 ? '' : 's'} excluded — the River is the equity desk (R-IV.569(b))` : '',
       d.levelCapped ? `${d.levelCapped} name${d.levelCapped === 1 ? '' : 's'} past the ${LANE_LEVEL_MAX}-name evidence read show "grade pending"` : '',
       'read ' + (riverTime(d.at) || ''),
     ].filter(Boolean).join(' · ');
 
-    el.innerHTML = notices
+    el.innerHTML = notices + errBanner
       + laneShell('Actionable', actionable.length, actionable.length
           ? actionable.map((s) => laneSigRow(s, { grade: true })).join('')
           : empty(actionableReason(d, graded)), { key: 'actionable', note: 'A grade only' })
@@ -1940,7 +1995,9 @@
           // A display-mapped class keeps its name even when it never grades (shadow, river-only);
           // only a class the roster does not know surfaces under its raw DB identifier.
           ? unproven.map((s) => laneSigRow(s, { raw: !setupDisplay(s.codename || s.signal_type || s.strategy).roster })).join('')
-          : empty('No shadow or non-roster class fired this cycle.')), { key: 'unproven', collapsed: true, note: 'no measured expectancy' })
+          : empty('No shadow or non-roster class fired this cycle.')),
+          // Open on an error: a row shown inside a collapsed lane is a row still hidden.
+          { key: 'unproven', collapsed: true, open: bad.length > 0, note: 'no measured expectancy' })
       + laneShell('Context', ctx.length, ctx.length
           ? ctx.map((i) => `<div class="rl-row" data-rid="${esc(i.id)}"><div class="rl-main"><span class="rl-k">${esc(i.type)}</span>${i.text}</div><div class="rl-sub">${riverTime(i.ts) ? `<span class="rl-time">${esc(riverTime(i.ts))}</span>` : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This item carries no time of its own, so none is shown.' })}</div></div>`).join('')
           : empty('Nothing in context yet.'), { key: 'context', note: 'not trades' })
@@ -1964,9 +2021,10 @@
     const today = etDate(Date.now());
     const circeToday = [..._river.values()].filter((i) => i.riverOnly && i.ts && etDate(i.ts) === today).length;
     const noticeRows = noticeRowsHtml(Date.now());
-    // The exclusion is the whole River's, not the lanes' — so the classic view owes the same count.
-    const cryptoRow = (_laneData && _laneData.cryptoExcluded && (_riverFilter === 'all' || _riverFilter === 'signal'))
-      ? `<div class="rv-count">${_laneData.cryptoExcluded} crypto ideas excluded — the River is the equity desk (R-IV.569(b))</div>` : '';
+    // A regression belongs to the whole River, not to one of its views.
+    const nBad = _laneData ? _laneData.cryptoLeak.length + _laneData.unclassed.length : 0;
+    const cryptoRow = nBad
+      ? `<div class="rv-alert" role="alert">The feed is serving ${nBad} row${nBad === 1 ? '' : 's'} it should not — crypto, or with no strategy_class. They are in the stream, not filtered out; switch to the lanes to see which.</div>` : '';
     const countRow = circeToday && (_riverFilter === 'all' || _riverFilter === 'signal')
       ? `<div class="rv-count${circeToday > CIRCE_DAILY_CEILING ? ' over' : ''}">CIRCE'S STEW · SHADOW · ${circeToday} seen today (ET)`
         + (circeToday > CIRCE_DAILY_CEILING ? ` — above the ~${CIRCE_DAILY_CEILING}/day ceiling: the trigger is too loose (R-IV.421(d))` : '') + '</div>'
