@@ -2241,7 +2241,7 @@ const X = (function () {
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
-  const st = { cb: { status: 'idle', accounts: {}, scope: [], meta: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
+  const st = { cb: { status: 'idle', accounts: {}, scope: [], error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
@@ -2361,15 +2361,21 @@ const X = (function () {
   const TYPE_WORD = { TRADE_DEBIT: 'trades', TRADE_CREDIT: 'trades', TRANSFER_IN: 'deposits', TRANSFER_OUT: 'withdrawals', DIVIDEND: 'dividends', INTEREST: 'interest', FEE: 'fees', ADJUSTMENT: 'adjustments', OTHER: 'other movements' };
   const whenMT = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t)) + ' MT' : null; };
   const dayLabel = (ymd) => { const t = Date.parse(String(ymd || '') + 'T00:00:00Z'); return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(t)) : null; };
-  // Where the figure came from. The hub's read does not yet say whether its starting point was the
-  // principal's broker figure or a statement, nor at what time, so the line states only what is known:
-  // the broker-figure wording appears for a figure set in this session (its own response carries the
-  // instant); otherwise the opening balance and its date, which the read does carry.
-  function sourceLine(name, d) {
-    const m = st.cb.meta[name];
-    if (m && m.as_of && whenMT(m.as_of)) return 'set from your broker figure · ' + whenMT(m.as_of);
-    const day = dayLabel(d.opening_date);
-    return day ? 'from the opening balance · ' + day : 'the opening balance has no date';
+  // Where the figure came from. R-IV.574(c): the read now SAYS — `derived.anchor.kind` is
+  // `broker_figure` or `statement` (R-IV.566(d)) — so the line no longer infers it from whether
+  // this browser happened to set the figure, and the session-scoped guess is gone.
+  //
+  // `as_of_is_instant` decides the precision, not the kind: an anchor written before that column
+  // existed carries only a date, and no time is invented for it. A null kind means nobody wrote
+  // down where the figure came from, so the card says NOTHING about the source rather than
+  // choosing one — and a kind this page does not recognise is treated the same way.
+  const ANCHOR_WORDS = { broker_figure: 'set from your broker figure', statement: 'from your statement' };
+  function sourceLine(d) {
+    const a = d && d.anchor;
+    const what = a && ANCHOR_WORDS[a.kind];
+    if (!what) return '';
+    const when = a.as_of_is_instant ? whenMT(a.as_of) : dayLabel(String(a.as_of || '').slice(0, 10));
+    return when ? what + ' · ' + when : what;
   }
   function moveLine(d) {
     if (d.movement_since_opening == null || d.movement_since_opening === 0) return '';
@@ -2387,7 +2393,9 @@ const X = (function () {
     else {
       const a = cb.accounts[name], d = (a && a.derived) || {};
       if (!a) body = '<div class="pp-acct-nofig">No record</div><div class="pp-acct-src">The hub returned nothing for this account.</div>';
-      else if (d.derivable) body = `<div class="pp-acct-fig">${money2(d.balance)}</div><div class="pp-acct-src">${X.esc(sourceLine(name, d))}</div>${moveLine(d)}`;
+      // No source line at all when the anchor does not say where the figure came from: an empty
+      // line would still be a line, and this card's job is to stop short of a claim nobody wrote.
+      else if (d.derivable) { const src = sourceLine(d); body = `<div class="pp-acct-fig">${money2(d.balance)}</div>${src ? `<div class="pp-acct-src">${X.esc(src)}</div>` : ''}${moveLine(d)}`; }
       else body = `<div class="pp-acct-nofig">No balance yet</div><div class="pp-acct-src" title="${X.esc(d.reason || '')}">Nothing has told the hub where this account started. Use “Set cash to my broker's figure” to give it a starting point.</div>`;
     }
     return `<div class="pp-acct" data-acct-card="${X.esc(name)}"><div class="pp-acct-name">${X.esc(acctName(name))}</div><div class="pp-k">Cash</div>${body}
@@ -2444,7 +2452,6 @@ const X = (function () {
     k.busy = false;
     if (r.ok && r.body && (r.body.status || '').indexOf('already_') !== 0 && r.body.status !== 'recorded' && r.body.status !== 'reanchored') { k.err = 'The hub answered with an unexpected status (' + r.body.status + '); check the ledger before repeating.'; render(); return; }
     if (!r.ok) { const f = refusal(r.status, r.body, r.err); k.err = f.text; k.focus = null; render(); return; }
-    if (!flow && r.body.status === 'reanchored' && r.body.as_of) st.cb.meta[k.acct] = { as_of: r.body.as_of };
     if (r.body.derived) st.cb.accounts[k.acct] = { derived: r.body.derived, flow: r.body.flow, event_count: r.body.event_count };
     k.resultHtml = flow ? entryResult(k, r) : reanchorResult(k, r, a);
     k.step = 'result'; k.err = null; render();
