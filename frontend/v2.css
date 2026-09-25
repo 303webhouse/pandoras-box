@@ -967,3 +967,7 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .rl-high { font-family: var(--mono); font-size: 10px; color: var(--text-2);
   border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; }
 .rv-item .rv-high { font-family: var(--mono); font-size: 10px; color: var(--text-2); }
+
+/* R-IV.591 — the held-signal label. A disclosure under the row, not a chip: it is a sentence
+   about a stamp the row carries, and it sits quietly under the release time it explains. */
+.rl-held, .rv-item .rv-held { margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--text-2); }
