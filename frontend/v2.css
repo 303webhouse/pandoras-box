@@ -871,3 +871,42 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .pp-tbtn:hover:not(:disabled) { text-decoration: underline; }
 .pp-tbtn:disabled { color: var(--text-3); cursor: not-allowed; }
 @media (max-width: 820px) { .pp-tbtn { min-height: 44px; } }
+/* R-IV.564: the River preview (mockup, sample data). Tokens only; nothing animates. */
+.rp-backdrop { position: fixed; inset: 0; background: rgba(3,6,14,0.6); z-index: 58; opacity: 0; pointer-events: none; transition: opacity 0.22s ease; }
+.rp-backdrop.open { opacity: 1; pointer-events: auto; }
+.rp-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); background: var(--bg); border-left: 1px solid var(--border-strong); z-index: 59;
+  transform: translateX(100%); transition: transform 0.22s ease; display: flex; flex-direction: column; visibility: hidden; }
+.rp-panel.open { transform: translateX(0); visibility: visible; }
+@media (min-width: 821px) { .rp-panel { width: max(560px, 50vw); } }
+@media (max-width: 820px) { .rp-backdrop { z-index: 94; } .rp-panel { z-index: 95; border-left: 0; } }
+@media (prefers-reduced-motion: reduce) { .rp-panel, .rp-backdrop { transition: none; } }
+.rp-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+.rp-head h2 { margin: 0; font-size: 14px; font-family: var(--mono); letter-spacing: 1.6px; text-transform: uppercase; color: var(--teal); font-weight: 400; }
+.rp-chip { font-family: var(--mono); font-size: 10px; color: var(--amber); border: 1px dashed var(--amber); border-radius: 999px; padding: 1px 8px; }
+.rp-x { margin-left: auto; background: transparent; border: 1px solid var(--border-strong); color: var(--text-2); border-radius: 6px; width: 40px; height: 40px; font-size: 16px; cursor: pointer; }
+.rp-x:hover { color: var(--text); border-color: var(--teal); }
+.rp-banner { border: 1px dashed var(--amber); color: var(--amber); border-radius: 8px; padding: 6px 10px; margin: 10px 16px 0; font-family: var(--mono); font-size: 11px; }
+.rp-body { flex: 1 1 auto; overflow: auto; padding: 12px 16px 24px; }
+.rp-dim { color: var(--text-3); font-size: 11px; }
+.rp-days { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.rp-days button { font-family: var(--mono); font-size: 11px; background: transparent; color: var(--text-2); border: 1px solid var(--border-strong); border-radius: 7px; padding: 8px 12px; min-height: 40px; cursor: pointer; }
+.rp-days button[aria-pressed="true"] { color: var(--teal); border-color: var(--teal); }
+.rp-lane { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; }
+.rp-h, .rp-lane > summary { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-family: var(--mono); font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text); font-weight: 400; }
+.rp-lane > summary { cursor: pointer; margin-bottom: 0; }
+.rp-lane[open] > summary { margin-bottom: 6px; }
+.rp-count { font-size: 11px; border: 1px solid var(--border-strong); border-radius: 999px; padding: 0 8px; color: var(--text-2); }
+.rp-note { font-size: 11px; color: var(--text-3); letter-spacing: 0; text-transform: none; }
+.rp-row { padding: 8px 0; border-top: 1px solid var(--border); }
+.rp-main { font-size: 14px; line-height: 1.4; }
+.rp-sub { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+.rp-dir { font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+.rp-k { font-family: var(--mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-3); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px; margin-right: 4px; }
+.rp-tag { font-family: var(--mono); font-size: 10px; letter-spacing: .5px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 6px; margin-right: 4px; }
+.rp-tag-bad { color: var(--down); border-color: var(--down); font-weight: 700; }
+.rp-tag-ok { color: var(--text-2); }
+.rp-bad { border-left: 3px solid var(--down); padding-left: 9px; }
+.rp-gate { display: inline-block; margin-left: 8px; font-family: var(--mono); font-size: 10px; color: var(--text-2); border: 1px dashed var(--text-2); border-radius: 999px; padding: 0 8px; }
+.rp-f { font-family: var(--mono); font-size: 10px; color: var(--text-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.rp-unproven { color: var(--amber); }
+.rp-empty { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 12px; font-size: 14px; color: var(--text); line-height: 1.4; }
