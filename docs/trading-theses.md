@@ -179,6 +179,75 @@ TOTAL 3,003.50~~ — **IEO and MOO exited 09-14; both COPX lots exited 09-11.**
   from rows known to be stale is not a cap test: **the sleeve was neither breached nor within its cap
   — it was unmeasured.**
 
+### ROBINHOOD account ceiling · TA-035 / TA-048, restamped TA-053(2)
+
+**Principal-supplied 2026-09-25.** ROBINHOOD total **$1,291.49**, cash **$491.49**.
+
+| | |
+|---|---|
+| **ceiling** | **$1,261.10** — 10% of $12,611.02 |
+| account total | $1,291.49 |
+| **over by** | **$30.39** |
+| cash | $491.49 |
+| **deployable** | **$291.49** — cash less the $200 floor |
+
+**What the overage binds, and what it does not.** Being $30.39 over the ceiling **binds new
+funding INTO Robinhood** — it does not restrict trading within the account. The ceiling is a
+concentration limit on how much of the book sits in one venue, not a position cap, so it is
+satisfied by not adding and it is not breached by rotating inside what is already there.
+
+**Arithmetic verified, not transcribed:** 10% of 12,611.02 = **1,261.10**; 1,291.49 − 1,261.10
+= **30.39**; 491.49 − 200 = **291.49**. All three reproduce to the cent.
+
+**This section is NEW, not a restamp.** TA-035 and TA-048 appear nowhere in this repository —
+not in this doc, not in any markdown file, not in any row's notes. The figures they set were
+carried in relay only, so there was no prior line to strike. Recorded here so the next stamp
+has one place to land (TA-041's "one cap, one place").
+
+### FIDELITY_ROTH 20% per-position cap · TA-053(3)
+
+| | |
+|---|---|
+| **cap** | **$2,263.91** — 20% of the Roth total $11,319.53 |
+| **counted, with TA-052's levels written** | **$1,374.67** (60.7% of the cap) |
+| was, with no levels written | $4,148.03 — **183%** |
+
+How the $1,374.67 is composed, per TA-052:
+
+| row | counts | why |
+|---|---|---|
+| **SRTY 525** | $226.39 | T1, per TA-034 — a written daily-close invalidation |
+| **PDBC 437** | $226.39 | T1 — written level |
+| **WRTH 534** | $226.39 | T1 — written level |
+| **RAMZ 554** | **$695.50** | full basis, per TA-052 |
+| | **$1,374.67** | |
+
+**Arithmetic verified:** 226.39 × 3 + 695.50 = **1,374.67**; 20% of 11,319.53 = **2,263.91**;
+1,374.67 / 2,263.91 = **60.7%**. And the historical figure reproduces too, which identifies what
+changed: **$4,148.03 = PDBC 1,184.93 + SRTY 1,230.50 + WRTH 1,037.10 + RAMZ 695.50**, exactly —
+using the **positions file's SRTY of 50 shares**, where the book now holds **35**. So the 183%
+stamp was taken before the day's SRTY reduction, which is precisely what TA-053(4) warns about.
+
+**ONE INPUT DOES NOT HOLD, and it is the one that moves the figure.** TA-052's RAMZ line reads
+*"Row holds NO LOTS, so the loss alert cannot compute it (R-IV.526)"*. **RAMZ 554 does hold a
+lot** — `position_lots` id 1036, 50 @ 13.91, dated 09-24, provenance `PRINCIPAL_REPORTED`,
+source `principal-entry@2026-09-24T19:59:33Z` — and the loss alert **does** compute it:
+`max_loss` reads **695.50** and `unrealized_pnl` **−5.50**, both lot-derived. What the lot lacks
+is a **`broker_ref`**: it is the principal's own entry, not an export line.
+
+*The conclusion may well survive on other grounds* — for a long stock position the max loss **is**
+its cost, so a level does not bound it the way it bounds a spread. But RAMZ now carries a written
+daily-close invalidation like the other three, so **if it counts at T1 on the same footing the cap
+reads $226.39 × 4 = $905.56, i.e. 40.0% instead of 60.7%.** The figure above is recorded as TA
+ruled it; the premise correction is flagged, not acted on. **Nothing here was changed on this
+lane's own reading of a cap.**
+
+**TA-053(4) — the denominator is derived, not read.** The Roth total **$11,319.53** behind both
+the cap and the percentage is the **2026-09-24 11:09 ET** position-file read. It **predates the
+SOXS 533 close and the RAMZ buy**, and it is derived rather than read from a statement.
+**Re-derive it on the next Fidelity export.** Two figures already shifted underneath it: SRTY went
+50 → 35 shares and SOXS went flat, both after the read.
+
 ### D4 hedge line — DECLINED, rolled · R-IV.209
 - **DECLINED 2026-09-03 by principal.** No new convexity purchased.
 - **Rolls to the FOMC cluster:** CPI **2026-09-11** · FOMC **2026-09-16**.
