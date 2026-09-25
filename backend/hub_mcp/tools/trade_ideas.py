@@ -26,6 +26,12 @@ DESCRIPTION = (
     "conviction setups right now. Also call when the user asks 'what are the "
     "top ideas', 'what does the hub like', 'show me the insights', or any "
     "equivalent.\n\n"
+    "EQUITY ONLY BY DEFAULT. Crypto ideas are excluded unless you pass "
+    "include_crypto=true, and they come only on request because they "
+    "swamp the feed: 49 of 76 active signals were crypto when this was "
+    "measured, 41 of them a single family. Pass include_crypto=true when "
+    "the pass is about crypto, or when the user asks for crypto ideas by "
+    "name. Every idea carries asset_class, so a mixed feed is readable.\n\n"
     "Do NOT call this for bias context (use hub_get_bias_composite). "
     "Do NOT call this for options flow (use hub_get_flow_radar). "
     "Returns status=unavailable when the signals DB is unreachable."
@@ -75,6 +81,15 @@ def _serialize_group(g: Dict[str, Any], now: datetime, include_related: bool) ->
         "strategies": g.get("strategies"),
         "signal_type": p.get("signal_type"),
         "codename": codename(p.get("signal_type"), p.get("strategy")),  # L0.4 additive
+        # R-IV.578(b): `asset_class` is what makes `include_crypto` usable. Without
+        # it a committee that asked for crypto would have to infer which rows are
+        # crypto from the ticker, and inferring a field is the failure this whole
+        # wave is about. `session` and `strategy_class` ride along for the same
+        # reason -- the server states them now, and an allow-list that omitted them
+        # would put the committee back to guessing (R-IV.566(e)3, R-IV.577(b)).
+        "asset_class": p.get("asset_class"),
+        "session": p.get("session"),
+        "strategy_class": p.get("strategy_class"),
         "signal_category": p.get("signal_category"),
         "entry_price": _safe_float(p.get("entry_price")),
         "stop_loss": _safe_float(p.get("stop_loss")),
@@ -97,6 +112,8 @@ def _serialize_group(g: Dict[str, Any], now: datetime, include_related: bool) ->
                 "signal_id": rs.get("signal_id"),
                 "strategy": rs.get("strategy"),
                 "codename": rs.get("codename"),  # L0.4 additive (from feed_service)
+                "session": rs.get("session"),            # RV5
+                "strategy_class": rs.get("strategy_class"),  # R-IV.577(b)
                 "score": _safe_float(rs.get("score")),
                 "timestamp": str(rs.get("timestamp")) if rs.get("timestamp") else None,
                 "confluence_tier": rs.get("confluence_tier"),
@@ -113,8 +130,16 @@ async def hub_get_trade_ideas(
     min_score: Optional[float] = 65.0,
     direction: Optional[str] = None,
     include_related: bool = False,
+    include_crypto: bool = False,
 ) -> dict:
-    """Return the active grouped trade ideas feed."""
+    """Return the active grouped trade ideas feed.
+
+    R-IV.578(b) -- ONE AUTHOR, TWO CONSUMERS. `feed_service.get_active_trade_ideas`
+    excludes crypto by default for both the River and this tool, because the swamping
+    is the same on each. But crypto was ruled out of the RIVER, not out of the
+    committee's reach, so the committee gets a named way to ask for it. The page has
+    no such argument: it is not a surface with a caller who can decide.
+    """
     if not isinstance(limit, int) or not (1 <= limit <= 25):
         return make_response(
             status="unavailable",
@@ -152,6 +177,7 @@ async def hub_get_trade_ideas(
             pool,
             min_score=min_score,
             direction=direction,
+            include_crypto=bool(include_crypto),
         )
     except Exception as exc:
         return make_response(
@@ -173,6 +199,11 @@ async def hub_get_trade_ideas(
         "total_qualifying": len(groups_all),
         "min_score_applied": min_score,
         "direction_filter": direction.upper() if direction else None,
+        # Stated, not left to be inferred from whether any crypto came back: an
+        # equity-only feed and a crypto-inclusive feed that happened to return no
+        # crypto are different answers.
+        "include_crypto": bool(include_crypto),
+        "asset_scope": "equity+crypto" if include_crypto else "equity only",
         "redis_degraded": not redis_ok,
     }
 
@@ -180,7 +211,8 @@ async def hub_get_trade_ideas(
         return make_response(
             status=status,
             data=data,
-            summary=f"No active trade ideas above threshold.{redis_note}",
+            summary=("No active trade ideas above threshold (%s).%s"
+                     % (data["asset_scope"], redis_note)),
             staleness_seconds=60,
         )
 
