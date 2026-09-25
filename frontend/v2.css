@@ -947,3 +947,16 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .rl-meter.over { color: var(--amber); }
 .rl-foot { padding: 2px 4px 4px; font-family: var(--mono); font-size: 10px; line-height: 1.5; color: var(--text-2); }   /* disclosures, not a micro-label: the readable token */
 @media (max-width: 820px) { .rl-row, .rl-lane > summary { min-height: 44px; } }
+
+/* R-IV.579(a)2 — a row the server should not have served is SHOWN, with what is wrong with it.
+   Vermilion, not amber: a filter that is supposed to hold and did not is a confirmed fault, not
+   an unconfirmable reading. The banner sits above every lane because the lane holding the bad
+   rows is collapsed by default, and a row hidden behind a click is a row still hidden. */
+.rl-alert, .rv-alert { border: 1px solid var(--down); border-radius: 8px; margin: 0 0 2px; padding: 8px 10px;
+  font-size: 12px; line-height: 1.4; color: var(--text); background: var(--panel-2); }
+.rl-alert b, .rv-alert b { color: var(--down); }
+.rl-alert code { font-family: var(--mono); font-size: 11px; color: var(--text-2); }
+.rv-alert { margin: 8px; }
+.rl-row.rl-bad { border-left: 3px solid var(--down); padding-left: 8px; }
+.rl-err { color: var(--down); border: 1px solid var(--down); border-radius: 4px; padding: 0 4px; }
+.rv-item .rv-err { margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--down); }
