@@ -2367,3 +2367,109 @@ const X = (function () {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
+
+/* River preview, R-IV.564 -- a MOCKUP on SAMPLE DATA of the Olympus review's wave 2. It reads nothing from the
+   hub and changes nothing: the live River (#riverStream) is untouched. Opened from the River tile's "Preview"
+   button or the #river-preview address. Nothing on it pulses. */
+(function () {
+  'use strict';
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // Every number, name and time below is invented for the preview.
+  const REC = {
+    pullback: { n: 41, hit: 58, r: '+0.34R' }, retest: { n: 33, hit: 55, r: '+0.21R' }, fade: { n: 52, hit: 61, r: '+0.40R' },
+    range: { n: 12, hit: 50, r: '+0.05R' }, tritonRec: null,
+  };
+  const recText = (r) => (r ? `record: ${r.n} trades · ${r.hit}% won · ${r.r} each${r.n < 20 ? ' · too few to trust' : ''}` : 'unproven');
+  const GATES = ['against tape', 'regime degraded', 'earnings in 2d', 'illiquid', 'unproven'];
+  // Signals. `gates` = the gates it fails in each sample day (an empty list passes them all). `on` = the sample days it exists on.
+  const SIGNALS = [
+    { id: 'nvda', t: 'NVDA', d: 'LONG', s: 'Trend Pullback', rec: REC.pullback, f: 'up', time: '1:45 PM MT', on: ['riskon'], gates: { riskon: [] } },
+    { id: 'iwm', t: 'IWM', d: 'SHORT', s: 'Failed Bounce', rec: REC.fade, f: null, time: '1:20 PM MT', on: ['riskon'], gates: { riskon: ['against tape'] } },
+    { id: 'xle', t: 'XLE', d: 'LONG', s: 'Trend Pullback', rec: REC.pullback, f: null, time: '12:50 PM MT', on: ['riskon'], gates: { riskon: ['earnings in 2d'] } },
+    { id: 'msft', t: 'MSFT', d: 'LONG', s: 'Breakdown Retest', rec: REC.retest, f: 'up', time: '12:10 PM MT', on: ['riskon'], gates: { riskon: ['illiquid'] } },
+    { id: 'tsla', t: 'TSLA', d: 'LONG', s: 'Trend Pullback', rec: REC.pullback, f: null, time: '11:40 AM MT', on: ['riskon'], gates: { riskon: ['regime degraded'] } },
+    { id: 'qqq', t: 'QQQ', d: 'LONG', s: 'Range Break', rec: REC.range, f: 'down', time: '1:05 PM MT', on: ['neutral', 'riskon'], gates: { neutral: ['unproven'], riskon: ['unproven'] } },
+    { id: 'triton', t: 'SPY', d: 'LONG', s: 'TRITON (shadow)', rec: null, f: null, time: '1:30 PM MT', on: ['neutral', 'riskon'], gates: { neutral: [], riskon: [] } },
+    { id: 'hera', t: 'QQQ', d: 'SHORT', s: 'HERA (shadow)', rec: null, f: null, time: '10:55 AM MT', on: ['neutral', 'riskon'], gates: { neutral: [], riskon: [] } },
+    { id: 'circe', t: 'IWM', d: 'SHORT', s: "CIRCE'S STEW (shadow)", rec: null, f: 'up', time: '9:40 AM MT', on: ['neutral', 'riskon'], gates: { neutral: [], riskon: [] } },
+  ];
+  // Items that touch an open position. `v`: CONTRADICTS or CONFIRMS what the position needs.
+  const BOOK = [
+    { id: 'b1', t: 'HYG', pos: 'put spread 76/73 (bearish hedge)', v: 'CONTRADICTS', why: 'Credit spreads tightened to 3.0: the stress the hedge is paid for is fading.', f: null, time: '1:00 PM MT' },
+    { id: 'b2', t: 'AVGO', pos: 'put debit spread 300/290 (bearish)', v: 'CONTRADICTS', why: 'An unproven AVGO LONG setup leans against your bearish spread.', f: 'up', time: '12:30 PM MT' },
+    { id: 'b3', t: 'PDBC', pos: 'commodity fund, long', v: 'CONFIRMS', why: 'Supply-cut headline supports the position.', f: 'up', time: '11:15 AM MT' },
+  ];
+  const CONTEXT = [
+    { id: 'c1', k: 'regime', text: (day) => day === 'neutral' ? 'Regime NEUTRAL · composite 50 · the stable lens reads RISK-ON: the two lenses disagree.' : 'Regime RISK-ON · composite 68 · both lenses agree.', time: '9:30 AM MT' },
+    { id: 'c2', k: 'unusual flow', text: () => 'Unusual flow on your watchlist: NVDA, call-heavy. (Not on a position, so it is context, not an alert.)', time: '1:10 PM MT' },
+    { id: 'c3', k: 'headline', text: () => 'Fed speakers scheduled 2:00 PM MT.', time: '12:00 PM MT' },
+    { id: 'c4', k: 'digest', text: () => 'Stable digest: breadth 61%, 3 of 5 sleeves above their 50-day.', time: '8:05 AM MT' },
+  ];
+  const EMPTY_REASON = { neutral: 'Nothing actionable: no validated setup is possible in a NEUTRAL regime.', riskon: 'Nothing actionable: every validated setup today fails a gate, and each one is in Watch with its reason.' };
+  let day = 'neutral', open = false, backdrop = null, panel = null, opener = null;
+
+  const fBadge = (f) => f ? `<span class="rp-f" title="Options flow ${f === 'up' ? 'agrees with' : 'disagrees with'} this idea (a badge, not a River item)">F${f === 'up' ? '▲' : '▼'}</span>` : '';
+  function sigRow(s, kind) {
+    const gates = s.gates[day] || [];
+    const gate = kind === 'watch' ? `<span class="rp-gate" title="The one gate this idea fails">${esc(gates[0])}</span>` : '';
+    return `<div class="rp-row"><div class="rp-main"><b>${esc(s.t)}</b> <span class="rp-dir">${esc(s.d)}</span> · ${esc(s.s)} ${fBadge(s.f)}${gate}</div>
+      <div class="rp-sub"><span class="${s.rec ? '' : 'rp-unproven'}">${esc(recText(s.rec))}</span> · ${esc(s.time)}</div></div>`;
+  }
+  function bookRow(b) {
+    const bad = b.v === 'CONTRADICTS';
+    return `<div class="rp-row ${bad ? 'rp-bad' : 'rp-ok'}"><div class="rp-main"><span class="rp-tag ${bad ? 'rp-tag-bad' : 'rp-tag-ok'}">${b.v}</span> <b>${esc(b.t)}</b> · your ${esc(b.pos)} ${fBadge(b.f)}</div>
+      <div class="rp-sub">${esc(b.why)} · ${esc(b.time)}</div></div>`;
+  }
+  function lane(title, count, body, opts) {
+    const o = opts || {};
+    const head = `<span class="rp-lane-t">${esc(title)}</span><span class="rp-count">${count}</span>${o.note ? `<span class="rp-note">${esc(o.note)}</span>` : ''}`;
+    if (o.collapsed) return `<details class="rp-lane"><summary>${head}</summary>${body}</details>`;
+    return `<section class="rp-lane"><h3 class="rp-h">${head}</h3>${body}</section>`;
+  }
+  function render() {
+    const sigs = SIGNALS.filter((s) => s.on.indexOf(day) >= 0);
+    const proven = sigs.filter((s) => s.rec);
+    const actionable = proven.filter((s) => (s.gates[day] || []).length === 0 && s.rec.n >= 20);
+    const watch = sigs.filter((s) => (s.gates[day] || []).length === 1);
+    const unproven = sigs.filter((s) => !s.rec);
+    const book = BOOK.slice().sort((a, b) => (a.v === 'CONTRADICTS' ? 0 : 1) - (b.v === 'CONTRADICTS' ? 0 : 1));
+    const ctx = CONTEXT;
+    const empty = (msg) => `<div class="rp-empty">${esc(msg)}</div>`;
+    panel.innerHTML = `<div class="rp-head"><h2>River preview</h2><span class="rp-chip">mockup · sample data</span><button type="button" class="rp-x" aria-label="Close the River preview">✕</button></div>
+      <div class="rp-banner">Mockup on sample data. Nothing here is live and nothing here changes your River. Every name, number and time is invented.</div>
+      <div class="rp-body">
+        <div class="rp-days" role="group" aria-label="Sample day"><span class="rp-dim">Sample day:</span>
+          <button type="button" data-day="neutral" aria-pressed="${day === 'neutral'}">Neutral regime</button>
+          <button type="button" data-day="riskon" aria-pressed="${day === 'riskon'}">Risk-on regime</button></div>
+        ${lane('Actionable', actionable.length, actionable.length ? actionable.map((s) => sigRow(s, 'act')).join('') : empty(EMPTY_REASON[day]))}
+        ${lane('Your book', book.length, book.map(bookRow).join(''), { note: 'contradictions first' })}
+        ${lane('Watch', watch.length, watch.length ? watch.map((s) => sigRow(s, 'watch')).join('') : empty('Nothing on watch.'), { note: 'the one gate each fails' })}
+        ${lane('Unproven', unproven.length, unproven.map((s) => sigRow(s, 'unproven')).join(''), { collapsed: true, note: 'strategies with no record yet' })}
+        ${lane('Context', ctx.length, ctx.map((c) => `<div class="rp-row"><div class="rp-main"><span class="rp-k">${esc(c.k)}</span> ${esc(c.text(day))}</div><div class="rp-sub">${esc(c.time)}</div></div>`).join(''), { note: 'not trades' })}
+      </div>`;
+  }
+  function build() {
+    if (panel) return;
+    backdrop = document.createElement('div'); backdrop.className = 'rp-backdrop';
+    panel = document.createElement('aside'); panel.className = 'rp-panel';
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', 'River preview (mockup, sample data)');
+    document.body.appendChild(backdrop); document.body.appendChild(panel);
+    backdrop.addEventListener('click', close);
+    panel.addEventListener('click', (e) => {
+      if (e.target.closest('.rp-x')) return close();
+      const d = e.target.closest('[data-day]'); if (d) { day = d.dataset.day; render(); }
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) close(); });
+  }
+  function show() {
+    build(); open = true; render();
+    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); const x = panel.querySelector('.rp-x'); if (x) x.focus(); });
+  }
+  function hide() { open = false; if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); } if (opener && opener.focus) { try { opener.focus(); } catch (_) {} } }
+  function openIt() { if (open) return; opener = document.activeElement; show(); if (location.hash !== '#river-preview') history.pushState(null, '', location.pathname + location.search + '#river-preview'); }
+  function close() { if (!open) return; hide(); if (location.hash === '#river-preview') history.pushState(null, '', location.pathname + location.search); }
+  function sync() { if (location.hash === '#river-preview') { if (!open) show(); } else if (open) hide(); }
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#riverPreviewBtn')) { e.preventDefault(); openIt(); } });
+  window.addEventListener('popstate', sync); window.addEventListener('hashchange', sync);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sync); else sync();
+})();
