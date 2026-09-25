@@ -29,9 +29,11 @@ ROWS = [
 
 @pytest.fixture
 def balances(client, test_api_key):
-    pool = AsyncMock()
-    pool.fetch = AsyncMock(return_value=ROWS)
-    with patch("api.portfolio.get_postgres_client", new_callable=AsyncMock, return_value=pool):
+    # The route reads through the ONE read service (services.read_only.balances), which resolves the
+    # account rows and their derived cash itself; what this file pins is the scope the ROUTE adds to
+    # each row, so the service is what is stubbed, with copies because the route tags rows in place.
+    with patch("services.read_only.balances.get_account_balances",
+               new=AsyncMock(side_effect=lambda *a, **k: [dict(r) for r in ROWS])):
         r = client.get(PATH, headers={"X-API-Key": test_api_key})
     assert r.status_code == 200
     return {row["account_name"]: row for row in r.json()}
