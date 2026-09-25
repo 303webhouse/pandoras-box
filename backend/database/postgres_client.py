@@ -6,6 +6,8 @@ Stores all signals for backtesting and historical analysis
 import asyncpg
 
 from models.position_status import STATUSES as _POSITION_STATUSES
+from models.position_lots import (LOT_SOURCES as _LOT_SOURCES,
+                                  PRINCIPAL_ENTRY_SOURCE_REGEX as _PRINCIPAL_ENTRY_SOURCE_REGEX)
 import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -1312,6 +1314,18 @@ async def init_database():
             # Census before constraining (2026-09-24, 489 rows): CLOSED 408,
             # EXPIRED 34, DUPLICATE_OF 24, OPEN 23. Nothing else, so nothing is
             # broken by adding it.
+            # R-IV.566(c): the live form writes a lot the moment a position exists,
+            # stamped `principal-entry@<instant>`. Generated from
+            # models/position_lots.py rather than retyped here.
+            ("lot source vocabulary: position_lots", """
+                DO $$
+                BEGIN
+                    ALTER TABLE position_lots DROP CONSTRAINT IF EXISTS position_lots_source_check;
+                    ALTER TABLE position_lots ADD CONSTRAINT position_lots_source_check
+                        CHECK (source IN (%s) OR source ~ '%s');
+                END $$
+            """ % (", ".join("'" + x + "'" for x in _LOT_SOURCES),
+                   _PRINCIPAL_ENTRY_SOURCE_REGEX)),
             ("status vocabulary: unified_positions", """
                 DO $$
                 BEGIN
