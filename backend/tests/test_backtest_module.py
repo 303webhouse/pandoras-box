@@ -543,7 +543,7 @@ def test_every_row_stores_its_expiry_and_a_bad_value_never_loses_the_signal():
 
 
 @pytest.mark.parametrize("tf,hours", [
-    ("60", 4), ("15", 4), ("5", 4), ("1H", 4), ("15m", 4), (None, 4),
+    ("60", 4), ("15", 4), ("5", 4), ("1H", 4), ("15m", 4),
     ("240", 24), ("4H", 24), ("D", 24), ("1D", 24), ("daily", 24), ("1440", 24),
     ("W", 168), ("10080", 168),
 ])
@@ -552,6 +552,24 @@ def test_expiry_follows_the_chart_including_tradingview_minute_counts(tf, hours)
     before = datetime.utcnow()
     exp = calculate_expiry({"timeframe": tf})
     assert abs((exp - before).total_seconds() - hours * 3600) < 5
+
+
+def test_a_missing_timeframe_is_refused_rather_than_given_the_shortest_life():
+    """R-IV.584(a) SUPERSEDES the `(None, 4)` case this test used to carry.
+
+    A missing or unrecognised timeframe used to fall to the 4-hour default -- the SHORTEST
+    lifetime in the table -- so a family writing a spelling nobody had added had its signals
+    expire four hours after firing, silently. It is now refused, and the refusal returns None:
+    no `expires_at`, so the row falls to the 24-hour age sweep instead of being cut short. A bad
+    spelling can never shorten a life.
+    """
+    from signals.pipeline import calculate_expiry
+    with patch("signals.pipeline.logger") as log:
+        for bad in (None, "", "nonsense", "1 hour"):
+            assert calculate_expiry({"timeframe": bad}) is None, bad
+        assert log.error.call_count == 4          # and it says so, every time
+    # POSITIVE CONTROL: a spelling in the vocabulary still gets its expiry.
+    assert calculate_expiry({"timeframe": "D"}) is not None
 
 
 def test_the_river_announces_the_change_while_it_is_fresh():
@@ -580,12 +598,37 @@ def test_notices_route_precedes_the_signal_id_route():
 
 
 class _SqlConn:
+    """A connection that records its SQL and answers `fetch` with nothing.
+
+    `fetch` and `transaction` are here because the sweeps now SELECT the ids they are about to
+    move and hand them to the one lifecycle author, rather than issuing a blind UPDATE. An empty
+    fetch means the author is never called, which is what each test below wants: the claim is
+    about WHICH state the sweep targets, and that is settled without any rows.
+    """
+
     def __init__(self):
         self.sql = []
 
     async def execute(self, sql, *a):
         self.sql.append(sql)
         return "UPDATE 0"
+
+    async def fetch(self, sql, *a):
+        self.sql.append(sql)
+        return []
+
+    async def fetchrow(self, sql, *a):
+        self.sql.append(sql)
+        return None
+
+    def transaction(self):
+        class _T:
+            async def __aenter__(self_inner):
+                return None
+
+            async def __aexit__(self_inner, *e):
+                return False
+        return _T()
 
 
 class _SqlPool:
@@ -605,22 +648,40 @@ class _SqlPool:
 
 
 def test_a_system_expiry_is_not_a_user_dismissal():
-    """R-IV.434(b): both system sweeps record 'EXPIRED', so the legacy 24h ticker hide --
-    which keys on a human's 'DISMISSED' -- does not fire when an idea runs out of time."""
+    """R-IV.434(b), now held by the vocabulary instead of by each sweep's SQL.
+
+    The claim is unchanged: a system expiry records 'EXPIRED', so the legacy 24-hour ticker
+    hide -- which keys on a human's 'DISMISSED' -- does not fire when an idea simply runs out
+    of time. What changed under R-IV.584(e) is that neither sweep writes the word any more.
+    Both route through the one author, so the guarantee lives in ONE place and is asserted
+    there rather than re-read out of two SQL strings that could drift apart.
+    """
+    from models.signal_lifecycle import EXPIRED, DISMISSED, columns_for
+
+    assert columns_for(EXPIRED) == ("EXPIRED", "EXPIRED")
+    # POSITIVE CONTROL: the principal's own word still exists, and is a different state.
+    assert columns_for(DISMISSED) == ("DISMISSED", "DISMISSED")
+
     from api import trade_ideas as ti
     conn = _SqlConn()
     with patch.object(ti, "get_postgres_client", new=AsyncMock(return_value=_SqlPool(conn))):
         asyncio.run(ti.expire_stale_signals())
-    assert "user_action = 'EXPIRED'" in conn.sql[0] and "'DISMISSED'" not in conn.sql[0]
+    joined = " ".join(conn.sql)
+    assert "'DISMISSED'" not in joined
+    assert inspect.getsource(ti.expire_stale_signals).count("_EXPIRED") >= 1
 
     from scheduler import bias_scheduler as bs
     conn = _SqlConn()
     with patch("database.postgres_client.get_postgres_client",
                new=AsyncMock(return_value=_SqlPool(conn))):
         asyncio.run(bs.auto_dismiss_old_signals())
-    sql = conn.sql[0]
-    assert "user_action = 'EXPIRED'" in sql and "'DISMISSED'" not in sql
-    assert "<> 'SHADOW'" in sql                      # a shadow row is never "dismissed"
+    joined = " ".join(conn.sql)
+    assert "'DISMISSED'" not in joined
+    src = inspect.getsource(bs.auto_dismiss_old_signals)
+    assert "_EXPIRED" in src
+    # A shadow row is never "dismissed", and R-IV.584(d) adds a withheld one: stamping EXPIRED
+    # on top of a withholding would bury the reason it was withheld.
+    assert "_SHADOW" in src and "_WITHHELD" in src
 
 
 def test_the_legacy_hide_keys_on_a_human_dismissal_only():

@@ -347,7 +347,9 @@ async def accept_signal_as_options(signal_id: str, request: AcceptSignalAsOption
 
         # Update signal bookkeeping (non-critical — don't block position creation)
         try:
-            await update_signal_action(signal_id, "SELECTED")
+            # R-IV.584(e): the OPTIONS path says so. It used to send the same "SELECTED" as
+            # the stock path above, so both landed on whichever status the reader assumed.
+            await update_signal_action(signal_id, "SELECTED_OPTIONS")
             await update_signal_outcome(
                 signal_id,
                 notes=request.notes or f"Accepted as OPTIONS: {request.strategy_type} | Premium: {request.net_premium}"

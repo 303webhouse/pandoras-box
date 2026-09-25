@@ -129,87 +129,57 @@ COUNTERTREND_COMMITTEE_THRESHOLD = 90
 
 
 async def _maybe_flag_for_committee(signal_data: Dict[str, Any]) -> None:
+    """RETIRED by R-IV.584(b). A high-scoring signal now STAYS IN THE FEED.
+
+    WHAT THIS USED TO DO, AND WHY IT HAD TO STOP. Every signal scoring 85 or more was moved
+    `ACTIVE -> COMMITTEE_REVIEW` at ingest, on the assumption that the automated committee would
+    pick it up. That committee was retired. Measured 2026-09-25: **750 rows had been promoted and
+    not one had ever carried `committee_data`** -- 25 to 81 signals a week, every one scoring 85
+    to 100, taken out of the River and put in a queue nothing drains.
+
+    That is the mechanism behind the empty top of book reported under R-IV.578(c). The feed was
+    not missing its best rows because the 65 threshold was too high. It was missing them because
+    everything from 85 up was diverted before the threshold ever saw it.
+
+    The threshold survives as a FLAG. `models.signal_lifecycle.is_high_score` marks the row and
+    the River can show it; the principal sends anything he wants reviewed to Trade Analysis
+    himself. The flag is DERIVED from the score on read, never stored -- a stored flag would be
+    one more writer to fall out of step with the column it summarises.
+
+    Kept as a no-op rather than deleted, with its call site intact, because the call site is
+    inside the ingest path and removing it is a separate change to a hot path. It states what it
+    no longer does, which a deleted function cannot.
     """
-    Flag signal for display in #signals channel with Analyze button.
-    Sets status=PENDING_REVIEW — committee does NOT run automatically.
-    Skips Scout alerts and signals that already have committee data.
-    """
-    # Skip scouts and manual signals
-    if signal_data.get("signal_type") in ("SCOUT_ALERT", "MANUAL"):
-        return
-
-    # Skip if already has committee data
-    if signal_data.get("committee_data") or signal_data.get("committee_run_id"):
-        return
-
-    # Check score threshold (prefer score_v2, fall back to score)
-    score = signal_data.get("score_v2") or signal_data.get("score") or 0
-    is_countertrend = signal_data.get("countertrend") or "wrr" in (signal_data.get("strategy") or "").lower()
-    threshold = COUNTERTREND_COMMITTEE_THRESHOLD if is_countertrend else COMMITTEE_SCORE_THRESHOLD
-    if score < threshold:
-        return
-
-    signal_id = signal_data.get("signal_id")
-    if not signal_id:
-        return
-
-    # All qualifying signals (score >= 85) go straight to COMMITTEE_REVIEW.
-    # No PENDING_REVIEW middle state — either committee or ACTIVE in feed.
-    AUTO_PROMOTE_THRESHOLD = 85.0
-    new_status = "COMMITTEE_REVIEW" if score >= AUTO_PROMOTE_THRESHOLD else "ACTIVE"
-
-    try:
-        from database.postgres_client import get_postgres_client
-        pool = await get_postgres_client()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE signals
-                SET status = $2,
-                    committee_requested_at = NOW()
-                WHERE signal_id = $1
-                AND status = 'ACTIVE'
-                """,
-                signal_id,
-                new_status,
-            )
-        signal_data["status"] = new_status
-        if new_status == "COMMITTEE_REVIEW":
-            logger.info(f"🤖 Auto-promoted to committee: {signal_data.get('ticker')} (score={score})")
-    except Exception as e:
-        logger.warning(f"Failed to flag {signal_id} for committee: {e}")
+    return
 
 
 def calculate_expiry(signal_data: Dict[str, Any]) -> Optional[datetime]:
-    """
-    Calculate signal expiry based on timeframe and asset class.
-    Returns None for signals that shouldn't auto-expire.
-    """
-    timeframe = (signal_data.get("timeframe") or "1H").upper()
+    """When this signal should stop being shown. R-IV.584(a): ONE timeframe vocabulary.
 
-    # TradingView's {{interval}} is a MINUTE COUNT for intraday charts ("60", "240") and a
-    # letter for the rest ("D", "W"). A 4-hour chart arrives as "240", which the lists below
-    # never matched, so it fell to the 4-hour default instead of the 4H rule's 24 hours.
-    # Harmless while expires_at was never written; wrong the moment it is (R-IV.432(f)).
-    if timeframe.isdigit():
-        minutes = int(timeframe)
-        if minutes >= 7 * 24 * 60:
-            return datetime.utcnow() + timedelta(days=7)
-        if minutes >= 240:
-            return datetime.utcnow() + timedelta(hours=24)
-        return datetime.utcnow() + timedelta(hours=4)
+    The band and its lifetime live in `models/signal_timeframe.py`. They used to live here as
+    two hand-typed tuples plus a digits-are-minutes branch, with `"1H"` in one and `"60"` -- the
+    same interval -- reaching the same answer down the other: consistent by luck.
 
-    # Intraday signals expire in 4 hours
-    if timeframe in ("1", "3", "5", "15", "30", "1M", "3M", "5M", "15M", "30M", "1H"):
-        return datetime.utcnow() + timedelta(hours=4)
-    # Swing signals expire in 24 hours
-    elif timeframe in ("4H", "D", "1D", "DAILY"):
-        return datetime.utcnow() + timedelta(hours=24)
-    # Weekly/monthly signals expire in 7 days
-    elif timeframe in ("W", "1W", "WEEKLY", "M", "MONTHLY"):
-        return datetime.utcnow() + timedelta(days=7)
-    # Default: 4 hours
-    return datetime.utcnow() + timedelta(hours=4)
+    AN UNRECOGNISED SPELLING IS REFUSED AND FLAGGED, not given four hours. The old default was
+    the SHORTEST lifetime in the table, so a family writing `1h` or `Daily` would have had its
+    signals expire four hours after firing with nothing anywhere saying why.
+
+    Returning None means "this signal does not auto-expire", and a refusal returns None so a bad
+    spelling can never shorten a life. The signal stays until the 24-hour age sweep takes it,
+    which is the conservative direction, and the log line names the spelling to fix.
+    """
+    from models.signal_timeframe import UnknownTimeframe, ttl_for
+
+    timeframe = signal_data.get("timeframe")
+    try:
+        return datetime.utcnow() + ttl_for(timeframe)
+    except UnknownTimeframe:
+        logger.error(
+            "REFUSED to set an expiry: unrecognised timeframe %r on %s (%s). The row keeps no "
+            "expires_at and falls to the 24-hour age sweep. Add the spelling to "
+            "models/signal_timeframe.py.",
+            timeframe, signal_data.get("signal_id"), signal_data.get("strategy"))
+        return None
 
 
 async def write_signal_outcome(signal_data: Dict[str, Any]) -> None:
@@ -970,40 +940,34 @@ async def _check_and_clear_conflicting_signals(signal_data: Dict[str, Any]) -> b
             if not rows:
                 return False
 
-            # Build conflict note
+            # R-IV.584(d): BOTH SIDES ARE STILL WITHHELD -- AS A STATE, NOT A DISMISSAL.
+            #
+            # This wrote a bare `status = 'DISMISSED'` and never touched `user_action`. Two
+            # things followed. The row became indistinguishable from one the principal had
+            # rejected, when in fact nobody had judged it -- the two sides simply cannot both be
+            # shown. And it went invisible to every query keyed on `user_action`, including the
+            # hourly sweep, which requires `user_action IS NULL` and would later stamp EXPIRED
+            # on top of the dismissal.
+            #
+            # WITHHELD is its own state, carrying its reason, so every query can count it.
             old_strategies = ", ".join(
                 f"{r['strategy']}({r['direction']})" for r in rows
             )
             new_strategy = signal_data.get("strategy", "?")
             conflict_note = (
-                f"Auto-dismissed: conflicting signals on {ticker}. "
+                f"Withheld: conflicting signals on {ticker}. "
                 f"New {new_strategy}({new_direction}) vs active {old_strategies}. "
                 f"Both sides logged for backtesting."
             )
 
-            # Dismiss all old conflicting signals
             old_ids = [r["signal_id"] for r in rows]
-            await conn.execute(
-                """
-                UPDATE signals
-                SET status = 'DISMISSED',
-                    notes = COALESCE(notes, '') || $1
-                WHERE signal_id = ANY($2::text[])
-                """,
-                f" | {conflict_note}",
-                old_ids,
-            )
+            from models.signal_lifecycle import WITHHELD
+            from services.signal_lifecycle import ACTOR_CONFLICT, set_state_many
 
-            # Dismiss the new signal too
-            await conn.execute(
-                """
-                UPDATE signals
-                SET status = 'DISMISSED',
-                    notes = COALESCE(notes, '') || $1
-                WHERE signal_id = $2
-                """,
-                f" | {conflict_note}",
-                new_signal_id,
+            await set_state_many(
+                conn, list(old_ids) + [new_signal_id], WITHHELD,
+                reason=conflict_note, actor=ACTOR_CONFLICT, ruling="R-IV.584(d)",
+                note=conflict_note,
             )
 
             # Clear Redis cache for dismissed signals
@@ -1017,10 +981,10 @@ async def _check_and_clear_conflicting_signals(signal_data: Dict[str, Any]) -> b
             except Exception:
                 pass  # Redis cleanup is best-effort
 
-            signal_data["status"] = "DISMISSED"
+            signal_data["status"] = "WITHHELD"
             signal_data["conflict_note"] = conflict_note
             logger.info(
-                f"⚔️ Conflict cleared: {ticker} — dismissed {len(old_ids)} old + 1 new signal. "
+                f"⚔️ Conflict: {ticker} — withheld {len(old_ids)} old + 1 new signal. "
                 f"{conflict_note}"
             )
             return True
