@@ -305,3 +305,84 @@ class TestTagRowStampsBoth:
         assert "def tag_row" not in code
         assert "def session_of" not in code
         assert "from signals.feed_service import" in code
+
+
+# ------------------------------ R-IV.578(b): one author, two consumers
+
+class TestTheCommitteeCanStillAskForCrypto:
+    """Crypto was ruled out of the RIVER, not out of the committee's reach.
+
+    `feed_service.get_active_trade_ideas` is both surfaces, and it excludes crypto by
+    default on each -- the swamping is identical. The difference is that the MCP tool
+    has a caller who can decide, so it gets a named argument; the page does not.
+    """
+
+    def test_the_default_is_equity_only_on_both_sides(self):
+        import inspect
+
+        from hub_mcp.tools.trade_ideas import hub_get_trade_ideas
+        from signals.feed_service import get_active_trade_ideas
+
+        for fn in (hub_get_trade_ideas, get_active_trade_ideas):
+            sig = inspect.signature(fn)
+            assert "include_crypto" in sig.parameters, fn
+            assert sig.parameters["include_crypto"].default is False, fn
+
+    def test_the_description_says_crypto_is_on_request(self):
+        """FastMCP builds the tool schema from this text and the signature, so the
+        description IS the interface for a model deciding whether to pass it."""
+        from hub_mcp.tools.trade_ideas import DESCRIPTION
+
+        assert "include_crypto" in DESCRIPTION
+        assert "EQUITY ONLY BY DEFAULT" in DESCRIPTION
+
+    def test_the_allow_list_serves_asset_class(self):
+        """Without it the argument is unusable: a committee that asked for crypto
+        would have to infer which rows are crypto from the ticker, and inferring a
+        field is the failure this whole wave is about."""
+        from hub_mcp.tools.trade_ideas import _serialize_group
+
+        group = {
+            "group_key": "DOGE-USD:LONG", "ticker": "DOGE-USD", "direction": "LONG",
+            "display_score": 61.0, "confluence_tier": "STANDALONE", "signal_count": 1,
+            "distinct_strategy_count": 1, "strategies": ["Crypto Scanner"],
+            "newest_at": "2026-09-24T15:07:00+00:00", "related_signals": [],
+            "primary_signal": {
+                "signal_id": "DOGE-USD_LONG_20260924_110707",
+                "signal_type": "TRAPPED_SHORTS", "strategy": "Crypto Scanner",
+                "asset_class": "CRYPTO", "session": "regular",
+                "strategy_class": "roster", "score": 61.0,
+            },
+        }
+        out = _serialize_group(group, datetime(2026, 9, 24, 16, 0), False)
+        assert out["asset_class"] == "CRYPTO"
+        assert out["session"] == "regular"
+        assert out["strategy_class"] == "roster"
+
+    def test_an_offset_bearing_timestamp_still_ages_correctly(self):
+        """RV1 changed `newest_at` from an offset-less string to one carrying +00:00.
+        `age_minutes` parses it by hand, so this is the place that would silently
+        drift -- and an age is how the committee decides a setup is stale."""
+        from hub_mcp.tools.trade_ideas import _serialize_group
+
+        now = datetime(2026, 9, 24, 16, 0)
+        base = {
+            "group_key": "K", "ticker": "HYG", "direction": "SHORT",
+            "display_score": 60.0, "confluence_tier": "STANDALONE", "signal_count": 1,
+            "distinct_strategy_count": 1, "strategies": ["sell_the_rip"],
+            "related_signals": [], "primary_signal": {"signal_id": "x"},
+        }
+        with_offset = dict(base, newest_at="2026-09-24T15:30:00+00:00")
+        without = dict(base, newest_at="2026-09-24T15:30:00")
+        a = _serialize_group(with_offset, now, False)["age_minutes"]
+        b = _serialize_group(without, now, False)["age_minutes"]
+        assert a == b == 30.0, (a, b)
+
+    def test_the_scope_is_stated_not_inferred(self):
+        """An equity-only feed and a crypto-inclusive feed that happened to return no
+        crypto are different answers, and a caller cannot tell them apart from the
+        rows alone."""
+        src = io.open(os.path.join(BACKEND, "hub_mcp/tools/trade_ideas.py"),
+                      encoding="utf-8").read()
+        assert '"asset_scope"' in src
+        assert '"include_crypto": bool(include_crypto)' in src
