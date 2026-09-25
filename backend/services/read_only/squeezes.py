@@ -7,6 +7,7 @@ because that module also contains POST endpoints that trigger writes.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from database.postgres_client import get_postgres_client
@@ -17,7 +18,14 @@ logger = logging.getLogger(__name__)
 def _row_to_dict(row) -> Dict[str, Any]:
     d = dict(row)
     for k, v in d.items():
-        if hasattr(v, "isoformat"):
+        if isinstance(v, datetime):
+            # RV1 (R-IV.566(e)1): through the one helper, so a naive value carries
+            # its UTC offset. `hasattr(v, "isoformat")` also catches a plain date,
+            # which has no time to place -- so the two are told apart here.
+            from database.postgres_client import iso_utc
+
+            d[k] = iso_utc(v)
+        elif hasattr(v, "isoformat"):
             d[k] = v.isoformat()
     return d
 

@@ -18,8 +18,13 @@ from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
 from database.postgres_client import get_postgres_client, serialize_db_row
-from signals.feed_service import SCAN_BASED_STRATEGIES, _dedup_related_signals, get_active_trade_ideas
+from signals.feed_service import (
+    SCAN_BASED_STRATEGIES, _dedup_related_signals, get_active_trade_ideas,
+    session_of, tag_row,          # RV5 + R-IV.577(b): one author, not a second copy
+)
 from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
+from config.strategy_class import strategy_class                 # R-IV.577(b)
+from config.asset_class import EXCLUDE_CRYPTO_SQL                # RV4, R-IV.566(e)2
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -51,6 +56,7 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
             f"""
             SELECT * FROM signals
             WHERE status = 'ACTIVE'
+              AND {EXCLUDE_CRYPTO_SQL}   -- RV4
               AND (expires_at IS NULL OR expires_at > NOW())
               AND created_at > NOW() - INTERVAL '24 hours'
               AND user_action IS NULL
@@ -97,6 +103,9 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
                 "signal_id": r.get("signal_id"),
                 "strategy": r.get("strategy") or r.get("signal_type"),
                 "codename": codename(r.get("signal_type"), r.get("strategy")),  # L0.4 additive
+                "strategy_class": strategy_class(r.get("signal_type"),
+                                                 r.get("strategy")),  # R-IV.577(b)
+                "session": session_of(r),                            # RV5
                 "signal_category": r.get("signal_category"),
                 "score": float(r.get("score_v2") or r.get("score") or 0),
                 "timestamp": r.get("timestamp") or r.get("created_at"),
@@ -117,7 +126,7 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
 
     # Dedup, finalize, sort
     for g in groups_map.values():
-        attach_codename(g["primary_signal"])  # L0.4 additive (raw fields untouched)
+        tag_row(attach_codename(g["primary_signal"]))  # L0.4 + R-IV.577(b) + RV5
         g["related_signals"] = _dedup_related_signals(g["related_signals"])
         g["signal_count"] = 1 + len(g["related_signals"])
         strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]
@@ -135,6 +144,17 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
         g["composite_rank"] = g["display_score"]
 
     return sorted(groups_map.values(), key=lambda g: g["composite_rank"], reverse=True)[:limit]
+
+
+# RV4 (R-IV.566(e)2): crypto does not appear in the River's feeds. The predicate and
+# the measurements behind it live in `config.asset_class`, imported above -- one
+# author, because it has to hold on every feed SELECT and a fifth feed added without
+# it would not error, it would just fill with crypto again.
+#
+# It is a FEED filter and nothing else. It is deliberately NOT on the expiry cron or
+# the group-action UPDATE below: a crypto signal excluded from expiry would never
+# expire, and a dismiss that skipped crypto would report success having changed
+# nothing.
 
 
 @router.get("/trade-ideas")
@@ -171,6 +191,8 @@ async def get_trade_ideas_feed(
         conditions.append(f"COALESCE(score_v2, score, 0) >= ${idx}")
         params.append(min_score)
         idx += 1
+
+    conditions.append(EXCLUDE_CRYPTO_SQL)      # RV4
 
     # Exclude expired signals from ACTIVE feed
     if status and status.upper() == "ACTIVE":
@@ -213,7 +235,7 @@ async def get_trade_ideas_feed(
     from config.liquid_universe import is_liquid
 
     def _enrich(row) -> dict:
-        d = attach_codename(serialize_db_row(dict(row)))
+        d = tag_row(attach_codename(serialize_db_row(dict(row))))
         d["is_liquid"] = is_liquid(d.get("ticker"))
         return d
 
