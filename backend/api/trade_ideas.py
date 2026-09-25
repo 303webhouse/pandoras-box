@@ -324,40 +324,33 @@ async def act_on_trade_idea_group(body: GroupAction, _=Depends(require_api_key))
     if action not in ("ACCEPTED", "REJECTED"):
         raise HTTPException(status_code=400, detail="action must be ACCEPTED or REJECTED")
 
-    user_action = "SELECTED" if action == "ACCEPTED" else "DISMISSED"
-    new_status = "DISMISSED" if action == "REJECTED" else "ACTIVE"
+    # R-IV.584(e): through the one author, so both columns move together.
+    #
+    # An ACCEPTED group stays ACTIVE and is only marked SELECTED. Acceptance here is the
+    # principal saying "I want this", not that a position exists -- the position routes are what
+    # write ACCEPTED_STOCKS / ACCEPTED_OPTIONS, and claiming one of those here would report a
+    # trade that had not been placed.
+    from models.signal_lifecycle import (ACTIVE as _ACTIVE, DISMISSED as _DISMISSED,
+                                         SELECTED as _SELECTED)
+    from services.signal_lifecycle import ACTOR_PRINCIPAL, set_state_many
+
     note_text = f"Group {action.lower()} via dashboard"
+    target = _DISMISSED if action == "REJECTED" else _SELECTED
 
     async with pool.acquire() as conn:
-        # Simplified SQL: only use columns guaranteed to exist (user_action, status, notes)
-        # Avoids selected_at/dismissed_at/decided_at which may not have been migrated
-        result = await conn.execute(
-            """
-            UPDATE signals
-            SET user_action = $1,
-                status = $4,
-                notes = CASE
-                    WHEN notes IS NULL OR notes = '' THEN $5
-                    ELSE notes || ' | ' || $5
-                END
-            WHERE UPPER(ticker) = $2
-            AND UPPER(direction) = $3
-            AND status = 'ACTIVE'
-            AND user_action IS NULL
-            """,
-            user_action,
-            ticker,
-            direction,
-            new_status,
-            note_text,
-        )
-
-    # Parse count
-    count = 0
-    if result:
-        parts = result.split()
-        if len(parts) >= 2 and parts[-1].isdigit():
-            count = int(parts[-1])
+        rows = await conn.fetch(
+            """SELECT signal_id FROM signals
+                WHERE UPPER(ticker) = $1 AND UPPER(direction) = $2
+                  AND status = $3 AND user_action IS NULL""",
+            ticker, direction, _ACTIVE)
+        ids = [r["signal_id"] for r in rows]
+        outcome = await set_state_many(
+            conn, ids, target, reason=note_text, actor=ACTOR_PRINCIPAL,
+            ruling="R-IV.584(e)", only_if=[_ACTIVE], note=note_text)
+        count = outcome["changed"]
+        if action == "ACCEPTED" and ids:
+            await conn.execute(
+                "UPDATE signals SET selected_at = NOW() WHERE signal_id = ANY($1::text[])", ids)
 
     # Set Redis suppression key — prevents this ticker+direction from reappearing
     # for 24 hours (matches signal query window)
@@ -536,25 +529,38 @@ async def expire_stale_signals(_=Depends(require_api_key)):
     decision about a ticker -- does not fire when an idea simply runs out of time.
     Rows expired before this change keep the 'DISMISSED' they were written with.
     """
+    from models.signal_lifecycle import ACTIVE as _ACTIVE, EXPIRED as _EXPIRED
+    from services.signal_lifecycle import ACTOR_AGE_SWEEP, set_state_many
+
     pool = await get_postgres_client()
 
     async with pool.acquire() as conn:
-        result = await conn.execute("""
-            UPDATE signals
-            SET status = 'EXPIRED', user_action = 'EXPIRED', dismissed_at = NOW()
-            WHERE status = 'ACTIVE'
-            AND (
-                (expires_at IS NOT NULL AND expires_at < NOW())
-                OR (expires_at IS NULL AND created_at < NOW() - INTERVAL '24 hours')
-            )
-        """)
-
-    # Parse count from result string like "UPDATE 5"
-    count = 0
-    if result:
-        parts = result.split()
-        if len(parts) >= 2 and parts[-1].isdigit():
-            count = int(parts[-1])
+        # R-IV.584(e): THE `status = 'ACTIVE'` SCOPE STAYS, and now it is honest. This was the
+        # ONLY writer that kept both columns in step, and that predicate meant a row which had
+        # drifted out of ACTIVE could never be brought back -- precisely how 750 rows came to
+        # sit in a state nobody had put them in and nothing could take them out of. The drift is
+        # fixed at its four sources; this stays scoped to live rows because expiring a row that
+        # is already over is not this job's business. `only_if` makes that scope a REFUSAL that
+        # gets counted, rather than a WHERE clause that silently matches nothing.
+        stale = await conn.fetch("""
+            SELECT signal_id FROM signals
+             WHERE status = $1
+               AND (
+                   (expires_at IS NOT NULL AND expires_at < NOW())
+                   OR (expires_at IS NULL AND created_at < NOW() - INTERVAL '24 hours')
+               )
+        """, _ACTIVE)
+        ids = [r["signal_id"] for r in stale]
+        outcome = await set_state_many(
+            conn, ids, _EXPIRED, reason="past its expiry", actor=ACTOR_AGE_SWEEP,
+            ruling="R-IV.584(e)", only_if=[_ACTIVE])
+        count = outcome["changed"]
+        if outcome["unchanged"]:
+            logger.warning("expiry: %d row(s) refused", outcome["unchanged"])
+        await conn.execute("""
+            UPDATE signals SET dismissed_at = NOW()
+             WHERE signal_id = ANY($1::text[]) AND dismissed_at IS NULL
+        """, ids)
 
     if count > 0:
         logger.info(f"🕐 Expired {count} stale signals")

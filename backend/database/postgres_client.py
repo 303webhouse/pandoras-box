@@ -6,6 +6,7 @@ Stores all signals for backtesting and historical analysis
 import asyncpg
 
 from models.position_status import STATUSES as _POSITION_STATUSES
+from models.signal_lifecycle import STATUS_VALUES as _SIGNAL_STATUS_VALUES
 from models.position_lots import (LOT_SOURCES as _LOT_SOURCES,
                                   PRINCIPAL_ENTRY_SOURCE_REGEX as _PRINCIPAL_ENTRY_SOURCE_REGEX)
 import os
@@ -1358,6 +1359,49 @@ async def init_database():
                 END $$
             """ % (", ".join("'" + x + "'" for x in _LOT_SOURCES),
                    _PRINCIPAL_ENTRY_SOURCE_REGEX)),
+            # R-IV.584(e): ONE FACT, TWO COLUMNS, ONE AUTHOR.
+            #
+            # `status` and `user_action` both record what became of a signal, and five
+            # writers each updated the half it cared about. The only writer that kept
+            # them in step had `WHERE status = 'ACTIVE'`, so a row that drifted out of
+            # ACTIVE could never drift back -- 754 rows sat at COMMITTEE_REVIEW of which
+            # only 4 were actually unattended.
+            #
+            # The constraint is GENERATED from models/signal_lifecycle.py. PENDING_REVIEW
+            # is deliberately absent: nothing has written it since the 2026-04-22 cleanup
+            # (verified -- every remaining reference is a read or that one-time sweep),
+            # and carrying a dead word forward is how it comes back.
+            #
+            # Census before constraining (2026-09-25, 23,144 rows): EXPIRED 18,678,
+            # DISMISSED 3,442, COMMITTEE_REVIEW 754, SHADOW 203, ACTIVE 67. Nothing else.
+            ("state vocabulary: signals", """
+                DO $$
+                BEGIN
+                    ALTER TABLE signals DROP CONSTRAINT IF EXISTS signals_status_check;
+                    ALTER TABLE signals ADD CONSTRAINT signals_status_check
+                        CHECK (status IS NULL OR status IN (%s));
+                END $$
+            """ % ", ".join("'%s'" % s for s in _SIGNAL_STATUS_VALUES)),
+            ("signal lifecycle audit", """
+                CREATE TABLE IF NOT EXISTS signal_lifecycle_events (
+                    id                BIGSERIAL   PRIMARY KEY,
+                    signal_id         TEXT        NOT NULL,
+                    from_status       TEXT,
+                    from_user_action  TEXT,
+                    from_state        TEXT,
+                    to_status         TEXT        NOT NULL,
+                    to_user_action    TEXT,
+                    to_state          TEXT        NOT NULL,
+                    reason            TEXT        NOT NULL,
+                    ruling            TEXT,
+                    actor             TEXT        NOT NULL,
+                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """),
+            ("signal lifecycle audit index", """
+                CREATE INDEX IF NOT EXISTS idx_signal_lifecycle_events_signal
+                    ON signal_lifecycle_events (signal_id, created_at DESC)
+            """),
             ("status vocabulary: unified_positions", """
                 DO $$
                 BEGIN
@@ -2923,24 +2967,41 @@ async def _write_iv_regime_evidence(conn, signal_data) -> None:
                      signal_data.get("signal_id"), exc)
 
 async def update_signal_action(signal_id: str, action: str):
+    """The principal acted on a signal. R-IV.584(e): through the one lifecycle author.
+
+    THIS FUNCTION IS WHY 697 ROWS SAT AT COMMITTEE_REVIEW FOR UP TO 147 DAYS. It wrote
+    `user_action` and left `status` exactly as it found it, so a row the principal had dismissed
+    still read as awaiting a review that was never coming -- and the only writer that could have
+    healed it refused to touch anything that was not ACTIVE.
+
+    `dismissed_at` / `selected_at` are still stamped here: they are timestamps, not state, and
+    nothing else writes them.
+
+    `action` says WHICH acceptance, because the two call sites in api/positions.py are the stocks
+    path and the options path and both used to send the same "SELECTED" -- so an options
+    acceptance and a stock acceptance became one word, and the status they landed on was
+    whichever the reader assumed.
     """
-    Update user action on a signal (DISMISSED or SELECTED)
-    """
+    from models.signal_lifecycle import ACCEPTED_OPTIONS, ACCEPTED_STOCKS, DISMISSED
+    from services.signal_lifecycle import ACTOR_PRINCIPAL, set_state
+
+    states = {
+        "DISMISSED": (DISMISSED, "the principal dismissed it", "dismissed_at"),
+        "SELECTED": (ACCEPTED_STOCKS, "the principal accepted it as stock", "selected_at"),
+        "SELECTED_OPTIONS": (ACCEPTED_OPTIONS, "the principal accepted it as options",
+                             "selected_at"),
+    }
+    if action not in states:
+        logger.warning("update_signal_action: unknown action %r for %s", action, signal_id)
+        return
+    state, reason, stamp = states[action]
+
     pool = await get_postgres_client()
-    
     async with pool.acquire() as conn:
-        if action == "DISMISSED":
-            await conn.execute("""
-                UPDATE signals 
-                SET user_action = 'DISMISSED', dismissed_at = NOW()
-                WHERE signal_id = $1
-            """, signal_id)
-        elif action == "SELECTED":
-            await conn.execute("""
-                UPDATE signals 
-                SET user_action = 'SELECTED', selected_at = NOW()
-                WHERE signal_id = $1
-            """, signal_id)
+        await set_state(conn, signal_id, state, reason=reason,
+                        actor=ACTOR_PRINCIPAL, ruling="R-IV.584(e)")
+        await conn.execute(
+            "UPDATE signals SET " + stamp + " = NOW() WHERE signal_id = $1", signal_id)
 
 async def create_position(signal_id: str, position_data: Dict[Any, Any]) -> Optional[int]:
     """Create a new position when user selects a trade. Returns position id if available."""

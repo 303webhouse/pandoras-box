@@ -21,6 +21,7 @@ from config.strategy_aliases import codename, attach_codename  # L0.4 display al
 from config.strategy_class import attach_strategy_class, strategy_class  # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL  # RV4, R-IV.566(e)2
 from stable_engine.sessions import session_at  # RV5, R-IV.566(e)3
+from models.signal_lifecycle import is_high_score, score_of  # R-IV.584(b)
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,11 @@ def tag_row(d: dict) -> dict:
     """
     attach_strategy_class(d)
     d["session"] = session_of(d)
+    # R-IV.584(b): the 85-point threshold used to take a signal OUT of the feed, into a
+    # committee queue that was never drained -- 25 to 81 rows a week, every one scoring 85 to
+    # 100. It now marks the row and the row stays. Derived on read from the same COALESCE the
+    # ranking uses, never stored: a stored flag is one more writer to fall out of step.
+    d["high_score"] = is_high_score(score_of(d))
     return d
 
 

@@ -2230,22 +2230,33 @@ async def auto_dismiss_old_signals():
             # expiry, not a user dismissal (R-IV.434(b)): 'EXPIRED', so the legacy feeds'
             # 24-hour ticker hide (keyed on 'DISMISSED') does not fire. SHADOW rows are left
             # alone -- they are never on an actionable surface, and their notes carry a banner.
-            result = await conn.execute("""
-                UPDATE signals
-                SET user_action = 'EXPIRED',
-                    dismissed_at = NOW(),
-                    notes = COALESCE(notes || ' | ', '') || 'Auto-expired after 24h'
-                WHERE user_action IS NULL
-                AND COALESCE(status, 'ACTIVE') <> 'SHADOW'
-                AND created_at < NOW() - INTERVAL '24 hours'
-            """)
-            
-            # Extract count from result status (e.g., "UPDATE 5")
-            count = 0
-            if hasattr(result, 'split'):
-                parts = result.split()
-                if len(parts) > 1 and parts[1].isdigit():
-                    count = int(parts[1])
+            #
+            # R-IV.584(e): THROUGH THE ONE AUTHOR. This wrote `user_action` and left `status`
+            # untouched, which is how 53 rows came to read COMMITTEE_REVIEW while already
+            # carrying `user_action = 'EXPIRED'` -- swept, and still apparently pending.
+            # WITHHELD is excluded alongside SHADOW: a withheld row is not an unattended one,
+            # and stamping it EXPIRED would bury the reason it was withheld.
+            from models.signal_lifecycle import EXPIRED as _EXPIRED, SHADOW as _SHADOW, WITHHELD as _WITHHELD
+            from services.signal_lifecycle import ACTOR_AGE_SWEEP, set_state_many
+
+            stale = await conn.fetch("""
+                SELECT signal_id FROM signals
+                 WHERE user_action IS NULL
+                   AND COALESCE(status, 'ACTIVE') NOT IN ($1, $2)
+                   AND created_at < NOW() - INTERVAL '24 hours'
+            """, _SHADOW, _WITHHELD)
+            outcome = await set_state_many(
+                conn, [r["signal_id"] for r in stale], _EXPIRED,
+                reason="no action inside 24 hours", actor=ACTOR_AGE_SWEEP,
+                ruling="R-IV.584(e)", note="Auto-expired after 24h")
+            count = outcome["changed"]
+            if outcome["unchanged"]:
+                logger.warning("age sweep: %d row(s) refused — %s",
+                               outcome["unchanged"], outcome["refusals"][:3])
+            await conn.execute("""
+                UPDATE signals SET dismissed_at = NOW()
+                 WHERE signal_id = ANY($1::text[]) AND dismissed_at IS NULL
+            """, [r["signal_id"] for r in stale])
             
             if count > 0:
                 logger.info(f"ðŸ—‘ï¸ Auto-expired {count} signals older than 24 hours")
