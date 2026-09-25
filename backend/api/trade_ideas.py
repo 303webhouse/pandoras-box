@@ -26,6 +26,7 @@ from config.strategy_aliases import codename, attach_codename  # L0.4 display al
 from config.strategy_class import strategy_class                 # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL                # RV4, R-IV.566(e)2
 from signals.session_policy import SERVE_RELEASED_SQL            # R-IV.587(b)1
+from models.signal_score import CANONICAL_SCORE_SQL              # R-IV.590(c)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -64,7 +65,7 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
               AND user_action IS NULL
               AND COALESCE(signal_category, 'TRADE_SETUP') NOT IN ('INTRADAY_SETUP', 'FOOTPRINT')
               AND feed_tier = $1{_l0_and}
-            ORDER BY COALESCE(adjusted_score, score_v2, score, 0) DESC, created_at DESC
+            ORDER BY {CANONICAL_SCORE_SQL} DESC, created_at DESC
             LIMIT $2
             """,
             tier,
@@ -227,7 +228,7 @@ async def get_trade_ideas_feed(
             f"""
             SELECT * FROM signals
             WHERE {where_clause}
-            ORDER BY COALESCE(adjusted_score, score_v2, score, 0) DESC, created_at DESC
+            ORDER BY {CANONICAL_SCORE_SQL} DESC, created_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}
             """,
             *params,

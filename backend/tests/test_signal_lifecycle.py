@@ -237,9 +237,17 @@ class TestTheAutoPromoteIsOff:
         """A stored flag is one more writer to fall out of step with the column it
         summarises — which is the whole lesson of the 754 rows."""
         code = _code_without_docstrings("signals/feed_service.py")
-        assert 'd["high_score"] = is_high_score(score_of(d))' in code
+        # Computed on read, from the canonical score (R-IV.590(c) moved which number that is).
+        # Asserted on the CALL, not on one line's exact text, so the next change to how the
+        # number is obtained does not fail this for the wrong reason.
+        assert "is_high_score(" in code and "tag_row" in code
         for rel in ("signals/pipeline.py", "database/postgres_client.py"):
             assert "high_score" not in _code_without_docstrings(rel), rel
+        # ...and it is never a column.
+        import inspect
+
+        from database import postgres_client as pc
+        assert "high_score" not in inspect.getsource(pc.log_signal)
 
 
 # ───────────────────────────────── (a) one timeframe vocabulary
@@ -296,3 +304,60 @@ class TestTheTimeframeVocabulary:
         assert band_of("240") == SWING
         assert band_of("10079") == SWING
         assert band_of("10080") == WEEKLY
+
+
+# ───────────────────────────────── R-IV.590(c): one score
+
+class TestOneCanonicalScore:
+
+    def test_the_flag_reads_the_number_the_pipeline_ranks_by(self):
+        """THE DEFECT. The flag read `score_v2 ?? score` while the feed ranked by
+        `adjusted_score ?? score_v2 ?? score`, and the two disagreed on 46 of 54 live rows.
+        DE read 93 by the flag and 85 by the ranking: one row, one card, two numbers."""
+        from models.signal_score import CANONICAL_SCORE_SQL, canonical_score
+
+        assert CANONICAL_SCORE_SQL == "COALESCE(adjusted_score, score_v2, score, 0)"
+        de = {"score": 88, "score_v2": 93, "adjusted_score": 85, "context_modifier": -3}
+        assert canonical_score(de) == 85.0
+        assert score_of(de) == 85.0                      # the flag now agrees
+        assert is_high_score(score_of(de)) is True
+
+    def test_the_precedence_is_the_order_bys_own(self):
+        from models.signal_score import canonical_score
+
+        assert canonical_score({"adjusted_score": 1, "score_v2": 2, "score": 3}) == 1.0
+        assert canonical_score({"score_v2": 2, "score": 3}) == 2.0
+        assert canonical_score({"score": 3}) == 3.0
+
+    def test_no_score_is_not_a_score_of_zero(self):
+        """The SQL coalesces to 0 so it can sort; this returns None. A row with no score and a
+        row scoring zero are different claims, and a card showing 0 for "never scored" would
+        state something nobody measured."""
+        from models.signal_score import canonical_score
+
+        assert canonical_score({}) is None
+        assert canonical_score({"score": None, "score_v2": None}) is None
+        assert canonical_score({"score_v2": float("nan"), "score": 70}) == 70.0
+        assert is_high_score(canonical_score({})) is False
+        # POSITIVE CONTROL: a real zero is a real number.
+        assert canonical_score({"score": 0}) == 0.0
+
+    def test_the_expression_is_written_once(self):
+        """Three copies of the ORDER BY existed. One sentence now, interpolated."""
+        for rel in ("api/trade_ideas.py", "signals/feed_service.py"):
+            code = _code_without_docstrings(rel)
+            assert "COALESCE(adjusted_score" not in code, rel
+            assert "CANONICAL_SCORE_SQL" in code, rel
+
+    def test_the_components_stay_visible(self):
+        """A reader seeing 85 must be able to tell whether context moved it or whether a
+        scorer was simply absent — the two cases this replaces."""
+        from models.signal_score import score_components
+
+        out = score_components({"score": 88, "score_v2": 93, "adjusted_score": 85,
+                                "context_modifier": -3})
+        assert out["source"] == "adjusted_score"
+        assert out["score_v2"] == 93.0 and out["score"] == 88.0
+        assert out["context_modifier"] == -3.0
+        assert score_components({"score": 70})["source"] == "score"
+        assert score_components({})["source"] is None
