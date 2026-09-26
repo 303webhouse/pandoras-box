@@ -299,6 +299,17 @@ def _parse_timestamp(value: Any) -> datetime:
 
 
 def _utc_naive(value: datetime) -> datetime:
+    """An aware datetime as naive UTC. A NAIVE one is passed through AS-IS.
+
+    R-IV.597(d): that pass-through assumes every naive value it is handed is already UTC, and it
+    cannot check -- a local 14:00 and a UTC 14:00 are the same object. A writer using
+    `datetime.now()` would therefore be stored six or seven hours out, with nothing raising.
+
+    The guard belongs at the WRITER, not here, because only the writer knows which clock it read.
+    Audited 2026-09-26: all 21 `FactorReading` timestamp writers use `datetime.utcnow()`, so the
+    trap is live but unsprung, and `tests/test_factor_clock.py` fails if a local clock ever
+    appears.
+    """
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)

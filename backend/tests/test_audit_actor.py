@@ -104,9 +104,26 @@ def test_every_script_that_updates_or_deletes_names_itself():
                    and re.search(r"(UPDATE|DELETE\s+FROM)\s+\{TABLE\}", src))
         if not (WRITE.search(src) or dynamic) or p.name in SCRIPT_EXEMPT:
             continue
-        if "set_config('app.actor'" not in src:
+        # Either the raw `set_config` OR a call to the canonical helper. The helper is the
+        # BETTER form -- it is the one author for this (R-IV.462(b)) and it sets the reason as
+        # well -- and a guard that only accepted the inlined string would push new scripts to
+        # bypass it to satisfy a test. `test_name_actor_sets_both_settings_transaction_local`
+        # below pins that the helper really does set `app.actor`, so the chain is complete.
+        if "set_config('app.actor'" not in src and "name_actor(" not in src:
             bad.append(p.name)
     assert not bad, f"scripts writing unified_positions with no actor: {bad}"
+
+
+def test_the_helper_is_an_accepted_form_because_it_does_the_same_thing():
+    """POSITIVE CONTROL for the widened guard: a script naming no actor at all still fails."""
+    import re as _re
+
+    assert not ("set_config('app.actor'" in "UPDATE unified_positions SET x = 1"
+                or "name_actor(" in "UPDATE unified_positions SET x = 1")
+    # ...and the helper's own source contains the setting the guard used to demand textually.
+    from utils import audit_actor
+    import inspect
+    assert "set_config('app.actor'" in inspect.getsource(audit_actor.name_actor)
 
 
 def test_the_exemptions_are_still_true():
