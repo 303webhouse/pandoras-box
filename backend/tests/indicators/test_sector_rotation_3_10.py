@@ -24,8 +24,17 @@ _FAKE_XLF_READING = {"sector_etf": "XLF", "osc_fast": -0.05, "osc_slow": -0.02, 
 
 
 def _run(coro):
-    """Run a coroutine synchronously for sync-style test assertions."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run a coroutine synchronously for sync-style test assertions.
+
+    `asyncio.run`, not `get_event_loop().run_until_complete`. The old form borrows whatever loop
+    the process happens to have, so it fails the moment an earlier test has closed one -- and
+    which tests run earlier is not this file's business. It surfaced when `pytest.ini` gained two
+    more test directories (R-IV.581(c)): these four passed alone and failed in the full run,
+    which is order pollution, not a defect in what they test.
+
+    `asyncio.run` makes and closes its own loop, so the answer does not depend on the neighbours.
+    """
+    return asyncio.run(coro)
 
 
 def _patch_cache(cache_state: dict):

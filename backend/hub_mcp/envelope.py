@@ -24,7 +24,10 @@ def make_response(
     """Build the canonical MCP response envelope.
 
     Truncates summary to 300 chars with ellipsis if longer.
-    Always emits schema_version="v1.0".
+    Emits `schema_version` from `hub_mcp.SCHEMA_VERSION`, which is the one place it is
+    declared. This line used to say `"v1.0"` and had been wrong since the v2.0 bump: a
+    version written into prose is a second copy, and the second copy is the one that goes
+    stale.
     """
     if summary and len(summary) > SUMMARY_MAX_CHARS:
         summary = summary[: SUMMARY_MAX_CHARS - 3] + "..."
