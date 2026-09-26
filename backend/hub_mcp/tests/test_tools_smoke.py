@@ -345,10 +345,16 @@ async def test_hermes_unavailable_when_source_fails():
 async def test_hermes_ok_with_events():
     from hub_mcp.tools.hermes_alerts import hub_get_hermes_alerts
 
+    # R-IV.581(c): the date was hard-coded "2026-06-20". `forward_days=60` filters on it, so
+    # this test passed until that date went by and then asserted 1 alert against 0 -- a
+    # time-bomb that went off months ago and was never seen, because this directory was outside
+    # the main run. Relative to today, it cannot expire.
+    from datetime import date as _date, timedelta as _timedelta
+
     raw = {
         "events": [
             {
-                "date": "2026-06-20",
+                "date": (_date.today() + _timedelta(days=7)).isoformat(),
                 "category": "FOMC",
                 "name": "FOMC",
                 "impact": "CRITICAL",
@@ -763,12 +769,27 @@ async def test_trade_ideas_invalid_direction():
     assert "direction" in r["error"]
 
 
+# R-IV.581(c) — PATCHED WHERE THE NAME IS LOOKED UP, not where it is used.
+#
+# These three patched `hub_mcp.tools.trade_ideas.get_postgres_client` and
+# `...get_active_trade_ideas`, and failed with "module does not have the attribute". The tool
+# imports both names INSIDE `hub_get_trade_ideas`, so they are never module attributes -- the
+# lookup happens on the SOURCE module, at call time, which is exactly where a patch does reach.
+#
+# The tool's import structure is deliberately unchanged. Hoisting those imports to module level
+# would make the patches work and would also change when a committee-facing module touches the
+# database at import time, which is not a change worth making to fix a test.
+#
+# They had been red for an unknown length of time because this whole directory was outside the
+# main run. It is in `pytest.ini`'s testpaths now.
+
+
 @pytest.mark.asyncio
 async def test_trade_ideas_db_unavailable():
     from hub_mcp.tools.trade_ideas import hub_get_trade_ideas
 
     with patch(
-        "hub_mcp.tools.trade_ideas.get_postgres_client",
+        "database.postgres_client.get_postgres_client",
         side_effect=Exception("DB down"),
     ):
         r = await hub_get_trade_ideas()
@@ -824,10 +845,10 @@ async def test_trade_ideas_ok_with_groups():
         return [fake_group], True
 
     with patch(
-        "hub_mcp.tools.trade_ideas.get_active_trade_ideas",
+        "signals.feed_service.get_active_trade_ideas",
         side_effect=_mock_feed,
     ), patch(
-        "hub_mcp.tools.trade_ideas.get_postgres_client",
+        "database.postgres_client.get_postgres_client",
         return_value=object(),
     ):
         r = await hub_get_trade_ideas(limit=5)
@@ -853,10 +874,10 @@ async def test_trade_ideas_degraded_when_redis_fails():
         return [], False  # redis_ok=False
 
     with patch(
-        "hub_mcp.tools.trade_ideas.get_active_trade_ideas",
+        "signals.feed_service.get_active_trade_ideas",
         side_effect=_mock_feed_degraded,
     ), patch(
-        "hub_mcp.tools.trade_ideas.get_postgres_client",
+        "database.postgres_client.get_postgres_client",
         return_value=object(),
     ):
         r = await hub_get_trade_ideas()
