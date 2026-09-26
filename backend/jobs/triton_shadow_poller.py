@@ -42,7 +42,7 @@ async def run_triton_shadow_poller() -> None:
     from integrations.uw_api import get_flow_alerts
     from config.liquid_universe import LIQUID_UNIVERSE, SEMIS_AI_TECH
     from jobs.triton_shadow_common import (
-        _f, classify_bucket, classify_direction, fetch_r_close_index,
+        _f, classify_bucket, classify_direction, fetch_r_close_index, iv_at_fire,
         triton_row_pinned,
     )
 
@@ -126,15 +126,23 @@ async def run_triton_shadow_poller() -> None:
                 "volume": a.get("volume"), "open_interest": a.get("open_interest"),
             }  # selected fields only — never the full payload, never secrets
 
+            # R-IV.597(c): IV at fire time, which no later job can recover. Fetched per row
+            # rather than cached per day, because the whole point is the value AT THE PRINT --
+            # the `iv_rank` cache (300s) absorbs prints on the same ticker inside five minutes,
+            # which is most of the repeats inside one tick. Tagged to Triton's own BACKGROUND
+            # lane, so it is shed before anything the principal trades on.
+            iv = await iv_at_fire(ticker)
+
             async with pool.acquire() as conn:
                 res = await conn.execute(
                     """
                     INSERT INTO triton_flow_shadow
                         (uw_alert_id, fired_at, ticker, direction, premium_usd, is_sweep,
                          liquidity_bucket, spot_at_fire, chg_pct_day, prior_5d_ret,
-                         is_liquid20, is_megacap_ai, bias_level_at_fire, gex_regime_at_fire, raw)
+                         is_liquid20, is_megacap_ai, bias_level_at_fire, gex_regime_at_fire, raw,
+                         iv_rank_at_fire, iv_at_fire, iv_source)
                     VALUES ($1, $2::text::timestamptz, $3, $4, $5, $6, $7, $8, $9, $10,
-                            $11, $12, $13, $14, $15::jsonb)
+                            $11, $12, $13, $14, $15::jsonb, $16, $17, $18)
                     ON CONFLICT (uw_alert_id) DO NOTHING
                     """,
                     aid, a.get("created_at"), ticker, direction, premium_i,
@@ -142,6 +150,7 @@ async def run_triton_shadow_poller() -> None:
                     spot, None,  # chg_pct_day: not reliably in the alert payload -> null
                     prior_5d, ticker in LIQUID_UNIVERSE, ticker in SEMIS_AI_TECH,
                     bias_level, gex_regime, dumps_jsonb(raw),
+                    iv["iv_rank_at_fire"], iv["iv_at_fire"], iv["iv_source"],
                 )
             if res and res.endswith(" 1"):   # asyncpg "INSERT 0 1" = new row
                 inserted += 1
