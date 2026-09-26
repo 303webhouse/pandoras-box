@@ -1578,7 +1578,17 @@
     const tickers = [...new Set(signals.map((s) => (s.ticker || '').toUpperCase()).filter(Boolean))];
     let smap = {};
     if (tickers.length) { try { const r = await apiFetch('/api/stable/enrich?tickers=' + tickers.join(',')); if (r.ok) smap = (await r.json()).enrichment || {}; } catch (_) {} }
-    const scoreOf = (s) => (s.adjusted_score != null ? s.adjusted_score : s.score_v2 != null ? s.score_v2 : s.score);
+    // R-IV.593(b)1: rank by the server's one score. R-IV.593(b)2: an UNSCORED row sorts last
+    // rather than as a zero — `|| 0` would have put it above any row the server scored below
+    // nothing, and would have made "nobody scored this" indistinguishable from "this scored 0".
+    const scoreOf = canonicalScore;
+    const byScore = (a, b) => {
+      const x = scoreOf(a), y = scoreOf(b);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return y - x;
+    };
 
     // Placement, from the server's class. `roster` grades and can reach Actionable; `shadow` and
     // `non-roster` never grade and sit in Unproven; a row with no class the server recognises is
@@ -1596,7 +1606,7 @@
       else if (cls === 'roster') roster.push(s);
       else nonRoster.push(s);
     });
-    roster.sort((a, b) => (scoreOf(b) || 0) - (scoreOf(a) || 0));
+    roster.sort(byScore);
 
     // L-evidence for every roster row the LANES will print, not just the top cards: the Watch
     // lane shows each row's grade, and a grade computed without its L evidence can read one step
@@ -1616,7 +1626,7 @@
       // computed WITHOUT this ticker's levels is in doubt (its L could have been the second icon).
       s._gradePending = s._grade === 'C' && !lvlAsked.has((s.ticker || '').toUpperCase());
     });
-    roster.sort((a, b) => (gradeRank[b._grade] || 0) - (gradeRank[a._grade] || 0) || (scoreOf(b) || 0) - (scoreOf(a) || 0));
+    roster.sort((a, b) => (gradeRank[b._grade] || 0) - (gradeRank[a._grade] || 0) || byScore(a, b));
 
     const visible = roster.slice(0, 3), queued = roster.length - visible.length;
     const ungraded = shadow.length + nonRoster.length + unclassed.length;
@@ -1648,6 +1658,10 @@
     _laneData = {
       at: Date.now(), roster, shadow, nonRoster, unclassed,
       cryptoLeak, read: feed.read, total: feed.total,
+      // A row the server could not score sorts last and shows no number. Said out loud, because
+      // otherwise it is just a row that quietly sank — and a field that stopped arriving at all
+      // would look exactly the same from the top of the lane.
+      unscored: signals.filter((x) => canonicalScore(x) == null).length,
       pages: feed.pages, answered: feed.answered,
       levelCapped: Math.max(0, new Set(roster.map((s) => (s.ticker || '').toUpperCase())).size - LANE_LEVEL_MAX),
     };
@@ -1785,7 +1799,7 @@
       riverOnly: !!disp.riverOnly,
       text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
         // The same flag in the other view: one River, and neither view is the one that omits it.
-        + (s.high_score === true ? ` · <span class="rv-high" title="${esc(highScoreNumber(s) == null ? 'Scores high, but not a validated setup. Actionable needs an A.' : 'Scores ' + highScoreNumber(s) + ': high, but not a validated setup. Actionable needs an A.')}">high score${highScoreNumber(s) == null ? '' : ' ' + highScoreNumber(s)}</span>` : '')
+        + (s.high_score === true ? ` · <span class="rv-high" title="${esc(canonicalScore(s) == null ? 'Scores high, but not a validated setup. Actionable needs an A.' : 'Scores ' + canonicalScore(s) + ': high, but not a validated setup. Actionable needs an A.')}">high score${canonicalScore(s) == null ? '' : ' ' + canonicalScore(s)}</span>` : '')
         + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : '')
         + (heldLabel(s) ? `<div class="rv-held">${esc(heldLabel(s))}</div>` : '')
         // R-IV.579(a)2: the same error the lanes show, so neither view is the one that hides it.
@@ -1932,19 +1946,19 @@
   // 85-point threshold that used to divert a signal out of the feed entirely now only marks it,
   // and the row stays. The page never recomputes it — one author for the fact.
   //
-  // THE NUMBER IS NOT THE PAGE'S RANKING NUMBER. The server flags on `score_v2 ?? score`
-  // (`models.signal_lifecycle.score_of`); this page RANKS on `adjusted_score ?? score_v2 ?? score`.
-  // They differ on 41 of today's 48 live rows — DE is 93 by the flag's number and 85 by the
-  // ranking's — so printing the ranking number beside the flag would put a figure in the tooltip
-  // that contradicts the badge it explains. This reads the flag's own number, or none.
-  const highScoreNumber = (s) => {
-    for (const k of ['score_v2', 'score']) {
-      const v = s[k];
-      if (v == null) continue;
-      const n = Number(v);
-      if (Number.isFinite(n)) return n;
-    }
-    return null;
+  // R-IV.593(b)1 — ONE number. `canonical_score` is what the server ranks by AND what it flags
+  // on (`models.signal_score`, R-IV.590(c)), so the badge, the tooltip and the order are all the
+  // same figure. The page's own coalesce is gone: three expressions were live at once and none
+  // was named, which is how DE read 93 on its badge and 85 in its position. Recomputing it here
+  // would be the second author all over again.
+  //
+  // NULL IS NULL, NOT ZERO (R-IV.593(b)2). The SQL coalesces to 0 so it can sort; the served
+  // field does not, because a row nobody scored and a row scoring zero are different claims.
+  const canonicalScore = (s) => {
+    const v = s && s.canonical_score;
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   };
   // Quiet: the same neutral chip as the grade, in --text-2. Teal is "attention" in this palette
   // and a badge that shouts is not a quiet badge (R-IV.588(a)).
@@ -1954,7 +1968,7 @@
   // the score, and R-IV.588(c) keeps it that way: this touches neither the grade nor the lane.
   function highBadge(s) {
     if (!s || s.high_score !== true) return '';
-    const n = highScoreNumber(s);
+    const n = canonicalScore(s);
     const tip = n == null
       ? 'Scores high, but not a validated setup. Actionable needs an A.'
       : `Scores ${n}: high, but not a validated setup. Actionable needs an A.`;
@@ -2050,6 +2064,7 @@
         ? `${d.read} idea${d.read === 1 ? '' : 's'} read` + (d.total != null && d.total > d.read ? ` of ${d.total} active — the feed serves ${IDEA_PAGE} a page and ${d.pages} were taken; the rest score lower` : '')
         : 'the idea feed did not answer',
       d.levelCapped ? `${d.levelCapped} name${d.levelCapped === 1 ? '' : 's'} past the ${LANE_LEVEL_MAX}-name evidence read show "grade pending"` : '',
+      d.unscored ? `${d.unscored} row${d.unscored === 1 ? ' carries' : 's carry'} no score, so ${d.unscored === 1 ? 'it sorts' : 'they sort'} last — not as a zero` : '',
       'read ' + (riverTime(d.at) || ''),
     ].filter(Boolean).join(' · ');
 
