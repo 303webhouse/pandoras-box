@@ -1244,13 +1244,22 @@ async def get_sector_etfs() -> Optional[List[Dict[str, Any]]]:
     return result
 
 
-async def get_iv_rank(ticker: str) -> Optional[List[Dict[str, Any]]]:
-    """Fetch IV rank data for a ticker."""
+async def get_iv_rank(ticker: str, caller: str = "iv_rank") -> Optional[List[Dict[str, Any]]]:
+    """Fetch IV rank data for a ticker.
+
+    `caller` names the GOVERNOR LANE, not the endpoint. It exists so a shadow study can spend
+    from its own BACKGROUND budget instead of the FOREGROUND `iv_rank` quota that live trading
+    depends on (R-IV.597(c)). The governor sheds BACKGROUND first, which is the right way round:
+    shadow research yields to committee and radar priority, never the reverse.
+
+    The CACHE key is deliberately unchanged, so a live caller and a shadow caller share one
+    cached answer. Two caches would double the real spend to keep the accounting tidy.
+    """
     cached = await cache_get("iv_rank", ticker.upper())
     if cached:
         return cached
 
-    data = await _uw_request(f"/api/stock/{ticker.upper()}/iv-rank", caller="iv_rank")
+    data = await _uw_request(f"/api/stock/{ticker.upper()}/iv-rank", caller=caller)
     if not data or "data" not in data:
         return None
 

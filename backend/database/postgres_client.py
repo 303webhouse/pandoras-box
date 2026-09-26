@@ -1389,6 +1389,19 @@ async def init_database():
             # deploy, and a hold kept in memory would release everything early, once, silently.
             # NULL means "serve it now", so every row written before this rule reads correctly
             # with no backfill.
+            # R-IV.597(c): IV AT FIRE TIME, WHICH CANNOT BE BACKDATED.
+            #
+            # No history exists (QUERY), so every session without it is lost for good. Three
+            # columns rather than one: `iv_rank_at_fire` is the 0-100 rank this codebase already
+            # reads, `iv_at_fire` is an IV LEVEL if the payload turns out to carry one, and
+            # `iv_source` names WHICH field a value came from -- so a figure is never anonymous
+            # and a NULL is distinguishable from a field nobody looked for.
+            ("iv at fire: triton_flow_shadow", """
+                ALTER TABLE triton_flow_shadow
+                    ADD COLUMN IF NOT EXISTS iv_rank_at_fire NUMERIC(6,2),
+                    ADD COLUMN IF NOT EXISTS iv_at_fire      NUMERIC(10,6),
+                    ADD COLUMN IF NOT EXISTS iv_source       TEXT
+            """),
             ("release stamp: signals", """
                 ALTER TABLE signals ADD COLUMN IF NOT EXISTS release_at TIMESTAMP
             """),

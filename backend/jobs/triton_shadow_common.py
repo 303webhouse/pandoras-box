@@ -398,3 +398,85 @@ def cohort_of(session) -> Optional[str]:
         if lo <= d <= hi:
             return "W%d" % k
     return None
+
+
+# ── IV at fire time (R-IV.597(c)) ────────────────────────────────────────────────────────────
+#
+# WHY THIS IS URGENT AND CANNOT WAIT. Implied volatility at the moment a whale print fired is
+# not recoverable afterwards -- QUERY has shown no history exists -- so every session without it
+# is lost for good. That is the whole reason it ships before the exit-plan migration.
+#
+# ONE READER, NOT A THIRD. Two callers already parse this payload and they disagree about which
+# end of the series is current:
+#
+#     enrichment/signal_enricher.py   latest = data[-1]   # "series is ascending"
+#     jobs/b2_options_resolver.py     latest = iv_data[0]
+#
+# One of them is reading a year-old reading as today's. I cannot settle it here -- there is no UW
+# key in this environment and `signal_options_expressions` holds ZERO rows, so the `[0]` reader
+# has never actually written anything to compare against. So this delegates to the `[-1]` reader,
+# which has 7,383 rows of operating history behind it, rather than adding a third opinion. If the
+# order is wrong it is wrong in one place, and fixing it fixes both.
+#
+# AND IT RECORDS WHAT THE PAYLOAD ACTUALLY CONTAINS, once per ticker per day, so the next
+# decision about this data is made on measured keys instead of my guess about them. `iv_rank_1y`
+# is the only field this codebase reads, and a RANK is not an expected move -- it says where
+# today's IV sits in its own one-year range. Whether the response also carries an IV LEVEL is
+# unknown from here, so `iv_at_fire` exists and stays NULL until the log says otherwise.
+
+_IV_SHAPE_LOGGED: set = set()
+
+
+async def iv_at_fire(ticker: str) -> dict:
+    """`{iv_rank_at_fire, iv_at_fire, iv_source}` for a ticker, now. Never raises.
+
+    Tagged to the `triton_flow_shadow` BACKGROUND lane, so it is shed before anything the
+    principal trades on. Returns None values on any failure -- never a fake 0, which would read
+    as "volatility is at its one-year low" rather than "we did not get an answer".
+    """
+    import logging as _logging
+    from datetime import date as _date
+
+    log = _logging.getLogger("triton_shadow")
+    out = {"iv_rank_at_fire": None, "iv_at_fire": None, "iv_source": None}
+    try:
+        from integrations.uw_api import get_iv_rank
+
+        data = await get_iv_rank(ticker, caller="triton_flow_shadow")
+        if not data:
+            return out
+        latest = data[-1] if isinstance(data, list) and data else data
+        if not isinstance(latest, dict):
+            return out
+
+        key = (ticker.upper(), _date.today())
+        if key not in _IV_SHAPE_LOGGED:
+            _IV_SHAPE_LOGGED.add(key)
+            log.info("triton iv payload keys for %s: %s (series len=%s, first=%s, last=%s)",
+                     ticker, sorted(latest.keys()),
+                     len(data) if isinstance(data, list) else 1,
+                     (data[0].get("date") if isinstance(data, list) and data
+                      and isinstance(data[0], dict) else None),
+                     latest.get("date"))
+
+        from scoring.sb3_iv_units import iv_rank_1y_to_100
+
+        out["iv_rank_at_fire"] = iv_rank_1y_to_100(latest.get("iv_rank_1y"))
+        # An IV LEVEL if the payload carries one under any of the names UW uses elsewhere in this
+        # codebase. Tried in order, and `iv_source` records WHICH -- so a value is never
+        # anonymous, and a NULL is distinguishable from a field we never looked for.
+        for name in ("implied_volatility", "iv", "iv_30d", "implied_move"):
+            raw = latest.get(name)
+            if raw is None:
+                continue
+            try:
+                out["iv_at_fire"] = float(raw)
+                out["iv_source"] = name
+                break
+            except (TypeError, ValueError):
+                continue
+        if out["iv_source"] is None and out["iv_rank_at_fire"] is not None:
+            out["iv_source"] = "iv_rank_1y"
+    except Exception as exc:  # noqa: BLE001
+        log.debug("triton iv_at_fire failed for %s: %s", ticker, exc)
+    return out
