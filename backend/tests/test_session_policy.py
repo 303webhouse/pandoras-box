@@ -289,8 +289,10 @@ class TestADropIsARow:
         code = _code_without_docstrings("signals/pipeline.py")
         assert "intraday outside regular hours" in code
 
-    def test_a_shadow_signal_is_never_withheld_by_the_policy(self):
-        """A shadow row is not on an actionable surface, so there is nothing to withhold it
-        from, and writing one would put a policy decision in a lane that must not have one."""
+    def test_a_shadow_signal_is_neither_withheld_nor_held(self):
+        """A shadow row is not on an actionable surface, so there is nothing to withhold or hold
+        it back FROM, and writing either would put a policy decision in a lane that must not
+        have one. Both branches carry the guard — the drop had it and the hold did not."""
         code = _code_without_docstrings("signals/pipeline.py")
         assert "if _action == DROP and not shadow:" in code
+        assert "if _action == HOLD and not shadow:" in code

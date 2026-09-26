@@ -1334,7 +1334,11 @@ async def process_signal_unified(
         logger.info("Session policy: %s withheld — %s", signal_data.get("ticker"), _why)
         await _persist_withheld(signal_data, _why)
         return signal_data
-    if _action == HOLD:
+    if _action == HOLD and not shadow:
+        # `not shadow` for the same reason the DROP above carries it: a shadow row is never on an
+        # actionable surface, so there is nothing to hold it back FROM, and stamping one would
+        # put a policy decision in a lane that must not have one. The asymmetry was mine -- the
+        # drop was guarded and the hold was not.
         signal_data["release_at"] = _release_at
         logger.info("Session policy: %s held until %s — %s",
                     signal_data.get("ticker"), _release_at, _why)
