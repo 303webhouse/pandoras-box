@@ -7,6 +7,7 @@ import asyncpg
 
 from models.position_status import STATUSES as _POSITION_STATUSES
 from models.signal_lifecycle import STATUS_VALUES as _SIGNAL_STATUS_VALUES
+from models.exit_plan import STOP_TYPES as _STOP_TYPES
 from models.position_lots import (LOT_SOURCES as _LOT_SOURCES,
                                   PRINCIPAL_ENTRY_SOURCE_REGEX as _PRINCIPAL_ENTRY_SOURCE_REGEX)
 import os
@@ -1396,6 +1397,31 @@ async def init_database():
             # reads, `iv_at_fire` is an IV LEVEL if the payload turns out to carry one, and
             # `iv_source` names WHICH field a value came from -- so a figure is never anonymous
             # and a NULL is distinguishable from a field nobody looked for.
+            # R-IV.571 / gap 3 (R-IV.597(b)): AN EXIT PLAN IS FIELDS, NOT A SENTENCE.
+            #
+            # Trade Analysis writes the plan into `notes`. Prose cannot be queried or counted,
+            # and R-IV.568's exit block would otherwise parse it on every read -- every reader
+            # parsing it slightly differently. `notes` is left exactly as it is: it stays the
+            # record of what was written, and these become what code reads.
+            #
+            # `stop_type` is NULLABLE on purpose. A row whose line omits the stop has not
+            # declared one, and defaulting that to 'none' would state that the principal chose to
+            # have no stop when nobody wrote it down -- the same distinction the loss alert
+            # already keeps between an unknown broker stop and an absent one (R-IV.526).
+            ("exit plan: unified_positions", """
+                ALTER TABLE unified_positions
+                    ADD COLUMN IF NOT EXISTS invalidation TEXT,
+                    ADD COLUMN IF NOT EXISTS time_stop    DATE,
+                    ADD COLUMN IF NOT EXISTS stop_type    TEXT
+            """),
+            ("stop type vocabulary: unified_positions", """
+                DO $$
+                BEGIN
+                    ALTER TABLE unified_positions DROP CONSTRAINT IF EXISTS unified_positions_stop_type_check;
+                    ALTER TABLE unified_positions ADD CONSTRAINT unified_positions_stop_type_check
+                        CHECK (stop_type IS NULL OR stop_type IN (%s));
+                END $$
+            """ % ", ".join("'%s'" % s for s in _STOP_TYPES)),
             ("iv at fire: triton_flow_shadow", """
                 ALTER TABLE triton_flow_shadow
                     ADD COLUMN IF NOT EXISTS iv_rank_at_fire NUMERIC(6,2),
