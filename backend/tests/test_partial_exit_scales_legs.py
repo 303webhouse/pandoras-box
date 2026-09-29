@@ -214,3 +214,124 @@ def test_the_helper_is_shared_by_both_partial_paths():
     from api import unified_positions as U
     assert "_scale_legs_to_remainder(" in inspect.getsource(U.close_position)
     assert "_scale_legs_to_remainder(" in inspect.getsource(U.reduce_position)
+
+
+# --- adds: the combine branch of create, and /lots --------------------------------------------
+# The combine branch rewrote quantity and basis on the row alone. With lots and legs on the
+# row, that left the row holding more than its lots and the legs marking the old size, and
+# nothing refused it -- the trigger watches lots and legs, not the row. Worse than the close
+# bug, because it was silent.
+
+HYG_LOTS = [{"qty": 3.0, "price": 0.14, "fees": 0}, {"qty": 2.0, "price": 0.13, "fees": 0}]
+
+
+def _combine_pool(existing, *, has_lots, lots_after, legs_shape):
+    conn = MagicMock()
+    conn.executed = []
+
+    async def fetchrow(sql, *args):
+        s = " ".join(sql.split())
+        if "FROM position_legs WHERE position_id" in s:
+            return legs_shape
+        if s.startswith("UPDATE unified_positions"):
+            conn.executed.append((s, args))
+            return {**existing, "quantity": args[1]}
+        return existing
+
+    async def fetchval(sql, *args):
+        if "SELECT 1 FROM position_lots" in " ".join(sql.split()):
+            return 1 if has_lots else None
+        return None
+
+    async def fetch(sql, *args):
+        return [dict(l) for l in lots_after]
+
+    async def execute(sql, *args):
+        conn.executed.append((" ".join(sql.split()), args))
+
+    conn.fetchrow, conn.fetchval, conn.fetch, conn.execute = fetchrow, fetchval, fetch, execute
+    conn.transaction = lambda: _Txn()
+    pool = MagicMock()
+    pool.acquire = _Acq(conn)
+    return pool, conn
+
+
+def _combine(monkeypatch, *, qty=2, price=0.20, has_lots=True, lots_after=None,
+             legs_shape={"n": 2, "shapes": 1}, entry_date=None):
+    from api import unified_positions as U
+    existing = {**OPEN_SPREAD, "max_loss": None, "max_profit": None, "breakeven": None}
+    pool, conn = _combine_pool(existing, has_lots=has_lots,
+                               lots_after=lots_after if lots_after is not None else HYG_LOTS,
+                               legs_shape=legs_shape)
+    monkeypatch.setattr(U, "get_postgres_client", AsyncMock(return_value=pool))
+    monkeypatch.setattr(U, "name_actor", AsyncMock())
+    monkeypatch.setattr(U, "_adjust_account_cash", AsyncMock(return_value=True))
+    monkeypatch.setattr(U.manager, "broadcast_position_update", AsyncMock())
+    req = U.CreatePositionRequest(ticker="HYG", structure="put_debit_spread",
+                                  entry_price=price, quantity=qty, long_strike=76.0,
+                                  short_strike=73.0, expiry="2026-11-20",
+                                  entry_date=entry_date)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(U.create_position(req)), conn
+    finally:
+        loop.close()
+
+
+def test_an_add_to_a_lotted_row_is_written_as_its_own_lot(monkeypatch):
+    after = HYG_LOTS + [{"qty": 2.0, "price": 0.20, "fees": 0}]
+    out, conn = _combine(monkeypatch, lots_after=after)
+    assert out["status"] == "combined"
+    ins = [e for e in conn.executed if e[0].startswith("INSERT INTO position_lots")]
+    assert len(ins) == 1
+    assert ins[0][1][2] == 2.0 and ins[0][1][3] == pytest.approx(0.20)
+
+
+def test_the_row_is_derived_from_the_lots_after_an_add(monkeypatch):
+    """5 held (3 @ 0.14, 2 @ 0.13) + 2 @ 0.20 -> 7 @ 0.1543, basis 108.00."""
+    after = HYG_LOTS + [{"qty": 2.0, "price": 0.20, "fees": 0}]
+    _, conn = _combine(monkeypatch, lots_after=after)
+    upd = next(e for e in conn.executed if e[0].startswith("UPDATE unified_positions"))
+    _, qty, entry, basis = upd[1][:4]
+    assert qty == pytest.approx(7.0)
+    assert entry == pytest.approx(round(1.08 / 7, 4))
+    assert basis == pytest.approx(108.0)
+
+
+def test_an_add_scales_the_legs_up_to_the_new_size(monkeypatch):
+    after = HYG_LOTS + [{"qty": 2.0, "price": 0.20, "fees": 0}]
+    _, conn = _combine(monkeypatch, lots_after=after)
+    ups = _legs_updates(conn)
+    assert len(ups) == 1 and ups[0][1] == (7.0, "p_hyg")
+
+
+def test_an_add_carries_the_fill_date_the_principal_gave(monkeypatch):
+    after = HYG_LOTS + [{"qty": 2.0, "price": 0.20, "fees": 0}]
+    _, conn = _combine(monkeypatch, lots_after=after, entry_date="2026-09-29")
+    ins = next(e for e in conn.executed if e[0].startswith("INSERT INTO position_lots"))
+    assert ins[1][1].date().isoformat() in ("2026-09-29", "2026-09-30")  # 00:00 Denver, in UTC
+    assert ins[1][1].tzinfo is not None
+
+
+def test_an_add_to_a_row_without_lots_writes_no_lot(monkeypatch):
+    """Negative control (#30): one lot for the add alone would make the lots describe 2 of
+    7, and the remainder would be wrong in the other direction."""
+    _, conn = _combine(monkeypatch, has_lots=False)
+    assert not [e for e in conn.executed if e[0].startswith("INSERT INTO position_lots")]
+    ups = _legs_updates(conn)
+    assert len(ups) == 1 and ups[0][1] == (7.0, "p_hyg")
+
+
+def test_an_add_to_a_row_without_legs_writes_no_legs(monkeypatch):
+    """Negative control (#30)."""
+    _, conn = _combine(monkeypatch, legs_shape={"n": 0, "shapes": 0},
+                       lots_after=HYG_LOTS + [{"qty": 2.0, "price": 0.20, "fees": 0}])
+    assert _legs_updates(conn) == []
+
+
+def test_the_lots_route_scales_the_legs_too():
+    import inspect
+    from api import unified_positions as U
+    src = inspect.getsource(U.add_position_lot)
+    assert "_scale_legs_to_remainder(conn, position_id, stored_qty)" in src
+    assert src.index("derive_aggregate(") < src.index("_scale_legs_to_remainder(")

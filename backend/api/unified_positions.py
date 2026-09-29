@@ -290,6 +290,9 @@ class CreatePositionRequest(BaseModel):
     # the write is recorded as legacy-ui: a request whose caller named no one.
     actor: Optional[str] = None
     reason: Optional[str] = None
+    # The day the fill happened, on the principal's clock (R-IV.464(a)). Read by the opening
+    # lot and by an add that combines into an open row; absent, the write's own instant.
+    entry_date: Optional[str] = None
 
 
 class UpdatePositionRequest(BaseModel):
@@ -615,6 +618,36 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         pos_id = existing["position_id"]
         async with pool.acquire() as conn, conn.transaction():
             await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
+            # An add is a fill, and a fill is a lot. This branch used to rewrite quantity
+            # and basis on the row alone, so a row with lots came to hold more than its
+            # lots said and its legs went on marking the old size -- silently, because the
+            # R-IV.517(c) trigger watches lots and legs, not the row. Where the row has
+            # lots, the add is lotted and the row is DERIVED from them, as /lots does.
+            # Where it has none, there is no remainder to keep true and the row's own
+            # arithmetic stands (writing one lot would make the lots describe only the add).
+            _has_lots = await conn.fetchval(
+                "SELECT 1 FROM position_lots WHERE position_id = $1 LIMIT 1", pos_id)
+            if _has_lots:
+                from models.position_lots import PRINCIPAL_REPORTED, principal_entry_source
+
+                fill_time = (_when(req.entry_date, "entry_date") if req.entry_date
+                             else datetime.now(timezone.utc))
+                await conn.execute(
+                    """INSERT INTO position_lots
+                           (position_id, fill_time, qty, price, fees, source, provenance)
+                       VALUES ($1, $2, $3, $4, 0, $5, $6)""",
+                    pos_id, fill_time, float(add_qty), abs(float(add_entry)),
+                    principal_entry_source(datetime.now(timezone.utc)), PRINCIPAL_REPORTED)
+                lots = await conn.fetch(
+                    "SELECT qty, price, fees FROM position_lots WHERE position_id = $1",
+                    pos_id)
+                agg = derive_aggregate([dict(l) for l in lots], existing.get("asset_type"))
+                new_qty = agg["qty"]
+                if agg["entry_price"] is not None:
+                    new_entry = agg["entry_price"]
+                if agg["cost_basis"] is not None:
+                    new_cost_basis = agg["cost_basis"]
+            await _scale_legs_to_remainder(conn, pos_id, float(new_qty))
             row = await conn.fetchrow("""
                 UPDATE unified_positions
                 SET quantity = $2, entry_price = $3, cost_basis = $4,
@@ -3165,6 +3198,8 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
             # so the lots' exact sum is stored -- the refusal that stood here protected an
             # INTEGER column from losing shares, and the column no longer loses them.
             stored_qty = agg["qty"]
+            # The legs follow the lots, or R-IV.517(c) refuses the commit.
+            await _scale_legs_to_remainder(conn, position_id, stored_qty)
 
             # The aggregate is WRITTEN, not merged. An add changes the quantity, so a basis
             # kept from before the add describes a position that no longer exists. When the lot
