@@ -28,11 +28,35 @@ It must be able to hand work back and forth with those lanes.
   retired `docs/session-handoff.md`. A pointer file was added to the Claude Code local
   memory directory so CC lanes learn this lane exists without a commit.
 
+## Second session, same day (~07:45–08:30 MDT): first real defect, on BUILD's file
+
+Nick asked this lane directly to look at a failed partial close on a live spread. Found
+and fixed, **on files CC-BUILD owns, at the principal's instruction** — stated here per
+conventions #9 and relayed in
+`docs/codex-briefs/RELAY_CURSOR_to_SPINE_2026-09-29_partial-exit-legs.md`.
+
+- **Defect:** since `98e32b5` (09-23, the R-IV.517(c) legs-match-remainder trigger),
+  every partial exit on a row with lots AND legs fails at commit, because neither
+  `/close` (partial) nor `/reduce` updated `position_legs`. Evidence: `close_attempts`
+  119/120. Not caught by the suite — no test did a partial exit on a legged row.
+- **Fix:** `_scale_legs_to_remainder()` shared by both paths; refuses ratio legs with 409.
+  8 tests in `backend/tests/test_partial_exit_scales_legs.py`; differential probe shows
+  6 fail on unpatched main, 2 negative controls pass either way.
+- **Principal's choice, recorded once:** partial `/close` keeps the blended-average
+  basis; `/reduce` stays FIFO. The FIFO-vs-blended delta on a partial exit will show up
+  against the broker export and is not a fee delta.
+
 ## In flight
 
-- PR from `cursor/lane-setup` → `main` carrying the files above. Docs/config only; a
-  merge redeploys the app (every push to `main` does) but changes no runtime behaviour.
-- `pandora-hub` OAuth approval pending Nick's click.
+- [PR #43](https://github.com/303webhouse/pandoras-box/pull/43) `cursor/lane-setup` →
+  `main`: lane docs/config only. Merge redeploys the app but changes no runtime behaviour.
+- PR from `cursor/partial-close-legs` → `main`: the fix above. Merge redeploys; Step 3
+  is a partial close on a lotted, legged row committing and `close_attempts` reading
+  `completed`. Full-suite run against `docs/defects/TEST-BASELINE.md` recorded on the PR.
+- `pandora-hub` OAuth approval still pending Nick's click (postgres/redis/ssh MCPs are
+  live and were used for this diagnosis).
+- **Book is behind the broker** on the affected HYG row until POSITIONS records the
+  partial sale after the fix deploys.
 
 ## Findings for other lanes (relayed here as text; owners insert)
 
