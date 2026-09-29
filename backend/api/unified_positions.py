@@ -1941,6 +1941,43 @@ async def _resolve_signal_with_failure_logging(
 
 # ── CLOSE (with trade bridge) ─────────────────────────────────────────
 
+async def _scale_legs_to_remainder(conn, position_id: str, remainder: float) -> int:
+    """A partial exit shrinks the legs to what is still open, in the same transaction.
+
+    R-IV.517(c) (2026-09-23) made the database refuse a commit where a leg's qty differs
+    from the open remainder on an OPEN row -- and neither partial-exit path updated the
+    legs, so every partial close on a row with lots AND legs has failed at commit since
+    (first seen on HYG, 2026-09-29: two attempts, both rolled back, book left behind the
+    broker). The mark path reads the legs; after selling 2 of 5 they must say 3.
+
+    Legs are scaled uniformly. A set whose legs already hold DIFFERENT quantities is a
+    ratio structure, and "shrink to the remainder" has no single right answer for it, so
+    it is refused with both facts named rather than guessed at -- the trigger's census
+    found zero such rows, and this is the loud way to meet the first one.
+
+    Returns the number of legs updated (0 when the row carries none).
+    """
+    shape = await conn.fetchrow(
+        "SELECT COUNT(*) AS n, COUNT(DISTINCT qty) AS shapes "
+        "FROM position_legs WHERE position_id = $1",
+        position_id)
+    n = int((shape or {}).get("n") or 0) if shape is not None else 0
+    if n == 0:
+        return 0
+    shapes = int((shape or {}).get("shapes") or 0)
+    if shapes > 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{position_id} carries {n} legs with {shapes} different quantities (a "
+                    f"ratio structure); a partial exit cannot scale them to the remainder "
+                    f"{remainder:g} uniformly. Nothing was written. Reduce the legs and the "
+                    f"lots together by hand, or close the whole position."))
+    await conn.execute(
+        "UPDATE position_legs SET qty = $1 WHERE position_id = $2",
+        float(remainder), position_id)
+    return n
+
+
 @router.post("/v2/positions/{position_id}/close")
 async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(require_api_key)):
     """
@@ -2150,6 +2187,19 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                         logger.error("position %s: disposal lot could not be written "
                                      "(%s)", position_id, type(exc).__name__)
                         raise
+
+                if is_partial:
+                    # The legs must say what is still open, or R-IV.517(c) refuses the
+                    # commit. The remainder is the LOTS' sum where lots exist (that is
+                    # the figure the trigger compares against); where they do not, the
+                    # row's own arithmetic is all there is.
+                    if _has_lots:
+                        legs_remainder = float(await conn.fetchval(
+                            "SELECT COALESCE(SUM(qty), 0) FROM position_lots "
+                            "WHERE position_id = $1", position_id) or 0)
+                    else:
+                        legs_remainder = float(total_qty - close_qty)
+                    await _scale_legs_to_remainder(conn, position_id, legs_remainder)
 
                 if not is_partial:
                     # INSERT closed_positions inside main transaction — full atomicity with position update.
@@ -3319,6 +3369,8 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
                 position_id)
             agg = derive_aggregate([dict(r) for r in remaining], pos["asset_type"])
             stored_qty = agg["qty"]   # R-IV.458(b): exact, fractions included
+            # The legs follow the remainder, or R-IV.517(c) refuses the commit.
+            await _scale_legs_to_remainder(conn, position_id, stored_qty)
             # The position's own realized field is NOT written here. Realized belongs to the
             # close path and its allocations live in position_lot_closures; writing it from two
             # places is how a figure comes to have two owners and no author.
