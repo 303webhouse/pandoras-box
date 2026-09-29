@@ -104,7 +104,7 @@
     ov.id = 'v2-login';
     ov.style.cssText = 'position:fixed;inset:0;z-index:200;background:#050810;display:flex;align-items:center;justify-content:center;font-family:system-ui';
     ov.innerHTML = '<form style="background:#0b1122;padding:30px;border:1px solid #223258;border-radius:12px;display:flex;flex-direction:column;gap:12px;min-width:280px">'
-      + '<div style="color:#14b8a6;font-weight:700;letter-spacing:2px">PANDORA v2</div>'
+      + '<div style="color:#14b8a6;font-weight:700;letter-spacing:2px">PANDORA</div>'
       + '<input id="v2pw" type="password" placeholder="Password" style="padding:10px;border-radius:6px;border:1px solid #223258;background:#050810;color:#e2e8f0">'
       + '<button type="submit" style="padding:10px;border:none;border-radius:6px;background:#14b8a6;color:#050810;font-weight:700;cursor:pointer">Sign in</button>'
       + '<div id="v2err" style="color:#ff5c33;font-size:12px;min-height:14px"></div></form>';
@@ -331,6 +331,7 @@
     // Only stamp the read clock on an actual success.
     try { const r = await apiFetch('/api/board/kill-switch'); if (r.ok) { kill = await r.json(); _killReadAt = Date.now(); } } catch (_) {}
     _lastRegime = { composite, regime, tide, kill };
+    quoteTick(composite && (composite.bias_level || composite.level));
     renderRegimeBand(composite, regime, tide, kill);
     renderBreadthPanel(regime);          // b3 shares the regime payload
     emitRegimeRiverItems(composite, regime, kill);
@@ -408,7 +409,7 @@
         <div class="sub kill-prov ${kv6.provCls}">${kv6.prov}</div>
       </div>`;
     applyGlossary(band);
-    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime, tide, kill })));
+    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime, tide, kill }, c)));
   }
 
   // ── Movers tape ──────────────────────────────────────────────────────────────
@@ -468,14 +469,14 @@
       slot.querySelectorAll('.kairos-tag').forEach((b) => b.addEventListener('click', (e) => {
         e.stopPropagation();
         const k = ctxMap[tk] && ctxMap[tk].kairos;
-        openCommittee(tk, k ? k.signal_id : '');
+        openCommittee(tk, k ? k.signal_id : '', b);
       }));
     });
   }
 
   function moverEl(m, side) {
     const thm = m.theme ? ` <span class="sep">·</span> <span class="thm">${esc(m.theme)}</span>` : '';
-    return `<span class="mover ${side}" data-ticker="${esc(m.ticker)}"><span class="tk">${esc(m.ticker)}</span> <span class="pct">${fmtPct(m.pct)}</span><span class="badge-slot"></span>${thm}</span>`;
+    return `<span class="mover ${side}" data-ticker="${esc(m.ticker)}" data-chart="${esc(String(m.ticker || '').toUpperCase())}"><span class="tk">${esc(m.ticker)}</span> <span class="pct">${fmtPct(m.pct)}</span><span class="badge-slot"></span>${thm}</span>`;
   }
   function renderMoversTape(data) {
     const tape = $('moversTape');
@@ -487,11 +488,13 @@
     const l = (data.losers || []).map((m) => moverEl(m, 'lose')).join(' <span class="sep">•</span> ');
     const one = g + ' <span class="sep">•</span> ' + l;
     tape.innerHTML = one + ' <span class="sep">•</span> ' + one; // duplicate for seamless marquee
-    tape.querySelectorAll('.mover[data-ticker]').forEach((el) => el.addEventListener('click', () => openTvPopover(el.dataset.ticker, el)));
   }
 
   // ── Drawer ────────────────────────────────────────────────────────────────
-  function openDrawer(kind, ctx) {
+  function openDrawer(kind, ctx, src) {
+    const side = popSide(src, kind === 'committee' ? 'kairos' : 'regime-band');
+    closePopup();   // was opening UNDER the member popup (z61 vs its z65 backdrop)
+    setSide($('drawer'), side);
     const title = $('drawerTitle'), body = $('drawerBody');
     const kv = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
     if (kind === 'themes' && ctx.regime) {
@@ -507,7 +510,8 @@
         kv('Up > 3%', b.up_3) + kv('Down > 3%', b.down_3) + kv('as of (metrics)', ctx.regime.metrics_date);
     } else if (kind === 'committee') {
       title.textContent = 'Committee · ' + (ctx.ticker || '');
-      body.innerHTML = kv('Ticker', ctx.ticker || '—') + kv('Signal', ctx.sig || '—') +
+      const tkRow = `<div class="kv"><span class="k">Ticker</span><span class="v">${ctx.ticker ? chartTk(ctx.ticker) : '—'}</span></div>`;
+      body.innerHTML = tkRow + kv('Signal', ctx.sig || '—') +
         '<div style="margin:10px 0;color:var(--text-3);font-size:12px">Loading options context…</div>';
       (async () => {
         try {
@@ -515,7 +519,7 @@
           if (!r.ok) return;
           const e = (await r.json()).enrichment || {};
           const iv = e.iv_rank || {}, tide = e.market_tide || {}, mp = e.max_pain || {}, sf = e.sector_flow || {};
-          body.innerHTML = kv('Ticker', ctx.ticker) + kv('Signal', ctx.sig || '—') +
+          body.innerHTML = tkRow + kv('Signal', ctx.sig || '—') +
             kv('IV rank', iv.iv_rank != null ? Number(iv.iv_rank).toFixed(0) : '—') +
             kv('Market tide', (tide.net_call_premium != null && tide.net_put_premium != null) ? (Number(tide.net_call_premium) > Number(tide.net_put_premium) ? 'bullish' : 'bearish') : '—') +
             kv('Max pain', mp.max_pain_strike != null ? mp.max_pain_strike + ' (' + mp.dte + 'dte)' : '—') +
@@ -536,31 +540,115 @@
     }
     $('drawerBackdrop').classList.add('open');
     $('drawer').classList.add('open');
+    placeChartSoon();
   }
-  function closeDrawer() { $('drawerBackdrop').classList.remove('open'); $('drawer').classList.remove('open'); }
+  function closeDrawer() { $('drawerBackdrop').classList.remove('open'); $('drawer').classList.remove('open'); placeChartSoon(); }
 
-  // ── TV popover ────────────────────────────────────────────────────────────
-  let _tvWidget = null;
-  function openTvPopover(ticker, anchorEl) {
-    const pop = $('tvPopover');
-    $('tvPopTicker').textContent = ticker;
-    $('tvPopHost').innerHTML = '<div id="tvPopHostInner" style="width:100%;height:100%"></div>';
-    // position near the click, clamped to viewport
-    const r = anchorEl.getBoundingClientRect();
-    const w = 520, h = 360;
-    pop.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left)) + 'px';
-    pop.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, r.bottom + 8)) + 'px';
-    pop.classList.add('open');
-    try {
-      if (window.TradingView) {
-        _tvWidget = new TradingView.widget({
-          container_id: 'tvPopHostInner', symbol: ticker, interval: 'D', theme: 'dark',
-          style: '1', autosize: true, hide_top_toolbar: true, hide_legend: true, save_image: false,
-        });
-      }
-    } catch (_) {}
+  // ── Pop-out sides ─────────────────────────────────────────────────────────
+  // A pop-out opens on the side of the screen its source tile sits on, and follows the tile
+  // when it is dragged across (recomputed on every open). At phone width every pop-out is
+  // full width, so there is no side. A pop-out opened from inside another inherits its side.
+  let _lastClick = { el: null, t: 0 };
+  document.addEventListener('click', (e) => { _lastClick = { el: e.target, t: Date.now() }; }, true);
+  function popSide(src, fallbackGsId) {
+    const W = document.documentElement.clientWidth;
+    if (W <= 820) return 'right';
+    let el = src && src.isConnected ? src : null;
+    if (!el && _lastClick.el && _lastClick.el.isConnected && Date.now() - _lastClick.t < 1000) el = _lastClick.el;
+    const host = el && el.closest ? el.closest('.drawer.open, .member-popup.open, .rp-panel.open') : null;
+    if (host) return host.classList.contains('from-left') || host.classList.contains('side-left') ? 'left' : 'right';
+    let tile = el && el.closest ? el.closest('.grid-stack-item') : null;
+    if (!tile && fallbackGsId) tile = document.querySelector('.grid-stack-item[gs-id="' + fallbackGsId + '"]');
+    let r = tile ? tile.getBoundingClientRect() : null;
+    // Full-width tiles (regime band, movers) have no side of their own: use what was clicked.
+    if (r && r.width > W * 0.6 && el && el.getBoundingClientRect) { const er = el.getBoundingClientRect(); if (er.width > 0) r = er; }
+    if (!r || r.width <= 0) return 'right';
+    return (r.left + r.width / 2) < W / 2 ? 'left' : 'right';
   }
-  function closeTvPopover() { $('tvPopover').classList.remove('open'); $('tvPopHost').innerHTML = ''; }
+  // Swap a sliding panel's side without animating it across the screen: the class change
+  // happens with transitions off, a reflow commits it, and only then may '.open' animate.
+  function setSide(panel, side) {
+    if (!panel) return;
+    const left = side === 'left';
+    if (panel.classList.contains('from-left') === left) return;
+    panel.classList.add('no-anim');
+    panel.classList.toggle('from-left', left);
+    void panel.offsetWidth;
+    panel.classList.remove('no-anim');
+  }
+
+  // ── Chart popup (click any ticker) ─────────────────────────────────────────
+  // TradingView embed: the browser talks to TradingView directly, so opening a chart makes
+  // zero hub or UW calls. Centred in the free space between whatever pop-outs are open, about
+  // 50% x 45% of the window (~22% of the screen). Non-modal: another ticker click switches it.
+  // Moving averages: three simple MAs (9 / 50 / 200). The embed cannot colour two instances of
+  // the same study differently, so they share one colour and the legend names each length.
+  const CHART_MAS = [9, 50, 200];
+  const CHART_SYM = /^[A-Z0-9.\-:\/!]{1,24}$/;
+  let _chartSym = null, _chartOpener = null, _placeTimer = null;
+  function chartTk(t) {
+    const sym = String(t || '').toUpperCase();
+    return `<span class="tk-link" data-chart="${esc(sym)}" tabindex="0" role="button" aria-label="Chart ${esc(sym)}">${esc(t || '')}</span>`;
+  }
+  function openChart(sym, opener) {
+    sym = String(sym || '').trim().toUpperCase();
+    if (!CHART_SYM.test(sym)) return;
+    const pop = $('tvPopover');
+    _chartOpener = opener || document.activeElement;
+    if (_chartSym !== sym || !pop.classList.contains('open')) {
+      _chartSym = sym;
+      $('tvPopTicker').textContent = sym;
+      $('tvPopHost').innerHTML = '<div id="tvPopHostInner" style="width:100%;height:100%"></div>';
+      try {
+        if (window.TradingView) {
+          new TradingView.widget({
+            container_id: 'tvPopHostInner', symbol: sym, interval: 'D', timezone: 'America/New_York',
+            theme: 'dark', style: '1', locale: 'en', autosize: true,
+            hide_top_toolbar: true, hide_side_toolbar: true, hide_volume: true, hide_legend: false,
+            allow_symbol_change: false, save_image: false,
+            studies: CHART_MAS.map((n) => ({ id: 'MASimple@tv-basicstudies', inputs: { length: n } })),
+            studies_overrides: { 'moving average.plot.color': '#38bdf8', 'moving average.plot.linewidth': 2 },
+          });
+        } else {
+          $('tvPopHost').innerHTML = '<div class="tv-unavail">Chart library did not load (TradingView unreachable).</div>';
+        }
+      } catch (_) {}
+    }
+    pop.classList.add('open');
+    placeChart();
+    const x = $('tvPopClose'); if (x) { try { x.focus({ preventScroll: true }); } catch (_) {} }
+  }
+  function closeChart() {
+    const pop = $('tvPopover');
+    if (!pop || !pop.classList.contains('open')) return false;
+    pop.classList.remove('open'); $('tvPopHost').innerHTML = ''; _chartSym = null;
+    const o = _chartOpener; _chartOpener = null;
+    if (o && o.isConnected && o.focus) { try { o.focus({ preventScroll: true }); } catch (_) {} }
+    return true;
+  }
+  function placeChart() {
+    const pop = $('tvPopover');
+    if (!pop || !pop.classList.contains('open')) return;
+    const W = document.documentElement.clientWidth, H = window.innerHeight;
+    if (W <= 768) { pop.style.width = ''; pop.style.height = ''; pop.style.left = '2vw'; pop.style.top = ''; return; }
+    // Free horizontal band = the window minus any open side pop-out.
+    let L = 0, R = W;
+    document.querySelectorAll('.drawer.open, .member-popup.open, .rp-panel.open, .pp-panel.open').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.right <= 0 || r.left >= W) return;
+      if (r.left + r.width / 2 < W / 2) L = Math.max(L, r.right); else R = Math.min(R, r.left);
+    });
+    let w = Math.max(480, Math.round(W * 0.5));
+    const h = Math.min(H - 32, Math.max(320, Math.round(H * 0.45)));
+    const free = R - L - 32;
+    let x;
+    if (free >= 400) { w = Math.min(w, free); x = Math.min(Math.max(W / 2 - w / 2, L + 16), R - 16 - w); }
+    else { w = Math.min(w, W - 32); x = (W - w) / 2; }   // no room beside the pop-outs: overlap, centred
+    pop.style.width = w + 'px'; pop.style.height = h + 'px';
+    pop.style.left = Math.round(x) + 'px'; pop.style.top = Math.round((H - h) / 2) + 'px';
+  }
+  // Pop-outs slide for 0.22 s; re-place once they have settled.
+  function placeChartSoon() { clearTimeout(_placeTimer); placeChart(); _placeTimer = setTimeout(placeChart, 260); }
 
   // ── Grid + layout persistence ───────────────────────────────────────────────
   let grid = null;
@@ -775,19 +863,19 @@
         <span class="status-chip ${statusClass(t.status)}">${esc(t.status || '')}</span></div>`;
     });
     el.innerHTML = html;
-    el.querySelectorAll('.th-row[data-theme]').forEach((r) => r.addEventListener('click', () => openThemeMembers(r.dataset.theme)));
+    el.querySelectorAll('.th-row[data-theme]').forEach((r) => r.addEventListener('click', () => openThemeMembers(r.dataset.theme, r)));
     applyGlossary(el);
   }
 
-  async function openThemeMembers(theme) {
-    openPopup('Theme · ' + theme, '<div class="mem-sec">loading…</div>');
+  async function openThemeMembers(theme, src) {
+    openPopup('Theme · ' + theme, '<div class="mem-sec">loading…</div>', src);
     let data = null;
     try { const r = await apiFetch('/api/stable/theme/' + encodeURIComponent(theme) + '/members'); if (r.ok) data = await r.json(); } catch (_) {}
     if (!data) { $('memberBody').innerHTML = '<div class="mem-sec">unavailable</div>'; return; }
     const row = (m) => {
       const rs = m.rs_qqq_20d;
       return `<div class="mem-row" data-ticker="${esc(m.ticker)}">
-        <span class="mtk" data-ticker="${esc(m.ticker)}">${esc(m.ticker)}</span>
+        <span class="mtk" data-ticker="${esc(m.ticker)}" data-chart="${esc(String(m.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(m.ticker)}</span>
         <span class="val-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.name || m.subtheme || '')}</span>
         <span class="${signCls(m.ret_1d)}">${m.ret_1d != null ? (m.ret_1d >= 0 ? '+' : '') + (m.ret_1d * 100).toFixed(1) + '%' : '--'}</span>
         <span class="val-muted">${m.last_price != null ? '$' + Number(m.last_price).toFixed(2) : '--'}</span>
@@ -805,7 +893,6 @@
     const label = data.anchor === 'provisional' ? "today's move" : '1d';
     $('memberBody').innerHTML = `<div class="mem-sec" style="color:var(--text-3);border:none">as of ${esc(fresh)}</div>`
       + sec('Top · ' + label, data.top) + sec('Bottom · ' + label, data.bottom);
-    $('memberBody').querySelectorAll('.mtk[data-ticker]').forEach((e) => e.addEventListener('click', () => { closePopup(); openTvPopover(e.dataset.ticker, e); }));
     $('memberBody').querySelectorAll('.opt-btn[data-ticker]').forEach((e) => e.addEventListener('click', () => loadOptionsContext(e)));
     // Flow/Kairos badges — on-demand for this popup only (not polled while closed).
     const memberTickers = [...(data.top || []), ...(data.bottom || [])].map((m) => m.ticker);
@@ -997,11 +1084,10 @@
       const chg = pct != null
         ? `<span class="chg ${signCls(pct)}${sus ? ' ix-suspect' : ''}"${sus ? ` title="${esc(susWhy)}"` : ''}>${(pct >= 0 ? '+' : '') + Number(pct).toFixed(2)}%${sus ? ' ?' : ''}</span>`
         : `<span class="chg ix-unavail" title="${esc(why)}">UNAVAILABLE</span>`;
-      return `<div class="ix-cell" data-ticker="${sym}"${pct == null ? ` title="${esc(why)}"` : ''}><span class="sym">${sym}</span>`
+      return `<div class="ix-cell" data-ticker="${sym}" data-chart="${sym}" tabindex="0" role="button"${pct == null ? ` title="${esc(why)}"` : ''}><span class="sym">${sym}</span>`
         + chg
         + `<span class="ext">${ext != null ? (ext >= 0 ? '+' : '') + Number(ext).toFixed(1) + ' ATR' : ''}</span></div>`;
     }).join('');
-    el.querySelectorAll('.ix-cell[data-ticker]').forEach((c) => c.addEventListener('click', () => openTvPopover(c.dataset.ticker, c)));
   }
 
   // ── b5 Yield curve mini ─────────────────────────────────────────────────────
@@ -1172,7 +1258,7 @@
 
   // ── c5: Book positions (same source as legacy Ledger: GET /api/v2/positions?status=OPEN) ──
   let _openPositions = [];
-  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o) };
+  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o), popSide, setSide, openChart, placeChartSoon };
   const OPT_PUT = /put/i, OPT_CALL = /call/i;
   function structureStr(p) {
     if ((p.asset_type || '').toUpperCase() === 'EQUITY' || (p.structure || '') === 'stock') {
@@ -1297,9 +1383,10 @@
          <button type="button" class="btn-danger" id="posCloseBtn">Close position</button>
          <button type="button" class="btn-secondary" id="posChartBtn">Chart</button>
        </div>`;
-    $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open');
+    closePopup(); setSide($('drawer'), popSide(null, 'book'));
+    $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open'); placeChartSoon();
     $('posCloseBtn').addEventListener('click', () => openCloseForm(p));
-    $('posChartBtn').addEventListener('click', (e) => { closeDrawer(); openTvPopover(p.ticker, e.target); });
+    $('posChartBtn').addEventListener('click', (e) => openChart(p.ticker, e.target));
     // Earnings surface (CHRONOS) — single earnings source from P0
     try {
       const r = await apiFetch('/api/chronos/next-earnings-batch?tickers=' + encodeURIComponent(p.ticker));
@@ -1313,7 +1400,7 @@
 
   // ── c5: add / close via the EXISTING write endpoints (call, never modify) ──
   const STRUCTURES = ['stock', 'long_call', 'long_put', 'call_debit_spread', 'put_debit_spread', 'call_credit_spread', 'put_credit_spread'];
-  function openModal(title, html) { $('modalTitle').textContent = title; $('modalBody').innerHTML = html; $('modalBackdrop').classList.add('open'); $('posModal').classList.add('open'); }
+  function openModal(title, html) { closeChart(); $('modalTitle').textContent = title; $('modalBody').innerHTML = html; $('modalBackdrop').classList.add('open'); $('posModal').classList.add('open'); }
   function closeModal() { $('modalBackdrop').classList.remove('open'); $('posModal').classList.remove('open'); }
 
   function openAddForm() {
@@ -1637,9 +1724,8 @@
     applyGlossary(el);
     el.querySelectorAll('.btn-committee[data-ticker]').forEach((b) => b.addEventListener('click', () => {
       const c = b.closest('.k-card'); if (c) c.classList.add('acked');  // acknowledge -> stop the decision-clock pulse
-      openCommittee(b.dataset.ticker, b.dataset.sig);
+      openCommittee(b.dataset.ticker, b.dataset.sig, b);
     }));
-    el.querySelectorAll('.k-card .tkr[data-ticker]').forEach((t) => t.addEventListener('click', () => openTvPopover(t.dataset.ticker, t)));
 
     // The classic stream: the top graded rows plus every row that never grades. Which ITEM
     // BUILDER a row gets is a display question, not a placement one — a class the display map
@@ -1679,7 +1765,7 @@
       return `<div class="k-card${shadow ? ' shadow' : ''}">
         <div class="top"><span class="nm">${esc(disp.name)}</span><span class="desc">${esc(disp.desc)}</span>
           <span class="grade ${grade === 'A' ? 'val-up' : ''}" data-gloss="GRADE">${grade}</span></div>
-        <div class="lvls"><span class="tkr" data-ticker="${esc(s.ticker)}">${esc(s.ticker)}</span>
+        <div class="lvls"><span class="tkr" data-ticker="${esc(s.ticker)}" data-chart="${esc(String(s.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(s.ticker)}</span>
           <span class="${sideCls}">${side || ''} ${s.entry_price != null ? Number(s.entry_price).toFixed(2) : ''}</span>
           ${s.target_1 != null ? `<span>T ${Number(s.target_1).toFixed(2)}</span>` : ''}
           ${s.stop_loss != null ? `<span>S ${Number(s.stop_loss).toFixed(2)}</span>` : ''}
@@ -1692,8 +1778,8 @@
       </div>`;
     }
   }
-  function openCommittee(ticker, sig) {
-    openDrawer('committee', { ticker, sig });
+  function openCommittee(ticker, sig, src) {
+    openDrawer('committee', { ticker, sig }, src);
   }
 
   // ── b9 River ────────────────────────────────────────────────────────────────
@@ -1797,7 +1883,7 @@
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : 'teal',
       ts: rowTime(s),
       riverOnly: !!disp.riverOnly,
-      text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
+      text: `<b>${esc(disp.name)}</b> ${chartTk(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
         // The same flag in the other view: one River, and neither view is the one that omits it.
         + (s.high_score === true ? ` · <span class="rv-high" title="${esc(canonicalScore(s) == null ? 'Scores high, but not a validated setup. Actionable needs an A.' : 'Scores ' + canonicalScore(s) + ': high, but not a validated setup. Actionable needs an A.')}">high score${canonicalScore(s) == null ? '' : ' ' + canonicalScore(s)}</span>` : '')
         + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : '')
@@ -1814,7 +1900,7 @@
       id: 'nr:' + (s.signal_id || raw + (s.ticker || '')), type: 'signal', tier: 'info',
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : null,
       ts: rowTime(s),
-      text: `<span class="rv-raw">${esc(raw)}</span> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`
+      text: `<span class="rv-raw">${esc(raw)}</span> ${chartTk(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`
         + (heldLabel(s) ? `<div class="rv-held">${esc(heldLabel(s))}</div>` : ''),
     };
   }
@@ -1849,11 +1935,11 @@
         if (align === 'NEUTRAL' || !align) return;
         items.push({ id: 'flow:' + (f.ticker || i) + ':' + align, type: 'flow',
           tier: f.strength === 'STRONG' ? 'action' : 'info', sev: align === 'CONFIRMING' ? 'up' : 'down', ts: null,
-          text: `<b>${esc(f.ticker || '')}</b> flow ${align.toLowerCase()}${f.strength ? ' (' + esc(f.strength.toLowerCase()) + ')' : ''} vs your position` });
+          text: `<b>${chartTk(f.ticker)}</b> flow ${align.toLowerCase()}${f.strength ? ' (' + esc(f.strength.toLowerCase()) + ')' : ''} vs your position` });
       });
       (flow.watchlist_unusual || []).slice(0, 5).forEach((w, i) => {
         items.push({ id: 'unusual:' + (w.ticker || i), type: 'flow', tier: 'info', sev: 'teal', ts: null,
-          text: `Unusual flow · <b>${esc(w.ticker || '')}</b>${w.sentiment ? ' ' + esc(w.sentiment) : ''}` });
+          text: `Unusual flow · <b>${chartTk(w.ticker)}</b>${w.sentiment ? ' ' + esc(w.sentiment) : ''}` });
       });
       (flow.headlines || []).slice(0, 6).forEach((h, i) => {
         const hl = h.headline || h.title || ''; if (!hl) return;
@@ -1865,7 +1951,7 @@
       (hermes.alerts || []).forEach((a) => {
         items.push({ id: 'herm:' + (a.id || a.trigger_ticker), type: 'catalyst',
           tier: (a.tier <= 1 ? 'action' : 'info'), sev: 'down', ts: apiTime(a.created_at),
-          text: `<b>${esc(a.trigger_ticker || '')}</b> ${esc(a.headline_summary || a.event_type || 'catalyst')}` });
+          text: `<b>${chartTk(a.trigger_ticker)}</b> ${esc(a.headline_summary || a.event_type || 'catalyst')}` });
       });
     }
     // Cowork stable digest (optional — render only if present)
@@ -1993,7 +2079,7 @@
     const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b>${esc(disp.name)}</b>`;
     const err = rowError(s);
     return `<div class="rl-row${err ? ' rl-bad' : ''}" data-sid="${esc(s.signal_id || '')}">
-        <div class="rl-main">${name} <span class="rl-tkr">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
+        <div class="rl-main">${name} <span class="rl-tkr" data-chart="${esc(String(s.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
         <div class="rl-sub">${err ? `<span class="rl-err" title="This row is being shown, not hidden, so the regression is visible: the page no longer filters it.">${esc(err)}</span>` : ''}${o.grade ? laneGrade(s) : ''}${highBadge(s)}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
         ${heldLabel(s) ? `<div class="rl-held">${esc(heldLabel(s))}</div>` : ''}
         ${disp.banner ? `<div class="rl-banner">${esc(disp.banner)}</div>` : ''}
@@ -2124,12 +2210,21 @@
       return `<div class="rv-item ${cls}" data-rid="${esc(it.id)}"><div class="rv-head"><span class="rv-dot t-${it.type}"></span><span class="rv-type">${it.type}</span><span class="rv-time">${hh}</span>${it.tier === 'shadow' ? '<span class="shadow-tag">shadow</span>' : ''}</div><div class="rv-txt">${it.text}</div></div>`;
     }).join('');
     // Click an action item to acknowledge — stops its pulse (nothing pulses forever).
-    el.querySelectorAll('.rv-item.action[data-rid]').forEach((n) => n.addEventListener('click', () => { _rvAcked.add(n.dataset.rid); renderRiver(); }));
+    el.querySelectorAll('.rv-item.action[data-rid]').forEach((n) => n.addEventListener('click', (e) => { if (e.target.closest('[data-chart]')) return; _rvAcked.add(n.dataset.rid); renderRiver(); }));
   }
 
   // ── Popup helpers ───────────────────────────────────────────────────────────
-  function openPopup(title, html) { $('memberTitle').textContent = title; $('memberBody').innerHTML = html; $('popupBackdrop').classList.add('open'); $('memberPopup').classList.add('open'); }
-  function closePopup() { $('popupBackdrop').classList.remove('open'); $('memberPopup').classList.remove('open'); }
+  function openPopup(title, html, src) {
+    const pop = $('memberPopup'), side = popSide(src, 'themes');
+    pop.classList.toggle('side-left', side === 'left'); pop.classList.toggle('side-right', side !== 'left');
+    $('memberTitle').textContent = title; $('memberBody').innerHTML = html; $('popupBackdrop').classList.add('open'); pop.classList.add('open');
+    placeChartSoon();
+  }
+  function closePopup() {
+    const was = $('memberPopup').classList.contains('open');
+    $('popupBackdrop').classList.remove('open'); $('memberPopup').classList.remove('open');
+    if (was) placeChartSoon();
+  }
 
   // ── Polling groups (idle interval budget: 4 << 10) ──────────────────────────
   function refreshMarket() { loadThemes(); loadDivergence(); loadIndexStrip(); loadRates(); loadFx(); }
@@ -2138,6 +2233,88 @@
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
     await refreshThemeMap(positions);
     loadBook(); loadKairos(); loadDeskStreams(); loadNotices();
+  }
+
+  // ── Top-bar quote ─────────────────────────────────────────────────────────
+  // v1's regime-matched trader quotes, restored. The mood follows the composite regime; a new
+  // quote every 10 minutes, no repeats within a day (ET), click for another. Rides the regime
+  // poll (60 s, paused when the tab is hidden), so it adds no timer and no request.
+  const QUOTE_MOOD = { TORO_MAJOR: 'greedy', TORO_MINOR: 'optimistic', NEUTRAL: 'pragmatic', URSA_MINOR: 'pessimistic', URSA_MAJOR: 'cynical' };
+  const QUOTE_ROTATE_MS = 10 * 60 * 1000;
+  const QUOTE_KEY = 'agora.quote.v1';
+  let _qMem = null, _qMood = null, _qPending = null;
+  function qLoad() { try { const v = JSON.parse(localStorage.getItem(QUOTE_KEY) || 'null'); if (v) return v; } catch (_) {} return _qMem; }
+  function qSave(v) { _qMem = v; try { localStorage.setItem(QUOTE_KEY, JSON.stringify(v)); } catch (_) {} }
+  function etDay() {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()); }
+    catch (_) { return new Date().toISOString().slice(0, 10); }
+  }
+  function quoteTick(bias, advance) {
+    const btn = $('v2Quote'), Q = window.AGORA_QUOTES;
+    if (!btn) return;
+    if (!Q) { btn.hidden = true; return; }
+    // A failed read never moves the mood, and a new mood must be read twice in a row, so a
+    // score sitting on a threshold does not churn the quote.
+    const m = bias ? QUOTE_MOOD[String(bias).toUpperCase()] : null;
+    if (m) {
+      if (_qMood === null || m === _qMood) { _qMood = m; _qPending = null; }
+      else if (_qPending === m) { _qMood = m; _qPending = null; }
+      else _qPending = m;
+    }
+    let st = qLoad();
+    const mood = _qMood || (st && st.cur && st.cur.mood) || 'pragmatic';
+    const pool = Q[mood] || [];
+    if (!pool.length) { btn.hidden = true; return; }
+    const day = etDay(), now = Date.now();
+    if (!st || st.day !== day) st = { day, seen: {}, cur: null };
+    const keep = st.cur && st.cur.mood === mood && st.cur.i < pool.length && now - st.cur.at < QUOTE_ROTATE_MS;
+    if (keep && !advance) {
+      if (btn.dataset.key !== mood + ':' + st.cur.i) renderQuote(pool[st.cur.i], mood, st.cur.i, false);
+      return;
+    }
+    let seen = (st.seen[mood] || []).filter((i) => i < pool.length);
+    if (seen.length >= pool.length) seen = [];
+    const left = pool.map((_, i) => i).filter((i) => seen.indexOf(i) < 0);
+    const i = left[Math.floor(Math.random() * left.length)];
+    seen.push(i); st.seen[mood] = seen; st.cur = { mood, i, at: now }; qSave(st);
+    renderQuote(pool[i], mood, i, !btn.hidden);
+  }
+  function renderQuote(q, mood, i, animate) {
+    const btn = $('v2Quote');
+    const apply = () => {
+      btn.querySelector('.q-text').textContent = '“' + q[0] + '”';
+      btn.querySelector('.q-author').textContent = '— ' + q[1] + (q[2] ? ' · ' + q[2] + ' pick' : '');
+      btn.dataset.mood = mood; btn.dataset.key = mood + ':' + i;
+      btn.title = '“' + q[0] + '” — ' + q[1] + '\n\nQuote mood: ' + mood + ' (follows the composite regime). Click for another.';
+      btn.hidden = false; btn.classList.remove('q-fade');
+    };
+    const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (animate && !still) { btn.classList.add('q-fade'); setTimeout(apply, 300); } else apply();
+  }
+
+  // ── Full-screen mode ────────────────────────────────────────────────────────
+  // The page root goes full screen (not the grid), so drawers, popups and the chart stay
+  // visible. Hidden where the browser cannot do it (iPhone Safari; an installed iOS app is
+  // already chromeless).
+  function initFullscreen() {
+    const b = $('fsBtn'); if (!b) return;
+    const d = document, root = d.documentElement;
+    if (!(d.fullscreenEnabled || d.webkitFullscreenEnabled)) { b.hidden = true; return; }
+    const cur = () => d.fullscreenElement || d.webkitFullscreenElement;
+    const sync = () => {
+      const on = !!cur();
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.title = on ? 'Exit full screen (Esc)' : 'Full screen';
+      b.classList.toggle('on', on);
+    };
+    b.addEventListener('click', () => {
+      try {
+        if (cur()) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+        else { const pr = (root.requestFullscreen || root.webkitRequestFullscreen).call(root); if (pr && pr.catch) pr.catch(() => {}); }
+      } catch (_) {}
+    });
+    d.addEventListener('fullscreenchange', sync); d.addEventListener('webkitfullscreenchange', sync);
+    b.hidden = false; sync();
   }
 
   // ── Boot ────────────────────────────────────────────────────────────────────
@@ -2162,13 +2339,37 @@
     });
     $('drawerClose').addEventListener('click', closeDrawer);
     $('drawerBackdrop').addEventListener('click', closeDrawer);
-    $('tvPopClose').addEventListener('click', closeTvPopover);
+    $('tvPopClose').addEventListener('click', () => closeChart());
     $('memberClose').addEventListener('click', closePopup);
     $('popupBackdrop').addEventListener('click', closePopup);
     $('bookAdd').addEventListener('click', openAddForm);
     $('modalClose').addEventListener('click', closeModal);
     $('modalBackdrop').addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); closePopup(); closeModal(); _divClear(); } });
+    // Any ticker marked data-chart opens the chart: one delegated handler, so tiles that
+    // re-render every poll need no re-wiring. Buttons inside a ticker row keep their own job.
+    document.addEventListener('click', (e) => {
+      const t = e.target.closest && e.target.closest('[data-chart]');
+      if (!t || t.closest('#tvPopover')) return;
+      if (e.target.closest('button, a, .opt-btn, .btn-committee, .kairos-tag, .flow-tag')) return;
+      e.preventDefault();
+      openChart(t.dataset.chart, t);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const t = e.target.closest && e.target.closest('[data-chart]');
+      if (!t || e.target !== t) return;
+      e.preventDefault(); openChart(t.dataset.chart, t);
+    });
+    // Escape closes only the chart when one is open (capture phase, so the page-wide close
+    // below does not also fire). Once focus is inside the TradingView frame, use the ✕.
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && closeChart()) { e.stopImmediatePropagation(); e.preventDefault(); }
+    }, true);
+    window.addEventListener('resize', () => placeChart());
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closePopup(); closeModal(); _divClear(); } });
+    initFullscreen();
+    const qb = $('v2Quote');
+    if (qb) qb.addEventListener('click', () => { const c = _lastRegime.composite; quoteTick(c && (c.bias_level || c.level), true); });
     try { window.__mgd = _managed.size; } catch (_) {}  // idle interval count (acceptance check)
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
@@ -2852,9 +3053,12 @@ const X = (function () {
   }
   function show() {
     build(); open = true; render();
-    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); const x = panel.querySelector('.rp-x'); if (x) x.focus(); });
+    // Open on the River tile's side (follows the tile if it is dragged across).
+    const v2 = window.__v2;
+    if (v2 && v2.setSide) v2.setSide(panel, v2.popSide(opener && opener.isConnected ? opener : null, 'river'));
+    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); if (v2 && v2.placeChartSoon) v2.placeChartSoon(); const x = panel.querySelector('.rp-x'); if (x) x.focus(); });
   }
-  function hide() { open = false; if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); } if (opener && opener.focus) { try { opener.focus(); } catch (_) {} } }
+  function hide() { open = false; if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); if (window.__v2 && window.__v2.placeChartSoon) window.__v2.placeChartSoon(); } if (opener && opener.focus) { try { opener.focus(); } catch (_) {} } }
   function openIt() { if (open) return; opener = document.activeElement; show(); if (location.hash !== '#river-preview') history.pushState(null, '', location.pathname + location.search + '#river-preview'); }
   function close() { if (!open) return; hide(); if (location.hash === '#river-preview') history.pushState(null, '', location.pathname + location.search); }
   function sync() { if (location.hash === '#river-preview') { if (!open) show(); } else if (open) hide(); }
