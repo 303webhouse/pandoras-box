@@ -109,9 +109,13 @@ All committee members (TORO, URSA, Sector Expert, Technical Analyst, PYTHIA) mus
 
 - Has ADHD — step-by-step chunks, clear next actions, single definition of done
 - Non-engineer — explain technical decisions simply
-- Uses Claude.ai for architecture/planning, Claude Code for implementation (Codex is backup only)
-- Local repo: `C:\trading-hub` — the ONLY clone. Never create another.
+- Uses Claude.ai for architecture/planning, Claude Code for implementation; Cursor is the overflow environment when Claude rate limits hit (Codex is backup only)
+- Local repo: `C:\trading-hub` — the ONLY clone. Never create another. (Worktrees under `C:\th-*` are not clones; each lane builds in its own.)
 - Timezone: America/Denver (observes DST)
+
+## Cross-Environment Lanes (read at session start)
+
+Three environments work this repo — Claude.ai (SPINE, Trade Analysis), Claude Code (CC-BUILD, CC-QUERY, CC-POSITIONS, CC-ABACUS) and Cursor (CURSOR). Each lane keeps a status file in `docs/handoffs/lanes/` and rewrites it at session end; read all of them before starting work. Protocol and ownership table: `docs/handoffs/lanes/README.md`. Durable learnings that need to reach the other local environment without a commit go in the auto-memory directory (`MEMORY.md` index) — Cursor reads and writes that directory too. `docs/session-handoff.md` is retired.
 
 ## Time-of-Day Statements (Important)
 
