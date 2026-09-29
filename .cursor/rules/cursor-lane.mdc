@@ -1,0 +1,63 @@
+---
+description: Charter for the CURSOR lane — how a Cursor agent joins the multi-lane Pandora's Box board without colliding with the Claude Code lanes
+alwaysApply: true
+---
+
+# CURSOR lane
+
+Cursor is one lane on a hub-and-spoke board. The other lanes (SPINE in Claude.ai;
+CC-BUILD, CC-QUERY, CC-POSITIONS, CC-ABACUS in Claude Code) are described in
+`docs/handoffs/lanes/README.md`. That file, `PROJECT_RULES.md`, and `CLAUDE.md` bind
+this lane the same as every other.
+
+## Session start (do these before any work)
+
+1. `git fetch origin` and state the SHA of `origin/main` you are reading.
+2. Read `docs/handoffs/lanes/*.md` — every lane's status file, newest first. This is
+   the cross-environment memory that travels with the repo.
+3. Read `C:\Users\nickh\.claude\projects\C--trading-hub\memory\MEMORY.md` (the Claude
+   Code lanes' local memory index). Follow links into it only for the area you are
+   about to touch. It is outside the repo on purpose — it may hold book figures.
+4. If the task touches code another lane owns (see README ownership table), stop and
+   say so; the fix is a relay to that lane, not an edit.
+
+## Session end
+
+- Rewrite `docs/handoffs/lanes/CURSOR.md` (whole-file rewrite, not append): what
+  changed, what is in flight, what the next session should do first, and the SHA you
+  worked against. Public-safe only — no balances, positions, P&L, routes, credentials.
+- If you learned something durable that the Claude Code lanes need (a landmine, a
+  ruling, a corrected assumption), write it as a new file in the memory directory
+  above using the same frontmatter shape as its neighbours, and add one index line to
+  `MEMORY.md`. That directory is the only channel that reaches those lanes without a
+  git commit.
+
+## Where this lane works
+
+- **Worktree, not the shared checkout.** `C:\trading-hub` is sync-and-package only
+  (SPINE ruling 2026-07-24). Build in `C:\th-cursor` (branch `cursor/<topic>`), or a
+  fresh `git worktree add`. Never commit from `C:\trading-hub`.
+- **Branch + PR, never a direct push to `main`.** A push to `main` is a Railway
+  production deploy. Open a PR; Nick or the owning lane merges.
+- **Stage by pathspec** (`git add <file> <file>`), never `-A`/`.`/`-a`. Run a
+  credential pattern scan on the exact paths before staging; report counts, never values.
+- **Never `git checkout --`, `stash`, `reset`, or `clean` a diff you did not create** —
+  in any worktree. A dirty tree is another lane, live.
+
+## Data access
+
+- Hub data: the `pandora-hub` MCP (read-only, GitHub OAuth). Call `mcp_ping` first.
+  Tool names are `hub_get_*`; the Olympus skills expect exactly these.
+- Direct DB: the `postgres` MCP is read-only by construction. Writes to the book belong
+  to CC-POSITIONS — never write to `unified_positions`, `position_lots`,
+  `position_legs`, or `trades` from this lane.
+- `scripts/reconcile_rh.py` is under a standing DO-NOT-RUN (`PROJECT_RULES.md`).
+
+## Skills
+
+The Olympus (TORO, URSA, PYTHIA, PYTHAGORAS, DAEDALUS, THALES, PIVOT) and Titans
+(ATLAS, HELIOS, AEGIS, ATHENA) skills are junctioned from `skills/<agent>/` in this
+repo into `~/.cursor/skills/`. Source of truth is the repo copy. A `_shared/...`
+reference inside a skill resolves to `skills/_shared/`. Do not edit skills from this
+lane without saying so on the face of `CURSOR.md` — the packaged Claude.ai bundles
+are regenerated from these files.
