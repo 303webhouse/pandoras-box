@@ -143,6 +143,72 @@ async def get_index_strip():
                          incoherent=incoherent)
 
 
+@router.get("/futures")
+async def get_futures():
+    """Overnight futures + pre/after-hours ETF moves, each measured from the 4 PM ET
+    close of `base_session` (stable_engine/ext_hours.py). ~10 minutes delayed.
+
+    `market_session` is THE calendar's answer (sessions.session_at) for right now;
+    the Agora index strip flips to this read whenever it is not 'regular'. `session`
+    is the futures market's own open/closed (weekend, daily halt), which is what
+    this feed's health dot should grey on -- the equity session being closed is the
+    reason this feed exists, not a reason to call it quiet.
+    """
+    from stable_engine import ext_hours
+    from stable_engine.sessions import envelope_session_fields
+
+    now = datetime.now(timezone.utc)
+    market_session = envelope_session_fields(now)["market_session"]
+    try:
+        expected_base = str(ext_hours.base_session(now))
+    except Exception:
+        expected_base = None
+    extra = {
+        "market_session": market_session,
+        "session": "open" if ext_hours.futures_open(now) else "closed",
+        "data_delay_minutes": ext_hours.DATA_DELAY_MINUTES,
+        "base_session_expected": expected_base,
+    }
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT symbol, kind, label, leads, last, base, pct, bar_ts, base_session,
+                          ext_session, reason, spark, fetched_at
+                   FROM stable_ext_quotes"""
+            )
+    except Exception as e:
+        # Includes the table not existing yet (created by the job's first run).
+        logger.warning("[stable] futures read failed: %s", e)
+        return _envelope(None, None, True, feed="ext_hours", futures=[], etfs=[], **extra)
+
+    import json as _json
+    order = {s: i for i, s in enumerate(list(ext_hours.FUTURES) + ext_hours.ETFS)}
+    out = []
+    for r in sorted(rows, key=lambda r: order.get(r["symbol"], 99)):
+        d = dict(r)
+        d["bar_ts"] = d["bar_ts"].isoformat() if d["bar_ts"] else None
+        d["fetched_at"] = d["fetched_at"].isoformat() if d["fetched_at"] else None
+        d["base_session"] = str(d["base_session"]) if d["base_session"] else None
+        try:
+            d["spark"] = _json.loads(d["spark"]) if d["spark"] else []
+        except (TypeError, ValueError):
+            d["spark"] = []
+        out.append(d)
+    futures = [d for d in out if d["kind"] == "future"]
+    etfs = [d for d in out if d["kind"] == "etf"]
+    # The feed's age is its newest FUTURES bar -- the data's own time, not the fetch.
+    stamps = [r["bar_ts"] for r in rows if r["kind"] == "future" and r["bar_ts"]]
+    as_of = max(stamps) if stamps else None
+    # A symbol still waiting for its first post-close bar is not a failure.
+    unresolved = [d["symbol"] for d in futures
+                  if d["pct"] is None and not (d["reason"] or "").startswith(ext_hours.WAITING)]
+    stale_base = [d["symbol"] for d in futures if expected_base and d["base_session"] != expected_base]
+    return _envelope(as_of, "provisional", (not futures) or bool(unresolved), feed="ext_hours",
+                     futures=futures, etfs=etfs, unresolved=unresolved, stale_base=stale_base,
+                     **extra)
+
+
 @router.get("/rates")
 async def get_rates():
     """Latest Treasury yields (percent + bp day change) and the 10y-3m spread."""
