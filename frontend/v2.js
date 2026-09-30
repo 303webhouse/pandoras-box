@@ -1056,6 +1056,7 @@
     try { const r = await apiFetch('/api/portfolio/pnl'); if (r.ok) pnl = await r.json(); } catch (_) {}
     try { const r = await apiFetch('/api/v2/positions/greeks'); if (r.ok) greeks = await r.json(); } catch (_) {}
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
+    setBookExits(positions);
     const el = $('bookStrip'); if (!el) return;
     const bookOk = !!(balances || pnl);
     const accts = Array.isArray(balances) ? balances : [];
@@ -1531,6 +1532,19 @@
   // loadKairos took — the graded roster, the classes that never grade, and the counts the
   // lanes are obliged to disclose (what was read, and what was excluded).
   let _laneData = null;
+  // R-IV.606(b) — the two halves of "Your book" arrive on DIFFERENT reads. `touches` rides on a
+  // signal row (`/api/trade-ideas`); `exit` rides on a position row (`/api/v2/positions`). This
+  // is the join, keyed by position_id, refreshed from whichever read last returned positions.
+  // `null` means no position read has succeeded — which is NOT the same as a position with no
+  // written plan, and the lane says so rather than reading both as "No exit written".
+  let _bookExits = null;
+  function setBookExits(positions) {
+    const rows = (positions && (positions.positions || positions.rows)) || (Array.isArray(positions) ? positions : null);
+    if (!rows) return;                       // a failed read leaves the last good map alone
+    const m = {};
+    rows.forEach((p) => { if (p && p.position_id) m[p.position_id] = { exit: p.exit || null, ticker: p.ticker, structure: p.structure }; });
+    _bookExits = m;
+  }
   const LANE_LEVEL_MAX = 24;      // how many names one cycle reads level evidence for
   // Level evidence is one read per ticker and the desk refreshes every two minutes, so reading
   // 24 names every cycle would put 24 concurrent requests against a pool of 10. Cache each
@@ -2056,6 +2070,59 @@
     if (!liquid.length) return `Nothing actionable: ${sided.length} setup${sided.length === 1 ? '' : 's'} fired on the validated side, ${sided.length === 1 ? 'and it is' : 'and every one is'} outside the liquid universe. The validated cell is a ${cell}.`;
     return 'Nothing actionable: no idea cleared the A grade this cycle.';
   }
+  // ── R-IV.606(b) · Your book ────────────────────────────────────────────────
+  // `touches` is a LIST and it is ABSENT, not empty, when the ticker is not in the book. One
+  // signal can touch two positions on different structures and one may confirm while the other
+  // contradicts, so each TOUCH is its own row — collapsing them to the signal would hide exactly
+  // the disagreement this lane exists to show.
+  function bookEntries(d) {
+    const out = [];
+    [...d.roster, ...d.shadow, ...d.nonRoster, ...d.unclassed].forEach((s) => {
+      const t = s.touches;
+      if (!Array.isArray(t) || !t.length) return;
+      t.forEach((h) => { if (h && h.position_id) out.push({ s, h }); });
+    });
+    // CONTRADICTS first — the ruling's order, and the reason the lane is read at all.
+    const rank = (r) => (r === 'CONTRADICTS' ? 0 : r === 'CONFIRMS' ? 1 : 2);
+    out.sort((a, b) => rank(a.h.relation) - rank(b.h.relation) || ((rowTime(b.s) || 0) - (rowTime(a.s) || 0)));
+    return out;
+  }
+  // "Your exit: …" from the position's own block. `written` is the ONE field to test, as the
+  // relay asks. `stop` and `stop_type` can legitimately disagree — a resting broker order under
+  // a plan that calls for none — so both are shown rather than one hidden behind the other.
+  function exitLine(positionId) {
+    if (_bookExits == null) {
+      return `<div class="rl-exit unknown">Your exit: <b>not read</b> — the position list has not answered this cycle, so this is not "no exit written".</div>`;
+    }
+    const rec = _bookExits[positionId];
+    if (!rec) return `<div class="rl-exit unknown">Your exit: <b>not read</b> — this position was not in the last book read.</div>`;
+    const x = rec.exit;
+    if (!x || x.written !== true) return '<div class="rl-exit none">Your exit: <b>No exit written</b></div>';
+    const bits = [];
+    if (x.stop != null && Number.isFinite(Number(x.stop))) bits.push('broker stop $' + Number(x.stop).toFixed(2));
+    if (x.stop_type) bits.push('stop type ' + String(x.stop_type).replace(/_/g, ' '));
+    if (x.invalidation) bits.push('invalidation: ' + x.invalidation);
+    if (x.time_stop) bits.push('time stop ' + x.time_stop);
+    return `<div class="rl-exit">Your exit: ${esc(bits.join(' · '))}</div>`;
+  }
+  function bookRow(e) {
+    const s = e.s, h = e.h;
+    const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
+    const side = (s.direction || '').toUpperCase();
+    const bad = h.relation === 'CONTRADICTS';
+    // A null relation is NOT a third badge (the relay is explicit) — no badge at all. The row
+    // still belongs here, because it names an open position and carries that position's exit.
+    const badge = h.relation
+      ? `<span class="rl-verdict${bad ? ' bad' : ''}">${esc(h.relation)}</span>`
+      : `<span class="rl-verdict quiet" title="${esc(h.position_direction ? 'The signal\u2019s own direction could not be read, so no verdict is claimed.' : 'This position\u2019s structure could not be read, so no verdict is claimed.')}">no verdict</span>`;
+    return `<div class="rl-row${bad ? ' rl-contra' : ''}" data-sid="${esc(s.signal_id || '')}" data-pos="${esc(h.position_id)}">
+        <div class="rl-main">${badge} <b>${esc(s.ticker || '')}</b> <span class="rl-dir">${esc(side)}</span> ${esc(disp.name)}
+          <span class="rl-pos">your ${esc(String(h.structure || 'position').replace(/_/g, ' '))}${h.position_direction ? ' (' + esc(h.position_direction) + ')' : ''}</span></div>
+        ${exitLine(h.position_id)}
+        <div class="rl-sub">${laneTime(s)}</div>
+      </div>`;
+  }
+
   function renderLanes() {
     const el = $('riverLanes'); if (!el) return;
     const now = Date.now();
@@ -2073,12 +2140,12 @@
       .sort((a, b) => ((a.ts == null) - (b.ts == null)) || ((b.ts || 0) - (a.ts || 0))).slice(0, LANE_CONTEXT_MAX);
 
     const empty = (msg) => `<div class="rl-empty">${esc(msg)}</div>`;
-    // Lane 2 joins when the feed says which position an idea touches and the position carries a
-    // written exit (R-IV.568). Neither field exists yet, so the count is UNKNOWN — not zero:
-    // "0 ideas touch your book" is a claim this page cannot make.
-    const bookSeam = '<div class="rl-seam">No idea in the feed names a position it touches, and no position carries a written exit, so this lane has nothing it can fill without guessing. '
-      + 'When those fields land (R-IV.568) each item reads <b>CONTRADICTS</b> or <b>CONFIRMS</b>, contradictions first, with the position\'s own exit under it — '
-      + '&ldquo;Your exit: broker stop / invalidation / time stop&rdquo;, or <b>No exit written</b>.</div>';
+    // R-IV.606(b): the seam is retired — `touches` and `exit` are live. A count of 0 is now a
+    // MEASUREMENT (no idea touched the book this cycle), not the unknown it used to be.
+    const book = bookEntries(d);
+    const bookBody = book.length ? book.map(bookRow).join('')
+      : empty(d.answered ? 'No idea in the feed touches an open position this cycle.'
+                         : 'The idea feed did not answer, so nothing could be matched against your book.');
 
     const circeToday = [..._river.values()].filter((i) => i.riverOnly && i.ts && etDate(i.ts) === etDate(now)).length;
     const circeRow = circeToday
@@ -2111,7 +2178,10 @@
       + laneShell('Actionable', actionable.length, actionable.length
           ? actionable.map((s) => laneSigRow(s, { grade: true })).join('')
           : empty(actionableReason(d, graded)), { key: 'actionable', note: 'A grade only' })
-      + laneShell('Your book', '—', bookSeam, { key: 'book', countUnknown: true, note: 'waiting on the feed', countTitle: 'Unknown, not zero: the feed does not yet say which ideas touch your positions.' })
+      + laneShell('Your book', d.answered ? book.length : '—', bookBody,
+          { key: 'book', countUnknown: !d.answered, note: 'contradictions first',
+            countTitle: d.answered ? 'Ideas touching an open position. One signal can touch two positions, and each is its own row.'
+                                   : 'Unknown, not zero: the idea feed did not answer this cycle.' })
       + laneShell('Watch', watch.length, watch.length
           ? watch.map((s) => laneSigRow(s, { grade: true })).join('')
           : empty('No roster setup below A fired this cycle.'), { key: 'watch', note: 'grade shown; gates later' })
@@ -2175,6 +2245,7 @@
   async function refreshDesk() {
     let positions = null;
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
+    setBookExits(positions);
     await refreshThemeMap(positions);
     loadBook(); loadKairos(); loadDeskStreams(); loadNotices();
   }
