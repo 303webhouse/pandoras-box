@@ -1311,6 +1311,35 @@
     } catch (_) {}
   }
 
+  // ── R-IV.606(a) · the expiry field has to work where there is no date picker ──────────
+  // MEASURED, not assumed: in a WebKit build at 390px the `type="date"` attribute does not
+  // stick — `input.type` reads back "text" — so the field renders as a bare empty box with no
+  // picker and no hint of what to type. Whatever was typed then went STRAIGHT to the write
+  // endpoint unvalidated, and `unified_positions` swallows an unparseable expiry in a bare
+  // `except: pass`. So "12/18/2026" created the position with NO EXPIRY and said "created".
+  // A silently dropped expiry on an options position is the worst of the three outcomes.
+  //
+  // The standard feature test, not a user-agent sniff: a real date input REJECTS an invalid
+  // value by sanitising it to ''. A text input keeps it.
+  const DATE_INPUT_SUPPORTED = (() => {
+    try {
+      const i = document.createElement('input');
+      i.setAttribute('type', 'date');
+      if (i.type !== 'date') return false;
+      i.value = 'not-a-date';
+      return i.value === '';
+    } catch (_) { return false; }
+  })();
+  // ONE validator, read by the picker path and the typed path alike, so the fallback cannot
+  // drift into accepting something the picker would never produce. Rejects 2026-02-31: the
+  // regex alone would pass it and the Date would roll it over to March.
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  function isIsoDate(v) {
+    if (!ISO_DATE.test(v)) return false;
+    const t = Date.parse(v + 'T00:00:00Z');
+    return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v;
+  }
+
   // ── c5: add / close via the EXISTING write endpoints (call, never modify) ──
   const STRUCTURES = ['stock', 'long_call', 'long_put', 'call_debit_spread', 'put_debit_spread', 'call_credit_spread', 'put_credit_spread'];
   function openModal(title, html) { $('modalTitle').textContent = title; $('modalBody').innerHTML = html; $('modalBackdrop').classList.add('open'); $('posModal').classList.add('open'); }
@@ -1325,7 +1354,9 @@
         <div class="fld"><label for="f_structure">Structure</label><select id="f_structure">${STRUCTURES.map((s) => `<option value="${s}">${s.replace(/_/g, ' ')}</option>`).join('')}</select></div>
         ${fld('f_qty', 'Quantity', 'type="number" min="1" value="1"')}
         ${fld('f_entry', 'Entry price', 'type="number" step="any" placeholder="0.00"')}
-        ${fld('f_expiry', 'Expiry', 'type="date"')}
+        ${fld('f_expiry', 'Expiry' + (DATE_INPUT_SUPPORTED ? '' : ' · YYYY-MM-DD'),
+          DATE_INPUT_SUPPORTED ? 'type="date"'
+            : 'type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="YYYY-MM-DD"')}
         ${fld('f_long', 'Long strike', 'type="number" step="any"')}
         ${fld('f_short', 'Short strike', 'type="number" step="any"')}
         ${fld('f_stop', 'Stop', 'type="number" step="any"')}
@@ -1349,7 +1380,15 @@
     };
     if (num('f_long') != null) body.long_strike = num('f_long');
     if (num('f_short') != null) body.short_strike = num('f_short');
-    if (val('f_expiry')) body.expiry = val('f_expiry');
+    // Validated on EVERY engine, not just the one without a picker: the endpoint drops an
+    // expiry it cannot parse without telling anyone, so the page refuses before it can.
+    const expiry = val('f_expiry');
+    if (expiry && !isIsoDate(expiry)) {
+      $('f_msg').className = 'form-msg err';
+      $('f_msg').textContent = 'Expiry must be a real date written YYYY-MM-DD, like 2026-12-18.';
+      return;
+    }
+    if (expiry) body.expiry = expiry;
     if (num('f_stop') != null) body.stop_loss = num('f_stop');
     if (num('f_target') != null) body.target_1 = num('f_target');
     if (val('f_notes')) body.notes = val('f_notes');
@@ -2345,7 +2384,9 @@ const X = (function () {
 
   function ticket() {
     const t = P.ticket;
-    return `<form class="pp-ticket" onsubmit="return false"><h4>Pre-trade ticket <span class="pp-dim">— the only way a new position enters (X8)</span></h4>
+    return `<form class="pp-ticket" onsubmit="return false"><h4>Pre-trade ticket <span class="pp-dim">— a sample of a planned form (X8)</span></h4>
+      <div class="pp-sample" role="note"><b>This is a sample form. It saves nothing, and no position you type here is recorded.</b>
+        To add a real position, close this panel and use <b>+ add</b> on the Book tile.</div>
       <div class="pp-tape">Tape: ${chip('reported', t.tape.state)} <span class="pp-dim">${esc(t.tape.detail)}</span></div>
       <label>Trade direction<select><option>bearish (with the tape)</option><option>bullish (AGAINST the tape)</option><option>neutral</option></select></label>
       <label>Bucket<select>${P.buckets.map(([n, d]) => `<option>${esc(n)}${d ? ' — ' + esc(d) : ''}</option>`).join('')}</select></label>
@@ -2357,7 +2398,7 @@ const X = (function () {
       <label>Time stop<input value="date or DTE"></label>
       <label>Zweig rule strained<select><option>none</option><option>the tape sets direction</option><option>another rule…</option></select></label>
       <div class="pp-need">A ticket saves onto the position row. A trade against the tape, or with no stop, shows amber above and asks for a reason before it can be submitted.</div>
-      <button type="button" class="pp-btn primary">Save ticket (mock: saves nothing)</button></form>`;
+      <button type="button" class="pp-btn primary" disabled aria-disabled="true" title="This sample form saves nothing. Use + add on the Book tile to record a position.">Save ticket — sample, saves nothing</button></form>`;
   }
 
   function history() {
