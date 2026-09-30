@@ -257,7 +257,7 @@ def _envelope(as_of, anchor, degraded, *, feed=None, **data) -> dict:
             flatline = feed_flatline(feed, age)
         except Exception:
             flatline = False
-    return {
+    env = {
         **data,
         "as_of": as_of.isoformat() if as_of else None,
         "data_age_seconds": age,
@@ -265,6 +265,21 @@ def _envelope(as_of, anchor, degraded, *, feed=None, **data) -> dict:
         "degraded": bool(degraded) if degraded is not None else True,
         "flatline": flatline,
     }
+    # R-IV.416(c): the screen may not decide the session from its own clock, so a
+    # regular-hours feed says which session it is being read in. Without this every
+    # strip/movers dot aged into amber "unconfirmed" after the close, when the truth
+    # is "closed, correctly quiet".
+    if feed in _RTH_FEEDS:
+        try:
+            from stable_engine.sessions import envelope_session_fields
+            env.update(envelope_session_fields())
+        except Exception:
+            env.update({"market_session": None, "session": None})
+    return env
+
+
+# Feeds whose writers run in regular hours only (job_status.RTH_ONLY_FEEDS).
+_RTH_FEEDS = ("strip", "movers")
 
 
 async def _latest_snapshot(conn):

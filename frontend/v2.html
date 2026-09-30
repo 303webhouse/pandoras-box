@@ -5,12 +5,12 @@
     <!-- viewport-fit=cover is required for env(safe-area-inset-*) to resolve to
          anything but 0 — the deck bar depends on it to clear the home indicator. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Pandora · Judgment Layer (v2)</title>
+    <title>Pandora · Agora</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=37">
+    <link rel="stylesheet" href="/v2.css?v=39">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -28,9 +28,14 @@
             <img src="/assets/pandora-logo.png" alt="Pandora" class="v2-logo-icon">
             <span class="v2-brand">PANDORA</span>
         </div>
-        <span class="v2-sub">Judgment Layer · v2</span>
+        <button type="button" class="v2-quote" id="v2Quote" hidden><span class="q-text"></span> <span class="q-author"></span></button>
         <span class="health-dot" id="dataHealthDot" data-gloss="HEALTH" title=""></span>
         <div class="spacer"></div>
+        <!-- Kill-switch beacon: pinned here so it stays visible with pop-outs open -->
+        <button type="button" class="kill-beacon" id="killBeacon" data-state="loading" aria-label="Kill switch — loading"><span class="kb-dot" aria-hidden="true"></span><span class="kb-word">KILL · …</span><span class="kb-num num"></span></button>
+        <button type="button" class="v2-fs" id="fsBtn" aria-label="Full screen" aria-pressed="false" title="Full screen" hidden>
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
         <span class="v2-sub" id="layoutStatus"></span>
         <a class="v2-legacy-link" href="/app/abacus">Abacus →</a>
         <a class="v2-legacy-link" href="/app/legacy">Legacy /app →</a>
@@ -94,20 +99,18 @@
                 </div>
             </div>
 
-            <!-- b2 Sector divergence chart -->
+            <!-- b2 Sectors vs SPY (gs-id kept as "divergence" so saved layouts still place it) -->
             <div class="grid-stack-item" gs-id="divergence" gs-x="0" gs-y="12" gs-w="4" gs-h="6">
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
-                            <span class="tile-title" data-gloss="DIVERGENCE">Sector Divergence</span>
+                            <span class="tile-title" data-gloss="DIVERGENCE">Sectors vs SPY · today</span>
+                            <span class="tile-sub" id="divAsOf"></span>
                             <div class="spacer"></div>
-                            <span class="seg" id="divToggle"><button type="button" data-w="1d" class="on">1D</button><button type="button" data-w="5d">5D</button></span>
+                            <button type="button" class="btn-add" id="divPopBtn" title="Open the 1D / 5D line chart of each sector's own % change">1D/5D chart</button>
                             <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
-                        <div class="tile-body">
-                            <div class="chart-host"><canvas id="divChart"></canvas></div>
-                            <div class="legend-row" id="divLegend"></div>
-                        </div>
+                        <div class="tile-body sv-body"><div id="sectorBars" class="sv-bars"></div></div>
                     </div>
                 </div>
             </div>
@@ -132,7 +135,8 @@
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
-                            <span class="tile-title" data-gloss="INDEX">Index</span>
+                            <span class="tile-title" id="indexTitle" data-gloss="INDEX">Index</span>
+                            <span class="tile-sub" id="indexSub"></span>
                             <div class="spacer"></div>
                             <span class="health-dot" id="indexHealthDot"></span>
                             <span class="tile-grip" data-gloss="GRIP">⠿</span>
@@ -251,9 +255,9 @@
         <div class="body" id="modalBody"></div>
     </div>
 
-    <!-- TV popover -->
-    <div class="tv-popover" id="tvPopover">
-        <div class="bar"><span class="tk" id="tvPopTicker"></span><span class="x" id="tvPopClose">✕</span></div>
+    <!-- Chart popup (any ticker click) — TradingView embed, zero hub calls -->
+    <div class="tv-popover" id="tvPopover" role="dialog" aria-modal="false" aria-labelledby="tvPopTicker">
+        <div class="bar"><span class="tk" id="tvPopTicker"></span><span class="tv-key">Daily · EMA 9 · SMA 50 · SMA 200</span><button type="button" class="x" id="tvPopClose" aria-label="Close chart">✕</button></div>
         <div class="host" id="tvPopHost"></div>
     </div>
 
@@ -279,6 +283,7 @@
     <script src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
-    <script src="/v2.js?v=44"></script>
+    <script src="/assets/agora-quotes.js?v=3"></script>
+    <script src="/v2.js?v=46"></script>
 </body>
 </html>

@@ -114,3 +114,19 @@ def is_outside_regular_hours(instant: Optional[datetime]) -> Optional[bool]:
     """The question R-IV.565's drop/hold policy actually asks."""
     s = session_at(instant)
     return None if s is None else s != REGULAR
+
+
+def envelope_session_fields(instant: Optional[datetime] = None) -> dict:
+    """The current session, as a market-hours feed's read envelope carries it.
+
+    `market_session` is the four-word vocabulary above. `session` is the two-word
+    one the Agora health dot already reads ('open' | 'closed'): a feed that only
+    runs in regular hours is correctly quiet in pre-market and after-hours alike,
+    so both read 'closed' there. None stays None -- an unreadable calendar is not
+    a closed market, and the screen falls through to its age test on it.
+    """
+    s = session_at(instant or datetime.now(timezone.utc))
+    return {
+        "market_session": s,
+        "session": None if s is None else ("open" if s == REGULAR else "closed"),
+    }

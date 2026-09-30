@@ -24,21 +24,22 @@
   const GLOSSARY = {
     HEALTH: 'Global data health — lime fresh, amber cannot confirm (unreadable or stale), grey market closed, vermilion source error, pulsing = dead feed',
     MOVERS: 'Top gainers/losers screener (Yahoo), filtered: last >= $2, avg vol >= 500k',
-    REGIME: 'Two lenses: Composite (weighted factor bias, X/100) vs Stable engine read (breadth-based)',
-    COMPOSITE: 'Composite bias score on a 0–100 scale (50 = neutral); the weighted factor blend',
-    STABLE: 'Stable engine regime — RISK-ON/NEUTRAL/RISK-OFF from % of universe above 50DMA',
-    DIVERGE: 'The Composite and Stable lenses disagree on direction — size with caution',
+    REGIME: 'Two unrelated regime reads that share no inputs: Market mix (20 market-wide factors, every 15 min) and Theme breadth (one nightly number from your themed watchlist). Click for the detail.',
+    COMPOSITE: 'Market mix — 20 market-wide factors (volatility, breadth, credit, trend, macro), recomputed every 15 min. Dial 0–100: under 20 URSA MAJOR · 20–39 URSA MINOR · 40–59 NEUTRAL · 60–79 TORO MINOR · 80+ TORO MAJOR. ▲/▼ = points to the next call.',
+    STABLE: 'Theme breadth — % of your ~250-name themed watchlist above its 50-day average, computed nightly from the close. 70%+ STRONG BUY · 60–70 MODERATE BUY · 40–60 NEUTRAL · 30–40 MODERATE SELL · 30% or less STRONG SELL. (The backend still labels this RISK-ON / RISK-OFF at 60 / 40.)',
+    DIVERGE: 'Lenses split — Market mix and Theme breadth point opposite ways by their own cut-offs. Size with caution.',
     DOM: 'Dominant theme — score >= 75',
     EMG: 'Emerging / improving theme',
     FAD: 'Fading / deteriorating theme',
-    TIDE: 'Market tide — net options-flow direction (net call vs put premium, cached UW read)',
-    HL: 'New 20-day / 52-week highs (H) and lows (L) across the scored universe',
+    TIDE: 'Market tide — whole-market options flow since the open (UW, every 5 min in market hours). BULL FLOW = calls bought, puts sold · BEAR FLOW = the reverse · PREMIUM SELLING = both sides sold · TWO-WAY = mixed or light. A side counts at $25M+; the ± number is call minus put premium. Thresholds are provisional.',
+    VOLCURVE: 'VIX ÷ VIX3M — near-term fear vs 3-month. Under 0.90 CALM · 0.90–0.99 FIRMING · 1.00+ STRESS (curve inverted). Calm is not a bullish call. Updates with the composite every 15 min.',
     BREADTH50: 'Percent of the scored universe above its 50-day moving average',
     BREADTH: 'Participation: % of universe above 20/50/200DMA, new highs/lows, ±3% movers',
-    KILL: 'Kill-switch / circuit-breaker state. ARMED = a market-risk breaker fired. CLEAR = the system confirmed no breaker is active. NO TRIP ON RECORD = healthy resting state, nothing stored (the breaker only writes when it fires). UNKNOWN = the source could not be reached — not a clear',
+    KILL: 'Kill switch (circuit breaker). ARMED = a market-risk breaker fired. CLEAR = the system confirmed no breaker is active this session. UNVERIFIED = no trip since the server started, but nothing proves the two TradingView alerts that arm it are alive (no heartbeat yet). UNKNOWN = the source could not be reached — not a clear.',
     THEMES: 'Ranked theme board: score, 1-day delta, and status (dominant/emerging/fading)',
-    DIVERGENCE: 'Sector ETF %-change spread — which sectors lead/lag; dot = above both 50/200DMA',
+    DIVERGENCE: 'Sectors vs SPY — each sector ETF’s 1-day % minus SPY’s, ranked. Leaders on top. The 1D/5D chart button opens the raw line chart.',
     INDEX: 'Major index 1-day % and ATR extension (how stretched vs typical range)',
+    FUTURES: 'Overnight futures, shown whenever the stock market is not in its regular session (the server calendar decides; it flips back at the open). ES = S&P 500 · NQ = Nasdaq 100 · RTY = Russell 2000 · YM = Dow · plus crude oil and the 10-year note. Each % is measured from the futures price at the last 4 PM ET stock close (not the exchange settlement). The small line under each is the matching ETF in pre-market or after-hours. Yahoo data, about 10 minutes delayed: context for the open, not an entry trigger.',
     CURVE: 'Treasury yield curve with a 5-day-ago ghost line; bp = basis-point day change',
     USD: 'Dollar carry check — DXY and USD/JPY level and day change',
     BOOK: 'Open book: balance, day P&L, net Greeks, theme-concentration guardrail, and positions',
@@ -104,7 +105,7 @@
     ov.id = 'v2-login';
     ov.style.cssText = 'position:fixed;inset:0;z-index:200;background:#050810;display:flex;align-items:center;justify-content:center;font-family:system-ui';
     ov.innerHTML = '<form style="background:#0b1122;padding:30px;border:1px solid #223258;border-radius:12px;display:flex;flex-direction:column;gap:12px;min-width:280px">'
-      + '<div style="color:#14b8a6;font-weight:700;letter-spacing:2px">PANDORA v2</div>'
+      + '<div style="color:#14b8a6;font-weight:700;letter-spacing:2px">PANDORA</div>'
       + '<input id="v2pw" type="password" placeholder="Password" style="padding:10px;border-radius:6px;border:1px solid #223258;background:#050810;color:#e2e8f0">'
       + '<button type="submit" style="padding:10px;border:none;border-radius:6px;background:#14b8a6;color:#050810;font-weight:700;cursor:pointer">Sign in</button>'
       + '<div id="v2err" style="color:#ff5c33;font-size:12px;min-height:14px"></div></form>';
@@ -278,35 +279,41 @@
     // sized by its tallest cell: a fourth line here grew every cell 87px -> 98px and
     // overflowed the band, which would clip the provenance away. Wording is kept
     // compact so it holds one line at the 232px desktop cell width.
+    // `state` drives the top-bar beacon; `display_state` from the payload is never read (it
+    // says CLEAR even for default-since-boot, which is exactly the fail-open this avoids).
     let v;
     if (unreachable) {
-      v = { label: 'UNKNOWN', cls: 'val-amber', pulse: '',
+      v = { state: 'unknown', label: 'UNKNOWN', cls: 'val-amber', pulse: '', num: '',
             prov: 'source unreachable — not a clear', provCls: 'val-amber' };
     } else if (k.active) {
       const pending = !!k.pending_reset;
-      const firedAge = fmtAge(k.triggered_at ? (Date.now() - Date.parse(k.triggered_at)) / 1000 : p.age_seconds);
+      const firedAge = fmtAge(k.triggered_at ? (Date.now() - Date.parse(isoUtc(k.triggered_at))) / 1000 : p.age_seconds);
       const trig = esc(k.trigger || 'risk-off');
       v = {
         // pending_reset still means active=true — the breaker is still enforcing
         // caps/floors until an operator accepts. It stays in the ARMED family.
-        label: pending ? 'ARMED · PENDING' : 'ARMED',
-        cls: 'val-down', pulse: ' pulse-vermilion',
+        state: 'armed', label: pending ? 'ARMED · PENDING' : 'ARMED',
+        cls: 'val-down', pulse: ' pulse-vermilion', num: firedAge || '',
         prov: pending ? trig + ' · awaiting reset, still enforcing'
                       : trig + (firedAge ? ' · fired ' + firedAge + ' ago' : ''),
         provCls: 'val-down',
       };
+      // The hub checks SPY itself on a fire; when its own reading does not confirm the
+      // TradingView alert, say so rather than let a disputed trip read as a clean one.
+      if (k.disputed) v.prov += ' · disputed: hub reading ' + esc(typeof k.disputed === 'string' ? k.disputed : (k.hub_reading != null ? k.hub_reading : 'does not confirm'));
     } else if (source === 'event-confirmed') {
-      v = { label: 'CLEAR', cls: 'val-teal', pulse: '',
+      v = { state: 'clear', label: 'CLEAR', cls: 'val-teal', pulse: '', num: '',
             prov: 'confirmed this session' + (stateAge ? ' · ' + stateAge : ''), provCls: '' };
     } else if (source === 'restored-at-boot') {
-      v = { label: 'CLEAR', cls: 'val-teal', pulse: '',
+      v = { state: 'clear', label: 'CLEAR', cls: 'val-teal', pulse: '', num: '',
             prov: 'restored at startup' + (stateAge ? ' · ' + stateAge : ''), provCls: '' };
     } else {
-      // Healthy resting state: the breaker writes only on events, so no record is
-      // the normal condition. Calm and affirmative — NOT "NO DATA", which implies
-      // breakage and trains the operator to ignore a working safety surface.
-      v = { label: 'NO TRIP ON RECORD', cls: 'val-quiet', pulse: '',
-            prov: 'nothing stored' + (stateAge ? ' · since startup ' + stateAge : ''), provCls: '' };
+      // No trip recorded since the server started. That is ALSO exactly what a dead or expired
+      // TradingView alert looks like: the only things that can arm this switch are two remote
+      // alerts, and nothing yet proves they are alive (no heartbeat). So this is UNVERIFIED,
+      // not a reassuring resting state (Olympus/Titans review 2026-09-30).
+      v = { state: 'unverified', label: 'UNVERIFIED', cls: 'val-amber', pulse: '', num: '',
+            prov: 'no trip since boot' + (stateAge ? ' ' + stateAge : '') + ' · watcher not proven alive', provCls: 'val-amber' };
     }
 
     // A1 divergence — disclosed as a provenance value, not a sixth visual state.
@@ -314,12 +321,26 @@
     if (!unreachable) {
       if (p.divergence) { v.prov = esc(p.divergence); v.provCls = 'val-amber'; }
       else if (p.persisted_record === 'unreadable') { v.prov += ' · record unreadable'; v.provCls = 'val-amber'; }
-      if (staleRead) { v.prov += ' · ' + staleRead; v.provCls = 'val-amber'; }
+      if (staleRead) { v.prov += ' · ' + staleRead; v.provCls = 'val-amber'; v.staleRead = true; }
     }
-    // Long labels ("NO TRIP ON RECORD") cannot hold the 22px/19px display size in a
-    // half-width phone cell; step them down rather than let them clip or overflow.
-    v.sizeCls = v.label.length > 8 ? ' big-long' : '';
+    v.source = unreachable ? null : source;
     return v;
+  }
+
+  // ── Kill-switch beacon (top bar) ─────────────────────────────────────────────
+  // One state word, at most one number, one dot (HELIOS glance budget). Lives in the top bar
+  // so it stays visible with pop-outs open. Provenance goes in the hover title and the drawer.
+  const _unesc = (s) => { const t = document.createElement('textarea'); t.innerHTML = String(s || ''); return t.value; };
+  function renderKillBeacon(kill) {
+    const b = $('killBeacon'); if (!b) return;
+    const v = killCellView(kill, _killReadAt);
+    b.dataset.state = v.state;
+    b.querySelector('.kb-word').textContent = 'KILL · ' + v.label;
+    b.querySelector('.kb-num').textContent = v.num || '';
+    b.classList.toggle('pulse-vermilion', v.state === 'armed');
+    if (v.staleRead) b.setAttribute('data-stale', ''); else b.removeAttribute('data-stale');
+    b.title = 'Kill switch: ' + v.label + ' — ' + _unesc(v.prov) + (v.source ? ' (' + v.source + ')' : '') + '\n\n' + GLOSSARY.KILL;
+    b.setAttribute('aria-label', 'Kill switch ' + v.label + '. Open details.');
   }
 
   async function loadRegimeBand() {
@@ -331,6 +352,8 @@
     // Only stamp the read clock on an actual success.
     try { const r = await apiFetch('/api/board/kill-switch'); if (r.ok) { kill = await r.json(); _killReadAt = Date.now(); } } catch (_) {}
     _lastRegime = { composite, regime, tide, kill };
+    quoteTick(composite && (composite.bias_level || composite.level));
+    renderKillBeacon(kill);
     renderRegimeBand(composite, regime, tide, kill);
     renderBreadthPanel(regime);          // b3 shares the regime payload
     emitRegimeRiverItems(composite, regime, kill);
@@ -342,73 +365,238 @@
     updateGlobalHealth();
   }
 
-  function themeChips(list, cls, limit) {
-    if (!list || !list.length) return '<span class="chip muted">none</span>';
-    return list.slice(0, limit || 3).map((t) =>
-      `<span class="chip ${cls}">${esc(t.theme)} <b>${t.score != null ? Math.round(t.score) : ''}</b></span>`).join(' ');
+  // ── Regime views (pure: payload in, what to show out) ───────────────────────
+  // Naive timestamps (no offset) from this backend are UTC. Date.parse reads a naive string as
+  // LOCAL time, which in Mountain time puts a fresh reading 6 h in the future and pins its age
+  // chip at "fresh" forever. Every new call site goes through this.
+  function isoUtc(s) {
+    if (!s) return null;
+    const str = String(s);
+    return /[zZ]$|[+-]\d\d:?\d\d$/.test(str) ? str : str + 'Z';
+  }
+  // Composite dial 0-100. floor, not round: the backend bands are score >= -0.60 / -0.20 /
+  // +0.20 / +0.60 (composite.py score_to_bias) = dial [20, 40, 60, 80), so flooring keeps the
+  // number inside the band its label names ("56 · ▲4 to TORO MINOR" lands exactly on 60).
+  const dial100 = (s) => (s == null || !Number.isFinite(Number(s))) ? null : Math.floor((Number(s) + 1) * 50);
+  const LENS1_CUTS = [20, 40, 60, 80];
+  const levelWords = (l) => String(l || '').replace(/_/g, ' ');
+  function levelForDial(d) { return d >= 80 ? 'TORO_MAJOR' : d >= 60 ? 'TORO_MINOR' : d >= 40 ? 'NEUTRAL' : d >= 20 ? 'URSA_MINOR' : 'URSA_MAJOR'; }
+  const dirOfLevel = (l) => (/TORO|BULL/.test(l || '') ? 1 : /URSA|BEAR/.test(l || '') ? -1 : 0);
+
+  // Lens 1 — MARKET MIX: the 20-factor composite, in the backend's own five words.
+  function lens1View(c) {
+    const lvl = c ? (c.bias_level || c.level || null) : null;
+    if (!lvl) return { call: '—', cls: 'val-muted', num: '', dist: 'no reading', dir: 0, held: false };
+    const d = dial100(c.composite_score), dir = dirOfLevel(lvl);
+    const cls = dir > 0 ? 'val-up' : dir < 0 ? 'val-down' : 'val-teal';
+    let dist = '', held = false;
+    if (d != null && levelForDial(d) !== lvl) {
+      // An override or a kill-switch cap/floor is holding the level away from what the score
+      // implies, so a "distance to flip" would be a lie. Say what is holding it instead.
+      held = true;
+      const cb = c.circuit_breaker;
+      dist = c.override ? 'held by override' : (cb && (cb.active || cb.bias_cap || cb.bias_floor)) ? 'held by kill-switch cap' : 'held (level differs from score)';
+    } else if (d != null) {
+      const up = LENS1_CUTS.find((e) => e > d);
+      const down = LENS1_CUTS.filter((e) => e <= d).pop();
+      const opts = [];
+      if (up != null) opts.push({ n: up - d, txt: '▲' + (up - d) + ' to ' + levelWords(levelForDial(up)) });
+      if (down != null) opts.push({ n: d - down + 1, txt: '▼' + (d - down + 1) + ' to ' + levelWords(levelForDial(down - 1)) });
+      opts.sort((a, b) => a.n - b.n);
+      dist = opts.length ? opts[0].txt : '';
+    }
+    return { call: levelWords(lvl), cls, num: d != null ? String(d) : '', dist, dir, held };
+  }
+
+  // Lens 2 — THEME BREADTH: % of the scored watchlist above its 50-day, in buy/sell words.
+  // DISPLAY ONLY: the backend regime_label (RISK-ON / RISK-OFF, which Olympus reads via MCP) is
+  // unchanged. The 60/40 lines are the backend's own (>= 60 / <= 40, stable.py); 70/30 add the
+  // STRONG tier (Nick, 2026-09-30).
+  function lens2Call(p, th) {
+    const on = (th && th.risk_on_pct_above_50dma) || 60, off = (th && th.risk_off_pct_above_50dma) || 40;
+    if (p >= 70) return ['STRONG BUY', 2];
+    if (p >= on) return ['MODERATE BUY', 1];
+    if (p > off) return ['NEUTRAL', 0];
+    if (p > 30) return ['MODERATE SELL', -1];
+    return ['STRONG SELL', -2];
+  }
+  function lens2View(r) {
+    const p = r && r.breadth ? r.breadth.pct_above_50dma : null;
+    if (p == null || !Number.isFinite(Number(p))) return { call: '—', cls: 'val-muted', num: '', dist: 'no reading', dir: 0 };
+    const th = r.thresholds || {};
+    const [call, lvl] = lens2Call(Number(p), th);
+    // Distance to the nearer neighbouring call, in 0.1-point steps (integer tenths: no float drift).
+    const t = Math.round(Number(p) * 10);
+    let best = null;
+    for (const sgn of [1, -1]) {
+      for (let k = 1; k <= 1000; k++) {
+        const q = (t + sgn * k) / 10;
+        if (q < 0 || q > 100) break;
+        const c2 = lens2Call(q, th);
+        if (c2[0] !== call) { if (!best || k < best.k) best = { k, sgn, call: c2[0] }; break; }
+      }
+    }
+    const dist = best ? (best.sgn > 0 ? '▲' : '▼') + (best.k / 10).toFixed(1) + ' to ' + best.call : '';
+    return { call, cls: lvl > 0 ? 'val-up' : lvl < 0 ? 'val-down' : 'val-teal', num: Number(p).toFixed(1) + '%', dist, dir: Math.sign(lvl) };
+  }
+  // The lenses "split" only when they point opposite ways by their OWN cut-offs.
+  const lensSplit = (v1, v2) => v1.dir !== 0 && v2.dir !== 0 && v1.dir !== v2.dir;
+
+  // Tide as a flow TYPE, not a bare "calls > puts" sign. UW's net premium is ask-side minus
+  // bid-side: negative means that side was net SOLD. PROVISIONAL thresholds, to be calibrated
+  // from the market-hours audit (2026-09-30).
+  const TIDE_MIN = 25e6, TIDE_STRONG = 100e6;
+  const fmtMabs = (v) => '$' + Math.round(Math.abs(v) / 1e6) + 'M';
+  const fmtMsigned = (v) => (v >= 0 ? '+' : '−') + Math.round(Math.abs(v) / 1e6) + 'M';
+  function tideView(tide, quietSince, closed) {
+    const t = tide && tide.tide;
+    if (!t || t.net_call_premium == null || t.net_put_premium == null) {
+      // The session is the server's answer (serverSession, R-IV.416(c)). Only when that is
+      // unknown is "closed" inferred, from the market feeds having ALSO gone quiet.
+      if (closed) return { word: 'NO READING', cls: 'val-muted', lean: '', line2: 'market closed · flow resumes at the open', chip: 'closed' };
+      if (quietSince) return { word: 'NO READING', cls: 'val-muted', lean: '', line2: 'feeds quiet since ' + quietSince + ' (likely closed)', chip: 'closed?' };
+      return { word: '—', cls: 'val-muted', lean: '', line2: 'no flow reading', chip: 'unknown' };
+    }
+    const nc = Number(t.net_call_premium), np = Number(t.net_put_premium);
+    const cOn = Math.abs(nc) >= TIDE_MIN, pOn = Math.abs(np) >= TIDE_MIN;
+    const lean = nc - np;
+    let word;
+    if (!cOn && !pOn) word = 'TWO-WAY';
+    else if (cOn && pOn && nc > 0 && np < 0) word = 'BULL FLOW';
+    else if (cOn && pOn && nc < 0 && np > 0) word = 'BEAR FLOW';
+    else if (cOn && pOn && nc < 0 && np < 0) word = 'PREMIUM SELLING';
+    else word = lean >= TIDE_STRONG ? 'BULL FLOW' : lean <= -TIDE_STRONG ? 'BEAR FLOW' : 'TWO-WAY';
+    const cls = word === 'BULL FLOW' ? 'val-up' : word === 'BEAR FLOW' ? 'val-down' : word === 'PREMIUM SELLING' ? 'val-quiet' : 'val-dim';
+    const side = (v, name) => name + ' ' + (v >= 0 ? 'bought ' : 'sold ') + fmtMabs(v);
+    return { word, cls, lean: (word === 'BULL FLOW' || word === 'BEAR FLOW') ? fmtMsigned(lean) : '',
+      line2: side(nc, 'calls') + ' · ' + side(np, 'puts'), chip: 'live' };
+  }
+
+  // VOL CURVE — VIX ÷ VIX3M from the composite's own vix_term factor (the same number the
+  // kill switch will use). Classified on the DISPLAYED two decimals, so "0.90" never reads CALM.
+  // CALM is --text, never lime: calm volatility is not a bullish call (HELIOS).
+  function volCurveView(c) {
+    const f = c && c.factors && c.factors.vix_term;
+    const raw = f && f.raw_data;
+    const ratio = raw && Number.isFinite(Number(raw.ratio)) ? Number(raw.ratio) : null;
+    if (ratio == null) return { value: '—', word: '', cls: 'val-muted', sub: 'VIX term structure not read', pct: null, iso: null, stale: true };
+    const shown = Math.round(ratio * 100) / 100;
+    const word = shown >= 1.00 ? 'STRESS' : shown >= 0.90 ? 'FIRMING' : 'CALM';
+    const stale = (c.stale_factors || []).includes('vix_term') || JSON.stringify(c.excluded_factors || []).includes('vix_term');
+    return {
+      value: shown.toFixed(2), word, cls: word === 'STRESS' ? 'val-down' : word === 'FIRMING' ? 'val-teal' : 'val-quiet',
+      sub: 'VIX ' + (raw.vix != null ? Number(raw.vix).toFixed(1) : '--') + ' ÷ 3M ' + (raw.vix3m != null ? Number(raw.vix3m).toFixed(1) : '--'),
+      pct: Math.max(0, Math.min(100, (ratio - 0.80) / 0.30 * 100)), iso: isoUtc(f.timestamp), stale,
+    };
+  }
+
+  // A reading that IS a close (nightly data): honest to call it closed, no clock needed.
+  function closeChip(dateStr, bad, why) {
+    const d = dateStr ? String(dateStr).slice(5, 10) : null;
+    if (!d) return vintageChip({ unknownLabel: 'as of —' });
+    return `<span class="vintage-chip" data-state="${bad ? 'stale' : 'closed'}" title="${esc(why || 'computed from the ' + dateStr + ' close; recomputes nightly ~9 PM ET')}">closed · ${esc(d)} close</span>`;
+  }
+  // "Feeds quiet since" — from the index strip's own age, the inference the Tide cell uses
+  // only when the server's session answer is missing.
+  let _ixData = null;
+  let _ext = null;   // /api/stable/futures — overnight futures + pre/after-hours ETFs
+  // THE session, as the server's calendar answers it (stable_engine/sessions.py). This page
+  // never works it out from a clock (R-IV.416(c)); null = unknown, and unknown is not closed.
+  function serverSession() {
+    if (_ext && _ext.market_session !== undefined) return _ext.market_session;
+    if (_ixData && _ixData.market_session !== undefined) return _ixData.market_session;
+    return null;
+  }
+  const marketShut = () => { const s = serverSession(); return s != null && s !== 'regular'; };
+  function feedsQuietSince() {
+    const ix = _ixData;
+    if (!ix || ix.data_age_seconds == null || ix.data_age_seconds <= 900 || !ix.as_of) return null;
+    try { return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }).format(new Date(isoUtc(ix.as_of))) + ' MT'; } catch (_) { return null; }
+  }
+
+  // Themes: every dominant / emerging / fading chip in priority order; fitThemeChips() then
+  // hides what does not fit in two rows and adds a "+N" chip (the cell opens the full list).
+  function themeChipsAll(regime) {
+    const groups = [['dom', (regime && regime.dominant) || []], ['emg', (regime && regime.emerging) || []], ['fad', (regime && regime.fading) || []]];
+    const out = [];
+    for (let i = 0; groups.some(([, l]) => i < l.length); i++) {
+      groups.forEach(([cls, l]) => { if (l[i]) out.push(`<span class="chip ${cls}" data-gloss="${cls.toUpperCase()}">${esc(l[i].theme)} <b>${l[i].score != null ? Math.round(l[i].score) : ''}</b></span>`); });
+    }
+    return out.length ? out.join('') : '<span class="chip muted">none</span>';
+  }
+  function fitThemeChips() {
+    const box = document.querySelector('#regimeBand .th-chips'); if (!box) return;
+    box.querySelectorAll('.th-more').forEach((m) => m.remove());
+    const chips = [...box.querySelectorAll('.chip')];
+    chips.forEach((c) => { c.hidden = false; });
+    if (!chips.length) return;
+    // Relative to the chip box: the cell centres its content vertically, so hiding chips moves
+    // the whole box, and absolute offsets would drift between measurements.
+    const rowTop = (el) => Math.round(el.getBoundingClientRect().top - box.getBoundingClientRect().top);
+    const tops = [...new Set(chips.map(rowTop))].sort((a, b) => a - b);
+    if (tops.length <= 2) return;
+    const limit = tops[1];
+    let hidden = 0;
+    chips.forEach((c) => { if (rowTop(c) > limit) { c.hidden = true; hidden++; } });
+    const more = document.createElement('span');
+    more.className = 'chip th-more'; more.title = 'Show every theme';
+    box.appendChild(more);
+    // The "+N" chip itself must also fit in row two: hide visible chips from the end until it does.
+    const vis = chips.filter((c) => !c.hidden);
+    more.textContent = '+' + hidden;
+    while (rowTop(more) > limit && vis.length) { vis.pop().hidden = true; hidden++; more.textContent = '+' + hidden; }
   }
 
   function renderRegimeBand(composite, regime, tide, kill) {
     const band = $('regimeBand');
+    const r = regime || {}, b = r.breadth || {};
+    const v1 = lens1View(composite), v2 = lens2View(regime), split = lensSplit(v1, v2);
+    const shut = marketShut();
+    const tv = tideView(tide, feedsQuietSince(), shut), vc = volCurveView(composite);
 
-    // ── Cell 1: two regime lenses, rendered distinctly ──
-    const bias = composite ? (composite.bias_level || composite.level || 'UNKNOWN') : 'UNKNOWN';
-    const comp100 = composite ? to100(composite.composite_score) : null;
-    const biasCls = bias.includes('TORO') || bias.includes('BULL') ? 'val-up' : bias.includes('URSA') || bias.includes('BEAR') ? 'val-down' : 'val-teal';
-    const breadth = (regime && regime.breadth) || {};
-    const regimeLabel = regime ? (regime.regime_label || 'UNKNOWN') : 'UNKNOWN';
-    const p50 = breadth.pct_above_50dma;
-    const stableCls = regimeLabel === 'RISK-ON' ? 'val-up' : regimeLabel === 'RISK-OFF' ? 'val-down' : 'val-teal';
-    // Divergence: one lens leans bullish while the other leans bearish
-    const compDir = comp100 == null ? 0 : comp100 >= 55 ? 1 : comp100 <= 45 ? -1 : 0;
-    const stableDir = regimeLabel === 'RISK-ON' ? 1 : regimeLabel === 'RISK-OFF' ? -1 : 0;
-    const diverge = compDir !== 0 && stableDir !== 0 && compDir !== stableDir;
-
-    // ── Cell 3: Tide ──
-    const t = tide && tide.tide;
-    const tideDir = t && t.direction ? t.direction : null;
-    const tideCls = tideDir === 'BULLISH' ? 'val-up' : tideDir === 'BEARISH' ? 'val-down' : 'val-muted';
-    const fmtM = (v) => (v == null ? '--' : '$' + (Number(v) / 1e6).toFixed(0) + 'M');
-    const tideSub = t ? `call ${fmtM(t.net_call_premium)} · put ${fmtM(t.net_put_premium)}`
-      : (tide && tide.degraded ? 'no cached flow' : '—');
-
-    // ── Cell 6: Kill-switch (five truthful states — see killCellView) ──
-    const kv6 = killCellView(kill, _killReadAt);
-
-    const hl = (h, l) => `<span class="val-up num">${h != null ? h : '--'}</span><span class="val-muted"> / </span><span class="val-down num">${l != null ? l : '--'}</span>`;
+    // Age chips. Lens 1 recomputes every 15 min (fresh bound 20 min). Lens 2 IS a nightly close;
+    // it goes amber only on a real problem, not on the themes snapshot's own degraded flag.
+    const chip1 = composite ? vintageChip({ iso: isoUtc(composite.timestamp), freshBoundSec: 1200 }) : vintageChip({ unknownLabel: 'no reading' });
+    const lag = r.anchor_lag && r.anchor_lag.sessions_behind;
+    const chip2 = closeChip(r.metrics_date, !!r.degraded_reason || (lag != null && lag > 0),
+      r.degraded_reason ? 'degraded: ' + r.degraded_reason : (lag > 0 ? lag + ' session(s) behind' : null));
+    const chipTh = r.degraded ? `<span class="vintage-chip" data-state="stale" title="theme snapshot reported degraded">snapshot degraded</span>` : vintageChip({ iso: isoUtc(r.as_of), freshBoundSec: 8 * 3600 });
+    const chipTide = tv.chip === 'closed?' ? `<span class="vintage-chip" data-state="closed" title="Inferred: the market feeds have also gone quiet. The server's session answer did not arrive.">closed?</span>`
+      : tv.chip === 'closed' ? `<span class="vintage-chip" data-state="closed" title="Market closed (server calendar). Flow resumes at the open.">closed</span>`
+      : tv.chip === 'unknown' ? vintageChip({ unknownLabel: 'no reading' }) : vintageChip({ iso: isoUtc(tide.as_of), freshBoundSec: 900, session: tide.session || (shut ? 'closed' : null) });
+    const chipVc = vc.iso == null ? vintageChip({ unknownLabel: 'no reading' })
+      : vc.stale ? `<span class="vintage-chip" data-state="stale" title="vix_term factor is stale or excluded">stale</span>` : vintageChip({ iso: vc.iso, freshBoundSec: 1200 });
+    const total = b.total != null ? b.total : 250;
 
     band.innerHTML = `
-      <div class="regime-cell" data-drawer="regime">
-        <span class="label" data-gloss="REGIME">Regime · two lenses</span>
-        <div class="sub"><span class="chip emg" data-gloss="COMPOSITE">C</span> <span class="${biasCls}">${esc(bias.replace(/_/g, ' '))}</span> <b class="num">${comp100 != null ? comp100 + '/100' : '--'}</b></div>
-        <div class="sub"><span class="chip emg" data-gloss="STABLE">S</span> <span class="${stableCls}">${esc(regimeLabel)}</span> <span class="num">${p50 != null ? p50.toFixed(0) + '% &gt;50d' : ''}</span>${diverge ? ' <span class="val-teal" data-gloss="DIVERGE">⚠ divergence</span>' : ''}</div>
+      <div class="regime-cell rc-regime" data-drawer="regime">
+        <div class="lens">
+          <div class="lens-lab"><span data-gloss="COMPOSITE">Market mix · 20 factors · 15 min</span>${chip1}${split ? '<span class="split-chip" data-gloss="DIVERGE">LENSES SPLIT</span>' : ''}</div>
+          <div class="lens-line"><span class="lens-call ${v1.cls}">${esc(v1.call)}</span><span class="lens-num num">${esc(v1.num)}</span><span class="lens-dist" title="${esc(v1.dist)}">${esc(v1.dist)}</span></div>
+        </div>
+        <div class="lens">
+          <div class="lens-lab"><span data-gloss="STABLE">Theme breadth · ${esc(total)} names &gt; 50d · nightly</span>${chip2}</div>
+          <div class="lens-line"><span class="lens-call ${v2.cls}">${esc(v2.call)}</span><span class="lens-num num">${esc(v2.num)}</span><span class="lens-dist" title="${esc(v2.dist)}">${esc(v2.dist)}</span></div>
+        </div>
       </div>
-      <div class="regime-cell" data-drawer="themes">
-        <span class="label">Dominant · Emerging · Fading</span>
-        <div class="row">${themeChips(regime && regime.dominant, 'dom', 2)} ${themeChips(regime && regime.emerging, 'emg', 2)} ${themeChips(regime && regime.fading, 'fad', 2)}</div>
+      <div class="regime-cell rc-themes" data-drawer="themes">
+        <span class="label"><span data-gloss="THEMES">Themes · dom · emerging · fading</span>${chipTh}</span>
+        <div class="th-chips">${themeChipsAll(regime)}</div>
       </div>
-      <div class="regime-cell">
-        <span class="label" data-gloss="TIDE">Tide</span>
-        <div class="big ${tideCls}">${tideDir || '—'}</div>
-        <div class="sub">${tideSub}</div>
+      <div class="regime-cell rc-tide${shut ? ' cell-closed' : ''}">
+        <span class="label"><span data-gloss="TIDE">Tide · ${shut ? 'last session' : 'options flow'}</span>${chipTide}</span>
+        <div class="big ${tv.cls}${tv.word.length > 9 ? ' tide-long' : ''}">${esc(tv.word)}${tv.lean ? `<span class="tide-lean num">${esc(tv.lean)}</span>` : ''}</div>
+        <div class="sub">${esc(tv.line2)}</div>
       </div>
-      <div class="regime-cell" data-drawer="breadth">
-        <span class="label" data-gloss="HL">New H / L</span>
-        <div class="sub">20d ${hl(breadth.new_high_20d, breadth.new_low_20d)}</div>
-        <div class="sub">52w ${hl(breadth.new_high_52w, breadth.new_low_52w)} <span class="val-muted">·</span> ±3% <span class="val-up num">${breadth.up_3 != null ? breadth.up_3 : '--'}</span>/<span class="val-down num">${breadth.down_3 != null ? breadth.down_3 : '--'}</span></div>
-      </div>
-      <div class="regime-cell" data-drawer="breadth">
-        <span class="label" data-gloss="BREADTH50">% &gt; 50DMA</span>
-        <div class="big num ${p50 != null && p50 >= 60 ? 'val-up' : p50 != null && p50 <= 40 ? 'val-down' : 'val-teal'}">${p50 != null ? p50.toFixed(0) + '%' : '--'}</div>
-        <div class="gauge"><span style="width:${p50 != null ? Math.max(0, Math.min(100, p50)) : 0}%"></span></div>
-      </div>
-      <div class="regime-cell kill-cell${kv6.pulse}">
-        <span class="label" data-gloss="KILL">Kill-switch</span>
-        <div class="big ${kv6.cls}${kv6.sizeCls}">${kv6.label}</div>
-        <div class="sub kill-prov ${kv6.provCls}">${kv6.prov}</div>
+      <div class="regime-cell rc-vol" data-drawer="volcurve">
+        <span class="label"><span data-gloss="VOLCURVE">Vol curve</span>${chipVc}</span>
+        <div class="vc-line"><span class="vc-val num ${vc.cls}">${esc(vc.value)}</span><b class="vc-word ${vc.cls}">${esc(vc.word)}</b></div>
+        <div class="sub">${esc(vc.sub)}</div>
+        <div class="vc-gauge" aria-hidden="true"><i style="left:33.33%"></i><i style="left:66.67%"></i>${vc.pct != null ? `<b style="left:${vc.pct.toFixed(1)}%"></b>` : ''}</div>
       </div>`;
     applyGlossary(band);
-    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime, tide, kill })));
+    fitThemeChips();
+    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime, tide, kill }, c)));
   }
 
   // ── Movers tape ──────────────────────────────────────────────────────────────
@@ -468,14 +656,14 @@
       slot.querySelectorAll('.kairos-tag').forEach((b) => b.addEventListener('click', (e) => {
         e.stopPropagation();
         const k = ctxMap[tk] && ctxMap[tk].kairos;
-        openCommittee(tk, k ? k.signal_id : '');
+        openCommittee(tk, k ? k.signal_id : '', b);
       }));
     });
   }
 
   function moverEl(m, side) {
     const thm = m.theme ? ` <span class="sep">·</span> <span class="thm">${esc(m.theme)}</span>` : '';
-    return `<span class="mover ${side}" data-ticker="${esc(m.ticker)}"><span class="tk">${esc(m.ticker)}</span> <span class="pct">${fmtPct(m.pct)}</span><span class="badge-slot"></span>${thm}</span>`;
+    return `<span class="mover ${side}" data-ticker="${esc(m.ticker)}" data-chart="${esc(String(m.ticker || '').toUpperCase())}"><span class="tk">${esc(m.ticker)}</span> <span class="pct">${fmtPct(m.pct)}</span><span class="badge-slot"></span>${thm}</span>`;
   }
   function renderMoversTape(data) {
     const tape = $('moversTape');
@@ -487,11 +675,15 @@
     const l = (data.losers || []).map((m) => moverEl(m, 'lose')).join(' <span class="sep">•</span> ');
     const one = g + ' <span class="sep">•</span> ' + l;
     tape.innerHTML = one + ' <span class="sep">•</span> ' + one; // duplicate for seamless marquee
-    tape.querySelectorAll('.mover[data-ticker]').forEach((el) => el.addEventListener('click', () => openTvPopover(el.dataset.ticker, el)));
   }
 
   // ── Drawer ────────────────────────────────────────────────────────────────
-  function openDrawer(kind, ctx) {
+  function openDrawer(kind, ctx, src) {
+    const side = popSide(src, kind === 'committee' ? 'kairos' : kind === 'breadth' ? 'breadth' : kind === 'divergence' ? 'divergence' : 'regime-band');
+    closePopup();   // was opening UNDER the member popup (z61 vs its z65 backdrop)
+    // Replacing the sector chart drawer with another kind: its canvas is about to be destroyed.
+    if (_divOpen && kind !== 'divergence') { _divOpen = false; if (_charts.divChart) { _charts.divChart.destroy(); delete _charts.divChart; } }
+    setSide($('drawer'), side); syncTopbarH();
     const title = $('drawerTitle'), body = $('drawerBody');
     const kv = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
     if (kind === 'themes' && ctx.regime) {
@@ -504,10 +696,40 @@
       const b = ctx.regime.breadth || {};
       body.innerHTML = kv('Total (scored universe)', b.total) + kv('% > 20DMA', b.pct_above_20dma) + kv('% > 50DMA', b.pct_above_50dma) +
         kv('% > 200DMA', b.pct_above_200dma) + kv('New highs 20d', b.new_high_20d) + kv('New highs 52w', b.new_high_52w) +
-        kv('Up > 3%', b.up_3) + kv('Down > 3%', b.down_3) + kv('as of (metrics)', ctx.regime.metrics_date);
+        kv('New lows 20d', b.new_low_20d) + kv('New lows 52w', b.new_low_52w) +
+        kv('Up > 3%', b.up_3) + kv('Down > 3%', b.down_3) + kv('As of (close)', ctx.regime.metrics_date);
+    } else if (kind === 'volcurve') {
+      title.textContent = 'Vol curve · VIX ÷ VIX3M';
+      const vc = volCurveView(ctx.composite), raw = (((ctx.composite || {}).factors || {}).vix_term || {}).raw_data || {};
+      body.innerHTML = kv('Ratio', raw.ratio != null ? Number(raw.ratio).toFixed(3) : '—') + kv('Reads', vc.word || '—') +
+        kv('VIX', raw.vix != null ? Number(raw.vix).toFixed(2) : '—') + kv('VIX3M', raw.vix3m != null ? Number(raw.vix3m).toFixed(2) : '—') +
+        kv('CALM', 'below 0.90 — near-term fear under longer-term') + kv('FIRMING', '0.90 – 0.99 — the curve is flattening') +
+        kv('STRESS', '1.00 and up — near-term fear above longer-term (inverted)') +
+        kv('Updates', 'with the composite, every 15 min (factor vix_term, yfinance)') +
+        '<div style="margin-top:10px;font-size:11px;color:var(--text-3)">CALM is not a bullish call; it only says near-term volatility is priced below longer-term.</div>';
+    } else if (kind === 'kill') {
+      title.textContent = 'Kill switch';
+      const v = killCellView(ctx.kill, _killReadAt);
+      const k = (ctx.kill && ctx.kill.kill_switch) || {}, p = (ctx.kill && ctx.kill.provenance) || {};
+      body.innerHTML = kv('State', v.label) + kv('Detail', _unesc(v.prov)) + kv('Source', p.source || '—') +
+        kv('As of', p.as_of || '—') + kv('State age', fmtAge(p.age_seconds) || '—') + kv('Stored record', p.persisted_record || '—') +
+        kv('Trigger', k.trigger || '—') + kv('Pending reset', k.pending_reset ? 'yes' : 'no') +
+        kv('Disputed', k.disputed ? String(k.disputed) : 'no') + kv('Divergence', p.divergence || 'none') +
+        kv('Readings', k.readings ? JSON.stringify(k.readings) : '—') +
+        `<div style="margin-top:10px;font-size:12px;color:var(--text-2);line-height:1.45">${v.state === 'unverified'
+          ? 'UNVERIFIED: no trip has been recorded since the server started. That is also what a dead or expired TradingView alert looks like: two remote alerts (SPY and VIX) are the only things that can arm this switch, and nothing yet proves they are alive. A heartbeat is a planned backend change.'
+          : esc(GLOSSARY.KILL)}</div>`;
+    } else if (kind === 'divergence') {
+      title.textContent = 'Sectors · % change (1D / 5D)';
+      body.innerHTML = `<div class="seg" id="divToggle"><button type="button" data-w="1d" class="${_divWindow === '1d' ? 'on' : ''}">1D</button><button type="button" data-w="5d" class="${_divWindow === '5d' ? 'on' : ''}">5D</button></div>
+        <div class="chart-host drawer-chart"><canvas id="divChart"></canvas></div><div class="legend-row" id="divLegend"></div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">Each sector ETF's own % change (not vs SPY). Click a line or chip to isolate it. 1D is every 2 min in market hours; 5D is daily closes.</div>`;
+      _divOpen = true;
+      loadDivergence();
     } else if (kind === 'committee') {
       title.textContent = 'Committee · ' + (ctx.ticker || '');
-      body.innerHTML = kv('Ticker', ctx.ticker || '—') + kv('Signal', ctx.sig || '—') +
+      const tkRow = `<div class="kv"><span class="k">Ticker</span><span class="v">${ctx.ticker ? chartTk(ctx.ticker) : '—'}</span></div>`;
+      body.innerHTML = tkRow + kv('Signal', ctx.sig || '—') +
         '<div style="margin:10px 0;color:var(--text-3);font-size:12px">Loading options context…</div>';
       (async () => {
         try {
@@ -515,9 +737,9 @@
           if (!r.ok) return;
           const e = (await r.json()).enrichment || {};
           const iv = e.iv_rank || {}, tide = e.market_tide || {}, mp = e.max_pain || {}, sf = e.sector_flow || {};
-          body.innerHTML = kv('Ticker', ctx.ticker) + kv('Signal', ctx.sig || '—') +
+          body.innerHTML = tkRow + kv('Signal', ctx.sig || '—') +
             kv('IV rank', iv.iv_rank != null ? Number(iv.iv_rank).toFixed(0) : '—') +
-            kv('Market tide', (tide.net_call_premium != null && tide.net_put_premium != null) ? (Number(tide.net_call_premium) > Number(tide.net_put_premium) ? 'bullish' : 'bearish') : '—') +
+            kv('Market tide (whole market)', (tide.net_call_premium != null && tide.net_put_premium != null) ? tideView({ tide }).word : '—') +
             kv('Max pain', mp.max_pain_strike != null ? mp.max_pain_strike + ' (' + mp.dte + 'dte)' : '—') +
             kv('Sector posture', sf.risk_posture || '—') +
             '<div style="margin-top:10px;font-size:11px;color:var(--text-3)">Foreground UW read (on-demand). Full committee review runs from the legacy analyzer.</div>';
@@ -526,41 +748,158 @@
     } else {
       title.textContent = 'Regime detail';
       const c = ctx.composite || {}, r = ctx.regime || {};
-      const t = ctx.tide && ctx.tide.tide, k = ctx.kill && ctx.kill.kill_switch;
-      const c100 = to100(c.composite_score);
-      body.innerHTML = kv('Composite bias', c.bias_level || c.level || '—') + kv('Composite (0–100)', c100 != null ? c100 + '/100' : '—') +
-        kv('Composite raw', c.composite_score != null ? Number(c.composite_score).toFixed(3) : '—') +
-        kv('Confidence', c.confidence || '—') + kv('Stable regime', r.regime_label || '—') + kv('% > 50DMA', (r.breadth || {}).pct_above_50dma) +
-        kv('Tide', t && t.direction ? t.direction : '—') + kv('Kill-switch', k ? (k.active ? (k.pending_reset ? 'PENDING RESET' : 'ARMED · ' + (k.trigger || '')) : 'CLEAR') : '—') +
-        kv('Anchor', r.anchor || '—') + kv('Data age (s)', r.data_age_seconds != null ? Math.round(r.data_age_seconds) : '—');
+      const v1 = lens1View(ctx.composite), v2 = lens2View(ctx.regime);
+      const tf = c.timeframe_scores || {};
+      const tfRow = (name, key) => { const x = tf[key]; return kv(name, x ? (x.sub_score != null ? (x.sub_score >= 0 ? '+' : '') + Number(x.sub_score).toFixed(3) : '—') + ' · ' + levelWords(x.bias_level) : '—'); };
+      const sec = (t) => `<div style="margin:12px 0 4px;color:var(--text-3);font-family:var(--mono);font-size:11px;letter-spacing:1px">${t}</div>`;
+      // The kill switch has its own drawer (top-bar beacon); it is not repeated here, and never as
+      // a bare CLEAR — that was the fail-open read of default-since-boot.
+      body.innerHTML = sec('MARKET MIX · 20 FACTORS · EVERY 15 MIN') +
+        kv('Call', v1.call + (v1.num ? ' · ' + v1.num : '')) + kv('Distance', v1.dist || '—') +
+        kv('Raw score', c.composite_score != null ? Number(c.composite_score).toFixed(3) : '—') +
+        tfRow('Intraday', 'intraday') + tfRow('Swing', 'swing') + tfRow('Macro', 'macro') +
+        kv('Coverage', c.coverage_ratio != null ? Math.round(c.coverage_ratio * 100) + '% of factor weight' : '—') +
+        kv('Stale factors', (c.stale_factors || []).length ? c.stale_factors.join(', ') : 'none') +
+        kv('Confidence', c.confidence || '—') + kv('Override', c.override ? String(c.override) : 'none') +
+        kv('Cut-offs (dial)', '20 / 40 / 60 / 80 = URSA MAJOR | URSA MINOR | NEUTRAL | TORO MINOR | TORO MAJOR') +
+        sec('THEME BREADTH · % OF WATCHLIST ABOVE 50-DAY · NIGHTLY') +
+        kv('Call', v2.call + (v2.num ? ' · ' + v2.num : '')) + kv('Distance', v2.dist || '—') +
+        kv('Backend label', r.regime_label || '—') + kv('Names scored', (r.breadth || {}).total != null ? r.breadth.total : '—') +
+        kv('Cut-offs (%)', '70 / 60 / 40 / 30 = STRONG BUY | MODERATE BUY | NEUTRAL | MODERATE SELL | STRONG SELL') +
+        kv('As of (close)', r.metrics_date || '—') +
+        '<div style="margin-top:10px;font-size:11px;color:var(--text-3);line-height:1.45">The two lenses share no inputs. Market mix blends 20 market-wide factors (volatility, breadth, credit, trend, macro) and recomputes every 15 minutes. Theme breadth is one nightly number: the share of your themed watchlist above its 50-day average.</div>';
     }
     $('drawerBackdrop').classList.add('open');
     $('drawer').classList.add('open');
+    placeChartSoon();
   }
-  function closeDrawer() { $('drawerBackdrop').classList.remove('open'); $('drawer').classList.remove('open'); }
+  function closeDrawer() {
+    $('drawerBackdrop').classList.remove('open'); $('drawer').classList.remove('open'); placeChartSoon();
+    if (_divOpen) { _divOpen = false; if (_charts.divChart) { _charts.divChart.destroy(); delete _charts.divChart; } }
+  }
 
-  // ── TV popover ────────────────────────────────────────────────────────────
-  let _tvWidget = null;
-  function openTvPopover(ticker, anchorEl) {
-    const pop = $('tvPopover');
-    $('tvPopTicker').textContent = ticker;
-    $('tvPopHost').innerHTML = '<div id="tvPopHostInner" style="width:100%;height:100%"></div>';
-    // position near the click, clamped to viewport
-    const r = anchorEl.getBoundingClientRect();
-    const w = 520, h = 360;
-    pop.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left)) + 'px';
-    pop.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, r.bottom + 8)) + 'px';
-    pop.classList.add('open');
-    try {
-      if (window.TradingView) {
-        _tvWidget = new TradingView.widget({
-          container_id: 'tvPopHostInner', symbol: ticker, interval: 'D', theme: 'dark',
-          style: '1', autosize: true, hide_top_toolbar: true, hide_legend: true, save_image: false,
-        });
-      }
-    } catch (_) {}
+  // ── Pop-out sides ─────────────────────────────────────────────────────────
+  // A pop-out opens on the side of the screen its source tile sits on, and follows the tile
+  // when it is dragged across (recomputed on every open). At phone width every pop-out is
+  // full width, so there is no side. A pop-out opened from inside another inherits its side.
+  let _lastClick = { el: null, t: 0 };
+  document.addEventListener('click', (e) => { _lastClick = { el: e.target, t: Date.now() }; }, true);
+  function popSide(src, fallbackGsId) {
+    const W = document.documentElement.clientWidth;
+    if (W <= 820) return 'right';
+    let el = src && src.isConnected ? src : null;
+    if (!el && _lastClick.el && _lastClick.el.isConnected && Date.now() - _lastClick.t < 1000) el = _lastClick.el;
+    const host = el && el.closest ? el.closest('.drawer.open, .member-popup.open, .rp-panel.open') : null;
+    if (host) return host.classList.contains('from-left') || host.classList.contains('side-left') ? 'left' : 'right';
+    let tile = el && el.closest ? el.closest('.grid-stack-item') : null;
+    if (!tile && fallbackGsId) tile = document.querySelector('.grid-stack-item[gs-id="' + fallbackGsId + '"]');
+    let r = tile ? tile.getBoundingClientRect() : null;
+    // Full-width tiles (regime band, movers) have no side of their own: use what was clicked.
+    if (r && r.width > W * 0.6 && el && el.getBoundingClientRect) { const er = el.getBoundingClientRect(); if (er.width > 0) r = er; }
+    if (!r || r.width <= 0) return 'right';
+    return (r.left + r.width / 2) < W / 2 ? 'left' : 'right';
   }
-  function closeTvPopover() { $('tvPopover').classList.remove('open'); $('tvPopHost').innerHTML = ''; }
+  // Swap a sliding panel's side without animating it across the screen: the class change
+  // happens with transitions off, a reflow commits it, and only then may '.open' animate.
+  function setSide(panel, side) {
+    if (!panel) return;
+    const left = side === 'left';
+    if (panel.classList.contains('from-left') === left) return;
+    panel.classList.add('no-anim');
+    panel.classList.toggle('from-left', left);
+    void panel.offsetWidth;
+    panel.classList.remove('no-anim');
+  }
+
+  // ── Chart popup (click any ticker) ─────────────────────────────────────────
+  // TradingView embed: the browser talks to TradingView directly, so opening a chart makes
+  // zero hub or UW calls. Centred in the free space between whatever pop-outs are open, about
+  // 50% x 45% of the window (~22% of the screen). Non-modal: another ticker click switches it.
+  // Moving averages: EMA 9 + SMA 50 + SMA 200. EMA 9 because the composite's own trend factor
+  // (spy_trend_intraday) scores price against a 9-EMA, so the chart and the hub agree (Olympus
+  // recommendation, Nick deferred to it). The embed colours by study TYPE, not instance: the EMA
+  // gets its own colour; the two SMAs share one and the legend names each length.
+  const CHART_MA9_TYPE = 'EMA';
+  const CHART_MAS = [[CHART_MA9_TYPE, 9], ['SMA', 50], ['SMA', 200]];
+  const CHART_SYM = /^[A-Z0-9.:!^=\-\/]{1,24}$/;
+  let _chartSym = null, _chartOpener = null, _placeTimer = null;
+  function chartTk(t) {
+    const sym = String(t || '').toUpperCase();
+    return `<span class="tk-link" data-chart="${esc(sym)}" tabindex="0" role="button" aria-label="Chart ${esc(sym)}">${esc(t || '')}</span>`;
+  }
+  function openChart(sym, opener) {
+    sym = String(sym || '').trim().toUpperCase();
+    if (!CHART_SYM.test(sym)) return;
+    const pop = $('tvPopover');
+    _chartOpener = opener || document.activeElement;
+    if (_chartSym !== sym || !pop.classList.contains('open')) {
+      _chartSym = sym;
+      $('tvPopTicker').textContent = sym;
+      const key = document.querySelector('#tvPopover .tv-key');
+      if (key) key.textContent = 'Daily · ' + CHART_MAS.map(([t, n]) => t + ' ' + n).join(' · ');
+      $('tvPopHost').innerHTML = '<div id="tvPopHostInner" style="width:100%;height:100%"></div>';
+      try {
+        if (window.TradingView) {
+          new TradingView.widget({
+            container_id: 'tvPopHostInner', symbol: sym, interval: 'D', timezone: 'America/New_York',
+            theme: 'dark', style: '1', locale: 'en', autosize: true,
+            hide_top_toolbar: true, hide_side_toolbar: true, hide_volume: true, hide_legend: false,
+            allow_symbol_change: false, save_image: false,
+            studies: CHART_MAS.map(([t, n]) => ({ id: t === 'EMA' ? 'MAExp@tv-basicstudies' : 'MASimple@tv-basicstudies', inputs: { length: n } })),
+            studies_overrides: {
+              'moving average.plot.color': '#38bdf8', 'moving average.plot.linewidth': 2,
+              'moving average exponential.plot.color': '#a78bfa', 'moving average exponential.plot.linewidth': 2,
+            },
+          });
+        } else {
+          $('tvPopHost').innerHTML = '<div class="tv-unavail">Chart library did not load (TradingView unreachable).</div>';
+        }
+      } catch (_) {}
+    }
+    pop.classList.add('open');
+    placeChart();
+    const x = $('tvPopClose'); if (x) { try { x.focus({ preventScroll: true }); } catch (_) {} }
+  }
+  function closeChart() {
+    const pop = $('tvPopover');
+    if (!pop || !pop.classList.contains('open')) return false;
+    pop.classList.remove('open'); $('tvPopHost').innerHTML = ''; _chartSym = null;
+    const o = _chartOpener; _chartOpener = null;
+    if (o && o.isConnected && o.focus) { try { o.focus({ preventScroll: true }); } catch (_) {} }
+    return true;
+  }
+  function placeChart() {
+    const pop = $('tvPopover');
+    if (!pop || !pop.classList.contains('open')) return;
+    const W = document.documentElement.clientWidth, H = window.innerHeight;
+    if (W <= 768) { pop.style.width = ''; pop.style.height = ''; pop.style.left = '2vw'; pop.style.top = ''; return; }
+    // Free horizontal band = the window minus any open side pop-out.
+    let L = 0, R = W;
+    document.querySelectorAll('.drawer.open, .member-popup.open, .rp-panel.open, .pp-panel.open, .pos-modal.open').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.right <= 0 || r.left >= W) return;
+      if (r.left + r.width / 2 < W / 2) L = Math.max(L, r.right); else R = Math.min(R, r.left);
+    });
+    let w = Math.max(480, Math.round(W * 0.5));
+    const top0 = topbarH();                               // centre in the area below the top bar
+    const h = Math.min(H - top0 - 32, Math.max(320, Math.round(H * 0.45)));
+    const free = R - L - 32;
+    let x;
+    if (free >= 400) { w = Math.min(w, free); x = Math.min(Math.max(W / 2 - w / 2, L + 16), R - 16 - w); }
+    else { w = Math.min(w, W - 32); x = (W - w) / 2; }   // no room beside the pop-outs: overlap, centred
+    pop.style.width = w + 'px'; pop.style.height = h + 'px';
+    pop.style.left = Math.round(x) + 'px'; pop.style.top = Math.round(top0 + (H - top0 - h) / 2) + 'px';
+  }
+  // Pop-outs and their backdrops start below the top bar (quote, full screen, future beacon
+  // stay visible). The bar wraps on narrow screens, so its height is measured, not assumed.
+  // Visible bottom edge of the top bar (0 once it has scrolled away), so a pop-out never
+  // leaves a gap where the bar used to be.
+  function topbarH() { const t = document.querySelector('.v2-topbar'); return t ? Math.max(0, Math.round(t.getBoundingClientRect().bottom)) : 0; }
+  function syncTopbarH() { document.documentElement.style.setProperty('--topbar-h', topbarH() + 'px'); }
+  let _tbRaf = 0;
+  window.addEventListener('scroll', () => { if (!_tbRaf) _tbRaf = requestAnimationFrame(() => { _tbRaf = 0; syncTopbarH(); }); }, { passive: true });
+  // Pop-outs slide for 0.22 s; re-place once they have settled.
+  function placeChartSoon() { clearTimeout(_placeTimer); placeChart(); _placeTimer = setTimeout(placeChart, 260); }
 
   // ── Grid + layout persistence ───────────────────────────────────────────────
   let grid = null;
@@ -729,7 +1068,10 @@
   function renderBreadthPanel(regime) {
     const el = $('breadthPanel'); if (!el) return;
     const b = (regime && regime.breadth) || {};
-    $('breadthAnchor').textContent = regime ? (regime.anchor || '') : '';
+    // Breadth is computed from the last complete close (metrics_date), all day. The payload's
+    // `anchor` describes the THEME snapshot ('provisional'), not these numbers, so it is not used.
+    const lag = regime && regime.anchor_lag && regime.anchor_lag.sessions_behind;
+    $('breadthAnchor').innerHTML = regime ? closeChip(regime.metrics_date, !!regime.degraded_reason || (lag != null && lag > 0)) : '';
     const gauge = (label, v, gloss) => {
       const w = v != null ? Math.max(0, Math.min(100, v)) : 0;
       const col = v != null && v >= 60 ? 'var(--up)' : v != null && v <= 40 ? 'var(--down)' : 'var(--teal)';
@@ -775,19 +1117,19 @@
         <span class="status-chip ${statusClass(t.status)}">${esc(t.status || '')}</span></div>`;
     });
     el.innerHTML = html;
-    el.querySelectorAll('.th-row[data-theme]').forEach((r) => r.addEventListener('click', () => openThemeMembers(r.dataset.theme)));
+    el.querySelectorAll('.th-row[data-theme]').forEach((r) => r.addEventListener('click', () => openThemeMembers(r.dataset.theme, r)));
     applyGlossary(el);
   }
 
-  async function openThemeMembers(theme) {
-    openPopup('Theme · ' + theme, '<div class="mem-sec">loading…</div>');
+  async function openThemeMembers(theme, src) {
+    openPopup('Theme · ' + theme, '<div class="mem-sec">loading…</div>', src);
     let data = null;
     try { const r = await apiFetch('/api/stable/theme/' + encodeURIComponent(theme) + '/members'); if (r.ok) data = await r.json(); } catch (_) {}
     if (!data) { $('memberBody').innerHTML = '<div class="mem-sec">unavailable</div>'; return; }
     const row = (m) => {
       const rs = m.rs_qqq_20d;
       return `<div class="mem-row" data-ticker="${esc(m.ticker)}">
-        <span class="mtk" data-ticker="${esc(m.ticker)}">${esc(m.ticker)}</span>
+        <span class="mtk" data-ticker="${esc(m.ticker)}" data-chart="${esc(String(m.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(m.ticker)}</span>
         <span class="val-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.name || m.subtheme || '')}</span>
         <span class="${signCls(m.ret_1d)}">${m.ret_1d != null ? (m.ret_1d >= 0 ? '+' : '') + (m.ret_1d * 100).toFixed(1) + '%' : '--'}</span>
         <span class="val-muted">${m.last_price != null ? '$' + Number(m.last_price).toFixed(2) : '--'}</span>
@@ -805,7 +1147,6 @@
     const label = data.anchor === 'provisional' ? "today's move" : '1d';
     $('memberBody').innerHTML = `<div class="mem-sec" style="color:var(--text-3);border:none">as of ${esc(fresh)}</div>`
       + sec('Top · ' + label, data.top) + sec('Bottom · ' + label, data.bottom);
-    $('memberBody').querySelectorAll('.mtk[data-ticker]').forEach((e) => e.addEventListener('click', () => { closePopup(); openTvPopover(e.dataset.ticker, e); }));
     $('memberBody').querySelectorAll('.opt-btn[data-ticker]').forEach((e) => e.addEventListener('click', () => loadOptionsContext(e)));
     // Flow/Kairos badges — on-demand for this popup only (not polled while closed).
     const memberTickers = [...(data.top || []), ...(data.bottom || [])].map((m) => m.ticker);
@@ -895,18 +1236,78 @@
   function _divToggle(sym) { if (!sym) return; if (_divSel.has(sym)) _divSel.delete(sym); else _divSel.add(sym); _divRender(); }
   function _divClear() { if (!_divSel.size) return; _divSel.clear(); _divRender(); }
 
+  // The tile shows ranked bars vs SPY (always the 1D window); the old line chart lives in a
+  // drawer and only fetches while that drawer is open.
+  let _div1d = null, _divOpen = false;
   async function loadDivergence() {
-    let data = null;
-    try { const r = await apiFetch('/api/stable/sector-divergence?window=' + _divWindow); if (r.ok) data = await r.json(); } catch (_) {}
+    let d1 = null;
+    try { const r = await apiFetch('/api/stable/sector-divergence?window=1d'); if (r.ok) d1 = await r.json(); } catch (_) {}
+    _div1d = d1;
+    renderSectorBars();
+    if (!_divOpen) return;
+    let data = d1;
+    if (_divWindow !== '1d') {
+      data = null;
+      try { const r = await apiFetch('/api/stable/sector-divergence?window=' + _divWindow); if (r.ok) data = await r.json(); } catch (_) {}
+    }
     const legend = $('divLegend'); if (!legend) return;
     if (!data || !data.sectors || data.degraded) {
       _divSectors = [];
-      legend.innerHTML = '<span class="legend-chip val-muted">divergence feed unavailable</span>';
+      legend.innerHTML = '<span class="legend-chip val-muted">sector feed unavailable</span>';
       if (_charts.divChart) { _charts.divChart.destroy(); delete _charts.divChart; }
       return;
     }
     _divSectors = data.sectors.filter((s) => s.series && s.series.length);
     _divRender();
+  }
+
+  // ── Sectors vs SPY (tile) ────────────────────────────────────────────────────
+  // Leadership only shows relative to the market: each sector ETF's 1-day % minus SPY's 1-day %,
+  // ranked, as bars from zero capped at ±2 pp. Zero hub cost beyond reads the page already does.
+  const SV_CAP = 2.0;
+  function renderSectorBars() {
+    const el = $('sectorBars'); if (!el) return;
+    const d = _div1d, ix = _ixData;
+    const asOf = $('divAsOf');
+    if (!d || !d.sectors || d.degraded) {
+      el.innerHTML = '<div class="sv-msg">Sector feed unavailable — showing no bars (not fake-fresh).</div>';
+      if (asOf) asOf.innerHTML = vintageChip({ unknownLabel: 'no reading' });
+      return;
+    }
+    const spyRow = ix && (ix.indices || []).find((r) => r.symbol === 'SPY');
+    const spy = spyRow && spyRow.value != null ? Number(spyRow.value) : null;
+    const spySuspect = ix && (ix.incoherent || []).includes('SPY');
+    if (spy == null || spySuspect) {
+      el.innerHTML = `<div class="sv-msg">SPY 1-day % ${spySuspect ? 'is flagged suspect (its own arithmetic does not close)' : 'is unavailable'}, so relative bars are not drawn.</div>`;
+      if (asOf) asOf.innerHTML = vintageChip({ unknownLabel: 'no SPY' });
+      return;
+    }
+    const rows = d.sectors.map((s) => {
+      const ser = s.series || [];
+      let last = null;
+      for (let i = ser.length - 1; i >= 0; i--) { if (ser[i] && ser[i].value != null) { last = ser[i]; break; } }
+      return last ? { sym: s.symbol, v: Number(last.value) - spy, ts: last.ts } : null;
+    }).filter(Boolean).sort((a, b) => b.v - a.v);
+    if (!rows.length) { el.innerHTML = '<div class="sv-msg">No sector readings yet.</div>'; return; }
+    const lastTs = rows.map((r) => Date.parse(isoUtc(r.ts))).filter(Number.isFinite).sort((a, b) => b - a)[0];
+    const spyTs = Date.parse(isoUtc(spyRow.as_of || ix.as_of));
+    const mixed = Number.isFinite(lastTs) && Number.isFinite(spyTs) && Math.abs(lastTs - spyTs) > 120e3;
+    if (asOf) {
+      asOf.innerHTML = mixed
+        ? `<span class="vintage-chip" data-state="stale" title="The sector and SPY readings are more than 2 minutes apart, so the gaps mix two moments.">mixed vintage</span>`
+        : vintageChip({ iso: Number.isFinite(lastTs) ? new Date(lastTs).toISOString() : null, freshBoundSec: 900, session: d.session });
+    }
+    const fmt = (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2);
+    const top = rows[0], bot = rows[rows.length - 1];
+    el.innerHTML = `<div class="sv-sum"><span>Leading <b class="val-up">${esc(top.sym)} ${fmt(top.v)}</b></span><span>Lagging <b class="val-down">${esc(bot.sym)} ${fmt(bot.v)}</b></span><span class="val-muted">vs SPY ${fmt(spy)}%</span></div>`
+      + rows.map((r) => {
+        const w = Math.min(Math.abs(r.v), SV_CAP) / SV_CAP * 50;
+        const bar = r.v >= 0 ? `left:50%;width:${w.toFixed(2)}%;background:var(--up)` : `left:${(50 - w).toFixed(2)}%;width:${w.toFixed(2)}%;background:var(--down)`;
+        return `<div class="sv-row"><span class="sv-sym" data-chart="${esc(r.sym)}" tabindex="0" role="button">${esc(r.sym)}</span>`
+          + `<span class="sv-track"><span class="sv-bar" style="${bar}"></span></span>`
+          + `<span class="sv-val num ${signCls(r.v)}">${fmt(r.v)}</span><span class="sv-seam"></span></div>`;
+      }).join('')
+      + `<div class="sv-leg" title="Bar = sector ETF 1-day % minus SPY 1-day %, capped at ±${SV_CAP} pp. 5-day / 20-day dots and level states (BREAKOUT, LOST 50…) come with a later backend change.">bar = today vs SPY (±${SV_CAP} pp) · click a symbol for its chart</div>`;
   }
 
   // Pure re-render from _divSectors + _divSel. Called by the fetch and by every selection
@@ -970,9 +1371,22 @@
 
   // ── b4 Index strip ──────────────────────────────────────────────────────────
   async function loadIndexStrip() {
-    let data = null;
-    try { const r = await apiFetch('/api/stable/index-strip'); if (r.ok) data = await r.json(); } catch (_) {}
+    let data = null, ext = null;
+    const getJson = async (u) => { try { const r = await apiFetch(u); return r.ok ? await r.json() : null; } catch (_) { return null; } };
+    [data, ext] = await Promise.all([getJson('/api/stable/index-strip'), getJson('/api/stable/futures')]);
+    // The Sectors-vs-SPY bars and the Tide cell's closed inference both read this strip.
+    _ixData = data;
+    _ext = ext;
+    renderSectorBars();
+    if (_lastRegime.composite || _lastRegime.regime) renderRegimeBand(_lastRegime.composite, _lastRegime.regime, _lastRegime.tide, _lastRegime.kill);
+    applyClosedTiles();
     const el = $('indexStrip'); if (!el) return;
+    // Outside the regular session (the SERVER's answer) the index bar flips to futures, and
+    // flips back at the open, on this same 60 s poll. Unknown session = the normal bar.
+    const fut = marketShut() && ext && (ext.futures || []).length > 0;
+    el.classList.toggle('fut', !!fut);
+    if (fut) { renderFuturesBar(el, ext); return; }
+    setIndexHeader(false);
     setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline, data && data.session, null, data && data.incoherent);
     noteFlatline('strip', data && data.flatline, 'Index / strip');
     const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
@@ -997,11 +1411,93 @@
       const chg = pct != null
         ? `<span class="chg ${signCls(pct)}${sus ? ' ix-suspect' : ''}"${sus ? ` title="${esc(susWhy)}"` : ''}>${(pct >= 0 ? '+' : '') + Number(pct).toFixed(2)}%${sus ? ' ?' : ''}</span>`
         : `<span class="chg ix-unavail" title="${esc(why)}">UNAVAILABLE</span>`;
-      return `<div class="ix-cell" data-ticker="${sym}"${pct == null ? ` title="${esc(why)}"` : ''}><span class="sym">${sym}</span>`
+      return `<div class="ix-cell" data-ticker="${sym}" data-chart="${sym}" tabindex="0" role="button"${pct == null ? ` title="${esc(why)}"` : ''}><span class="sym">${sym}</span>`
         + chg
         + `<span class="ext">${ext != null ? (ext >= 0 ? '+' : '') + Number(ext).toFixed(1) + ' ATR' : ''}</span></div>`;
     }).join('');
-    el.querySelectorAll('.ix-cell[data-ticker]').forEach((c) => c.addEventListener('click', () => openTvPopover(c.dataset.ticker, c)));
+  }
+
+  // ── b4b Futures bar (outside the regular session) ─────────────────────────────
+  // Each percent is measured from the price at 4 PM ET of `base_session` (the stock close,
+  // not the exchange settlement), ~10 min delayed. Chart symbols are TradingView's
+  // continuous front-month contracts.
+  const FUT_SHORT = { 'ES=F': 'ES', 'NQ=F': 'NQ', 'RTY=F': 'RTY', 'YM=F': 'YM', 'CL=F': 'CRUDE', 'ZN=F': '10Y' };
+  const FUT_CHART = { 'ES=F': 'ES1!', 'NQ=F': 'NQ1!', 'RTY=F': 'RTY1!', 'YM=F': 'YM1!', 'CL=F': 'CL1!', 'ZN=F': 'ZN1!' };
+  const EXT_WORD = { pre_market: 'pre', after_hours: 'after' };
+  const fmtMT = (iso) => { try { return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }).format(new Date(isoUtc(iso))) + ' MT'; } catch (_) { return ''; } };
+  // "Tue" for a YYYY-MM-DD session date (a date label only; noon UTC keeps it on its day).
+  const sessionDay = (d) => { try { return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(new Date(d + 'T12:00:00Z')); } catch (_) { return d; } };
+  function setIndexHeader(fut, sub) {
+    const t = $('indexTitle'), s = $('indexSub');
+    if (t) { t.textContent = fut ? 'Futures' : 'Index'; t.setAttribute('data-gloss', fut ? 'FUTURES' : 'INDEX'); applyGlossary(t.parentNode); }
+    if (s) s.textContent = fut ? (sub || '') : '';
+  }
+  function renderFuturesBar(el, ext) {
+    const etf = {}; (ext.etfs || []).forEach((r) => { etf[r.symbol] = r; });
+    const base = ext.base_session_expected || ((ext.futures || [])[0] || {}).base_session;
+    const stale = (ext.stale_base || []).length > 0;
+    setIndexHeader(true, (base ? 'since ' + sessionDay(base) + ' 4 PM ET' : 'since the 4 PM ET close')
+      + ' · ~' + (ext.data_delay_minutes || 10) + ' min delayed' + (stale ? ' · updating' : ''));
+    // The feed's stated delay is not staleness: the dot ages from the end of that delay.
+    const delay = (ext.data_delay_minutes || 0) * 60;
+    const age = ext.data_age_seconds != null ? Math.max(0, ext.data_age_seconds - delay) : null;
+    setDot('indexHealthDot', age, !!ext.degraded, ext.flatline, ext.session, null, null);
+    noteFlatline('ext_hours', !!ext.flatline, 'Overnight futures');
+    _health.index = null;
+    updateGlobalHealth();
+    el.innerHTML = (ext.futures || []).map((f) => {
+      const pct = f.pct;
+      const waiting = /^waiting/.test(f.reason || '');
+      const oldBase = base && f.base_session && f.base_session !== base;
+      const chg = pct != null
+        ? `<span class="chg ${signCls(pct)}">${fmtPct(pct)}</span>`
+        : `<span class="chg ix-unavail" title="${esc(f.reason || 'no reading')}">${waiting ? 'WAITING' : 'UNAVAILABLE'}</span>`;
+      const e = f.leads ? etf[f.leads] : null;
+      const sub = e && e.pct != null ? `${esc(e.symbol)} ${EXT_WORD[e.ext_session] || 'ext'} ${fmtPct(e.pct)}` : esc(f.label || '');
+      const path = sparkPath((f.spark || []).map((v) => ({ value: v })), 100, 14);
+      const col = pct > 0 ? 'var(--up)' : pct < 0 ? 'var(--down)' : 'var(--text-3)';
+      const title = `${f.label} futures${f.last != null ? ' ' + f.last : ''}`
+        + (f.base != null ? ` vs ${f.base} at the ${f.base_session} 4 PM ET close` : '')
+        + (f.bar_ts ? ` · last bar ${fmtMT(f.bar_ts)}` : '')
+        + (oldBase ? ` · still measured from ${f.base_session}; refreshes within 5 min` : '')
+        + (e && e.pct != null ? ` · ${e.symbol} ${e.ext_session === 'pre_market' ? 'pre-market' : 'after-hours'} ${e.last} vs ${e.base} close` : '');
+      return `<div class="ix-cell fut-cell" data-chart="${esc(FUT_CHART[f.symbol] || '')}" tabindex="0" role="button" title="${esc(title)}">`
+        + `<div class="fut-txt"><span class="sym">${esc(FUT_SHORT[f.symbol] || f.symbol)}</span>${chg}<span class="ext">${sub}</span></div>`
+        + (path ? `<svg class="fut-spark" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><path d="${path}" fill="none" stroke="${col}" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg>` : '')
+        + '</div>';
+    }).join('');
+  }
+
+  // ── Market-closed tiles ─────────────────────────────────────────────────────
+  // Tiles whose feeds run in regular hours only (strip / movers / scanner jobs). Outside the
+  // session they hold the last reading, so they say so instead of looking live. Nightly
+  // tiles (Themes, Breadth) update after the close and are NOT listed; the River keeps
+  // receiving news; the Book is out of scope. R-IV.527: no opacity dimming (it fails AA) —
+  // a greyscale body, a dashed neutral border and a full-strength tag.
+  const CLOSED_TILES = ['movers-tape', 'divergence', 'curve', 'usd', 'kairos'];
+  const CLOSED_WORD = { pre_market: 'PRE-MARKET', after_hours: 'AFTER HOURS', closed: 'CLOSED' };
+  function applyClosedTiles() {
+    const s = serverSession();
+    const shut = s != null && s !== 'regular';
+    const since = _ixData && _ixData.as_of ? fmtMT(_ixData.as_of) : '';
+    CLOSED_TILES.forEach((id) => {
+      const it = document.querySelector(`#v2Grid > .grid-stack-item[gs-id="${id}"]`);
+      if (!it) return;
+      it.classList.toggle('tile-closed', shut);
+      const hdr = it.querySelector('.tile-header'); if (!hdr) return;
+      let tag = hdr.querySelector('.closed-tag');
+      if (!shut) { if (tag) tag.remove(); return; }
+      if (!tag) {
+        tag = document.createElement('span'); tag.className = 'closed-tag';
+        const title = hdr.querySelector('.tile-title');
+        if (title && title.nextSibling) hdr.insertBefore(tag, title.nextSibling); else hdr.appendChild(tag);
+      }
+      tag.textContent = CLOSED_WORD[s] || 'CLOSED';
+      tag.title = id === 'kairos'
+        ? 'Outside the regular session (server calendar). New setups are held until the open.'
+        : 'Outside the regular session (server calendar). This feed updates only in market hours; it shows the last reading'
+          + (since ? ' (market feeds last wrote ' + since + ')' : '') + '. The Futures bar is live.';
+    });
   }
 
   // ── b5 Yield curve mini ─────────────────────────────────────────────────────
@@ -1173,7 +1669,7 @@
 
   // ── c5: Book positions (same source as legacy Ledger: GET /api/v2/positions?status=OPEN) ──
   let _openPositions = [];
-  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o) };
+  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o), popSide, setSide, openChart, placeChartSoon };
   const OPT_PUT = /put/i, OPT_CALL = /call/i;
   function structureStr(p) {
     if ((p.asset_type || '').toUpperCase() === 'EQUITY' || (p.structure || '') === 'stock') {
@@ -1298,9 +1794,10 @@
          <button type="button" class="btn-danger" id="posCloseBtn">Close position</button>
          <button type="button" class="btn-secondary" id="posChartBtn">Chart</button>
        </div>`;
-    $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open');
+    closePopup(); setSide($('drawer'), popSide(null, 'book')); syncTopbarH();
+    $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open'); placeChartSoon();
     $('posCloseBtn').addEventListener('click', () => openCloseForm(p));
-    $('posChartBtn').addEventListener('click', (e) => { closeDrawer(); openTvPopover(p.ticker, e.target); });
+    $('posChartBtn').addEventListener('click', (e) => openChart(p.ticker, e.target));
     // Earnings surface (CHRONOS) — single earnings source from P0
     try {
       const r = await apiFetch('/api/chronos/next-earnings-batch?tickers=' + encodeURIComponent(p.ticker));
@@ -1343,7 +1840,7 @@
 
   // ── c5: add / close via the EXISTING write endpoints (call, never modify) ──
   const STRUCTURES = ['stock', 'long_call', 'long_put', 'call_debit_spread', 'put_debit_spread', 'call_credit_spread', 'put_credit_spread'];
-  function openModal(title, html) { $('modalTitle').textContent = title; $('modalBody').innerHTML = html; $('modalBackdrop').classList.add('open'); $('posModal').classList.add('open'); }
+  function openModal(title, html) { closeChart(); $('modalTitle').textContent = title; $('modalBody').innerHTML = html; $('modalBackdrop').classList.add('open'); $('posModal').classList.add('open'); }
   function closeModal() { $('modalBackdrop').classList.remove('open'); $('posModal').classList.remove('open'); }
 
   function openAddForm() {
@@ -1690,9 +2187,8 @@
     applyGlossary(el);
     el.querySelectorAll('.btn-committee[data-ticker]').forEach((b) => b.addEventListener('click', () => {
       const c = b.closest('.k-card'); if (c) c.classList.add('acked');  // acknowledge -> stop the decision-clock pulse
-      openCommittee(b.dataset.ticker, b.dataset.sig);
+      openCommittee(b.dataset.ticker, b.dataset.sig, b);
     }));
-    el.querySelectorAll('.k-card .tkr[data-ticker]').forEach((t) => t.addEventListener('click', () => openTvPopover(t.dataset.ticker, t)));
 
     // The classic stream: the top graded rows plus every row that never grades. Which ITEM
     // BUILDER a row gets is a display question, not a placement one — a class the display map
@@ -1732,7 +2228,7 @@
       return `<div class="k-card${shadow ? ' shadow' : ''}">
         <div class="top"><span class="nm">${esc(disp.name)}</span><span class="desc">${esc(disp.desc)}</span>
           <span class="grade ${grade === 'A' ? 'val-up' : ''}" data-gloss="GRADE">${grade}</span></div>
-        <div class="lvls"><span class="tkr" data-ticker="${esc(s.ticker)}">${esc(s.ticker)}</span>
+        <div class="lvls"><span class="tkr" data-ticker="${esc(s.ticker)}" data-chart="${esc(String(s.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(s.ticker)}</span>
           <span class="${sideCls}">${side || ''} ${s.entry_price != null ? Number(s.entry_price).toFixed(2) : ''}</span>
           ${s.target_1 != null ? `<span>T ${Number(s.target_1).toFixed(2)}</span>` : ''}
           ${s.stop_loss != null ? `<span>S ${Number(s.stop_loss).toFixed(2)}</span>` : ''}
@@ -1745,8 +2241,8 @@
       </div>`;
     }
   }
-  function openCommittee(ticker, sig) {
-    openDrawer('committee', { ticker, sig });
+  function openCommittee(ticker, sig, src) {
+    openDrawer('committee', { ticker, sig }, src);
   }
 
   // ── b9 River ────────────────────────────────────────────────────────────────
@@ -1850,7 +2346,7 @@
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : 'teal',
       ts: rowTime(s),
       riverOnly: !!disp.riverOnly,
-      text: `<b>${esc(disp.name)}</b> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
+      text: `<b>${esc(disp.name)}</b> ${chartTk(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${grade ? ' · grade ' + grade : ''}`
         // The same flag in the other view: one River, and neither view is the one that omits it.
         + (s.high_score === true ? ` · <span class="rv-high" title="${esc(canonicalScore(s) == null ? 'Scores high, but not a validated setup. Actionable needs an A.' : 'Scores ' + canonicalScore(s) + ': high, but not a validated setup. Actionable needs an A.')}">high score${canonicalScore(s) == null ? '' : ' ' + canonicalScore(s)}</span>` : '')
         + (disp.banner ? `<div class="rv-banner">${esc(disp.banner)}</div>` : '')
@@ -1867,20 +2363,20 @@
       id: 'nr:' + (s.signal_id || raw + (s.ticker || '')), type: 'signal', tier: 'info',
       sev: side === 'LONG' ? 'up' : side === 'SHORT' ? 'down' : null,
       ts: rowTime(s),
-      text: `<span class="rv-raw">${esc(raw)}</span> ${esc(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`
+      text: `<span class="rv-raw">${esc(raw)}</span> ${chartTk(s.ticker)} ${side}${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''} <span class="val-muted">· non-roster</span>`
         + (heldLabel(s) ? `<div class="rv-held">${esc(heldLabel(s))}</div>` : ''),
     };
   }
   function emitRegimeRiverItems(composite, regime, kill) {
-    // stable-vs-composite divergence
+    // Lenses split — the same rule as the band's chip: opposite calls by each lens's OWN
+    // cut-offs (was 55/45 on the dial, which fired while the composite label still read NEUTRAL).
     if (composite && regime) {
-      const c100 = to100(composite.composite_score);
-      const rl = regime.regime_label;
-      const cDir = c100 == null ? 0 : c100 >= 55 ? 1 : c100 <= 45 ? -1 : 0;
-      const sDir = rl === 'RISK-ON' ? 1 : rl === 'RISK-OFF' ? -1 : 0;
-      if (cDir && sDir && cDir !== sDir) {
-        addRiverItems([{ id: 'div:' + rl + ':' + cDir, type: 'regime', tier: 'action', sev: 'teal', ts: null,
-          text: `<b>Lens divergence</b> — Composite ${c100}/100 vs Stable ${esc(rl)}. Size with caution.` }]);
+      const v1 = lens1View(composite), v2 = lens2View(regime);
+      if (lensSplit(v1, v2)) {
+        // Timed by the composite read that produced it, so it ranks among the newest context
+        // items instead of sinking below the lane's cut as a no-time item.
+        addRiverItems([{ id: 'split:' + v1.dir + ':' + v2.dir, type: 'regime', tier: 'action', sev: 'teal', ts: apiTime(composite.timestamp),
+          text: `<b>Lenses split</b> — Market mix ${esc(v1.call)} vs Theme breadth ${esc(v2.call)}. Size with caution.` }]);
       }
     }
     const k = kill && kill.kill_switch;
@@ -1902,11 +2398,11 @@
         if (align === 'NEUTRAL' || !align) return;
         items.push({ id: 'flow:' + (f.ticker || i) + ':' + align, type: 'flow',
           tier: f.strength === 'STRONG' ? 'action' : 'info', sev: align === 'CONFIRMING' ? 'up' : 'down', ts: null,
-          text: `<b>${esc(f.ticker || '')}</b> flow ${align.toLowerCase()}${f.strength ? ' (' + esc(f.strength.toLowerCase()) + ')' : ''} vs your position` });
+          text: `<b>${chartTk(f.ticker)}</b> flow ${align.toLowerCase()}${f.strength ? ' (' + esc(f.strength.toLowerCase()) + ')' : ''} vs your position` });
       });
       (flow.watchlist_unusual || []).slice(0, 5).forEach((w, i) => {
         items.push({ id: 'unusual:' + (w.ticker || i), type: 'flow', tier: 'info', sev: 'teal', ts: null,
-          text: `Unusual flow · <b>${esc(w.ticker || '')}</b>${w.sentiment ? ' ' + esc(w.sentiment) : ''}` });
+          text: `Unusual flow · <b>${chartTk(w.ticker)}</b>${w.sentiment ? ' ' + esc(w.sentiment) : ''}` });
       });
       (flow.headlines || []).slice(0, 6).forEach((h, i) => {
         const hl = h.headline || h.title || ''; if (!hl) return;
@@ -1918,7 +2414,7 @@
       (hermes.alerts || []).forEach((a) => {
         items.push({ id: 'herm:' + (a.id || a.trigger_ticker), type: 'catalyst',
           tier: (a.tier <= 1 ? 'action' : 'info'), sev: 'down', ts: apiTime(a.created_at),
-          text: `<b>${esc(a.trigger_ticker || '')}</b> ${esc(a.headline_summary || a.event_type || 'catalyst')}` });
+          text: `<b>${chartTk(a.trigger_ticker)}</b> ${esc(a.headline_summary || a.event_type || 'catalyst')}` });
       });
     }
     // Cowork stable digest (optional — render only if present)
@@ -2046,7 +2542,7 @@
     const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b>${esc(disp.name)}</b>`;
     const err = rowError(s);
     return `<div class="rl-row${err ? ' rl-bad' : ''}" data-sid="${esc(s.signal_id || '')}">
-        <div class="rl-main">${name} <span class="rl-tkr">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
+        <div class="rl-main">${name} <span class="rl-tkr" data-chart="${esc(String(s.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
         <div class="rl-sub">${err ? `<span class="rl-err" title="This row is being shown, not hidden, so the regression is visible: the page no longer filters it.">${esc(err)}</span>` : ''}${o.grade ? laneGrade(s) : ''}${highBadge(s)}${o.why ? `<span class="rl-why">${esc(o.why)}</span>` : ''}${laneTime(s)}</div>
         ${heldLabel(s) ? `<div class="rl-held">${esc(heldLabel(s))}</div>` : ''}
         ${disp.banner ? `<div class="rl-banner">${esc(disp.banner)}</div>` : ''}
@@ -2059,16 +2555,21 @@
     if (!d.read) return 'The idea feed answered with no active ideas at all.';
     if (!regimeKnown()) return 'The regime has not been read this cycle, and the grade turns on it — so no idea can be graded A yet. Nothing here is a judgement about the ideas.';
     const reg = currentRegime();
-    const cell = validatedCellText();
+    // Plain wording, built from the table so a promoted cell rewrites the sentence with it:
+    // "…the only proven setup is a liquid short when the tape is URSA."
+    const cellWords = VALIDATED_A_CELLS.map((c) =>
+      'a ' + (c.liquid === true ? 'liquid ' : c.liquid === false ? 'illiquid ' : '') + String(c.side || '').toLowerCase() + ' when the tape is ' + c.regime).join(', or ');
+    const proven = (VALIDATED_A_CELLS.length === 1 ? 'the only proven setup is ' : 'the proven setups are ') + cellWords;
+    const noLong = VALIDATED_A_CELLS.some((c) => c.side === 'LONG') ? '' : ' No long setup is proven yet.';
     if (!VALIDATED_A_CELLS.some((c) => c.regime === reg)) {
-      return `Nothing actionable: no validated setup exists for a ${reg} regime. The one validated cell is a ${cell}.`;
+      return `Nothing to act on. Tape is ${reg}; ${proven}.${noLong}`;
     }
     const want = VALIDATED_A_CELLS.filter((c) => c.regime === reg);
     const sided = graded.filter((s) => want.some((c) => c.side === (s.direction || '').toUpperCase()));
-    if (!sided.length) return `Nothing actionable: the regime is ${reg} and the validated cell is a ${cell}, but no setup on that side fired today.`;
+    if (!sided.length) return `Nothing to act on. Tape is ${reg} and ${proven}, but no setup on that side fired today.`;
     const liquid = sided.filter((s) => want.some((c) => c.side === (s.direction || '').toUpperCase() && (c.liquid === undefined || c.liquid === !!s.is_liquid)));
-    if (!liquid.length) return `Nothing actionable: ${sided.length} setup${sided.length === 1 ? '' : 's'} fired on the validated side, ${sided.length === 1 ? 'and it is' : 'and every one is'} outside the liquid universe. The validated cell is a ${cell}.`;
-    return 'Nothing actionable: no idea cleared the A grade this cycle.';
+    if (!liquid.length) return `Nothing to act on. ${sided.length} setup${sided.length === 1 ? '' : 's'} fired on the proven side, ${sided.length === 1 ? 'but it is' : 'but every one is'} outside the liquid universe (${proven}).`;
+    return 'Nothing to act on. No idea cleared the A grade this cycle.';
   }
   // ── R-IV.606(b) · Your book ────────────────────────────────────────────────
   // `touches` is a LIST and it is ABSENT, not empty, when the ticker is not in the book. One
@@ -2233,12 +2734,22 @@
       return `<div class="rv-item ${cls}" data-rid="${esc(it.id)}"><div class="rv-head"><span class="rv-dot t-${it.type}"></span><span class="rv-type">${it.type}</span><span class="rv-time">${hh}</span>${it.tier === 'shadow' ? '<span class="shadow-tag">shadow</span>' : ''}</div><div class="rv-txt">${it.text}</div></div>`;
     }).join('');
     // Click an action item to acknowledge — stops its pulse (nothing pulses forever).
-    el.querySelectorAll('.rv-item.action[data-rid]').forEach((n) => n.addEventListener('click', () => { _rvAcked.add(n.dataset.rid); renderRiver(); }));
+    el.querySelectorAll('.rv-item.action[data-rid]').forEach((n) => n.addEventListener('click', (e) => { if (e.target.closest('[data-chart]')) return; _rvAcked.add(n.dataset.rid); renderRiver(); }));
   }
 
   // ── Popup helpers ───────────────────────────────────────────────────────────
-  function openPopup(title, html) { $('memberTitle').textContent = title; $('memberBody').innerHTML = html; $('popupBackdrop').classList.add('open'); $('memberPopup').classList.add('open'); }
-  function closePopup() { $('popupBackdrop').classList.remove('open'); $('memberPopup').classList.remove('open'); }
+  function openPopup(title, html, src) {
+    const pop = $('memberPopup'), side = popSide(src, 'themes');
+    syncTopbarH();
+    pop.classList.toggle('side-left', side === 'left'); pop.classList.toggle('side-right', side !== 'left');
+    $('memberTitle').textContent = title; $('memberBody').innerHTML = html; $('popupBackdrop').classList.add('open'); pop.classList.add('open');
+    placeChartSoon();
+  }
+  function closePopup() {
+    const was = $('memberPopup').classList.contains('open');
+    $('popupBackdrop').classList.remove('open'); $('memberPopup').classList.remove('open');
+    if (was) placeChartSoon();
+  }
 
   // ── Polling groups (idle interval budget: 4 << 10) ──────────────────────────
   function refreshMarket() { loadThemes(); loadDivergence(); loadIndexStrip(); loadRates(); loadFx(); }
@@ -2250,6 +2761,89 @@
     loadBook(); loadKairos(); loadDeskStreams(); loadNotices();
   }
 
+  // ── Top-bar quote ─────────────────────────────────────────────────────────
+  // v1's regime-matched trader quotes, restored. The mood follows the composite regime; a new
+  // quote every 10 minutes, no repeats within a day (ET), click for another. Rides the regime
+  // poll (60 s, paused when the tab is hidden), so it adds no timer and no request.
+  const QUOTE_MOOD = { TORO_MAJOR: 'greedy', TORO_MINOR: 'optimistic', NEUTRAL: 'pragmatic', URSA_MINOR: 'pessimistic', URSA_MAJOR: 'cynical' };
+  const QUOTE_ROTATE_MS = 10 * 60 * 1000;
+  const QUOTE_KEY = 'agora.quote.v1';
+  let _qMem = null, _qMood = null, _qPending = null;
+  function qLoad() { try { const v = JSON.parse(localStorage.getItem(QUOTE_KEY) || 'null'); if (v) return v; } catch (_) {} return _qMem; }
+  function qSave(v) { _qMem = v; try { localStorage.setItem(QUOTE_KEY, JSON.stringify(v)); } catch (_) {} }
+  function etDay() {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()); }
+    catch (_) { return new Date().toISOString().slice(0, 10); }
+  }
+  function quoteTick(bias, advance) {
+    const btn = $('v2Quote'), Q = window.AGORA_QUOTES;
+    if (!btn) return;
+    if (!Q) { btn.hidden = true; return; }
+    // A failed read never moves the mood, and a new mood must be read twice in a row, so a
+    // score sitting on a threshold does not churn the quote.
+    const m = bias ? QUOTE_MOOD[String(bias).toUpperCase()] : null;
+    if (m) {
+      if (_qMood === null || m === _qMood) { _qMood = m; _qPending = null; }
+      else if (_qPending === m) { _qMood = m; _qPending = null; }
+      else _qPending = m;
+    }
+    let st = qLoad();
+    const mood = _qMood || (st && st.cur && st.cur.mood) || 'pragmatic';
+    const pool = Q[mood] || [];
+    if (!pool.length) { btn.hidden = true; return; }
+    const day = etDay(), now = Date.now();
+    if (!st || st.day !== day) st = { day, seen: {}, cur: null };
+    const keep = st.cur && st.cur.mood === mood && st.cur.i < pool.length && now - st.cur.at < QUOTE_ROTATE_MS;
+    if (keep && !advance) {
+      if (btn.dataset.key !== mood + ':' + st.cur.i) renderQuote(pool[st.cur.i], mood, st.cur.i, false);
+      return;
+    }
+    let seen = (st.seen[mood] || []).filter((i) => i < pool.length);
+    if (seen.length >= pool.length) seen = [];
+    const left = pool.map((_, i) => i).filter((i) => seen.indexOf(i) < 0);
+    const i = left[Math.floor(Math.random() * left.length)];
+    seen.push(i); st.seen[mood] = seen; st.cur = { mood, i, at: now }; qSave(st);
+    renderQuote(pool[i], mood, i, !btn.hidden);
+  }
+  function renderQuote(q, mood, i, animate) {
+    const btn = $('v2Quote');
+    const apply = () => {
+      btn.querySelector('.q-text').textContent = '“' + q[0] + '”';
+      btn.querySelector('.q-author').textContent = '— ' + q[1] + (q[2] ? ' · ' + q[2] + ' pick' : '');
+      btn.dataset.mood = mood; btn.dataset.key = mood + ':' + i;
+      btn.title = '“' + q[0] + '” — ' + q[1] + (q[2] ? '\n' + q[2] + "'s pick for its lane (source in assets/agora-quotes.js)" : '') + '\n\nQuote mood: ' + mood + ' (follows the composite regime). Click for another.';
+      btn.hidden = false; btn.classList.remove('q-fade');
+      syncTopbarH();
+    };
+    const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (animate && !still) { btn.classList.add('q-fade'); setTimeout(apply, 250); } else apply();
+  }
+
+  // ── Full-screen mode ────────────────────────────────────────────────────────
+  // The page root goes full screen (not the grid), so drawers, popups and the chart stay
+  // visible. Hidden where the browser cannot do it (iPhone Safari; an installed iOS app is
+  // already chromeless).
+  function initFullscreen() {
+    const b = $('fsBtn'); if (!b) return;
+    const d = document, root = d.documentElement;
+    if (!(d.fullscreenEnabled || d.webkitFullscreenEnabled)) { b.hidden = true; return; }
+    const cur = () => d.fullscreenElement || d.webkitFullscreenElement;
+    const sync = () => {
+      const on = !!cur();
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.title = on ? 'Exit full screen (Esc)' : 'Full screen';
+      b.classList.toggle('on', on);
+    };
+    b.addEventListener('click', () => {
+      try {
+        if (cur()) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+        else { const pr = (root.requestFullscreen || root.webkitRequestFullscreen).call(root); if (pr && pr.catch) pr.catch(() => {}); }
+      } catch (_) {}
+    });
+    d.addEventListener('fullscreenchange', sync); d.addEventListener('webkitfullscreenchange', sync);
+    b.hidden = false; sync();
+  }
+
   // ── Boot ────────────────────────────────────────────────────────────────────
   function boot() {
     applyGlossary(document);
@@ -2258,27 +2852,87 @@
     loadMoversTape(); managedInterval(loadMoversTape, 5 * 60 * 1000);
     refreshMarket(); managedInterval(refreshMarket, 60 * 1000);
     refreshDesk(); managedInterval(refreshDesk, 2 * 60 * 1000);
-    // divergence window toggle
-    const dt = $('divToggle');
-    if (dt) dt.querySelectorAll('button[data-w]').forEach((b) => b.addEventListener('click', () => {
-      _divWindow = b.dataset.w; dt.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); loadDivergence();
-    }));
-    // divergence isolation: delegate on the container — chips are destroyed and rebuilt on
-    // every refresh, so per-chip listeners would be lost and re-added each cycle.
-    const dl = $('divLegend');
-    if (dl) dl.addEventListener('click', (e) => {
-      const chip = e.target.closest('.div-chip'); if (!chip) return;
+    // The sector line chart (1D/5D toggle + isolation chips) lives in a drawer that is rebuilt
+    // on every open, so its controls are delegated from the drawer body, not bound once.
+    $('drawerBody').addEventListener('click', (e) => {
+      if (!_divOpen) return;
+      const w = e.target.closest('#divToggle button[data-w]');
+      if (w) {
+        _divWindow = w.dataset.w;
+        $('divToggle').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === w));
+        loadDivergence(); return;
+      }
+      const chip = e.target.closest('#divLegend .div-chip'); if (!chip) return;
       if (chip.dataset.all) _divClear(); else _divToggle(chip.dataset.sym);
     });
+    const dpb = $('divPopBtn');
+    if (dpb) dpb.addEventListener('click', () => openDrawer('divergence', {}, dpb));
+    const kb = $('killBeacon');
+    if (kb) kb.addEventListener('click', () => openDrawer('kill', { kill: _lastRegime.kill }, kb));
+    // The Breadth tile is the only way into the breadth drawer now that the band's duplicate
+    // New H/L and % > 50DMA cells are gone.
+    const bp = $('breadthPanel');
+    if (bp) {
+      bp.setAttribute('role', 'button'); bp.setAttribute('tabindex', '0'); bp.title = 'Open breadth detail';
+      const openB = () => openDrawer('breadth', { regime: _lastRegime.regime }, bp);
+      bp.addEventListener('click', openB);
+      bp.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openB(); } });
+    }
+    window.addEventListener('resize', fitThemeChips);
+    try { grid.on('resizestop', () => setTimeout(fitThemeChips, 50)); } catch (_) {}
     $('drawerClose').addEventListener('click', closeDrawer);
     $('drawerBackdrop').addEventListener('click', closeDrawer);
-    $('tvPopClose').addEventListener('click', closeTvPopover);
+    $('tvPopClose').addEventListener('click', () => closeChart());
     $('memberClose').addEventListener('click', closePopup);
     $('popupBackdrop').addEventListener('click', closePopup);
     $('bookAdd').addEventListener('click', openAddForm);
     $('modalClose').addEventListener('click', closeModal);
     $('modalBackdrop').addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closeTvPopover(); closePopup(); closeModal(); _divClear(); } });
+    // Any ticker marked data-chart opens the chart: one delegated handler, so tiles that
+    // re-render every poll need no re-wiring. Buttons inside a ticker row keep their own job.
+    document.addEventListener('click', (e) => {
+      const t = e.target.closest && e.target.closest('[data-chart]');
+      if (!t || t.closest('#tvPopover')) return;
+      if (e.target.closest('button, a, .opt-btn, .btn-committee, .kairos-tag, .flow-tag')) return;
+      e.preventDefault();
+      openChart(t.dataset.chart, t);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const t = e.target.closest && e.target.closest('[data-chart]');
+      if (!t || e.target !== t) return;
+      e.preventDefault(); openChart(t.dataset.chart, t);
+    });
+    // Escape closes only the chart when one is open (capture phase, so the page-wide close
+    // below does not also fire). Once focus is inside the TradingView frame, use the ✕.
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !document.getElementById('v2-login') && closeChart()) { e.stopImmediatePropagation(); e.preventDefault(); }
+    }, true);
+    syncTopbarH();
+    window.addEventListener('resize', () => { syncTopbarH(); placeChart(); });
+    document.addEventListener('fullscreenchange', () => { syncTopbarH(); placeChartSoon(); });
+    // 'Layout saved' is a receipt, not a status: fade it after 5 s.
+    const ls = $('layoutStatus');
+    if (ls && window.MutationObserver) {
+      let lt = null;
+      new MutationObserver(() => {
+        ls.classList.remove('faded'); clearTimeout(lt);
+        if (ls.textContent && !/locked/.test(ls.textContent)) lt = setTimeout(() => ls.classList.add('faded'), 5000);
+      }).observe(ls, { childList: true, characterData: true, subtree: true });
+    }
+    // Escape peels one layer at a time: chart (above) → modal → theme popup → drawer →
+    // divergence selection. The River preview and Positions panel keep their own handlers.
+    // The sign-in overlay is never dismissed.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || document.getElementById('v2-login')) return;
+      if ($('posModal').classList.contains('open')) closeModal();
+      else if ($('memberPopup').classList.contains('open')) closePopup();
+      else if ($('drawer').classList.contains('open')) closeDrawer();
+      else _divClear();
+    });
+    initFullscreen();
+    const qb = $('v2Quote');
+    if (qb) qb.addEventListener('click', () => { const c = _lastRegime.composite; quoteTick(c && (c.bias_level || c.level), true); });
     try { window.__mgd = _managed.size; } catch (_) {}  // idle interval count (acceptance check)
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
@@ -2964,9 +3618,12 @@ const X = (function () {
   }
   function show() {
     build(); open = true; render();
-    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); const x = panel.querySelector('.rp-x'); if (x) x.focus(); });
+    // Open on the River tile's side (follows the tile if it is dragged across).
+    const v2 = window.__v2;
+    if (v2 && v2.setSide) v2.setSide(panel, v2.popSide(opener && opener.isConnected ? opener : null, 'river'));
+    requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); if (v2 && v2.placeChartSoon) v2.placeChartSoon(); const x = panel.querySelector('.rp-x'); if (x) x.focus(); });
   }
-  function hide() { open = false; if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); } if (opener && opener.focus) { try { opener.focus(); } catch (_) {} } }
+  function hide() { open = false; if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); if (window.__v2 && window.__v2.placeChartSoon) window.__v2.placeChartSoon(); } if (opener && opener.focus) { try { opener.focus(); } catch (_) {} } }
   function openIt() { if (open) return; opener = document.activeElement; show(); if (location.hash !== '#river-preview') history.pushState(null, '', location.pathname + location.search + '#river-preview'); }
   function close() { if (!open) return; hide(); if (location.hash === '#river-preview') history.pushState(null, '', location.pathname + location.search); }
   function sync() { if (location.hash === '#river-preview') { if (!open) show(); } else if (open) hide(); }
