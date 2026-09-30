@@ -321,16 +321,28 @@ async def create_b2_expression(signal_data: dict) -> None:
                 logger.debug("b2: NO_SHORT_LEG for %s", signal_id)
                 return
 
-        # IV rank: UW returns 0-1 fractional; store as 0-100
+        # R-IV.599(b)2: TWO FAULTS, BOTH SETTLED BY MEASUREMENT.
+        #
+        # This took `iv_data[0]` while `enrichment/signal_enricher` took `[-1]`, and one of them
+        # had to be reading an old figure as today's. Monday's key log settled it: the series
+        # runs first=2026-09-24 to last=2026-09-30, ASCENDING, so `[0]` was the OLDEST row in the
+        # window -- six days stale -- and `[-1]` is current. This was the offender.
+        #
+        # And `iv_rank_1y` is a PERCENT, not the 0-1 fraction the comment claimed: 58 of 58 raw
+        # readings measured 4.09 to 100.00. So `* 100` was wrong too, twice over. Both go through
+        # the one converter now, which validates instead of scaling.
+        #
+        # This path has never written a row (`signal_options_expressions` is empty), so nothing
+        # stored is affected -- but it would have been wrong the first time it ran.
         iv_rank_val: Optional[float] = None
         try:
+            from scoring.sb3_iv_units import iv_rank_1y_to_100
+
             iv_data = await get_iv_rank(ticker)
             if iv_data:
-                latest = iv_data[0] if isinstance(iv_data, list) and iv_data else iv_data
+                latest = iv_data[-1] if isinstance(iv_data, list) and iv_data else iv_data
                 if isinstance(latest, dict):
-                    raw_iv = latest.get("iv_rank_1y")
-                    if raw_iv is not None:
-                        iv_rank_val = round(float(raw_iv) * 100, 2)
+                    iv_rank_val = iv_rank_1y_to_100(latest.get("iv_rank_1y"))
         except Exception:
             pass
 
