@@ -216,3 +216,256 @@ window.AGORA_QUOTES = {
         ["This is not a market for the complacent.", "Howard Marks"]
     ]
 };
+
+/* Olympus committee picks (2026-09-30 UI review): 5 per lane, each verified against the
+   source named in its 4th field. Entry: [text, author, lane, source]. */
+(function (Q) {
+  var picks = [
+  [
+    "When you have tremendous conviction on a trade, you have to go for the jugular. It takes courage to be a pig.",
+    "Stanley Druckenmiller",
+    "TORO",
+    "https://www.brainyquote.com/quotes/stanley_druckenmiller_897233",
+    "greedy"
+  ],
+  [
+    "The real key to making money in stocks is not to get scared out of them.",
+    "Peter Lynch",
+    "TORO",
+    "https://www.crossingwallstreet.com/archives/2020/01/the-short-and-long-term.html",
+    "optimistic"
+  ],
+  [
+    "Don't fight the tape.",
+    "Martin Zweig",
+    "TORO",
+    "https://tradingmomentum.substack.com/p/marty-zweigs-rules-dont-fight-the",
+    "pragmatic"
+  ],
+  [
+    "You can't predict. You can prepare.",
+    "Howard Marks",
+    "TORO",
+    "https://www.oaktreecapital.com/docs/default-source/memos/2001-11-20-you-cant-predict-you-can-prepare.pdf",
+    "pessimistic"
+  ],
+  [
+    "There is the plain fool, who does the wrong thing at all times everywhere, but there is the Wall Street fool, who thinks he must trade all the time.",
+    "Edwin Lefevre (Jesse Livermore's voice)",
+    "TORO",
+    "Full text of Reminiscences of a Stock Operator",
+    "cynical"
+  ],
+  [
+    "Speculators may do no harm as bubbles on a steady stream of enterprise. But the position is serious when enterprise becomes the bubble on a whirlpool of speculation.",
+    "John Maynard Keynes",
+    "URSA",
+    "The General Theory of Employment, Interest and Money (1936), ch. 12 (marxists.org text)",
+    "greedy"
+  ],
+  [
+    "The way to build long-term returns is through preservation of capital and home runs.",
+    "Stanley Druckenmiller",
+    "URSA",
+    "https://www.marketfolly.com/2013/03/lessons-from-stanley-druckenmiller.html",
+    "optimistic"
+  ],
+  [
+    "Being too far ahead of your time is indistinguishable from being wrong.",
+    "Howard Marks",
+    "URSA",
+    "Oaktree memo 'On Bubble Watch' (oaktreecapital.com), an adage Marks learned in the early 1970s",
+    "pragmatic"
+  ],
+  [
+    "Avoiding loss should be the primary goal of every investor.",
+    "Seth Klarman",
+    "URSA",
+    "https://jamesclear.com/book-summaries/margin-of-safety-risk-averse-value-investing-strategies-for-the-thoughtful-investor",
+    "pessimistic"
+  ],
+  [
+    "October. This is one of the peculiarly dangerous months to speculate in stocks in. The others are July, January, September, April, November, May, March, June, December, August, and February.",
+    "Mark Twain",
+    "URSA",
+    "Project Gutenberg text of Pudd'nhead Wilson, https://www.gutenberg.org/cache/epub/102/pg102.txt, lines 3034-3044",
+    "cynical"
+  ],
+  [
+    "A trader who forces a trade when there is no real opportunity in the market is like a basketball player who forces a shot when he is off-balance or heavily guarded—the chances of scoring are low.",
+    "James F. Dalton",
+    "PYTHIA",
+    "Mind Over Markets (Dalton, Jones, Dalton), Goodreads quotes",
+    "pragmatic"
+  ],
+  [
+    "To progress beyond the average, beyond the middle of the bell curve and into the upper extremes of excellence, you must achieve self-understanding.",
+    "James F. Dalton",
+    "PYTHIA",
+    "Mind Over Markets (Dalton, Jones, Dalton), Goodreads quotes",
+    "optimistic"
+  ],
+  [
+    "Every indicator eventually bites the dust.",
+    "Marty Zweig",
+    "PYTHIA",
+    "https://tradingmomentum.substack.com/p/marty-zweigs-rules-dont-fight-the",
+    "cynical"
+  ],
+  [
+    "Don't focus on making money; focus on protecting what you have.",
+    "Paul Tudor Jones",
+    "PYTHIA",
+    "https://finance.yahoo.com/news/legendary-trader-paul-tudor-jones-180042155.html",
+    "pessimistic"
+  ],
+  [
+    "I just wait until there is money lying in the corner, and all I have to do is go over there and pick it up.",
+    "Jim Rogers",
+    "PYTHIA",
+    "https://www.azquotes.com/quote/726761",
+    "greedy"
+  ],
+  [
+    "What seems too high and risky to the majority usually goes higher and what seems low and cheap usually goes lower.",
+    "William J. O'Neil",
+    "PYTHAGORAS",
+    "How to Make Money in Stocks (O'Neil); wording seen in secondary sources only, not checked against the book",
+    "greedy"
+  ],
+  [
+    "The big money was not in the individual fluctuations but in the main movements; that is, not in reading the tape but in sizing up the entire market and its trend.",
+    "Jesse Livermore (as written by Edwin Lefevre)",
+    "PYTHAGORAS",
+    "Full text of Reminiscences of a Stock Operator",
+    "optimistic"
+  ],
+  [
+    "The elements of good trading are: (1) cutting losses, (2) cutting losses, and (3) cutting losses.",
+    "Ed Seykota",
+    "PYTHAGORAS",
+    "https://www.turtletrader.com/market-quotes/",
+    "pragmatic"
+  ],
+  [
+    "If you're playing for the emotional satisfaction, you're bound to lose, because what feels good is often the wrong thing to do.",
+    "William Eckhardt",
+    "PYTHAGORAS",
+    "The New Market Wizards (Schwager, 1992), Eckhardt interview",
+    "pessimistic"
+  ],
+  [
+    "Technical analysis tracks the past; it does not predict the future.",
+    "Bruce Kovner",
+    "PYTHAGORAS",
+    "Market Wizards (Schwager, 1989), Kovner interview (full text checked)",
+    "cynical"
+  ],
+  [
+    "When the music stops, in terms of liquidity, things will be complicated. But as long as the music is playing, you've got to get up and dance. We're still dancing.",
+    "Chuck Prince",
+    "DAEDALUS",
+    "https://fcic-static.law.stanford.edu/cdn_media/fcic-docs/2007-07-09%20Citigroup%20chief%20stay%20bullish%20on%20buyouts%20(The%20Financial%20Times).pdf",
+    "greedy"
+  ],
+  [
+    "Wind extinguishes a candle and energizes fire. Likewise with randomness, uncertainty, chaos: you want to use them, not hide from them.",
+    "Nassim Nicholas Taleb",
+    "DAEDALUS",
+    "https://www.fooledbyrandomness.com/prologue.pdf",
+    "optimistic"
+  ],
+  [
+    "I will never sacrifice reality for elegance without explaining why I have done so.",
+    "Emanuel Derman and Paul Wilmott",
+    "DAEDALUS",
+    "https://emanuelderman.com/the-financial-modelers-manifesto/",
+    "pragmatic"
+  ],
+  [
+    "Derivatives are financial weapons of mass destruction, carrying dangers that, while now latent, are potentially lethal.",
+    "Warren Buffett",
+    "DAEDALUS",
+    "https://www.berkshirehathaway.com/letters/2002pdf.pdf",
+    "pessimistic"
+  ],
+  [
+    "Noise makes trading in financial markets possible, and thus allows us to observe prices for financial assets.",
+    "Fischer Black",
+    "DAEDALUS",
+    "https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1540-6261.1986.tb04513.x",
+    "cynical"
+  ],
+  [
+    "There is nothing so disturbing to one's well-being and judgment as to see a friend get rich.",
+    "Charles P. Kindleberger",
+    "THALES",
+    "https://barrypopik.com/blog/there_is_nothing_so_disturbing_to_ones_well_being_and_judgment_as_to_see_a",
+    "greedy"
+  ],
+  [
+    "Whether we're talking about socks or stocks, I like buying quality merchandise when it is marked down.",
+    "Warren Buffett",
+    "THALES",
+    "https://www.berkshirehathaway.com/letters/2008ltr.pdf",
+    "optimistic"
+  ],
+  [
+    "It's far better to buy a wonderful company at a fair price than a fair company at a wonderful price.",
+    "Warren Buffett",
+    "THALES",
+    "Berkshire Hathaway 1989 shareholder letter (berkshirehathaway.com/letters/1989.html)",
+    "pragmatic"
+  ],
+  [
+    "Financial genius is before the fall.",
+    "John Kenneth Galbraith",
+    "THALES",
+    "https://www.amazon.com/Short-History-Financial-Euphoria-Genius/dp/096247455X",
+    "pessimistic"
+  ],
+  [
+    "Never, ever, think about something else when you should be thinking about the power of incentives.",
+    "Charlie Munger",
+    "THALES",
+    "https://fs.blog/great-talks/psychology-human-misjudgment/",
+    "cynical"
+  ],
+  [
+    "The speculator's deadly enemies are: Ignorance, greed, fear and hope.",
+    "Edwin Lefevre",
+    "PIVOT",
+    "Reminiscences of a Stock Operator (Project Gutenberg #60979, full text checked)",
+    "greedy"
+  ],
+  [
+    "Men who can both be right and sit tight are uncommon. I found it one of the hardest things to learn.",
+    "Edwin Lefevre (Jesse Livermore's voice)",
+    "PIVOT",
+    "Full text of Reminiscences of a Stock Operator",
+    "optimistic"
+  ],
+  [
+    "I know where I'm getting out before I get in.",
+    "Bruce Kovner",
+    "PIVOT",
+    "Market Wizards (Schwager, 1989), Kovner interview (full text checked)",
+    "pragmatic"
+  ],
+  [
+    "I have two basic rules about winning in trading as well as in life: (1) If you don't bet, you can't win. (2) If you lose all your chips, you can't bet.",
+    "Larry Hite",
+    "PIVOT",
+    "https://www.goodreads.com/quotes/11714331-have-two-basic-rules-about-winning-in-trading-as-well",
+    "pessimistic"
+  ],
+  [
+    "The first principle is that you must not fool yourself—and you are the easiest person to fool.",
+    "Richard P. Feynman",
+    "PIVOT",
+    "https://calteches.library.caltech.edu/51/2/CargoCult.htm",
+    "cynical"
+  ]
+];
+  picks.forEach(function (e) { (Q[e[4]] = Q[e[4]] || []).push([e[0], e[1], e[2], e[3]]); });
+})(window.AGORA_QUOTES);

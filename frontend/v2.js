@@ -494,7 +494,7 @@
   function openDrawer(kind, ctx, src) {
     const side = popSide(src, kind === 'committee' ? 'kairos' : 'regime-band');
     closePopup();   // was opening UNDER the member popup (z61 vs its z65 backdrop)
-    setSide($('drawer'), side);
+    setSide($('drawer'), side); syncTopbarH();
     const title = $('drawerTitle'), body = $('drawerBody');
     const kv = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`;
     if (kind === 'themes' && ctx.regime) {
@@ -583,8 +583,10 @@
   // 50% x 45% of the window (~22% of the screen). Non-modal: another ticker click switches it.
   // Moving averages: three simple MAs (9 / 50 / 200). The embed cannot colour two instances of
   // the same study differently, so they share one colour and the legend names each length.
-  const CHART_MAS = [9, 50, 200];
-  const CHART_SYM = /^[A-Z0-9.\-:\/!]{1,24}$/;
+  // The 9-period type is one constant (SMA or EMA — Nick's call, pending). 50 and 200 stay simple.
+  const CHART_MA9_TYPE = 'SMA';
+  const CHART_MAS = [[CHART_MA9_TYPE, 9], ['SMA', 50], ['SMA', 200]];
+  const CHART_SYM = /^[A-Z0-9.:!^=\-\/]{1,24}$/;
   let _chartSym = null, _chartOpener = null, _placeTimer = null;
   function chartTk(t) {
     const sym = String(t || '').toUpperCase();
@@ -598,6 +600,8 @@
     if (_chartSym !== sym || !pop.classList.contains('open')) {
       _chartSym = sym;
       $('tvPopTicker').textContent = sym;
+      const key = document.querySelector('#tvPopover .tv-key');
+      if (key) key.textContent = 'Daily · ' + CHART_MAS.map(([t, n]) => t + ' ' + n).join(' · ');
       $('tvPopHost').innerHTML = '<div id="tvPopHostInner" style="width:100%;height:100%"></div>';
       try {
         if (window.TradingView) {
@@ -606,7 +610,7 @@
             theme: 'dark', style: '1', locale: 'en', autosize: true,
             hide_top_toolbar: true, hide_side_toolbar: true, hide_volume: true, hide_legend: false,
             allow_symbol_change: false, save_image: false,
-            studies: CHART_MAS.map((n) => ({ id: 'MASimple@tv-basicstudies', inputs: { length: n } })),
+            studies: CHART_MAS.map(([t, n]) => ({ id: t === 'EMA' ? 'MAExp@tv-basicstudies' : 'MASimple@tv-basicstudies', inputs: { length: n } })),
             studies_overrides: { 'moving average.plot.color': '#38bdf8', 'moving average.plot.linewidth': 2 },
           });
         } else {
@@ -633,20 +637,29 @@
     if (W <= 768) { pop.style.width = ''; pop.style.height = ''; pop.style.left = '2vw'; pop.style.top = ''; return; }
     // Free horizontal band = the window minus any open side pop-out.
     let L = 0, R = W;
-    document.querySelectorAll('.drawer.open, .member-popup.open, .rp-panel.open, .pp-panel.open').forEach((el) => {
+    document.querySelectorAll('.drawer.open, .member-popup.open, .rp-panel.open, .pp-panel.open, .pos-modal.open').forEach((el) => {
       const r = el.getBoundingClientRect();
       if (r.width <= 0 || r.right <= 0 || r.left >= W) return;
       if (r.left + r.width / 2 < W / 2) L = Math.max(L, r.right); else R = Math.min(R, r.left);
     });
     let w = Math.max(480, Math.round(W * 0.5));
-    const h = Math.min(H - 32, Math.max(320, Math.round(H * 0.45)));
+    const top0 = topbarH();                               // centre in the area below the top bar
+    const h = Math.min(H - top0 - 32, Math.max(320, Math.round(H * 0.45)));
     const free = R - L - 32;
     let x;
     if (free >= 400) { w = Math.min(w, free); x = Math.min(Math.max(W / 2 - w / 2, L + 16), R - 16 - w); }
     else { w = Math.min(w, W - 32); x = (W - w) / 2; }   // no room beside the pop-outs: overlap, centred
     pop.style.width = w + 'px'; pop.style.height = h + 'px';
-    pop.style.left = Math.round(x) + 'px'; pop.style.top = Math.round((H - h) / 2) + 'px';
+    pop.style.left = Math.round(x) + 'px'; pop.style.top = Math.round(top0 + (H - top0 - h) / 2) + 'px';
   }
+  // Pop-outs and their backdrops start below the top bar (quote, full screen, future beacon
+  // stay visible). The bar wraps on narrow screens, so its height is measured, not assumed.
+  // Visible bottom edge of the top bar (0 once it has scrolled away), so a pop-out never
+  // leaves a gap where the bar used to be.
+  function topbarH() { const t = document.querySelector('.v2-topbar'); return t ? Math.max(0, Math.round(t.getBoundingClientRect().bottom)) : 0; }
+  function syncTopbarH() { document.documentElement.style.setProperty('--topbar-h', topbarH() + 'px'); }
+  let _tbRaf = 0;
+  window.addEventListener('scroll', () => { if (!_tbRaf) _tbRaf = requestAnimationFrame(() => { _tbRaf = 0; syncTopbarH(); }); }, { passive: true });
   // Pop-outs slide for 0.22 s; re-place once they have settled.
   function placeChartSoon() { clearTimeout(_placeTimer); placeChart(); _placeTimer = setTimeout(placeChart, 260); }
 
@@ -1383,7 +1396,7 @@
          <button type="button" class="btn-danger" id="posCloseBtn">Close position</button>
          <button type="button" class="btn-secondary" id="posChartBtn">Chart</button>
        </div>`;
-    closePopup(); setSide($('drawer'), popSide(null, 'book'));
+    closePopup(); setSide($('drawer'), popSide(null, 'book')); syncTopbarH();
     $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open'); placeChartSoon();
     $('posCloseBtn').addEventListener('click', () => openCloseForm(p));
     $('posChartBtn').addEventListener('click', (e) => openChart(p.ticker, e.target));
@@ -2216,6 +2229,7 @@
   // ── Popup helpers ───────────────────────────────────────────────────────────
   function openPopup(title, html, src) {
     const pop = $('memberPopup'), side = popSide(src, 'themes');
+    syncTopbarH();
     pop.classList.toggle('side-left', side === 'left'); pop.classList.toggle('side-right', side !== 'left');
     $('memberTitle').textContent = title; $('memberBody').innerHTML = html; $('popupBackdrop').classList.add('open'); pop.classList.add('open');
     placeChartSoon();
@@ -2285,11 +2299,12 @@
       btn.querySelector('.q-text').textContent = '“' + q[0] + '”';
       btn.querySelector('.q-author').textContent = '— ' + q[1] + (q[2] ? ' · ' + q[2] + ' pick' : '');
       btn.dataset.mood = mood; btn.dataset.key = mood + ':' + i;
-      btn.title = '“' + q[0] + '” — ' + q[1] + '\n\nQuote mood: ' + mood + ' (follows the composite regime). Click for another.';
+      btn.title = '“' + q[0] + '” — ' + q[1] + (q[2] ? '\n' + q[2] + "'s pick for its lane (source in assets/agora-quotes.js)" : '') + '\n\nQuote mood: ' + mood + ' (follows the composite regime). Click for another.';
       btn.hidden = false; btn.classList.remove('q-fade');
+      syncTopbarH();
     };
     const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (animate && !still) { btn.classList.add('q-fade'); setTimeout(apply, 300); } else apply();
+    if (animate && !still) { btn.classList.add('q-fade'); setTimeout(apply, 250); } else apply();
   }
 
   // ── Full-screen mode ────────────────────────────────────────────────────────
@@ -2363,10 +2378,30 @@
     // Escape closes only the chart when one is open (capture phase, so the page-wide close
     // below does not also fire). Once focus is inside the TradingView frame, use the ✕.
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && closeChart()) { e.stopImmediatePropagation(); e.preventDefault(); }
+      if (e.key === 'Escape' && !document.getElementById('v2-login') && closeChart()) { e.stopImmediatePropagation(); e.preventDefault(); }
     }, true);
-    window.addEventListener('resize', () => placeChart());
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); closePopup(); closeModal(); _divClear(); } });
+    syncTopbarH();
+    window.addEventListener('resize', () => { syncTopbarH(); placeChart(); });
+    document.addEventListener('fullscreenchange', () => { syncTopbarH(); placeChartSoon(); });
+    // 'Layout saved' is a receipt, not a status: fade it after 5 s.
+    const ls = $('layoutStatus');
+    if (ls && window.MutationObserver) {
+      let lt = null;
+      new MutationObserver(() => {
+        ls.classList.remove('faded'); clearTimeout(lt);
+        if (ls.textContent && !/locked/.test(ls.textContent)) lt = setTimeout(() => ls.classList.add('faded'), 5000);
+      }).observe(ls, { childList: true, characterData: true, subtree: true });
+    }
+    // Escape peels one layer at a time: chart (above) → modal → theme popup → drawer →
+    // divergence selection. The River preview and Positions panel keep their own handlers.
+    // The sign-in overlay is never dismissed.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || document.getElementById('v2-login')) return;
+      if ($('posModal').classList.contains('open')) closeModal();
+      else if ($('memberPopup').classList.contains('open')) closePopup();
+      else if ($('drawer').classList.contains('open')) closeDrawer();
+      else _divClear();
+    });
     initFullscreen();
     const qb = $('v2Quote');
     if (qb) qb.addEventListener('click', () => { const c = _lastRegime.composite; quoteTick(c && (c.bias_level || c.level), true); });
