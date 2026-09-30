@@ -188,7 +188,7 @@
 
 **Purpose:** Confirm the shadow-mode pipeline is actually capturing data correctly. None of these are decision gates — the 6-month shadow window is the real comparison gate — but they catch plumbing failures (migration didn't run, scanner didn't pick up 3-10, enrichment silently failing, etc.) BEFORE weeks of bad data accumulate.
 
-**All queries run against Railway production DB** (public URL: `postgresql://postgres:sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty@trolley.proxy.rlwy.net:25012/railway` — per memory). Use whatever client is handy (psql, TablePlus, DBeaver, or a one-off Python script via Claude in Chrome's `javascript_tool` fetch pattern).
+**All queries run against Railway production DB** (public URL: `postgresql://<user>:<REDACTED — rotated 2026-09-30>@<host>:<port>/<db>` — per memory). Use whatever client is handy (psql, TablePlus, DBeaver, or a one-off Python script via Claude in Chrome's `javascript_tool` fetch pattern).
 
 ### Test 1 — Gate distribution sanity check (CRITICAL)
 

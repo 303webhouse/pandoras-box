@@ -395,7 +395,7 @@ except Exception as e:
 
 **Add DATABASE_URL to env file:**
 ```bash
-echo 'DATABASE_URL=postgresql://postgres:sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty@trolley.proxy.rlwy.net:25012/railway' >> /etc/openclaw/openclaw.env
+echo 'DATABASE_URL=postgresql://<user>:<REDACTED — rotated 2026-09-30>@<host>:<port>/<db>' >> /etc/openclaw/openclaw.env
 ```
 
 **Verify psycopg2 is installed:** `python3 -c "import psycopg2; print(psycopg2.__version__)"` — if missing, `pip3 install psycopg2-binary`.
