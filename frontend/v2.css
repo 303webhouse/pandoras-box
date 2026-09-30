@@ -361,7 +361,7 @@ body {
 .tv-popover .bar .tk { font-family: var(--mono); font-weight: 700; color: var(--teal); }
 .tv-popover .bar .x { margin-left: auto; cursor: pointer; color: var(--text-3); background: none; border: 0; font-size: 14px; padding: 2px 4px; }
 .tv-popover .bar .x:hover { color: var(--text); }
-.tv-popover .bar .tv-key { font-family: var(--mono); font-size: 10px; letter-spacing: .5px; color: #38bdf8; }
+.tv-popover .bar .tv-key { font-family: var(--mono); font-size: 10px; letter-spacing: .5px; color: var(--teal); }
 .tv-popover .host { flex: 1; min-height: 0; }
 .tv-popover .tv-unavail { padding: 24px; color: var(--amber); font-size: 12px; }
 /* Anything that opens a chart. */
