@@ -164,6 +164,25 @@ CREATE TABLE IF NOT EXISTS stable_live_strip (
 ALTER TABLE stable_live_strip ADD COLUMN IF NOT EXISTS reason TEXT;
 ALTER TABLE stable_live_strip ADD COLUMN IF NOT EXISTS prior_close DOUBLE PRECISION;
 
+-- Overnight futures + pre/after-hours ETF moves (stable_engine/ext_hours.py). Its own
+-- table: stable_live_strip is keyed on symbol alone, so an extended-hours SPY row
+-- there would overwrite the regular-hours one.
+CREATE TABLE IF NOT EXISTS stable_ext_quotes (
+    symbol       TEXT PRIMARY KEY,           -- Yahoo symbol: 'ES=F' ... or 'SPY'
+    kind         TEXT NOT NULL,              -- 'future' | 'etf'
+    label        TEXT,
+    leads        TEXT,                       -- futures: the ETF it leads (ES=F -> SPY)
+    last         DOUBLE PRECISION,
+    base         DOUBLE PRECISION,           -- price at 16:00 ET of base_session
+    pct          DOUBLE PRECISION,           -- last / base - 1, percent; NULL carries reason
+    bar_ts       TIMESTAMPTZ,                -- the newest bar's own time (not the fetch)
+    base_session DATE,
+    ext_session  TEXT,                       -- etf: 'after_hours' | 'pre_market'
+    reason       TEXT,
+    spark        TEXT,                       -- JSON list of percent-from-base since the close
+    fetched_at   TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS stable_intraday_points (
     symbol  TEXT NOT NULL,
     ts      TIMESTAMPTZ NOT NULL,
