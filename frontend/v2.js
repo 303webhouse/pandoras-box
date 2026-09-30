@@ -511,7 +511,7 @@
   function feedsQuietSince() {
     const ix = _ixData;
     if (!ix || ix.data_age_seconds == null || ix.data_age_seconds <= 900 || !ix.as_of) return null;
-    try { return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }).format(new Date(isoUtc(ix.as_of))) + ' MT'; } catch (_) { return null; }
+    return riverTime(apiTime(ix.as_of));   // R-IV.611(b)1: the River's clock, never a second one
   }
 
   // Themes: every dominant / emerging / fading chip in priority order; fitThemeChips() then
@@ -1424,7 +1424,10 @@
   const FUT_SHORT = { 'ES=F': 'ES', 'NQ=F': 'NQ', 'RTY=F': 'RTY', 'YM=F': 'YM', 'CL=F': 'CRUDE', 'ZN=F': '10Y' };
   const FUT_CHART = { 'ES=F': 'ES1!', 'NQ=F': 'NQ1!', 'RTY=F': 'RTY1!', 'YM=F': 'YM1!', 'CL=F': 'CL1!', 'ZN=F': 'ZN1!' };
   const EXT_WORD = { pre_market: 'pre', after_hours: 'after' };
-  const fmtMT = (iso) => { try { return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }).format(new Date(isoUtc(iso))) + ' MT'; } catch (_) { return ''; } };
+  // R-IV.611(b)1: every stamp goes through riverTime(), which adds the weekday or the date when
+  // the stamp is not today — so a futures bar from yesterday says so instead of reading as this
+  // afternoon. apiTime() subsumes isoUtc(): both read an offset-less string as UTC.
+  const fmtMT = (iso) => riverTime(apiTime(iso)) || '';
   // "Tue" for a YYYY-MM-DD session date (a date label only; noon UTC keeps it on its day).
   const sessionDay = (d) => { try { return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(new Date(d + 'T12:00:00Z')); } catch (_) { return d; } };
   function setIndexHeader(fut, sub) {
@@ -2555,21 +2558,16 @@
     if (!d.read) return 'The idea feed answered with no active ideas at all.';
     if (!regimeKnown()) return 'The regime has not been read this cycle, and the grade turns on it — so no idea can be graded A yet. Nothing here is a judgement about the ideas.';
     const reg = currentRegime();
-    // Plain wording, built from the table so a promoted cell rewrites the sentence with it:
-    // "…the only proven setup is a liquid short when the tape is URSA."
-    const cellWords = VALIDATED_A_CELLS.map((c) =>
-      'a ' + (c.liquid === true ? 'liquid ' : c.liquid === false ? 'illiquid ' : '') + String(c.side || '').toLowerCase() + ' when the tape is ' + c.regime).join(', or ');
-    const proven = (VALIDATED_A_CELLS.length === 1 ? 'the only proven setup is ' : 'the proven setups are ') + cellWords;
-    const noLong = VALIDATED_A_CELLS.some((c) => c.side === 'LONG') ? '' : ' No long setup is proven yet.';
+    const cell = validatedCellText();
     if (!VALIDATED_A_CELLS.some((c) => c.regime === reg)) {
-      return `Nothing to act on. Tape is ${reg}; ${proven}.${noLong}`;
+      return `Nothing actionable: no validated setup is possible in a ${reg} regime. The one validated cell is a ${cell}.`;
     }
     const want = VALIDATED_A_CELLS.filter((c) => c.regime === reg);
     const sided = graded.filter((s) => want.some((c) => c.side === (s.direction || '').toUpperCase()));
-    if (!sided.length) return `Nothing to act on. Tape is ${reg} and ${proven}, but no setup on that side fired today.`;
+    if (!sided.length) return `Nothing actionable: the regime is ${reg} and the validated cell is a ${cell}, but no setup on that side fired today.`;
     const liquid = sided.filter((s) => want.some((c) => c.side === (s.direction || '').toUpperCase() && (c.liquid === undefined || c.liquid === !!s.is_liquid)));
-    if (!liquid.length) return `Nothing to act on. ${sided.length} setup${sided.length === 1 ? '' : 's'} fired on the proven side, ${sided.length === 1 ? 'but it is' : 'but every one is'} outside the liquid universe (${proven}).`;
-    return 'Nothing to act on. No idea cleared the A grade this cycle.';
+    if (!liquid.length) return `Nothing actionable: ${sided.length} setup${sided.length === 1 ? '' : 's'} fired on the validated side, ${sided.length === 1 ? 'and it is' : 'and every one is'} outside the liquid universe. The validated cell is a ${cell}.`;
+    return 'Nothing actionable: no idea cleared the A grade this cycle.';
   }
   // ── R-IV.606(b) · Your book ────────────────────────────────────────────────
   // `touches` is a LIST and it is ABSENT, not empty, when the ticker is not in the book. One
@@ -2771,10 +2769,8 @@
   let _qMem = null, _qMood = null, _qPending = null;
   function qLoad() { try { const v = JSON.parse(localStorage.getItem(QUOTE_KEY) || 'null'); if (v) return v; } catch (_) {} return _qMem; }
   function qSave(v) { _qMem = v; try { localStorage.setItem(QUOTE_KEY, JSON.stringify(v)); } catch (_) {} }
-  function etDay() {
-    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()); }
-    catch (_) { return new Date().toISOString().slice(0, 10); }
-  }
+  // R-IV.611(b)1: `etDate` at the top of this file is already this exact formatter.
+  const etDay = () => etDate(Date.now());
   function quoteTick(bias, advance) {
     const btn = $('v2Quote'), Q = window.AGORA_QUOTES;
     if (!btn) return;
