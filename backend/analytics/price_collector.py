@@ -599,17 +599,24 @@ async def _load_target_tickers() -> List[str]:
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         try:
+            # R-IV.610(c): `priority` is a NOT NULL LABEL ('low' / 'normal'), so
+            # `COALESCE(priority, 999)` was type-invalid AND pointless, and this query had never
+            # once succeeded. The rank is generated from models/watchlist_priority.py.
+            from models.watchlist_priority import order_by_sql
+
             rows = await conn.fetch(
                 """
                 SELECT symbol
                 FROM watchlist_tickers
                 WHERE muted = false
-                ORDER BY COALESCE(priority, 999), symbol ASC
-                """
+                ORDER BY {order}, symbol ASC
+                """.format(order=order_by_sql("priority"))
             )
             _add_many(row["symbol"] for row in rows)
         except Exception as exc:
-            logger.debug("watchlist_tickers unavailable for collector: %s", exc)
+            # WARNING, not debug. At debug this swallowed a query that could never work, and a
+            # watchlist contributing nothing read exactly like a watchlist with no rows.
+            logger.warning("watchlist_tickers unavailable for collector: %s", exc)
 
         try:
             rows = await conn.fetch(
