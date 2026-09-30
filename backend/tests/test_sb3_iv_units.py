@@ -8,15 +8,15 @@ from scoring.sb3_iv_units import iv_rank_1y_to_100, iv_bonus_from_rank
 
 
 def test_x100_conversion_applied():
-    # 0.65 fraction → 65.0 on the 0–100 scale (the core assertion)
-    assert iv_rank_1y_to_100(0.65) == 65.0
+    # R-IV.599(b)2: measured, `iv_rank_1y` arrives as a PERCENT. 65 stays 65.
+    assert iv_rank_1y_to_100(65.0) == 65.0
     assert iv_rank_1y_to_100(0.0) == 0.0
-    assert iv_rank_1y_to_100(1.0) == 100.0
-    assert iv_rank_1y_to_100(0.137) == 13.7
+    assert iv_rank_1y_to_100(100.0) == 100.0
+    assert iv_rank_1y_to_100(13.7) == 13.7
 
 
 def test_string_input_coerced():
-    assert iv_rank_1y_to_100("0.42") == 42.0
+    assert iv_rank_1y_to_100("42.0") == 42.0
 
 
 def test_out_of_range_is_refused_not_clamped():
@@ -36,13 +36,19 @@ def test_out_of_range_is_refused_not_clamped():
     conversion against that assertion rather than against the payload. A quantity defined on
     [0, 1] cannot exceed 1 in 99.3% of observations, so the assertion was wrong and the clamp
     hid it by turning every out-of-range input into "IV at its one-year high".
+
+    R-IV.599(b)2 then settled the units by measurement: storing the raw value for one session
+    gave 58 of 58 readings above 1, from 4.09 to 100.00, mean 35.06. `iv_rank_1y` is a PERCENT,
+    so the conversion is identity and the refusal is now for values outside [0, 100].
     """
-    assert iv_rank_1y_to_100(1.5) is None
+    assert iv_rank_1y_to_100(100.1) is None
     assert iv_rank_1y_to_100(-0.1) is None
-    assert iv_rank_1y_to_100(41.7) is None       # a percent, which is what the payload sends
-    # POSITIVE CONTROL: a genuine fraction is still converted, so the refusal is narrow.
-    assert iv_rank_1y_to_100(0.417) == 41.7
-    assert iv_rank_1y_to_100(1.0) == 100.0       # the boundary is IN range
+    assert iv_rank_1y_to_100(4170) is None
+    # POSITIVE CONTROL: the whole measured range converts, so the refusal is narrow.
+    assert iv_rank_1y_to_100(4.0881) == 4.1
+    assert iv_rank_1y_to_100(35.06) == 35.1
+    assert iv_rank_1y_to_100(100.0) == 100.0
+    assert iv_rank_1y_to_100(0.0) == 0.0
 
 
 def test_missing_is_none_not_zero():
@@ -52,7 +58,7 @@ def test_missing_is_none_not_zero():
 
 
 def test_range_invariant():
-    for raw in (0.0, 0.01, 0.5, 0.999, 1.0):
+    for raw in (0.0, 4.09, 35.06, 99.9, 100.0):
         v = iv_rank_1y_to_100(raw)
         assert 0.0 <= v <= 100.0
 

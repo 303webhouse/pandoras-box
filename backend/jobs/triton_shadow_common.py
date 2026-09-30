@@ -483,7 +483,12 @@ async def iv_at_fire(ticker: str) -> dict:
         # An IV LEVEL if the payload carries one under any of the names UW uses elsewhere in this
         # codebase. Tried in order, and `iv_source` records WHICH -- so a value is never
         # anonymous, and a NULL is distinguishable from a field we never looked for.
-        for name in ("implied_volatility", "iv", "iv_30d", "implied_move"):
+        # `volatility` FIRST, because the payload's measured keys are
+        # ['close', 'date', 'iv_rank_1y', 'updated_at', 'volatility'] (R-IV.599(b)2, read from
+        # Monday's key log). That is the IV LEVEL the ATM-IV upgrade was going to cost ~50
+        # FOREGROUND calls a day for, and it is already in the response we pay for -- so the
+        # upgrade costs NOTHING. The other names stay as fallbacks in case the payload changes.
+        for name in ("volatility", "implied_volatility", "iv", "iv_30d", "implied_move"):
             raw = latest.get(name)
             if raw is None:
                 continue
