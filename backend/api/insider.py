@@ -4,7 +4,8 @@ Insider + Congressional Trading API — powered by UW API.
 Provides insider transaction data and congressional trading data
 for enrichment pipeline and dashboard display.
 """
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import Depends, APIRouter, Query, HTTPException
+from utils.pivot_auth import require_api_key
 from typing import Optional
 import logging
 
@@ -12,7 +13,7 @@ logger = logging.getLogger("api.insider")
 router = APIRouter()
 
 
-@router.get("/insider/transactions")
+@router.get("/insider/transactions", dependencies=[Depends(require_api_key)])
 async def get_insider_transactions(
     ticker: Optional[str] = None,
     limit: int = Query(20, ge=1, le=100),
@@ -33,7 +34,7 @@ async def get_insider_transactions(
         raise HTTPException(status_code=502, detail="Failed to fetch insider data")
 
 
-@router.get("/congress/recent-trades")
+@router.get("/congress/recent-trades", dependencies=[Depends(require_api_key)])
 async def get_congressional_trades(
     limit: int = Query(20, ge=1, le=100),
 ):
@@ -53,7 +54,7 @@ async def get_congressional_trades(
         raise HTTPException(status_code=502, detail="Failed to fetch congressional data")
 
 
-@router.get("/market/economic-calendar")
+@router.get("/market/economic-calendar", dependencies=[Depends(require_api_key)])
 async def get_economic_calendar():
     """Economic calendar events from UW API."""
     try:

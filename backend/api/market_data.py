@@ -13,7 +13,8 @@ import time
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import Depends, APIRouter, HTTPException, Query
+from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,7 +24,7 @@ _news_cache: dict = {}
 _NEWS_CACHE_TTL = 600  # 10 minutes
 
 
-@router.get("/market/quote/{ticker}")
+@router.get("/market/quote/{ticker}", dependencies=[Depends(require_api_key)])
 async def get_quote(ticker: str):
     """Current stock/ETF snapshot (price, volume, change %)."""
     from integrations.uw_api import get_snapshot
@@ -34,7 +35,7 @@ async def get_quote(ticker: str):
     return result
 
 
-@router.get("/market/previous-close/{ticker}")
+@router.get("/market/previous-close/{ticker}", dependencies=[Depends(require_api_key)])
 async def get_previous_close(ticker: str):
     """Previous trading day OHLCV."""
     from integrations.uw_api import get_previous_close as _get_prev
@@ -45,7 +46,7 @@ async def get_previous_close(ticker: str):
     return result
 
 
-@router.get("/market/bars/{ticker}")
+@router.get("/market/bars/{ticker}", dependencies=[Depends(require_api_key)])
 async def get_bars(
     ticker: str,
     days: int = Query(30, ge=1, le=365),
@@ -64,7 +65,7 @@ async def get_bars(
     return result
 
 
-@router.get("/market/options-chain/{ticker}")
+@router.get("/market/options-chain/{ticker}", dependencies=[Depends(require_api_key)])
 async def get_options_chain(
     ticker: str,
     expiration: Optional[str] = Query(None),
@@ -87,7 +88,7 @@ async def get_options_chain(
     return result
 
 
-@router.get("/market/option-value")
+@router.get("/market/option-value", dependencies=[Depends(require_api_key)])
 async def get_option_value(
     underlying: str = Query(...),
     long_strike: float = Query(...),
@@ -118,7 +119,7 @@ async def get_option_value(
     return result
 
 
-@router.get("/market/news")
+@router.get("/market/news", dependencies=[Depends(require_api_key)])
 async def get_news(
     limit: int = Query(10, ge=1, le=50),
 ):

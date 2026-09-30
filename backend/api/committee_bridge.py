@@ -227,7 +227,7 @@ async def submit_committee_results(body: CommitteeResult, _=Depends(require_api_
     }
 
 
-@router.get("/committee/enrichment/{ticker}")
+@router.get("/committee/enrichment/{ticker}", dependencies=[Depends(require_api_key)])
 async def get_committee_enrichment(ticker: str):
     """
     Parallel-fetch 6 UW data points for committee context.

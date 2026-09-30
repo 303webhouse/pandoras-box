@@ -178,7 +178,7 @@ async def refresh_squeeze_scores():
 
 # === LIGHTNING CARD ENDPOINTS ===
 
-@router.get("/lightning")
+@router.get("/lightning", dependencies=[Depends(require_api_key)])
 async def get_lightning_cards(
     active_only: bool = Query(default=True),
     limit: int = Query(default=5, le=20),
