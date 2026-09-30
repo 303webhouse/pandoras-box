@@ -168,25 +168,28 @@ body {
 /* ── Regime band ─────────────────────────────────────────────────────────── */
 .regime-band {
   display: grid;
-  grid-template-columns: 1.4fr 1.8fr 1fr 1fr 1fr 1.2fr;
+  /* Regime · Themes · Tide · VOL CURVE (the duplicate breadth cells and the kill cell left
+     the band on 2026-09-30: breadth lives in its own tile, the kill switch in the top bar). */
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 2.2fr) minmax(0, 1.3fr) minmax(0, 1.1fr);
   gap: 1px;
   background: var(--border);
   height: 100%;
 }
 .regime-cell {
   background: var(--panel);
-  padding: 10px 14px;
-  display: flex; flex-direction: column; gap: 4px; justify-content: center;
-  cursor: pointer;
+  padding: 6px 12px;
+  display: flex; flex-direction: column; gap: 3px; justify-content: center;
+  cursor: pointer; min-width: 0; overflow: hidden;
 }
+.regime-cell.rc-tide { cursor: default; }
 .regime-cell:hover { background: var(--panel-2); }
 .regime-cell .label {
   font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px;
   text-transform: uppercase; color: var(--text-3);
   display: flex; align-items: center; gap: 5px;
 }
-.regime-cell .big { font-size: 22px; font-weight: 700; line-height: 1.1; }
-.regime-cell .sub { font-size: 12px; color: var(--text-2); }
+.regime-cell .big { font-size: 18px; font-weight: 700; line-height: 1.15; white-space: nowrap; }
+.regime-cell .sub { font-size: 11px; color: var(--text-2); line-height: 1.3; }
 .regime-cell .row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .chip {
   display: inline-flex; align-items: baseline; gap: 5px;
@@ -202,10 +205,10 @@ body {
 .val-down { color: var(--down); }
 .val-teal { color: var(--teal); }
 .val-amber { color: var(--amber); }
-/* Resting state ("NO TRIP ON RECORD"): legible and calm. Not teal — teal reads as
-   an affirmative all-clear, and this state is an absence of events, not a
-   confirmation. Not amber either: nothing is wrong. */
+/* Plain, directionless readings (VOL CURVE CALM, Tide PREMIUM SELLING): legible and
+   calm. Never lime or vermilion — those mean price direction on this page (HELIOS). */
 .val-quiet { color: var(--text); }
+.val-dim { color: var(--text-2); }
 
 /* DEF-GREEKS-ZERO — a floor is not a total, and N/A is not zero. Amber rather
    than the up/down colours, which would imply a directional read of a value we
@@ -216,25 +219,76 @@ body {
 .book-greeks-note.g-floor { color: var(--amber); }
 .book-greeks-note.g-na { color: var(--amber); }
 
-/* ── Kill-switch cell (DEF-KILLSWITCH-FAILOPEN) ───────────────────────────── */
-.kill-cell .big.big-long {
-  /* "NO TRIP ON RECORD" / "ARMED · PENDING" cannot hold the 22px display size in a
-     half-width phone cell. Step down and allow a second line instead of clipping. */
-  font-size: 13px; line-height: 1.2; letter-spacing: .02em;
-  text-transform: uppercase; white-space: normal;
-}
-.kill-cell .kill-prov {
-  font-size: 10.5px; color: var(--text-3); line-height: 1.3;
-  /* Provenance is the honest-seam disclosure — it must never be clipped away. */
-  white-space: normal; overflow-wrap: anywhere;
-}
-.kill-cell .kill-prov.val-amber { color: var(--amber); }
-.kill-cell .kill-prov.val-down { color: var(--down); }
 .val-muted { color: var(--text-3); }
 
-/* Gauge (for %>50dma) */
-.gauge { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; border: 1px solid var(--border); }
-.gauge > span { display: block; height: 100%; background: var(--teal); }
+/* ── Regime band cells (2026-09-30 redesign) ─────────────────────────────────
+   Sized to the saved ~87px band body: a small label naming what kind of regime it is,
+   then the much larger call (Nick's ask), number and distance-to-flip on one line. */
+.regime-cell .vintage-chip { font-size: 9px; padding: 0 5px; letter-spacing: .3px; text-transform: none; }
+.regime-cell .label { white-space: nowrap; overflow: hidden; }
+.lens { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lens + .lens { margin-top: 3px; }
+.lens-lab {
+  font: 10px/13px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-3);
+  display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; min-width: 0;
+}
+.lens-line { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; min-width: 0; }
+.lens-call { font-size: 17px; line-height: 1.15; font-weight: 700; flex: none; }
+.lens-num { font-size: 13px; color: var(--text); flex: none; }
+.lens-dist { font: 11px var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.split-chip {
+  font: 9px var(--mono); color: var(--teal); border: 1px solid var(--teal); border-radius: 999px;
+  padding: 0 6px; letter-spacing: .8px; flex: none;
+}
+.th-chips { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; overflow: hidden; max-height: 48px; }
+.th-chips .chip { font-size: 11px; padding: 1px 7px; }
+.th-chips .chip[hidden] { display: none; }
+.chip.th-more { color: var(--text-3); border-color: var(--border-strong); cursor: pointer; }
+.regime-cell .big.tide-long { font-size: 14px; }
+.tide-lean { font-size: 12px; font-weight: 400; margin-left: 6px; color: var(--text-2); }
+.vc-line { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.vc-val { font-size: 20px; font-weight: 700; line-height: 1.1; }
+.vc-word { font-size: 11px; letter-spacing: .8px; }
+.vc-gauge { position: relative; height: 5px; background: var(--border); border-radius: 3px; margin-top: 2px; }
+.vc-gauge i { position: absolute; top: -2px; width: 1px; height: 9px; background: var(--text-3); }
+.vc-gauge b { position: absolute; top: -3px; width: 4px; height: 11px; margin-left: -2px; border-radius: 2px; background: var(--text); }
+
+/* ── Kill-switch beacon (top bar) ─────────────────────────────────────────────
+   One state word, at most one number, one dot. UNVERIFIED/UNKNOWN are amber and dashed:
+   "cannot confirm", not an alarm and never a reassurance. */
+.kill-beacon {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; flex: none;
+  border-radius: 999px; border: 1px solid var(--border-strong); background: none; color: var(--text-3);
+  font: 10px var(--mono); letter-spacing: 1px; white-space: nowrap; cursor: pointer;
+}
+.kill-beacon .kb-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.kill-beacon .kb-num:empty { display: none; }
+.kill-beacon .kb-num { color: var(--text-2); }
+.kill-beacon[data-state="armed"] { color: var(--down); border-color: var(--down); background: rgba(255,92,51,0.08); }
+.kill-beacon[data-state="armed"] .kb-num { color: var(--down); }
+.kill-beacon[data-state="clear"] { color: var(--teal); border-color: rgba(20,184,166,0.5); }
+.kill-beacon[data-state="unverified"], .kill-beacon[data-state="unknown"] { color: var(--amber); border: 1px dashed var(--amber); }
+.kill-beacon[data-state="unverified"] .kb-dot, .kill-beacon[data-state="unknown"] .kb-dot { background: none; border: 1.5px solid currentColor; }
+.kill-beacon[data-stale] { box-shadow: 0 0 0 2px rgba(245,165,36,0.35); }
+.kill-beacon:hover { background: var(--panel-2); }
+.kill-beacon:focus-visible { outline: 1px solid var(--teal); outline-offset: 2px; }
+
+/* ── Sectors vs SPY (tile) ─────────────────────────────────────────────────── */
+.sv-body { padding: 8px 12px; }
+.sv-bars { display: flex; flex-direction: column; gap: 1px; }
+.sv-sum { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 11px var(--mono); color: var(--text-2); margin-bottom: 4px; }
+.sv-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 46px 0; gap: 8px; align-items: center; height: 17px; font: 11px var(--mono); }
+.sv-sym { color: var(--text); font-weight: 700; }
+.sv-sym:hover { color: var(--teal); text-decoration: underline; }
+.sv-track { position: relative; height: 11px; }
+.sv-track::before { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--border-strong); }
+.sv-bar { position: absolute; top: 2px; height: 7px; border-radius: 2px; opacity: 0.75; }
+.sv-val { text-align: right; }
+.sv-seam:empty { display: none; }   /* later: 5d / 20d dots and level chips (backend brief) */
+.sv-leg { font: 9px var(--mono); color: var(--text-3); margin-top: 4px; }
+.sv-msg { font-size: 12px; color: var(--amber); padding: 6px 0; }
+.chart-host.drawer-chart { height: 300px; min-height: 240px; }
+#breadthPanel { cursor: pointer; }
 
 /* ── Movers tape ─────────────────────────────────────────────────────────── */
 .tape-wrap { position: relative; height: 100%; display: flex; align-items: center; overflow: hidden; }
@@ -710,6 +764,8 @@ body.is-mobile-grid .tile-grip { display: none !important; }
      No data is hidden — staleness and health stay on the tiles (Ruling 6). */
   .v2-topbar > .v2-sub:not(#layoutStatus), .v2-quote { display: none !important; }
   .v2-fs { min-width: 44px; min-height: 44px; }
+  /* The kill beacon stays on phones (the quote does not): it is the safety surface. */
+  .kill-beacon { min-height: 44px; height: auto; }
   #layoutStatus { order: 10; flex: 1 0 100%; }
   .v2-legacy-link {
     min-height: 44px; display: inline-flex; align-items: center;
@@ -721,6 +777,10 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   .regime-band { grid-template-columns: repeat(2, minmax(0, 1fr)); height: auto; }
   .regime-cell { min-height: 60px; padding: 10px 12px; }
   .regime-cell .big { font-size: 19px; }
+  /* Regime and Themes full width; Tide and VOL CURVE share a row. */
+  .rc-regime, .rc-themes { grid-column: 1 / -1; }
+  .lens-line, .lens-lab { flex-wrap: wrap; white-space: normal; }
+  .th-chips { max-height: none; }
   .regime-cell .row { gap: 6px; }
 
   /* ── Fixed-width internal grids that overflow at 390px ───────────────────── */

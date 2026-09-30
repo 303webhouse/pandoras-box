@@ -44,7 +44,7 @@ Before starting any build, verify you have all necessary permissions, API keys, 
 - Deploy: SSH → edit files → `systemctl restart <service>` → verify with `journalctl -u <service> -f`
 
 ### Frontend (`frontend/`)
-- Vanilla JS PWA, dark teal theme. Cache busting — increment on every change: Agora (`/app` = `v2.html`) pins `v2.css?v=36`, `v2.js?v=43`, `assets/agora-quotes.js?v=2` (Stater and Abacus pin `v2.css` too); legacy `/app/legacy` (`index.html`) pins `styles.css?v=151`, `app.js?v=175`. New static files must live under `frontend/assets/` — only that folder is served wholesale (`backend/main.py` routes each other file by name).
+- Vanilla JS PWA, dark teal theme. Cache busting — increment on every change: Agora (`/app` = `v2.html`) pins `v2.css?v=37`, `v2.js?v=44`, `assets/agora-quotes.js?v=3` (Stater and Abacus pin `v2.css` too); legacy `/app/legacy` (`index.html`) pins `styles.css?v=151`, `app.js?v=175`. New static files must live under `frontend/assets/` — only that folder is served wholesale (`backend/main.py` routes each other file by name).
 
 ## Critical Patterns
 
