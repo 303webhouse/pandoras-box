@@ -44,8 +44,9 @@
   kill cell and breadth cells; `#divToggle`/`#divLegend`/`#divChart` now live in a drawer.
   This branch now ALSO touches CC-BUILD files (futures feed + envelope `session`); CC-BUILD should
   review that relay before merge.
-- Tide thresholds are provisional; calibrate from the 2026-09-30 market-hours re-audit (14:30 UTC,
-  scheduled in this session).
+- Tide thresholds are provisional. The 2026-09-30 market-hours re-audit is done (8:31 AM MDT; findings in
+  the CC-BUILD relay and Nick's report). Its one Tide sample (calls +$99M / puts +$26M, both bought)
+  reads TWO-WAY, which is not enough to recalibrate, so take a second read near a close.
 - Deferred: `liftSource` (lift the source tile above the backdrop) — needs a layering rework near `liftBook`.
 
 ## Findings for other lanes (text; owners insert)
