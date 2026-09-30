@@ -976,3 +976,18 @@ body.is-mobile-grid .tile-grip { display: none !important; }
    what you think it is" is an unconfirmable-state warning, not a fired alarm. */
 .pp-sample { border: 1px dashed var(--amber); border-radius: 8px; padding: 8px 10px; margin: 6px 0 10px;
   font-size: 12px; line-height: 1.4; color: var(--amber); }
+
+/* R-IV.606(b) — Your book. CONTRADICTS is vermilion and carries a rule, because a signal against
+   an open position is a confirmed fact about the book, not an unconfirmable reading. CONFIRMS is
+   deliberately quiet (R-IV.564's approved look). "no verdict" is neither: amber, because it is
+   precisely a thing that could not be confirmed. */
+.rl-verdict { font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px; color: var(--text-2);
+  border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px; }
+.rl-verdict.bad { color: var(--down); border-color: var(--down); font-weight: 700; }
+.rl-verdict.quiet { color: var(--amber); border-color: var(--amber); border-style: dashed; }
+.rl-row.rl-contra { border-left: 3px solid var(--down); padding-left: 8px; }
+.rl-pos { font-family: var(--mono); font-size: 10px; color: var(--text-2); }
+.rl-exit { margin-top: 3px; font-size: 11px; line-height: 1.35; color: var(--text-2); }
+.rl-exit.none { color: var(--text-2); }
+.rl-exit.none b { color: var(--amber); }
+.rl-exit.unknown { color: var(--amber); }
