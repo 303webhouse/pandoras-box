@@ -971,3 +971,8 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 /* R-IV.591 — the held-signal label. A disclosure under the row, not a chip: it is a sentence
    about a stamp the row carries, and it sits quietly under the release time it explains. */
 .rl-held, .rv-item .rv-held { margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--text-2); }
+
+/* R-IV.606(a)2 — a sample form says so before it is filled in, not after. Amber: "this is not
+   what you think it is" is an unconfirmable-state warning, not a fired alarm. */
+.pp-sample { border: 1px dashed var(--amber); border-radius: 8px; padding: 8px 10px; margin: 6px 0 10px;
+  font-size: 12px; line-height: 1.4; color: var(--amber); }
