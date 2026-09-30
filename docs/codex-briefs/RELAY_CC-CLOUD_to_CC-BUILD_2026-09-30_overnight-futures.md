@@ -74,3 +74,13 @@ Production's strip works, so Railway evidently resolves a compatible pair. The p
 - Full backend suite, before vs after: identical failure set (44 failed / 456 errors, all from the container having no DB or `pandas_ta`), with +22 passes.
 - Live dry run of `ext_hours.fetch()` from the container, with no DB writes: all 10 rows resolved (ES +0.13%, SPY after-hours +0.25% vs the 764.20 official close).
 - `/api/stable/futures` exercised against a fake pool.
+
+## Market-hours re-audit (Wed 2026-09-30 14:31 UTC / 8:31 AM MDT, read-only GETs on production)
+- **Bug: the sector-divergence 1D series splices two sessions.**
+  - `GET /api/stable/sector-divergence?window=1d` returned yesterday 14:32–20:00 UTC (164 points per sector) followed by today from 13:30 UTC (30 points).
+  - Cause: `backend/api/stable.py` `get_sector_divergence` filters `ts >= NOW() - INTERVAL '1 day'`.
+  - Fix direction: bound the window to the current session's 09:30 ET open via `market_calendar` (outside a session, the last one). Don't use a clock or weekday rule.
+  - The new Agora Sectors-vs-SPY bars read only the last point, so they are unaffected. The drawer's 1D line chart shows the splice.
+- **Narrowing: the stale composite SPY price happens after hours only.**
+  - During RTH, `spy_trend_intraday` and `spy_50sma_distance` quote today's price: 768.68 / 768.74 at 14:18 UTC, against index-strip 767.80 at 14:30.
+  - The one-session lag is only the yfinance fallback's exclusive `end` after the close.
