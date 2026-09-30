@@ -438,7 +438,8 @@ async def iv_at_fire(ticker: str) -> dict:
     from datetime import date as _date
 
     log = _logging.getLogger("triton_shadow")
-    out = {"iv_rank_at_fire": None, "iv_at_fire": None, "iv_source": None}
+    out = {"iv_rank_at_fire": None, "iv_at_fire": None, "iv_source": None,
+           "iv_rank_raw": None}
     try:
         from integrations.uw_api import get_iv_rank
 
@@ -461,7 +462,18 @@ async def iv_at_fire(ticker: str) -> dict:
 
         from scoring.sb3_iv_units import iv_rank_1y_to_100
 
-        out["iv_rank_at_fire"] = iv_rank_1y_to_100(latest.get("iv_rank_1y"))
+        # THE RAW VALUE, STORED UNCONVERTED. Measured 2026-09-30: the converted figure was
+        # exactly 100.0 on 7,553 of 7,606 rows across this codebase, because `iv_rank_1y` is not
+        # the 0-1 fraction the converter was told it is and the clamp turned every out-of-range
+        # input into "IV at its one-year high". Keeping the raw number means the units are
+        # settled by DATA on the next session rather than by a docstring's assertion -- which is
+        # how the original assertion should have been checked.
+        raw_rank = latest.get("iv_rank_1y")
+        try:
+            out["iv_rank_raw"] = float(raw_rank) if raw_rank is not None else None
+        except (TypeError, ValueError):
+            out["iv_rank_raw"] = None
+        out["iv_rank_at_fire"] = iv_rank_1y_to_100(raw_rank)
         # An IV LEVEL if the payload carries one under any of the names UW uses elsewhere in this
         # codebase. Tried in order, and `iv_source` records WHICH -- so a value is never
         # anonymous, and a NULL is distinguishable from a field we never looked for.

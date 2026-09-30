@@ -60,7 +60,10 @@ class TestItNeverInventsAValue:
 
         monkeypatch.setattr(uw, "get_iv_rank", _boom)
         out = await tsc.iv_at_fire("NVDA")
-        assert out == {"iv_rank_at_fire": None, "iv_at_fire": None, "iv_source": None}
+        # Every value, not an exact key set: the claim is "nothing was invented", and pinning the
+        # dict's shape instead made this fail when `iv_rank_raw` was added — a test breaking for
+        # the wrong reason, which is the same fault as a positional index.
+        assert out and all(v is None for v in out.values()), out
 
     @pytest.mark.asyncio
     async def test_an_empty_payload_is_none(self, monkeypatch):
@@ -135,3 +138,89 @@ class TestOneReaderNotAThird:
         for col in ("iv_rank_at_fire", "iv_at_fire", "iv_source"):
             assert col in code, col
         assert "await iv_at_fire(ticker)" in code
+
+
+# ─────────────── the unit trap, measured 2026-09-30 (R-IV.597(c) follow-up)
+
+class TestTheConverterRefusesInsteadOfClamping:
+    """`iv_rank_1y_to_100` multiplied by 100 and clamped to [0, 100].
+
+    Measured on `signals.enrichment_data.iv_rank_uw_shadow`, which it produces: 7,553 of 7,606
+    rows exactly 100.0 and 35 exactly 0.0 — the two clamp bounds — with nineteen distinct values
+    since 2026-06-11. The unrelated proxy rank has 711 distinct values and none at 100, so the
+    constant is the conversion, not the market.
+
+    A quantity defined on [0, 1] cannot exceed 1 in 99.3% of observations.
+    """
+
+    def test_a_real_fraction_still_converts(self):
+        from scoring.sb3_iv_units import iv_rank_1y_to_100
+
+        assert iv_rank_1y_to_100(0.417) == 41.7
+        assert iv_rank_1y_to_100(0.0) == 0.0
+        assert iv_rank_1y_to_100(1.0) == 100.0
+
+    def test_an_out_of_range_input_is_refused_not_clamped(self):
+        """A clamp turns 'this input is not what I was told' into 'IV is at its one-year high',
+        which is a claim. None is the absence of one."""
+        from scoring.sb3_iv_units import iv_rank_1y_to_100
+
+        for raw in (41.7, 100, 1.0001, 83.6, -0.1, -1):
+            assert iv_rank_1y_to_100(raw) is None, raw
+
+    def test_the_values_that_looked_plausible_are_the_misleading_ones(self):
+        """Seventeen readings looked like real mid-range ranks. Each came from a raw value BELOW
+        one, multiplied up — so it read as a mid-range rank when the raw number was under one
+        percent. Those are preserved by the raw column, not by the conversion."""
+        from scoring.sb3_iv_units import iv_rank_1y_to_100
+
+        assert iv_rank_1y_to_100(0.417) == 41.7      # what produced the 41.7 in the table
+        assert iv_rank_1y_to_100(41.7) is None       # what a true 41.7% rank would arrive as
+
+    def test_nan_and_junk_are_refused(self):
+        from scoring.sb3_iv_units import iv_rank_1y_to_100
+
+        assert iv_rank_1y_to_100(float("nan")) is None
+        assert iv_rank_1y_to_100("41.7%") is None
+        assert iv_rank_1y_to_100(None) is None
+
+    def test_no_caller_clamps_on_its_own(self):
+        """`b2_options_resolver` does its own `* 100` inline rather than using the helper, so it
+        carries the same trap. It is named here because it writes to a table holding ZERO rows —
+        it has never run — and the fix belongs with its first use, not with a guess now."""
+        src = _src("jobs/b2_options_resolver.py")
+        assert "float(raw_iv) * 100" in src           # still there, and still dead
+        from database.postgres_client import get_postgres_client  # noqa: F401
+
+
+class TestTheRawValueIsKept:
+
+    @pytest.mark.asyncio
+    async def test_the_raw_is_stored_even_when_the_conversion_refuses(self, monkeypatch):
+        """This is what settles the units on the next session: the number as it arrived."""
+        import integrations.uw_api as uw
+
+        async def _p(ticker, caller="iv_rank"):
+            return [{"date": "2026-09-30", "iv_rank_1y": 41.7}]
+
+        monkeypatch.setattr(uw, "get_iv_rank", _p)
+        out = await tsc.iv_at_fire("NVDA")
+        assert out["iv_rank_raw"] == 41.7            # kept
+        assert out["iv_rank_at_fire"] is None        # and not converted into a false claim
+
+    @pytest.mark.asyncio
+    async def test_a_genuine_fraction_gives_both(self, monkeypatch):
+        import integrations.uw_api as uw
+
+        async def _p(ticker, caller="iv_rank"):
+            return [{"date": "2026-09-30", "iv_rank_1y": 0.417}]
+
+        monkeypatch.setattr(uw, "get_iv_rank", _p)
+        out = await tsc.iv_at_fire("NVDA")
+        assert out["iv_rank_raw"] == 0.417
+        assert out["iv_rank_at_fire"] == 41.7
+
+    def test_the_poller_persists_the_raw_column(self):
+        code = _src("jobs/triton_shadow_poller.py")
+        assert "iv_rank_raw" in code
+        assert 'iv["iv_rank_raw"]' in code
