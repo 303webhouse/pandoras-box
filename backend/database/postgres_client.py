@@ -1426,7 +1426,8 @@ async def init_database():
                 ALTER TABLE triton_flow_shadow
                     ADD COLUMN IF NOT EXISTS iv_rank_at_fire NUMERIC(6,2),
                     ADD COLUMN IF NOT EXISTS iv_at_fire      NUMERIC(10,6),
-                    ADD COLUMN IF NOT EXISTS iv_source       TEXT
+                    ADD COLUMN IF NOT EXISTS iv_source       TEXT,
+                    ADD COLUMN IF NOT EXISTS iv_rank_raw     NUMERIC(14,6)
             """),
             ("release stamp: signals", """
                 ALTER TABLE signals ADD COLUMN IF NOT EXISTS release_at TIMESTAMP
