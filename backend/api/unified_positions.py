@@ -722,15 +722,25 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         else:
             cost_basis = abs(req.entry_price) * 100 * req.quantity
 
-    # Parse expiry
+    # R-IV.610(d): AN UNREADABLE EXPIRY IS REFUSED, NOT SWALLOWED.
+    #
+    # This was `except (ValueError, TypeError): pass`, so a mis-typed date created an option
+    # position with `expiry = NULL` and the route reported SUCCESS. Every downstream reader then
+    # had to invent something: the expiry sweep cannot age it, `COALESCE(expiry, '2099-12-31')`
+    # sorts it last forever, and DTE is unknowable. The principal saw a confirmation.
+    #
+    # A date he can retype is worth more than a row he has to discover.
     expiry = None
     dte = None
     if req.expiry:
         try:
             expiry = date.fromisoformat(str(req.expiry)[:10])
-            dte = max(0, (expiry - date.today()).days)
         except (ValueError, TypeError):
-            pass
+            raise HTTPException(
+                status_code=400,
+                detail=("expiry %r is not a date I can read. Use YYYY-MM-DD — for example "
+                        "2026-10-16. Nothing was written." % (req.expiry,)))
+        dte = max(0, (expiry - date.today()).days)
 
     async with pool.acquire() as conn, conn.transaction():
         await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)

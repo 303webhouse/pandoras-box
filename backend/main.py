@@ -1422,9 +1422,19 @@ async def health_check():
         postgres_state = "error"
     
     now_et = get_eastern_now()
-    overall = "healthy"
+
+    # R-IV.610(c): "degraded" USED TO BE A WORD WITH NO SUBJECT.
+    #
+    # During the 2026-09-30 rotation outage this route read `degraded` while the app could not
+    # reach the database at all, and the only thing carrying the real error was one nested block
+    # a reader had to go looking for. Three separate checks could set the word and none of them
+    # recorded which one had.
+    #
+    # `overall` is now DERIVED from this list, so a check cannot degrade the hub without naming
+    # itself -- the structural fix, not a better label. `degraded_by` is served beside the status.
+    degraded_by: list = []
     if postgres_state in {"error", "disconnected"}:
-        overall = "degraded"
+        degraded_by.append("postgres:%s" % postgres_state)
     
     # ZEUS Phase 3 — feed_tier schema + distribution check
     zeus_block: dict = {}
@@ -1472,8 +1482,10 @@ async def health_check():
     try:
         from stable_engine.job_status import health_summary
         stable_jobs_block = await health_summary()
-        if stable_jobs_block.get("any_flatline") and overall == "healthy":
-            overall = "degraded"
+        if stable_jobs_block.get("any_flatline"):
+            flat = stable_jobs_block.get("flatlined") or stable_jobs_block.get("flatline_classes")
+            degraded_by.append("stable_jobs:%s" % (
+                ",".join(map(str, flat)) if isinstance(flat, (list, tuple)) else "flatline"))
     except Exception as _sje:
         stable_jobs_block = {"error": str(_sje)}
 
@@ -1483,8 +1495,11 @@ async def health_check():
     try:
         from stable_engine.signals_freshness import signals_freshness_summary
         signals_freshness_block = await signals_freshness_summary()
-        if signals_freshness_block.get("any_flatline") and overall == "healthy":
-            overall = "degraded"
+        if signals_freshness_block.get("any_flatline"):
+            flat = (signals_freshness_block.get("flatlined")
+                    or signals_freshness_block.get("flatline_classes"))
+            degraded_by.append("signals_freshness:%s" % (
+                ",".join(map(str, flat)) if isinstance(flat, (list, tuple)) else "flatline"))
     except Exception as _sfe:
         signals_freshness_block = {"error": str(_sfe)}
 
@@ -1592,7 +1607,9 @@ async def health_check():
         s8_block = {"state": "ERROR", "reason": str(_s8e)}
 
     return _sanitise_health({
-        "status": overall,
+        # Derived, never assigned: see degraded_by above.
+        "status": "degraded" if degraded_by else "healthy",
+        "degraded_by": degraded_by,
         "build": build_block,
         "option_chain_snapshot": s8_block,
         "uw_quota": uw_quota_block,
