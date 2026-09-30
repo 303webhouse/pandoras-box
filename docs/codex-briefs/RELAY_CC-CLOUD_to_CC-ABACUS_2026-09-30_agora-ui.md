@@ -31,6 +31,34 @@
 - Chart: `CHART_MA9_TYPE = 'EMA'` (MAExp, own colour via `'moving average exponential.plot.color'`).
 - Pins: `v2.css?v=37` (also Stater, Abacus), `v2.js?v=44`, `agora-quotes.js?v=3`.
 
+## Fourth round (overnight futures, Nick 2026-09-30)
+Backend half: `RELAY_CC-CLOUD_to_CC-BUILD_2026-09-30_overnight-futures.md`.
+
+**Session source.** `serverSession()` reads `market_session` from `/api/stable/futures`, or from index-strip when futures is absent. `marketShut()` is true only for a non-null, non-`regular` answer. No clock test anywhere (R-IV.416(c)); a null session greys nothing and keeps the normal bar.
+
+**`loadIndexStrip()`**
+- Fetches index-strip and `/api/stable/futures` in parallel and stores `_ext`.
+- When the market is shut and futures exist, `#indexStrip` gets class `fut` and `renderFuturesBar()` draws 6 cells: ES · NQ · RTY · YM · CRUDE · 10Y.
+  - Each cell shows the % since the 4 PM ET close and the matching ETF's pre/after-hours move as a sub-line.
+  - Each cell has a 44 px sparkline, hidden below 1100 px.
+  - `data-chart` uses TradingView continuous contracts: `ES1!`…`ZN1!`.
+- The header is now `#indexTitle` (Index ↔ Futures, data-gloss INDEX ↔ FUTURES) plus a new `#indexSub` (e.g. "since Tue 4 PM ET · ~10 min delayed").
+- The futures dot ages from the end of the stated delay: `data_age_seconds − data_delay_minutes·60`.
+- Phones: the 6 cells wrap 3 + 3.
+
+**`applyClosedTiles()`**
+- Toggles `.tile-closed` and a `.closed-tag` (AFTER HOURS / PRE-MARKET / CLOSED) on `CLOSED_TILES` = movers-tape, divergence, curve, usd, kairos.
+- Not on themes/breadth (nightly), river (news keeps arriving), book (out of scope) or index (it becomes futures).
+- Style follows R-IV.527: a greyscale body, a dashed neutral border and a full-opacity tag. No opacity dimming, no amber.
+
+**Tide cell.** `tideView(tide, quietSince, closed)` gained a third argument. When the market is shut, the cell gets `.cell-closed` and the label "Tide · last session". The old "closed?" inference remains only for a null session.
+
+**Pins.** `v2.css?v=38` (also Stater, Abacus) and `v2.js?v=45`.
+
+**Health dots now go grey.** Backend reads for strip/movers/tide now carry `session`, so the existing `healthState` `'closed'` branch finally fires after hours instead of amber.
+
+**Verification.** 24 fixture checks × 3 widths (1440/1024/390), plus the 59 redesign checks and the 86-check regression suite, all pass.
+
 ## Contracts to keep
 - New chart surfaces: add `data-chart="SYM"` (uppercase). Do **not** delegate on `data-ticker` — `.opt-btn`, `.btn-committee`, `.mem-row` carry it.
 - Book rows still open the position drawer; the drawer's Chart button now opens the chart **without** closing the drawer.

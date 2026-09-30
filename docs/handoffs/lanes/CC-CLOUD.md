@@ -1,6 +1,6 @@
 # CC-CLOUD lane — status
 
-**Written:** 2026-09-29 20:18 MDT (2026-09-30 02:18 UTC)
+**Written:** 2026-09-29 21:10 MDT (2026-09-30 03:10 UTC)
 **Worked against:** `origin/main` = `f0421ac` (Merge PR #43, cursor/lane-setup)
 **Where:** Claude Code cloud session (claude.ai/code), branch `claude/sharp-faraday-pd9x1j`. Not a local worktree.
 **Why this lane exists:** Nick's local weekly limit was spent; a cloud-only credit let work continue here. It owns nothing by default. It built in CC-ABACUS's files at Nick's instruction and relayed (below).
@@ -27,13 +27,23 @@
    - 16 misattributed v1 quotes fixed (231 quotes).
    Verified: 59 fixture-driven checks + 86-check regression suite in headless Chromium (America/Denver).
 4. Relay to CC-ABACUS: `docs/codex-briefs/RELAY_CC-CLOUD_to_CC-ABACUS_2026-09-30_agora-ui.md`.
-5. `CLAUDE.md` cache-bust line current: `v2.css?v=37`, `v2.js?v=44`, `agora-quotes.js?v=3`.
+5. **Overnight futures bar + market-closed tiles** (Nick, 2026-09-30):
+   - **Backend:** new `stable_engine/ext_hours.py`, table `stable_ext_quotes`, a 5-minute loop outside RTH and `GET /api/stable/futures`.
+   - **Session on the RTH envelopes:** strip, movers and tide reads now carry `session`/`market_session`.
+   - **Frontend:** the index bar flips to ES/NQ/RTY/YM/crude/10Y outside the regular session, measured from the 4 PM ET close and ~10 min delayed. Movers, Sectors, Curve, USD, Kairos and the Tide cell grey out.
+   - **Relays:**
+     - to CC-BUILD: `RELAY_CC-CLOUD_to_CC-BUILD_2026-09-30_overnight-futures.md`;
+     - to CC-ABACUS: a "fourth round" section added to its relay.
+   - **Tests:** 22 backend tests and 24 browser checks × 3 widths.
+6. `CLAUDE.md` cache-bust line current: `v2.css?v=38`, `v2.js?v=45`, `agora-quotes.js?v=3`.
 
 ## In flight
 - **Branch is NOT merged and NOT deployed** (Nick: hold for the project-manager conflict review).
   Rebase on `main` before merge; unpushed ABACUS work in `C:\th-abacus` is the collision risk.
   Renamed/removed in v2.js: `openTvPopover` → `openChart`; `themeChips` → `themeChipsAll`; the band's
   kill cell and breadth cells; `#divToggle`/`#divLegend`/`#divChart` now live in a drawer.
+  This branch now ALSO touches CC-BUILD files (futures feed + envelope `session`); CC-BUILD should
+  review that relay before merge.
 - Tide thresholds are provisional; calibrate from the 2026-09-30 market-hours re-audit (14:30 UTC,
   scheduled in this session).
 - Deferred: `liftSource` (lift the source tile above the backdrop) — needs a layering rework near `liftBook`.
