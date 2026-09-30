@@ -93,6 +93,12 @@ async def list_positions(
             lots = await fetch_lots_by_position(
                 conn, [r.get("position_id") for r in rows])
         attach_economics(out, lots)
+        # R-IV.599(e)2: the exit block, from gap 3's fields plus the stop_loss column. Served on
+        # every row so the page has one place to look, and `written` so it has one thing to test
+        # for its "No exit written" state rather than four.
+        from models.position_direction import exit_block
+        for row in out:
+            row["exit"] = exit_block(row)
         return out
     except Exception as exc:
         logger.warning("positions read failed: %s", exc)

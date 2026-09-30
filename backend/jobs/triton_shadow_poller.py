@@ -140,9 +140,9 @@ async def run_triton_shadow_poller() -> None:
                         (uw_alert_id, fired_at, ticker, direction, premium_usd, is_sweep,
                          liquidity_bucket, spot_at_fire, chg_pct_day, prior_5d_ret,
                          is_liquid20, is_megacap_ai, bias_level_at_fire, gex_regime_at_fire, raw,
-                         iv_rank_at_fire, iv_at_fire, iv_source, iv_rank_raw)
+                         iv_rank_at_fire, iv_at_fire, iv_source, iv_rank_raw, iv_rank_valid)
                     VALUES ($1, $2::text::timestamptz, $3, $4, $5, $6, $7, $8, $9, $10,
-                            $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19)
+                            $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20)
                     ON CONFLICT (uw_alert_id) DO NOTHING
                     """,
                     aid, a.get("created_at"), ticker, direction, premium_i,
@@ -151,7 +151,7 @@ async def run_triton_shadow_poller() -> None:
                     prior_5d, ticker in LIQUID_UNIVERSE, ticker in SEMIS_AI_TECH,
                     bias_level, gex_regime, dumps_jsonb(raw),
                     iv["iv_rank_at_fire"], iv["iv_at_fire"], iv["iv_source"],
-                    iv["iv_rank_raw"],
+                    iv["iv_rank_raw"], iv["iv_rank_valid"],
                 )
             if res and res.endswith(" 1"):   # asyncpg "INSERT 0 1" = new row
                 inserted += 1

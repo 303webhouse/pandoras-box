@@ -24,6 +24,7 @@ from signals.session_policy import SERVE_RELEASED_SQL, is_held  # R-IV.587(b)1
 from stable_engine.sessions import session_at  # RV5, R-IV.566(e)3
 from models.signal_lifecycle import is_high_score, score_of  # R-IV.584(b)
 from models.signal_score import CANONICAL_SCORE_SQL, score_components  # R-IV.590(c)
+from models.position_direction import touches_block  # R-IV.599(e)1
 
 logger = logging.getLogger(__name__)
 
@@ -134,12 +135,54 @@ def tag_row(d: dict) -> dict:
     return d
 
 
+
+async def open_positions_by_ticker(pool) -> Dict[str, list]:
+    """{TICKER: [open position, ...]} for the touches block. R-IV.599(e)1.
+
+    ONE query for the whole feed, not one per row. The alternative is an N+1 across every signal
+    on the page, which is the shape that made the balances read slow enough to notice.
+
+    Only the columns the block needs. A feed row must not carry the position's money: the River
+    says "this touches your book", and what the position is worth is the positions surface's
+    answer, computed from lots there.
+    """
+    out: Dict[str, list] = {}
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT position_id, ticker, structure
+                     FROM unified_positions
+                    WHERE status = 'OPEN' AND ticker IS NOT NULL""")
+        for r in rows:
+            out.setdefault((r["ticker"] or "").upper(), []).append(dict(r))
+    except Exception as exc:  # noqa: BLE001
+        # Fail OPEN: a feed that cannot read the book shows no touches, rather than no feed.
+        logger.warning("touches: open positions unreadable (%s) — serving the feed without them",
+                       exc)
+    return out
+
+
+def attach_touches(row: dict, by_ticker: Dict[str, list]) -> dict:
+    """Stamp `touches` on a signal or flow row, in place. Returns the row.
+
+    A LIST, because a ticker can carry more than one open position -- QQQ holds two today, on
+    different structures, and one of them could confirm while the other contradicts. Serving the
+    first would hide the disagreement. Absent (not empty) when the ticker is not in the book, so
+    "no position" and "a position with an unreadable structure" stay different.
+    """
+    positions = by_ticker.get((row.get("ticker") or "").upper()) or []
+    if positions:
+        row["touches"] = [touches_block(p, row.get("direction")) for p in positions]
+    return row
+
+
 async def get_active_trade_ideas(
     pool,
     min_score: Optional[float] = 65.0,
     feed_tier: Optional[str] = None,
     direction: Optional[str] = None,
     include_crypto: bool = False,
+    with_book: bool = False,
 ) -> Tuple[List[Dict[str, Any]], bool]:
     """Fetch and group active trade ideas from the signals table.
 
@@ -253,6 +296,11 @@ async def get_active_trade_ideas(
     if not rows:
         return [], redis_ok
 
+    # R-IV.599(e)1: the book, once, for the whole feed — and only when the CALLER has
+    # authenticated. `with_book` is passed in rather than decided here: this module has no
+    # request, and a module that guessed at authorisation would be the wrong author for it.
+    book = await open_positions_by_ticker(pool) if with_book else {}
+
     # Group by (ticker, direction)
     groups_map: OrderedDict = OrderedDict()
     for row in rows:
@@ -310,6 +358,7 @@ async def get_active_trade_ideas(
     # Dedup scan-based strategies, recount, rebuild strategy list
     for g in groups_map.values():
         tag_row(attach_codename(g["primary_signal"]))  # L0.4 + R-IV.577(b) + RV5
+        attach_touches(g["primary_signal"], book)      # R-IV.599(e)1
         g["related_signals"] = _dedup_related_signals(g["related_signals"])
         g["signal_count"] = 1 + len(g["related_signals"])
         strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]

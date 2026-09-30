@@ -1422,6 +1422,17 @@ async def init_database():
                         CHECK (stop_type IS NULL OR stop_type IN (%s));
                 END $$
             """ % ", ".join("'%s'" % s for s in _STOP_TYPES)),
+            # R-IV.599(b)1: THE CLAMPED RANKS ARE FLAGGED INVALID, AND THE ROWS ARE KEPT.
+            #
+            # `iv_rank_valid` is NULL for anything written before the refusal landed and FALSE
+            # where the clamp produced the figure. No reader may use a row that is not TRUE, and
+            # the proxy-versus-true review restarts from the first valid capture. Kept rather
+            # than deleted: the constant is the evidence that the conversion was wrong, and a
+            # deleted row cannot be counted in the census that proved it.
+            ("iv validity: triton_flow_shadow", """
+                ALTER TABLE triton_flow_shadow
+                    ADD COLUMN IF NOT EXISTS iv_rank_valid BOOLEAN
+            """),
             ("iv at fire: triton_flow_shadow", """
                 ALTER TABLE triton_flow_shadow
                     ADD COLUMN IF NOT EXISTS iv_rank_at_fire NUMERIC(6,2),

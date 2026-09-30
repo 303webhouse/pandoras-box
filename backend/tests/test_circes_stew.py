@@ -564,8 +564,14 @@ def test_an_explicit_shadow_read_is_not_l0_filtered(status, has_l0):
          patch("config.l0_routing.l0_enforce_where_clause", return_value="L0_PREDICATE"):
         asyncio.run(trade_ideas.get_trade_ideas_feed(
             limit=50, offset=0, status=status, source="circes_stew", min_score=None))
-    assert all(("L0_PREDICATE" in s) is has_l0 for s in seen)
-    assert all("source = $2" in s for s in seen)
+    # Scoped to the SIGNALS query. This read `all(... for s in seen)`, which was the same claim
+    # while the handler issued exactly one statement; it now also reads `unified_positions` for
+    # the touches block (R-IV.599(e)1), and that query has neither predicate nor should it. The
+    # claim here is about how signals are filtered, not about every table the handler touches.
+    signal_reads = [s for s in seen if "FROM signals" in s]
+    assert signal_reads, "the signals query was not issued at all — the scan is broken"
+    assert all(("L0_PREDICATE" in s) is has_l0 for s in signal_reads)
+    assert all("source = $2" in s for s in signal_reads)
 
 
 def test_a_shadow_row_is_never_rescored_or_its_payload_replaced():
