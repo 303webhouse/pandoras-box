@@ -6,12 +6,13 @@ GET /api/uw/health/by_caller — Phase A.4a — per-caller request + 429 breakdo
 
 from datetime import date
 
-from fastapi import APIRouter
+from fastapi import Depends, APIRouter
+from utils.pivot_auth import require_api_key
 
 router = APIRouter(prefix="/uw", tags=["uw-health"])
 
 
-@router.get("/health")
+@router.get("/health", dependencies=[Depends(require_api_key)])
 async def uw_health():
     """Return UW API health status."""
     from integrations.uw_api import get_health
