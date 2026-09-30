@@ -21,6 +21,16 @@
 - Quote author is `--text-3` (never bull/bear coloured); `#layoutStatus` fades after 5 s.
 - Not done: `liftSource` (lift the source tile above the backdrop). A same-side drawer covers its own tile, so this needs a z-index rework next to `liftBook` — yours if you want it.
 
+## Third round (`aea9bc2`, `640575b`, Nick-approved mockups)
+- **Regime band is 4 cells** (`.rc-regime`, `.rc-themes`, `.rc-tide`, `.rc-vol`; grid `2.2fr 2.2fr 1.3fr 1.1fr`). The New H/L, % > 50DMA and kill cells are gone; `themeChips` → `themeChipsAll` + `fitThemeChips` (two rows, `+N`).
+- **Pure view functions** (reuse them, don't re-derive): `lens1View(composite)`, `lens2View(regime)`, `lensSplit`, `tideView(tide, quietSince)`, `volCurveView(composite)`, `dial100` (floor, not `to100`'s round), `isoUtc`, `closeChip`.
+- **Theme-breadth words are display only** (70/60/40/30); the backend `regime_label` is untouched.
+- **Kill switch:** `killCellView` gained `state` (`armed`/`clear`/`unverified`/`unknown`) and `num`; `renderKillBeacon` drives `#killBeacon` in the top bar; `openDrawer('kill')`. default-since-boot is UNVERIFIED. Never read `display_state`.
+- **Sector divergence tile** → "Sectors vs SPY" bars (`renderSectorBars`, `#sectorBars`, `#divAsOf`). The line chart, `#divToggle`, `#divLegend` and `#divChart` now render inside `openDrawer('divergence')`; their listeners are delegated from `#drawerBody`; `closeDrawer` destroys the chart. gs-id `divergence` unchanged.
+- `loadIndexStrip` stores `_ixData` and re-renders the band + sector bars. The breadth drawer's only opener is now the Breadth tile body (`#breadthPanel`).
+- Chart: `CHART_MA9_TYPE = 'EMA'` (MAExp, own colour via `'moving average exponential.plot.color'`).
+- Pins: `v2.css?v=37` (also Stater, Abacus), `v2.js?v=44`, `agora-quotes.js?v=3`.
+
 ## Contracts to keep
 - New chart surfaces: add `data-chart="SYM"` (uppercase). Do **not** delegate on `data-ticker` — `.opt-btn`, `.btn-committee`, `.mem-row` carry it.
 - Book rows still open the position drawer; the drawer's Chart button now opens the chart **without** closing the drawer.
