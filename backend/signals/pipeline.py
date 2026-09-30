@@ -1311,7 +1311,8 @@ async def process_signal_unified(
         except ValueError:
             _fired_at = None
     _action, _release_at, _why = _session_decide(
-        signal_data.get("timeframe"), _fired_at, signal_data.get("signal_id"))
+        signal_data.get("timeframe"), _fired_at, signal_data.get("signal_id"),
+        asset_class=signal_data.get("asset_class"))
     if _action == DROP and not shadow:
         # R-IV.590(b): THE DROP IS A ROW. R-IV.565(1) said dropped signals are kept in the
         # table for the record and never shown, and the bail-out convention yields to that.

@@ -21,6 +21,7 @@ from database.postgres_client import get_postgres_client, serialize_db_row
 from signals.feed_service import (
     SCAN_BASED_STRATEGIES, _dedup_related_signals, get_active_trade_ideas,
     session_of, tag_row,          # RV5 + R-IV.577(b): one author, not a second copy
+    attach_touches, open_positions_by_ticker,   # R-IV.599(e)1
 )
 from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
 from config.strategy_class import strategy_class                 # R-IV.577(b)
@@ -162,6 +163,12 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
 
 @router.get("/trade-ideas")
 async def get_trade_ideas_feed(
+    # R-IV.599(e)1: GATED, because the `touches` block discloses which tickers the principal
+    # holds and `test_no_ungated_get_touches_a_book_table` is right to refuse that on an open
+    # route. Its other remedy is an exemption, and exemptions are what hid six routes before it
+    # was written. The page is built for this: `apiFetch` shows a login overlay on a 401, and a
+    # same-origin fetch carries the session cookie, which `require_api_key` accepts.
+    _=Depends(require_api_key),
     limit: int = Query(default=20, le=50),
     offset: int = Query(default=0, ge=0),
     status: Optional[str] = Query(default="ACTIVE"),
@@ -238,9 +245,14 @@ async def get_trade_ideas_feed(
     # (today: liquid SHORT in URSA). Read-time only; raw columns untouched.
     from config.liquid_universe import is_liquid
 
+    # R-IV.599(e)1: one read of the book for the whole page, not one per row. The route is
+    # gated above, so every caller that reaches here has authenticated.
+    book = await open_positions_by_ticker(pool)
+
     def _enrich(row) -> dict:
         d = tag_row(attach_codename(serialize_db_row(dict(row))))
         d["is_liquid"] = is_liquid(d.get("ticker"))
+        attach_touches(d, book)
         return d
 
     return {
@@ -278,6 +290,7 @@ async def get_river_notices():
 
 @router.get("/trade-ideas/grouped")
 async def get_trade_ideas_grouped(
+    _=Depends(require_api_key),           # R-IV.599(e)1 — as the flat feed above
     limit: int = Query(default=20, le=50),
     min_score: Optional[float] = Query(default=65.0),
     show_all: bool = Query(default=False),
@@ -294,7 +307,9 @@ async def get_trade_ideas_grouped(
     """
     pool = await get_postgres_client()
     effective_min_score = None if show_all else min_score
-    groups_all, _ = await get_active_trade_ideas(pool, min_score=effective_min_score, feed_tier=feed_tier)
+    groups_all, _ = await get_active_trade_ideas(
+        pool, min_score=effective_min_score, feed_tier=feed_tier,
+        with_book=True)                            # R-IV.599(e)1 — the route is gated
     return {
         "groups": groups_all[:limit],
         "total_groups": len(groups_all),

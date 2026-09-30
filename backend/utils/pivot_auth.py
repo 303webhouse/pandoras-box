@@ -54,3 +54,4 @@ def require_api_key(
 # Keep old names as aliases so existing imports don't break
 verify_pivot_key = require_api_key
 verify_api_key = require_api_key
+

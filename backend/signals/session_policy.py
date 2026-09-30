@@ -46,6 +46,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from typing import Optional, Tuple
 
+from config.asset_class import is_crypto
 from models.signal_timeframe import UnknownTimeframe, bar_minutes, is_intraday
 from stable_engine import sessions
 
@@ -92,13 +93,27 @@ def _next_regular_open(instant: datetime) -> Optional[datetime]:
 
 
 def decide(timeframe: Optional[str], fired_at: Optional[datetime],
-           signal_id: Optional[str] = None) -> Tuple[str, Optional[datetime], str]:
+           signal_id: Optional[str] = None,
+           asset_class: Optional[str] = None) -> Tuple[str, Optional[datetime], str]:
     """`(action, release_at, reason)` for one signal.
 
     `release_at` is set only for HOLD. For DELIVER it is None, which is what the feed predicate
     treats as "serve it now" -- so a delivered signal and a signal from before this rule existed
     are the same row shape, and no backfill is needed.
     """
+    # R-IV.599(c): CRYPTO IS OUTSIDE THIS RULE ENTIRELY.
+    #
+    # Every clause of it reasons about an exchange session: an intraday setup is dropped because
+    # it is gone by the open, and a swing setup is held UNTIL the open. Crypto trades around the
+    # clock, so there is no open to be gone by and none to wait for. I had applied the rule to
+    # every signal, which held 66 crypto rows until the NEXT EQUITY OPEN -- for the one consumer
+    # that can ask for crypto at all, the committee, that is a delay invented out of a calendar
+    # the asset does not use.
+    #
+    # Asked before the calendar and before the band, because neither question applies.
+    if is_crypto(asset_class):
+        return DELIVER, None, "crypto trades around the clock; the session rule does not apply"
+
     if fired_at is None:
         return DELIVER, None, "no fire time to judge; delivered rather than guessed"
 

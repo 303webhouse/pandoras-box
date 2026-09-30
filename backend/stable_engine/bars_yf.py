@@ -74,39 +74,115 @@ def _extract_ticker_frame(data: pd.DataFrame, ticker: str, single: bool) -> pd.D
     return out if not out.empty else None
 
 
-def fetch_batch(tickers: list[str], start: date, end: date) -> dict[str, pd.DataFrame]:
-    """Download one batch of tickers. Retry once with backoff. Returns {ticker: frame}."""
+# R-IV.599(d): A PARTIAL ANSWER IS NOT AN ANSWER.
+#
+# 2026-09-29 landed in `stable_daily_bars` for 2 of 679 tickers. 2026-09-22 did the same for 135
+# and later healed. FANUY survived both times, which is the tell: the vendor returned a frame
+# containing a couple of symbols, and `fetch_batch` handed that back as the batch's result.
+#
+# TWO FAULTS, and the retry was only the second of them.
+#
+#   1. `return out` sat INSIDE the `try`. A call that succeeded but returned an empty or
+#      near-empty frame raised nothing, so it returned on attempt 1 and THE RETRY NEVER RAN. A
+#      silent shortfall was indistinguishable from a genuine "these symbols have no bars".
+#   2. A batch that did raise twice returned `{}`, abandoning all 100 tickers, with no attempt
+#      to find out whether one bad symbol had taken the other 99 down with it.
+#
+# So: incompleteness is now a reason to retry, and after the retry the batch is SPLIT and the
+# stragglers are asked for one at a time. yfinance is free and off the UW governor, but a serial
+# fallback across a 679-ticker universe is slow, so it is capped -- a total vendor outage must
+# not become 679 sequential requests.
+#
+# The caller already measured this and flagged the run degraded below 90% coverage. The miss was
+# visible; nothing asked again. That is what changed.
+
+# A batch yielding less than this fraction is treated as a failed attempt, not a thin answer.
+_MIN_BATCH_YIELD = 0.5
+# Most individual re-asks per batch, so an outage degrades rather than stalling the job.
+_MAX_SINGLE_RETRIES = 40
+
+
+def _download_batch(yahoo: dict[str, str], tickers: list[str],
+                    start: date, end: date) -> dict[str, pd.DataFrame]:
+    """One `yf.download` call, unwrapped into {universe symbol: frame}. May raise."""
     import yfinance as yf
 
+    data = yf.download(
+        list(yahoo.values()), start=start.isoformat(), end=end.isoformat(),
+        auto_adjust=_AUTO_ADJUST, group_by="ticker",
+        progress=False, threads=True, actions=False,
+    )
+    single = len(tickers) == 1
+    out: dict[str, pd.DataFrame] = {}
+    if data is not None and not data.empty:
+        for t in tickers:
+            frame = _extract_ticker_frame(data, yahoo[t], single)
+            if frame is not None:
+                out[t] = frame                      # stored under the UNIVERSE symbol
+    return out
+
+
+def fetch_batch(tickers: list[str], start: date, end: date) -> dict[str, pd.DataFrame]:
+    """Download one batch. Retries a SHORTFALL as well as an exception, then splits.
+
+    Returns {ticker: frame} for whatever answered. A ticker genuinely without bars is simply
+    absent, which is what the caller counts as missing -- the point of the change is that it is
+    absent because it was asked twice and once more alone, not because a frame arrived thin.
+    """
     tickers = [t for t in tickers if t]
     if not tickers:
         return {}
-    yahoo = {t: to_yahoo_symbol(t) for t in tickers}   # universe symbol -> Yahoo symbol
+    yahoo = {t: to_yahoo_symbol(t) for t in tickers}
 
+    need = max(1, int(len(tickers) * _MIN_BATCH_YIELD))
+    best: dict[str, pd.DataFrame] = {}
     last_err = None
+
     for attempt in (1, 2):
         try:
-            data = yf.download(
-                list(yahoo.values()), start=start.isoformat(), end=end.isoformat(),
-                auto_adjust=_AUTO_ADJUST, group_by="ticker",
-                progress=False, threads=True, actions=False,
-            )
-            single = len(tickers) == 1
-            out: dict[str, pd.DataFrame] = {}
-            if data is not None and not data.empty:
-                for t in tickers:
-                    frame = _extract_ticker_frame(data, yahoo[t], single)
-                    if frame is not None:
-                        out[t] = frame              # stored under the UNIVERSE symbol
-            return out
-        except Exception as e:  # transient network/yfinance error
+            out = _download_batch(yahoo, tickers, start, end)
+        except Exception as e:                      # transient network/yfinance error
             last_err = e
-            logger.warning("[stable_bars] batch attempt %d failed (%d tickers): %s",
+            logger.warning("[stable_bars] batch attempt %d raised (%d tickers): %s",
                            attempt, len(tickers), e)
             if attempt == 1:
                 time.sleep(1.5)
-    logger.error("[stable_bars] batch permanently failed after retry: %s", last_err)
-    return {}
+            continue
+
+        if len(out) > len(best):
+            best = out
+        if len(out) >= need:
+            return out
+        # A SHORTFALL IS A FAILED ATTEMPT. This is the branch that did not exist: it used to
+        # return here, on attempt 1, with 2 of 100 frames.
+        logger.warning("[stable_bars] batch attempt %d yielded %d/%d frames — retrying",
+                       attempt, len(out), len(tickers))
+        if attempt == 1:
+            time.sleep(1.5)
+
+    if last_err is not None and not best:
+        logger.error("[stable_bars] batch raised on both attempts: %s", last_err)
+
+    # SPLIT. One unanswerable symbol must not take the rest of its batch with it.
+    stragglers = [t for t in tickers if t not in best]
+    if stragglers:
+        capped = stragglers[:_MAX_SINGLE_RETRIES]
+        logger.warning("[stable_bars] asking %d/%d stragglers individually",
+                       len(capped), len(stragglers))
+        for t in capped:
+            try:
+                one = _download_batch({t: yahoo[t]}, [t], start, end)
+            except Exception as e:                  # noqa: BLE001
+                logger.debug("[stable_bars] %s alone also failed: %s", t, e)
+                continue
+            if t in one:
+                best[t] = one[t]
+        if len(stragglers) > len(capped):
+            logger.error("[stable_bars] %d straggler(s) left unasked (cap %d) — the run is "
+                         "incomplete and the caller's coverage will say so",
+                         len(stragglers) - len(capped), _MAX_SINGLE_RETRIES)
+
+    return best
 
 
 def incomplete_sessions(lookback_days: int = 10) -> list:

@@ -439,7 +439,7 @@ async def iv_at_fire(ticker: str) -> dict:
 
     log = _logging.getLogger("triton_shadow")
     out = {"iv_rank_at_fire": None, "iv_at_fire": None, "iv_source": None,
-           "iv_rank_raw": None}
+           "iv_rank_raw": None, "iv_rank_valid": None}
     try:
         from integrations.uw_api import get_iv_rank
 
@@ -474,6 +474,12 @@ async def iv_at_fire(ticker: str) -> dict:
         except (TypeError, ValueError):
             out["iv_rank_raw"] = None
         out["iv_rank_at_fire"] = iv_rank_1y_to_100(raw_rank)
+        # R-IV.599(b)1: validity is stamped BY THE CONVERSION, not asserted separately. A rank
+        # exists only where the converter accepted the raw value, so TRUE and "a figure is
+        # present" cannot come apart -- which is exactly how 7,553 rows came to hold a number
+        # nothing had validated.
+        if raw_rank is not None:
+            out["iv_rank_valid"] = out["iv_rank_at_fire"] is not None
         # An IV LEVEL if the payload carries one under any of the names UW uses elsewhere in this
         # codebase. Tried in order, and `iv_source` records WHICH -- so a value is never
         # anonymous, and a NULL is distinguishable from a field we never looked for.
