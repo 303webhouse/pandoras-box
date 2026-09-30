@@ -39,6 +39,7 @@
     THEMES: 'Ranked theme board: score, 1-day delta, and status (dominant/emerging/fading)',
     DIVERGENCE: 'Sectors vs SPY — each sector ETF’s 1-day % minus SPY’s, ranked. Leaders on top. The 1D/5D chart button opens the raw line chart.',
     INDEX: 'Major index 1-day % and ATR extension (how stretched vs typical range)',
+    FUTURES: 'Overnight futures, shown whenever the stock market is not in its regular session (the server calendar decides; it flips back at the open). ES = S&P 500 · NQ = Nasdaq 100 · RTY = Russell 2000 · YM = Dow · plus crude oil and the 10-year note. Each % is measured from the futures price at the last 4 PM ET stock close (not the exchange settlement). The small line under each is the matching ETF in pre-market or after-hours. Yahoo data, about 10 minutes delayed: context for the open, not an entry trigger.',
     CURVE: 'Treasury yield curve with a 5-day-ago ghost line; bp = basis-point day change',
     USD: 'Dollar carry check — DXY and USD/JPY level and day change',
     BOOK: 'Open book: balance, day P&L, net Greeks, theme-concentration guardrail, and positions',
@@ -447,12 +448,13 @@
   const TIDE_MIN = 25e6, TIDE_STRONG = 100e6;
   const fmtMabs = (v) => '$' + Math.round(Math.abs(v) / 1e6) + 'M';
   const fmtMsigned = (v) => (v >= 0 ? '+' : '−') + Math.round(Math.abs(v) / 1e6) + 'M';
-  function tideView(tide, quietSince) {
+  function tideView(tide, quietSince, closed) {
     const t = tide && tide.tide;
     if (!t || t.net_call_premium == null || t.net_put_premium == null) {
-      // No session field reaches this page, and it may not guess the session from a clock
-      // (R-IV.416(c)). "Closed" is inferred only when the market feeds have ALSO gone quiet.
-      if (quietSince) return { word: 'NO READING', cls: 'val-muted', lean: '', line2: 'feeds quiet since ' + quietSince + ' (likely closed)', chip: 'closed' };
+      // The session is the server's answer (serverSession, R-IV.416(c)). Only when that is
+      // unknown is "closed" inferred, from the market feeds having ALSO gone quiet.
+      if (closed) return { word: 'NO READING', cls: 'val-muted', lean: '', line2: 'market closed · flow resumes at the open', chip: 'closed' };
+      if (quietSince) return { word: 'NO READING', cls: 'val-muted', lean: '', line2: 'feeds quiet since ' + quietSince + ' (likely closed)', chip: 'closed?' };
       return { word: '—', cls: 'val-muted', lean: '', line2: 'no flow reading', chip: 'unknown' };
     }
     const nc = Number(t.net_call_premium), np = Number(t.net_put_premium);
@@ -494,8 +496,18 @@
     if (!d) return vintageChip({ unknownLabel: 'as of —' });
     return `<span class="vintage-chip" data-state="${bad ? 'stale' : 'closed'}" title="${esc(why || 'computed from the ' + dateStr + ' close; recomputes nightly ~9 PM ET')}">closed · ${esc(d)} close</span>`;
   }
-  // "Feeds quiet since" — from the index strip's own age, the inference the Tide cell uses.
+  // "Feeds quiet since" — from the index strip's own age, the inference the Tide cell uses
+  // only when the server's session answer is missing.
   let _ixData = null;
+  let _ext = null;   // /api/stable/futures — overnight futures + pre/after-hours ETFs
+  // THE session, as the server's calendar answers it (stable_engine/sessions.py). This page
+  // never works it out from a clock (R-IV.416(c)); null = unknown, and unknown is not closed.
+  function serverSession() {
+    if (_ext && _ext.market_session !== undefined) return _ext.market_session;
+    if (_ixData && _ixData.market_session !== undefined) return _ixData.market_session;
+    return null;
+  }
+  const marketShut = () => { const s = serverSession(); return s != null && s !== 'regular'; };
   function feedsQuietSince() {
     const ix = _ixData;
     if (!ix || ix.data_age_seconds == null || ix.data_age_seconds <= 900 || !ix.as_of) return null;
@@ -539,7 +551,8 @@
     const band = $('regimeBand');
     const r = regime || {}, b = r.breadth || {};
     const v1 = lens1View(composite), v2 = lens2View(regime), split = lensSplit(v1, v2);
-    const tv = tideView(tide, feedsQuietSince()), vc = volCurveView(composite);
+    const shut = marketShut();
+    const tv = tideView(tide, feedsQuietSince(), shut), vc = volCurveView(composite);
 
     // Age chips. Lens 1 recomputes every 15 min (fresh bound 20 min). Lens 2 IS a nightly close;
     // it goes amber only on a real problem, not on the themes snapshot's own degraded flag.
@@ -548,8 +561,9 @@
     const chip2 = closeChip(r.metrics_date, !!r.degraded_reason || (lag != null && lag > 0),
       r.degraded_reason ? 'degraded: ' + r.degraded_reason : (lag > 0 ? lag + ' session(s) behind' : null));
     const chipTh = r.degraded ? `<span class="vintage-chip" data-state="stale" title="theme snapshot reported degraded">snapshot degraded</span>` : vintageChip({ iso: isoUtc(r.as_of), freshBoundSec: 8 * 3600 });
-    const chipTide = tv.chip === 'closed' ? `<span class="vintage-chip" data-state="closed" title="Inferred: the market feeds have also gone quiet. No session flag reaches this page yet.">closed?</span>`
-      : tv.chip === 'unknown' ? vintageChip({ unknownLabel: 'no reading' }) : vintageChip({ iso: isoUtc(tide.as_of), freshBoundSec: 900, session: tide.session });
+    const chipTide = tv.chip === 'closed?' ? `<span class="vintage-chip" data-state="closed" title="Inferred: the market feeds have also gone quiet. The server's session answer did not arrive.">closed?</span>`
+      : tv.chip === 'closed' ? `<span class="vintage-chip" data-state="closed" title="Market closed (server calendar). Flow resumes at the open.">closed</span>`
+      : tv.chip === 'unknown' ? vintageChip({ unknownLabel: 'no reading' }) : vintageChip({ iso: isoUtc(tide.as_of), freshBoundSec: 900, session: tide.session || (shut ? 'closed' : null) });
     const chipVc = vc.iso == null ? vintageChip({ unknownLabel: 'no reading' })
       : vc.stale ? `<span class="vintage-chip" data-state="stale" title="vix_term factor is stale or excluded">stale</span>` : vintageChip({ iso: vc.iso, freshBoundSec: 1200 });
     const total = b.total != null ? b.total : 250;
@@ -569,8 +583,8 @@
         <span class="label"><span data-gloss="THEMES">Themes · dom · emerging · fading</span>${chipTh}</span>
         <div class="th-chips">${themeChipsAll(regime)}</div>
       </div>
-      <div class="regime-cell rc-tide">
-        <span class="label"><span data-gloss="TIDE">Tide · options flow</span>${chipTide}</span>
+      <div class="regime-cell rc-tide${shut ? ' cell-closed' : ''}">
+        <span class="label"><span data-gloss="TIDE">Tide · ${shut ? 'last session' : 'options flow'}</span>${chipTide}</span>
         <div class="big ${tv.cls}${tv.word.length > 9 ? ' tide-long' : ''}">${esc(tv.word)}${tv.lean ? `<span class="tide-lean num">${esc(tv.lean)}</span>` : ''}</div>
         <div class="sub">${esc(tv.line2)}</div>
       </div>
@@ -1357,13 +1371,22 @@
 
   // ── b4 Index strip ──────────────────────────────────────────────────────────
   async function loadIndexStrip() {
-    let data = null;
-    try { const r = await apiFetch('/api/stable/index-strip'); if (r.ok) data = await r.json(); } catch (_) {}
+    let data = null, ext = null;
+    const getJson = async (u) => { try { const r = await apiFetch(u); return r.ok ? await r.json() : null; } catch (_) { return null; } };
+    [data, ext] = await Promise.all([getJson('/api/stable/index-strip'), getJson('/api/stable/futures')]);
     // The Sectors-vs-SPY bars and the Tide cell's closed inference both read this strip.
     _ixData = data;
+    _ext = ext;
     renderSectorBars();
     if (_lastRegime.composite || _lastRegime.regime) renderRegimeBand(_lastRegime.composite, _lastRegime.regime, _lastRegime.tide, _lastRegime.kill);
+    applyClosedTiles();
     const el = $('indexStrip'); if (!el) return;
+    // Outside the regular session (the SERVER's answer) the index bar flips to futures, and
+    // flips back at the open, on this same 60 s poll. Unknown session = the normal bar.
+    const fut = marketShut() && ext && (ext.futures || []).length > 0;
+    el.classList.toggle('fut', !!fut);
+    if (fut) { renderFuturesBar(el, ext); return; }
+    setIndexHeader(false);
     setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline, data && data.session, null, data && data.incoherent);
     noteFlatline('strip', data && data.flatline, 'Index / strip');
     const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
@@ -1392,6 +1415,89 @@
         + chg
         + `<span class="ext">${ext != null ? (ext >= 0 ? '+' : '') + Number(ext).toFixed(1) + ' ATR' : ''}</span></div>`;
     }).join('');
+  }
+
+  // ── b4b Futures bar (outside the regular session) ─────────────────────────────
+  // Each percent is measured from the price at 4 PM ET of `base_session` (the stock close,
+  // not the exchange settlement), ~10 min delayed. Chart symbols are TradingView's
+  // continuous front-month contracts.
+  const FUT_SHORT = { 'ES=F': 'ES', 'NQ=F': 'NQ', 'RTY=F': 'RTY', 'YM=F': 'YM', 'CL=F': 'CRUDE', 'ZN=F': '10Y' };
+  const FUT_CHART = { 'ES=F': 'ES1!', 'NQ=F': 'NQ1!', 'RTY=F': 'RTY1!', 'YM=F': 'YM1!', 'CL=F': 'CL1!', 'ZN=F': 'ZN1!' };
+  const EXT_WORD = { pre_market: 'pre', after_hours: 'after' };
+  const fmtMT = (iso) => { try { return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }).format(new Date(isoUtc(iso))) + ' MT'; } catch (_) { return ''; } };
+  // "Tue" for a YYYY-MM-DD session date (a date label only; noon UTC keeps it on its day).
+  const sessionDay = (d) => { try { return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(new Date(d + 'T12:00:00Z')); } catch (_) { return d; } };
+  function setIndexHeader(fut, sub) {
+    const t = $('indexTitle'), s = $('indexSub');
+    if (t) { t.textContent = fut ? 'Futures' : 'Index'; t.setAttribute('data-gloss', fut ? 'FUTURES' : 'INDEX'); applyGlossary(t.parentNode); }
+    if (s) s.textContent = fut ? (sub || '') : '';
+  }
+  function renderFuturesBar(el, ext) {
+    const etf = {}; (ext.etfs || []).forEach((r) => { etf[r.symbol] = r; });
+    const base = ext.base_session_expected || ((ext.futures || [])[0] || {}).base_session;
+    const stale = (ext.stale_base || []).length > 0;
+    setIndexHeader(true, (base ? 'since ' + sessionDay(base) + ' 4 PM ET' : 'since the 4 PM ET close')
+      + ' · ~' + (ext.data_delay_minutes || 10) + ' min delayed' + (stale ? ' · updating' : ''));
+    // The feed's stated delay is not staleness: the dot ages from the end of that delay.
+    const delay = (ext.data_delay_minutes || 0) * 60;
+    const age = ext.data_age_seconds != null ? Math.max(0, ext.data_age_seconds - delay) : null;
+    setDot('indexHealthDot', age, !!ext.degraded, ext.flatline, ext.session, null, null);
+    noteFlatline('ext_hours', !!ext.flatline, 'Overnight futures');
+    _health.index = null;
+    updateGlobalHealth();
+    el.innerHTML = (ext.futures || []).map((f) => {
+      const pct = f.pct;
+      const waiting = /^waiting/.test(f.reason || '');
+      const oldBase = base && f.base_session && f.base_session !== base;
+      const chg = pct != null
+        ? `<span class="chg ${signCls(pct)}">${fmtPct(pct)}</span>`
+        : `<span class="chg ix-unavail" title="${esc(f.reason || 'no reading')}">${waiting ? 'WAITING' : 'UNAVAILABLE'}</span>`;
+      const e = f.leads ? etf[f.leads] : null;
+      const sub = e && e.pct != null ? `${esc(e.symbol)} ${EXT_WORD[e.ext_session] || 'ext'} ${fmtPct(e.pct)}` : esc(f.label || '');
+      const path = sparkPath((f.spark || []).map((v) => ({ value: v })), 100, 14);
+      const col = pct > 0 ? 'var(--up)' : pct < 0 ? 'var(--down)' : 'var(--text-3)';
+      const title = `${f.label} futures${f.last != null ? ' ' + f.last : ''}`
+        + (f.base != null ? ` vs ${f.base} at the ${f.base_session} 4 PM ET close` : '')
+        + (f.bar_ts ? ` · last bar ${fmtMT(f.bar_ts)}` : '')
+        + (oldBase ? ` · still measured from ${f.base_session}; refreshes within 5 min` : '')
+        + (e && e.pct != null ? ` · ${e.symbol} ${e.ext_session === 'pre_market' ? 'pre-market' : 'after-hours'} ${e.last} vs ${e.base} close` : '');
+      return `<div class="ix-cell fut-cell" data-chart="${esc(FUT_CHART[f.symbol] || '')}" tabindex="0" role="button" title="${esc(title)}">`
+        + `<div class="fut-txt"><span class="sym">${esc(FUT_SHORT[f.symbol] || f.symbol)}</span>${chg}<span class="ext">${sub}</span></div>`
+        + (path ? `<svg class="fut-spark" viewBox="0 0 100 14" preserveAspectRatio="none" aria-hidden="true"><path d="${path}" fill="none" stroke="${col}" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg>` : '')
+        + '</div>';
+    }).join('');
+  }
+
+  // ── Market-closed tiles ─────────────────────────────────────────────────────
+  // Tiles whose feeds run in regular hours only (strip / movers / scanner jobs). Outside the
+  // session they hold the last reading, so they say so instead of looking live. Nightly
+  // tiles (Themes, Breadth) update after the close and are NOT listed; the River keeps
+  // receiving news; the Book is out of scope. R-IV.527: no opacity dimming (it fails AA) —
+  // a greyscale body, a dashed neutral border and a full-strength tag.
+  const CLOSED_TILES = ['movers-tape', 'divergence', 'curve', 'usd', 'kairos'];
+  const CLOSED_WORD = { pre_market: 'PRE-MARKET', after_hours: 'AFTER HOURS', closed: 'CLOSED' };
+  function applyClosedTiles() {
+    const s = serverSession();
+    const shut = s != null && s !== 'regular';
+    const since = _ixData && _ixData.as_of ? fmtMT(_ixData.as_of) : '';
+    CLOSED_TILES.forEach((id) => {
+      const it = document.querySelector(`#v2Grid > .grid-stack-item[gs-id="${id}"]`);
+      if (!it) return;
+      it.classList.toggle('tile-closed', shut);
+      const hdr = it.querySelector('.tile-header'); if (!hdr) return;
+      let tag = hdr.querySelector('.closed-tag');
+      if (!shut) { if (tag) tag.remove(); return; }
+      if (!tag) {
+        tag = document.createElement('span'); tag.className = 'closed-tag';
+        const title = hdr.querySelector('.tile-title');
+        if (title && title.nextSibling) hdr.insertBefore(tag, title.nextSibling); else hdr.appendChild(tag);
+      }
+      tag.textContent = CLOSED_WORD[s] || 'CLOSED';
+      tag.title = id === 'kairos'
+        ? 'Outside the regular session (server calendar). New setups are held until the open.'
+        : 'Outside the regular session (server calendar). This feed updates only in market hours; it shows the last reading'
+          + (since ? ' (market feeds last wrote ' + since + ')' : '') + '. The Futures bar is live.';
+    });
   }
 
   // ── b5 Yield curve mini ─────────────────────────────────────────────────────
