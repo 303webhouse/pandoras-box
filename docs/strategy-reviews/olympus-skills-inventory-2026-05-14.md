@@ -2302,7 +2302,7 @@ Save to `C:\trading-hub\committee-reviews\<TICKER>-<YYYY-MM-DD>.md` with:
 
 ### 4. Post notification to Discord
 ```
-curl -X POST "https://discordapp.com/api/webhooks/1493053445291376824/Iuecb5TVpOMOxU2M72RtkJwzvx6poLckKSpBw75lfCmq-bLLlVZLNwpeocMAEkbAuFVB" \
+curl -X POST "https://discordapp.com/api/webhooks/<WEBHOOK_ID>/<TOKEN — regenerate in Discord, 2026-09-30>" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "Cowork Deep Review",
