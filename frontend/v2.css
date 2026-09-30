@@ -1087,3 +1087,32 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .drawer-backdrop, .popup-backdrop, .rp-backdrop, .pp-backdrop { top: var(--topbar-h); }
 .drawer { top: var(--topbar-h); height: calc(100% - var(--topbar-h)); }
 .rp-panel, .pp-panel { top: var(--topbar-h); }
+
+/* ── Futures bar + market-closed tiles (2026-09-30) ───────────────────────────
+   The index strip flips to overnight futures outside the regular session (server calendar).
+   Tiles whose feeds run in market hours only carry .tile-closed: R-IV.527 forbids opacity
+   dimming (fails AA), so "not live" is a greyscale body, a dashed NEUTRAL border and a
+   full-strength tag. Never amber: amber means "cannot confirm", and closed is known. */
+.ix-cell.fut-cell { flex-direction: row; gap: 8px; min-width: 0; }
+.fut-txt { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.fut-cell .ext { color: var(--text-2); white-space: nowrap; }
+.fut-spark { flex: 0 0 auto; width: 44px; height: 18px; pointer-events: none; }
+.grid-stack-item.tile-closed .tile { border-style: dashed; border-color: var(--text-3); }
+.grid-stack-item.tile-closed .tile-body { filter: grayscale(1); }
+.closed-tag {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.6px; white-space: nowrap;
+  color: var(--text-2); border: 1px solid var(--text-3); border-radius: 3px; padding: 0 5px; cursor: help;
+}
+.regime-cell.cell-closed { outline: 1px dashed var(--text-3); outline-offset: -3px; }
+.regime-cell.cell-closed .big, .regime-cell.cell-closed .sub { filter: grayscale(1); }
+@media (max-width: 820px) {
+  .closed-tag { font-size: 9px; }
+  .fut-cell .ext { font-size: 8.5px; }
+}
+@media (max-width: 1100px) { .fut-spark { display: none; } }
+/* Phones: tiles size to content here, so six cells wrap into two rows of three. */
+@media (max-width: 768px) {
+  .index-strip.fut { flex-wrap: wrap; height: auto; }
+  .index-strip.fut .fut-cell { flex: 1 0 33.33%; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .index-strip.fut .fut-cell:nth-child(3n) { border-right: none; }
+}

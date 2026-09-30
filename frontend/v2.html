@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=37">
+    <link rel="stylesheet" href="/v2.css?v=38">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -135,7 +135,8 @@
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
-                            <span class="tile-title" data-gloss="INDEX">Index</span>
+                            <span class="tile-title" id="indexTitle" data-gloss="INDEX">Index</span>
+                            <span class="tile-sub" id="indexSub"></span>
                             <div class="spacer"></div>
                             <span class="health-dot" id="indexHealthDot"></span>
                             <span class="tile-grip" data-gloss="GRIP">⠿</span>
@@ -283,6 +284,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=44"></script>
+    <script src="/v2.js?v=45"></script>
 </body>
 </html>
