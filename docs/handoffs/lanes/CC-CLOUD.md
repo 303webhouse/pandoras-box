@@ -1,6 +1,6 @@
 # CC-CLOUD lane — status
 
-**Written:** 2026-09-29 18:56 MDT (2026-09-30 00:56 UTC)
+**Written:** 2026-09-29 20:18 MDT (2026-09-30 02:18 UTC)
 **Worked against:** `origin/main` = `f0421ac` (Merge PR #43, cursor/lane-setup)
 **Where:** Claude Code cloud session (claude.ai/code), branch `claude/sharp-faraday-pd9x1j`. Not a local worktree.
 **Why this lane exists:** Nick's local weekly limit was spent; a cloud-only credit let work continue here. It owns nothing by default. It built in CC-ABACUS's files at Nick's instruction and relayed (below).
@@ -10,37 +10,46 @@
    members ×2 passes + PIVOT, 4 Titans ×2 passes + ATHENA, quote fact-checkers, completeness critic).
    Output went to Nick as a private report (not in this repo): answers per section, a what's-live table,
    drawn mockups, and ATHENA's 30-item ranked list. Security findings went to Nick directly and are
-   deliberately **not** described here (public repo).
-2. **Built Nick's direct asks** on the branch (3 commits: `bcf589e`, `dbed5e4`, `2659776`): ticker-click
-   TradingView chart (SMA 9/50/200, centred between open pop-outs, zero hub calls); pop-outs open on their
-   tile's side and start below the top bar; ordered Escape; full-screen button; "Judgment Layer · v2"
-   branding removed; v1's 200 quotes + 35 verified Olympus-lane quotes back in the top bar.
-   Verified in headless Chromium at 1920/1440/1024/390 against live GETs with every non-GET trapped.
-3. Relay to CC-ABACUS: `docs/codex-briefs/RELAY_CC-CLOUD_to_CC-ABACUS_2026-09-30_agora-ui.md`.
-4. `CLAUDE.md` cache-bust line brought current (Agora pins + "static files live under /assets").
+   deliberately **not** described here (public repo); Nick has deferred them.
+2. **Built Nick's direct asks** (`bcf589e`, `dbed5e4`, `2659776`): ticker-click TradingView chart
+   centred between open pop-outs (zero hub calls); pop-outs open on their tile's side and start below
+   the top bar; ordered Escape; full-screen button; "Judgment Layer · v2" branding removed; v1 quotes +
+   35 verified Olympus-lane quotes back in the top bar.
+3. **Built the approved mockups, frontend only** (`aea9bc2`, `640575b`). Nick approved with changes:
+   - Regime band = Regime · Themes · Tide · VOL CURVE. Each lens is a small label above a large call:
+     MARKET MIX in TORO/URSA MAJOR/MINOR/NEUTRAL (backend bias_level), THEME BREADTH as STRONG/MODERATE
+     BUY · NEUTRAL · MODERATE/STRONG SELL at 70/60/40/30 (display only — backend RISK-ON/OFF unchanged).
+   - Duplicate New H/L and % > 50DMA band cells removed (Breadth tile opens the breadth drawer).
+   - Kill-switch beacon in the top bar; default-since-boot reads UNVERIFIED.
+   - Tide as a flow type (provisional $25M / $100M thresholds); VOL CURVE from vix_term.
+   - Sectors vs SPY ranked bars; the old line chart moved to a drawer.
+   - Chart 9-day line is an EMA (Olympus pick; Nick deferred to it).
+   - 16 misattributed v1 quotes fixed (231 quotes).
+   Verified: 59 fixture-driven checks + 86-check regression suite in headless Chromium (America/Denver).
+4. Relay to CC-ABACUS: `docs/codex-briefs/RELAY_CC-CLOUD_to_CC-ABACUS_2026-09-30_agora-ui.md`.
+5. `CLAUDE.md` cache-bust line current: `v2.css?v=37`, `v2.js?v=44`, `agora-quotes.js?v=3`.
 
 ## In flight
 - **Branch is NOT merged and NOT deployed** (Nick: hold for the project-manager conflict review).
-  Rebase on `main` before merge; unpushed ABACUS work in `C:\th-abacus` is the collision risk
-  (`openTvPopover` no longer exists → `openChart`).
-- Open for Nick: 9-day MA as SMA or EMA (`CHART_MA9_TYPE`, one constant); approve the band / beacon /
-  sectors mockups before Briefs B, C, E; 16 v1 quotes flagged as misattributed (no change without OK).
-- Deferred: `liftSource` (source tile lifted above the backdrop) — needs a layering rework near `liftBook`.
-- A market-hours re-audit of Tide, status dots, the 1D sector window and composite price freshness
-  is scheduled for 2026-09-30 14:30 UTC (8:30 AM MDT) in this session.
+  Rebase on `main` before merge; unpushed ABACUS work in `C:\th-abacus` is the collision risk.
+  Renamed/removed in v2.js: `openTvPopover` → `openChart`; `themeChips` → `themeChipsAll`; the band's
+  kill cell and breadth cells; `#divToggle`/`#divLegend`/`#divChart` now live in a drawer.
+- Tide thresholds are provisional; calibrate from the 2026-09-30 market-hours re-audit (14:30 UTC,
+  scheduled in this session).
+- Deferred: `liftSource` (lift the source tile above the backdrop) — needs a layering rework near `liftBook`.
 
 ## Findings for other lanes (text; owners insert)
-- CC-BUILD: composite SPY factors go a session stale after the close (yfinance fallback `end` is
-  exclusive, `backend/integrations/uw_api.py` get_bars path); IV rank parsed on the wrong scale and
-  read from the wrong end of the series in several readers; `/api/bias/history` is shadowed by the
-  `/api/bias/{timeframe}` catch-all in `backend/main.py`; the stable envelope never sends `session`,
-  so every status dot turns amber/red after hours.
-- CC-ABACUS: see the relay. Tide's label is a bare call>put sign test; the committee proposes a
-  flow-type label (BULL FLOW / BEAR FLOW / TWO-WAY / PREMIUM SELLING) once the series is stored.
+- CC-BUILD (backend briefs, in ATHENA's order): composite SPY factors go a session stale after the
+  close (yfinance fallback `end` is exclusive, `backend/integrations/uw_api.py` get_bars path); add
+  SPY/RSP/VIX/VIX3M to the 2-minute strip; send `session` on the stable envelope (every dot turns
+  amber/red after hours without it); store Tide's full-day series (+0 UW calls) for the sparkline and
+  a real closed state; IV rank parsed on the wrong scale / wrong end of the series; `/api/bias/history`
+  shadowed by the `/api/bias/{timeframe}` catch-all in `backend/main.py`; sector 5d/20d + level table
+  for the Sectors-vs-SPY seam; kill-switch heartbeat + trip log.
 - SPINE: kill-switch latch behaviour (`spy_recovery` cannot clear an armed breaker; `spy_up_2pct`
   floors the bias bearish) needs rulings before any fix.
 
 ## What the next session should do first
-1. Confirm with Nick that the security items in the private report are handled (he has the list).
-2. Read the project-manager review of this branch; rebase on `main`; resolve any ABACUS collisions.
-3. Take Nick's picks from the ranked list and write briefs in ATHENA's order (one open brief per lane).
+1. Read the project-manager review of this branch; rebase on `main`; resolve any ABACUS collisions.
+2. Fold in the 09-30 market-hours re-audit (Tide thresholds, dots, 1D window, composite freshness).
+3. Take Nick's picks from the ranked list and write CC-BUILD briefs in ATHENA's order.
