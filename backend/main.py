@@ -894,9 +894,11 @@ async def lifespan(app: FastAPI):
     try:
         from jobs.stable_jobs import (
             stable_engine_loop, stable_strip_loop, stable_movers_loop, stable_tide_warmer_loop,
+            stable_ext_hours_loop,
         )
         stable_engine_task = asyncio.create_task(stable_engine_loop())
         stable_strip_task = asyncio.create_task(stable_strip_loop())
+        stable_ext_hours_task = asyncio.create_task(stable_ext_hours_loop())  # overnight futures
         stable_movers_task = asyncio.create_task(stable_movers_loop())
         stable_tide_task = asyncio.create_task(stable_tide_warmer_loop())
         logger.info("✅ Stable Engine scheduler started")
