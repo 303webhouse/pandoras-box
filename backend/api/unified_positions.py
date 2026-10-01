@@ -742,6 +742,39 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
                         "2026-10-16. Nothing was written." % (req.expiry,)))
         dte = max(0, (expiry - date.today()).days)
 
+    # R-IV.613(c)1: WHAT THE SHAPE REQUIRES, REFUSED BY NAME.
+    #
+    # 564 QQQ was written as a put_debit_spread with no legs, no expiry and no direction, and the
+    # route said success. Fixing the date was one of three silences: nothing required an expiry
+    # or strikes for a structure that cannot exist without them.
+    from models.position_shape import legs_from_strikes, missing_fields, refusal_message
+
+    _missing = missing_fields(req.structure, req.expiry, norm_long, norm_short)
+    if _missing:
+        raise HTTPException(status_code=400,
+                            detail=refusal_message(req.structure, _missing))
+
+    # R-IV.613(c)2: the legs come from the STRIKES the form sends.
+    #
+    # `legs` only ever reached the row when the form happened to send an array, and the form
+    # sends strikes -- so a spread's legs were simply absent. A synthesised set is shaped exactly
+    # like a form-supplied one, so nothing downstream can tell them apart.
+    legs_payload = req.legs or legs_from_strikes(
+        req.structure, expiry, norm_long, norm_short, req.quantity)
+
+    # R-IV.613(c)3: every money figure through money(), so no float reaches a numeric column.
+    # `cost_basis` arrived as 7.000000000000001 on 564 QQQ -- binary floating point, written
+    # verbatim into NUMERIC, and every figure derived from it inherits the tail.
+    from services.position_economics import money_in as _money
+
+    entry_price = _money(req.entry_price)
+    cost_basis = _money(cost_basis)
+    max_loss = _money(max_loss)
+    max_profit = _money(max_profit)
+    stop_loss = _money(req.stop_loss)
+    target_1 = _money(req.target_1)
+    target_2 = _money(req.target_2)
+
     async with pool.acquire() as conn, conn.transaction():
         await name_actor(conn, req.actor or "legacy-ui", req.reason or None)  # R-IV.463(b)
         row = await conn.fetchrow("""
@@ -761,9 +794,9 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             RETURNING *
         """,
             position_id, req.ticker.upper(), req.asset_type, req.structure, direction,
-            dumps_jsonb(req.legs) if req.legs else None,
-            req.entry_price, req.quantity, cost_basis,
-            max_loss, max_profit, req.stop_loss, req.target_1, req.target_2,
+            dumps_jsonb(legs_payload) if legs_payload else None,
+            entry_price, req.quantity, cost_basis,
+            max_loss, max_profit, stop_loss, target_1, target_2,
             breakeven if breakeven else None,
             expiry, dte, norm_long, norm_short,
             req.source, req.signal_id, account,
@@ -1753,13 +1786,19 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         sets.append(f"signal_id = ${idx}")
         params.append(req.signal_id)
         idx += 1
+    # R-IV.613(c)3: the PATCH path is a close path too, and a caller-supplied float lands in
+    # NUMERIC exactly as it arrives. Quantized at the edge, like every other money column.
     if req.exit_price is not None:
+        from services.position_economics import money_in as _money_patch
+
         sets.append(f"exit_price = ${idx}")
-        params.append(req.exit_price)
+        params.append(_money_patch(req.exit_price))
         idx += 1
     if req.realized_pnl is not None:
+        from services.position_economics import money_in as _money_patch2
+
         sets.append(f"realized_pnl = ${idx}")
-        params.append(req.realized_pnl)
+        params.append(_money_patch2(req.realized_pnl))
         idx += 1
     if req.trade_outcome is not None:
         sets.append(f"trade_outcome = ${idx}")
@@ -2097,16 +2136,25 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                 asset_type = (pos.get("asset_type") or "").upper()
                 is_stock = s in ("stock", "stock_long", "long_stock", "stock_short", "short_stock") or (not s and asset_type == "EQUITY")
 
+                # R-IV.613(c)3: through money(), not round(). `round(x, 2)` is Python's
+                # banker's rounding (HALF-EVEN), so round(2.675, 2) is 2.67 -- convention #27
+                # says money is HALF-UP. Both prices are quantized on the way IN as well, so a
+                # float tail like 564 QQQ's 7.000000000000001 cannot propagate through the
+                # multiplication before the result is rounded.
+                from services.position_economics import money_in as _money
+
+                _entry = _money(entry_price)
+                _exit = _money(req.exit_price)
                 if is_stock:
                     direction = (pos.get("direction") or "LONG").upper()
                     if direction == "SHORT":
-                        realized_pnl = round((entry_price - req.exit_price) * close_qty, 2)
+                        realized_pnl = _money((_entry - _exit) * close_qty)
                     else:
-                        realized_pnl = round((req.exit_price - entry_price) * close_qty, 2)
+                        realized_pnl = _money((_exit - _entry) * close_qty)
                 elif s in CREDIT_STRUCTURES:
-                    realized_pnl = round((entry_price - req.exit_price) * 100 * close_qty, 2)
+                    realized_pnl = _money((_entry - _exit) * 100 * close_qty)
                 else:
-                    realized_pnl = round((req.exit_price - entry_price) * 100 * close_qty, 2)
+                    realized_pnl = _money((_exit - _entry) * 100 * close_qty)
 
                 # R-IV.447(b): the caller's figure is CHECKED, never stored in place of this
                 # one. Two methods that disagree produce two defensible numbers, and the one
