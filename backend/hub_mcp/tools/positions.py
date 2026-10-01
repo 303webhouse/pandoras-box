@@ -38,18 +38,23 @@ Account = Literal[
 ]
 Status = Literal["OPEN", "CLOSED", "ALL"]
 
-_VALID_ACCOUNTS = {"robinhood", "fidelity_roth", "brokerage_link_401k", "breakout_prop"}
+# R-IV.632(c): derived from models/accounts.py, not retyped. `brokerage_link_401k` and
+# `breakout_prop` are not canonical but remain filterable, so a reader can ask about a row
+# that exists under either label.
+from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
+
+_NON_CANONICAL_FILTERABLE = {"brokerage_link_401k", "breakout_prop"}
+_VALID_ACCOUNTS = {a.lower() for a in _CANONICAL_TUPLE} | _NON_CANONICAL_FILTERABLE
 _VALID_STATUS = {"OPEN", "CLOSED", "ALL"}
 
 
 def _normalize_account(value: str) -> str:
     """Map our normalized snake_case account names to DB account column values."""
-    mapping = {
-        "robinhood": "ROBINHOOD",
-        "fidelity_roth": "FIDELITY_ROTH",
+    mapping = {a.lower(): a for a in _CANONICAL_TUPLE}
+    mapping.update({
         "brokerage_link_401k": "BROKERAGE_LINK_401K",
         "breakout_prop": "BREAKOUT_PROP",
-    }
+    })
     return mapping.get(value, value.upper())
 
 

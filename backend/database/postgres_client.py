@@ -1879,9 +1879,17 @@ async def init_database():
 
         # Brief 07: Cash flow events for accurate P&L calculation
         await conn.execute("""
+            -- R-IV.632(c)2: account_name carries NO DEFAULT. It was `DEFAULT 'Robinhood'`,
+            -- a display-style spelling the live ledger does not use (it holds ROBINHOOD,
+            -- FIDELITY_ROTH, OUT_OF_SCOPE), so an insert omitting the column would have
+            -- filed money under a FOURTH spelling that `WHERE account_name = 'ROBINHOOD'`
+            -- -- the loss alert's own query -- could never match. All nine inserters name
+            -- the column explicitly, so the default was never a convenience, only a trap:
+            -- an account is not a thing to guess on a money row. NOT NULL now means the
+            -- writer must say which account.
             CREATE TABLE IF NOT EXISTS cash_flows (
                 id SERIAL PRIMARY KEY,
-                account_name TEXT NOT NULL DEFAULT 'Robinhood',
+                account_name TEXT NOT NULL,
                 flow_type TEXT NOT NULL,
                 amount NUMERIC(10,2) NOT NULL,
                 description TEXT,
@@ -1991,31 +1999,35 @@ async def init_database():
         # VALUES are unchanged placeholders — on a real fresh bootstrap they carry stale
         # numbers, acceptable for placeholders (flagged in the completion doc).
         if not await conn.fetchval("SELECT EXISTS (SELECT 1 FROM account_balances)"):
-            await conn.execute("""
-                INSERT INTO account_balances (account_name, broker, balance, updated_by)
-                SELECT 'Robinhood', 'robinhood', 4607.0, 'manual'
-                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Robinhood')
-            """)
-            await conn.execute("""
-                INSERT INTO account_balances (account_name, broker, balance, updated_by)
-                SELECT 'Fidelity 401A', 'fidelity', 10107.90, 'manual'
-                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 401A')
-            """)
-            await conn.execute("""
-                INSERT INTO account_balances (account_name, broker, balance, updated_by)
-                SELECT 'Fidelity 403B', 'fidelity', 233.15, 'manual'
-                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity 403B')
-            """)
-            await conn.execute("""
-                INSERT INTO account_balances (account_name, broker, balance, updated_by)
-                SELECT 'Fidelity Roth', 'fidelity', 8223.41, 'manual'
-                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Fidelity Roth')
-            """)
-            await conn.execute("""
-                INSERT INTO account_balances (account_name, broker, balance, updated_by)
-                SELECT 'Interactive Brokers', 'ibkr', 0.0, 'manual'
-                WHERE NOT EXISTS (SELECT 1 FROM account_balances WHERE account_name = 'Interactive Brokers')
-            """)
+            # ── R-IV.632(c)2: the seed speaks the CANONICAL vocabulary ────────────────
+            # It used to seed display-style names -- 'Robinhood', 'Fidelity Roth',
+            # 'Fidelity 401A', 'Fidelity 403B', 'Interactive Brokers' -- while the live
+            # table holds canonical keys. The empty-table guard above (DEF-SEED-
+            # RESURRECTION, 2cddf49) means this only ever fires on an empty table, and on
+            # that day it would have repopulated the very vocabulary R-IV.394 was written
+            # to clean up, INCLUDING a separate 'Fidelity 401A' row that the registry now
+            # spells FIDELITY_401A. A seed is a vocabulary writer like any other.
+            #
+            # The out-of-scope accounts are not seeded at all: the 403(b) and the retired
+            # IBKR are not tracked, and seeding a row for an untracked account is how one
+            # gets summed by a later reader.
+            #
+            # BALANCE IS A PLACEHOLDER, NOT A READING. The column is NOT NULL, so a row
+            # must carry a number; `cash` is nullable and is left NULL, because unknown
+            # cash and zero cash are different claims and only one of them is true here.
+            # `updated_by` says so out loud, and the principal's form supplies the real
+            # figures (R-IV.632(c)2).
+            from models.accounts import CANONICAL_ACCOUNTS as _SEED_ACCOUNTS
+
+            _BROKER = {"ROBINHOOD": "robinhood", "FIDELITY_ROTH": "fidelity",
+                       "FIDELITY_401A": "fidelity"}
+            for _acct in _SEED_ACCOUNTS:
+                await conn.execute("""
+                    INSERT INTO account_balances (account_name, broker, balance, updated_by)
+                    SELECT $1, $2, 0.00, 'seed: awaiting the first cash entry'
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM account_balances WHERE account_name = $1)
+                """, _acct, _BROKER.get(_acct, "unknown"))
 
         # Balance snapshots — daily EOD photo of each account for PnL tracking
         await conn.execute("""

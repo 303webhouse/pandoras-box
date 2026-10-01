@@ -130,12 +130,19 @@ def touches_block(position: dict, signal_direction: Optional[str]) -> dict:
     and so a null relation is distinguishable from a null direction -- the first means the signal
     was unreadable, the second means the structure was.
     """
+    from models.accounts import account_envelope
+
     structure = position.get("structure")
     return {
         "position_id": position.get("position_id"),
         "structure": structure,
         "position_direction": direction_of_structure(structure),
         "relation": relation(structure, signal_direction),
+        # R-IV.632(c)3 / R-IV.633: the account travels with the touch, key AND display
+        # name. A touches block that names only the position_id makes ABACUS join back to
+        # the book to answer "which account contradicts this signal" -- and with three
+        # accounts that question now has three possible answers.
+        **account_envelope(position.get("account")),
     }
 
 

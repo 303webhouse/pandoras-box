@@ -44,7 +44,10 @@ def triggers(rows, **kw):
 @pytest.fixture
 def account_value(monkeypatch):
     """A known account value for the end-to-end tick, without a database."""
-    async def _av(rows):
+    async def _av(rows, account=None):
+        # `account` accepted since R-IV.632(c)2: the pass now values each watched account
+        # separately. A stub that refuses the argument raises inside run_loss_alert's try
+        # and the whole tick is swallowed as a failure -- the stub inverting what it observes.
         return {"value": ACCOUNT_VALUE, "cash": 6007.93, "positions_value": 5311.60,
                 "positions_counted": 1, "positions_unvalued": [], "partial": False,
                 "reason": None}
@@ -390,7 +393,7 @@ def test_the_blind_rows_go_out_as_one_message_naming_each():
          row(id=2, position_id="B", ticker="BBB", remainder=None, lot_cost=None)],
         now=NOW)]
     title, body = la._digest_body(notices)
-    assert "2" in title and la.ACCOUNT in title
+    assert "2" in title and (la._account_display(la.ACCOUNT) or la.ACCOUNT) in title
     assert "AAA" in body and "BBB" in body
 
 

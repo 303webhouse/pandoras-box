@@ -150,7 +150,10 @@ async def open_positions_by_ticker(pool) -> Dict[str, list]:
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                """SELECT position_id, ticker, structure
+                # `account` is SELECTed because touches_block serves it (R-IV.632(c)3).
+                # A column the block reads and the query omits yields a null that looks
+                # like an unlabelled position rather than a missing SELECT.
+                """SELECT position_id, ticker, structure, account
                      FROM unified_positions
                     WHERE status = 'OPEN' AND ticker IS NOT NULL""")
         for r in rows:
