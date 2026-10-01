@@ -885,7 +885,7 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
 EXPIRY_SWEEP_ACTOR = "expiry-sweep"
 
 
-async def _sweep_expired_positions() -> List[Dict[str, Any]]:
+async def _sweep_expired_positions(through: Optional[date] = None) -> List[Dict[str, Any]]:
     """End OPEN positions whose expiry has passed, recording the result, never leaving it absent.
 
     R-IV.454(d): a terminal status is reachable only through a path that records the exit. An
@@ -897,7 +897,25 @@ async def _sweep_expired_positions() -> List[Dict[str, Any]]:
     AND IT RUNS ON A SCHEDULE, NEVER ON A READ. It used to be called from GET /v2/positions and
     from the portfolio summary, so a request to LOOK at the book could end positions in it. It is
     now driven by the stable-jobs loop and by the authenticated manual endpoint. Never raises.
+
+    `through` — R-IV.629(b). WITHOUT it the predicate is `expiry < CURRENT_DATE`: strictly
+    before today, which is the only safe rule for a pass that runs BEFORE the close. That pass
+    is at 06:30 ET on weekdays, so a Friday expiry waited until Monday, and in between an
+    expired option read OPEN to the loss alert, the caps and the River — measured as trailing
+    the expiry by 1 to 3 days, which was the sweep's normal behaviour, not a skip.
+
+    WITH `through` the predicate is `expiry <= through`, which is what makes an option EXPIRED
+    the evening it expires. The caller must have established that the session for `through` has
+    CLOSED; passing today's date before the close would end a position that is still live, so a
+    future date is refused outright rather than trusted.
     """
+    if through is not None:
+        from stable_engine.sessions import to_et
+        today_et = to_et(datetime.now(timezone.utc)).date()
+        if through > today_et:
+            logger.error("Expiry sweep REFUSED: through=%s is after today in ET (%s). "
+                         "Nothing was swept.", through, today_et)
+            return []
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
@@ -907,7 +925,12 @@ async def _sweep_expired_positions() -> List[Dict[str, Any]]:
                 await conn.execute(
                     "SELECT set_config('app.reason', $1, true)",
                     "R-IV.454(d): expiry passed; result recorded as UNKNOWN until marked")
-                rows = await conn.fetch("""
+                # One statement, two cutoffs. The inclusive form is only reachable when a
+                # caller has established the session for `through` has closed.
+                cutoff_sql = ("expiry <= $1::date" if through is not None
+                              else "expiry < CURRENT_DATE")
+                args = (through,) if through is not None else ()
+                rows = await conn.fetch(f"""
                     UPDATE unified_positions
                        SET status = 'EXPIRED',
                            -- R-IV.464(a): the day it expired, in the principal's timezone
@@ -917,13 +940,14 @@ async def _sweep_expired_positions() -> List[Dict[str, Any]]:
                            updated_at = NOW()
                      WHERE status = 'OPEN'
                        AND expiry IS NOT NULL
-                       AND expiry < CURRENT_DATE
+                       AND {cutoff_sql}
                     RETURNING position_id, ticker, expiry
-                """)
+                """, *args)
         expired = [{"position_id": r["position_id"], "ticker": r["ticker"],
                     "expiry": str(r["expiry"])} for r in rows]
         if expired:
-            logger.info("Expiry sweep ended %d position(s), result UNKNOWN: %s",
+            logger.info("Expiry sweep (%s) ended %d position(s), result UNKNOWN: %s",
+                        f"through {through}" if through is not None else "before today",
                         len(expired), [e["position_id"] for e in expired])
         return expired
     except Exception as e:
