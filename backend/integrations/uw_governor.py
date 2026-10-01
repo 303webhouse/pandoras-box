@@ -141,14 +141,43 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "market_tide": (300, TIER_FOREGROUND),
     "chart_indicators": (700, TIER_FOREGROUND),
     # ── STANDARD (scanners / factors) ──
-    # R-IV.380(b) READ: this tag names a JOB, not an endpoint — the only call site
-    # is crypto_bars.py:75, /api/crypto/{pair}/ohlc/{candle_size} at limit=500.
-    # It violates the endpoint-grain convention stated at uw_api_cache.py:115,
-    # which is why a table built by walking endpoints never saw it and it ran on
-    # the 500 unknown-code-path default while being the largest hub caller.
-    # RENAME to `crypto_ohlc` is owed — deferred because renaming resets the
-    # counter mid-measurement.
-    "outcome_resolver": (4500, TIER_STANDARD),
+    # ── crypto bars: the rename R-IV.380(b) said was owed — DONE, R-IV.624(b) ──
+    # `outcome_resolver` named a JOB, not an endpoint, violating the endpoint-grain
+    # convention at uw_api_cache.py:115 — which is why a table built by walking
+    # endpoints never saw it and it ran on the 500 unknown-code-path default.
+    # The rename was deferred because it resets the counter. It is done now, and
+    # the BEFORE figure is recorded so the reset costs no measurement:
+    #
+    #   old tag `outcome_resolver`, measured 2026-10-01 14:40 UTC
+    #     09-30 (full day)  369  — of which 333 was the two scheduled jobs
+    #     10-01 (to 14:40Z) 204  — accounted for exactly by those jobs
+    #
+    # SIX consumers shared that one name (all via crypto_bars._fetch_uw_bars_full):
+    # the resolver, tape-health, /api/crypto/state, the regime job, the MCP VP
+    # tool and btc_market_structure. Measured 2026-10-01: an open Stater tab is
+    # 4 calls per 30 s — 11,520/day, 41% of DAILY_BUDGET — and was indistinguishable
+    # from the resolver's own traffic. Tags are declared once, in
+    # jobs/crypto_bars.py::CRYPTO_BAR_CALLERS; a test proves every one appears
+    # below, because an absent tag silently takes DEFAULT_QUOTA 500.
+    #
+    # SIZING. A first pass split the 4,500 six ways to keep the table total fixed.
+    # test_uw_governor_account.py refused it, correctly: this tag's MEASURED peak is
+    # **2,764 on 2026-09-14**, when it was the largest hub caller, so a sixth of
+    # 4,500 would have blocked it on sight — the very fault the 09-14 retune was
+    # filed to fix. The split is therefore NOT budget-neutral; it rises 500, which
+    # the table's headroom carries (25,500 against the 26,000 cap).
+    #
+    # The 2,764 cannot be attributed to one consumer now — that is the defect being
+    # fixed, and it is not retroactive. It is assigned to the resolver because
+    # over-sizing a quota wastes headroom while under-sizing BLOCKS, and the table's
+    # own rule is to size to the maximum of sightings, not the smaller one. The six
+    # buckets separate from today, so the next tuning pass has real figures.
+    "crypto_bars_outcome_resolver": (3350, TIER_STANDARD),  # measured 2,764 (09-14) x1.2
+    "crypto_bars_tape_health": (700, TIER_STANDARD),        # 288/day scheduled + GET traffic
+    "crypto_bars_state_api": (450, TIER_STANDARD),          # Stater /api/crypto/state
+    "crypto_bars_regime": (200, TIER_STANDARD),             # 72/day scheduled
+    "crypto_bars_vp_mcp": (150, TIER_STANDARD),             # on demand, Claude sessions
+    "crypto_bars_market_structure": (150, TIER_STANDARD),   # on demand
     "ohlc_bars": (2500, TIER_STANDARD),
     # R-IV.380(b) READ: the poller IS running (main.py:882, every 300 s, RTH-gated)
     # and its output is consumed three ways — flow_radar's build_flow_summary,

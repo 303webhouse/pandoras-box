@@ -769,8 +769,8 @@ async def get_crypto_state(symbol: str):
     liquidations_field = _field_envelope(None, True, total_usd=None, long_pct=None, composition=None, signal=None)
 
     try:
-        from jobs.crypto_bars import fetch_crypto_ohlc
-        bars = await fetch_crypto_ohlc(base_symbol, use_daily=False)
+        from jobs.crypto_bars import CALLER_STATE_API, fetch_crypto_ohlc
+        bars = await fetch_crypto_ohlc(base_symbol, use_daily=False, caller=CALLER_STATE_API)
         if bars and len(bars) >= 15:
             from indicators.atr import latest_atr
             highs = [b[2] for b in bars]

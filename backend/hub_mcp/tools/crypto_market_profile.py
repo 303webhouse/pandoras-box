@@ -63,7 +63,7 @@ async def _get_crypto_market_profile(base_symbol: str) -> Dict[str, Any]:
     """Service layer: compute POC/VAH/VAL + session extremes for base_symbol."""
     from datetime import datetime, timezone
     from strategies.btc_market_structure import compute_volume_profile
-    from jobs.crypto_bars import fetch_crypto_ohlc
+    from jobs.crypto_bars import CALLER_VP_MCP, fetch_crypto_ohlc
     from utils.crypto_sessions import get_partition
 
     now_utc = datetime.now(timezone.utc)
@@ -84,7 +84,7 @@ async def _get_crypto_market_profile(base_symbol: str) -> Dict[str, Any]:
     # question is a separate PYTHIA-ratified methodology call, deferred.
     bars_1h = []
     try:
-        bars_1h = await fetch_crypto_ohlc(base_symbol, use_daily=False) or []
+        bars_1h = await fetch_crypto_ohlc(base_symbol, use_daily=False, caller=CALLER_VP_MCP) or []
         # bars_1h: List[Tuple[datetime, open, high, low, close]]
         bars_1h = sorted(bars_1h, key=lambda b: b[0])  # ORDERING FIX — never trust vendor order
         if bars_1h:
