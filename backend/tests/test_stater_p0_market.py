@@ -66,15 +66,37 @@ class FakeVenues:
         return _Resp(503, None)
 
 
+def _reset_cvd_state():
+    """Reset the per-symbol CVD trend state, BTC's dict IN PLACE.
+
+    R-IV.638(d): the fixture cleared the cache and the fallbacks but not this third global,
+    so `test_cvd_trend_state_is_per_symbol` passed alone and FAILED in the full suite --
+    `tests/test_frontend_routes.py` sorts earlier and drives /api/crypto/market through a
+    TestClient, leaving BTC's ema_ratio at -0.93 where the test expects None. A test that
+    asserts on module state has to own that state.
+
+    In place, not replaced: `cm._cvd_trend_state` is an alias for the dict at "BTCUSDT" and
+    the test asserts that identity. `_cvd_state_by_symbol.clear()` would orphan the alias
+    and the assertion would then fail for a different reason.
+    """
+    for pair in list(cm._cvd_state_by_symbol):
+        if pair == "BTCUSDT":
+            cm._cvd_state_by_symbol[pair].update(cm._new_cvd_state())
+        else:
+            del cm._cvd_state_by_symbol[pair]
+
+
 @pytest.fixture(autouse=True)
 def _reset():
     cm._cache_by_symbol.clear()
     cm._last_good_by_symbol.clear()
+    _reset_cvd_state()
     FakeVenues.down = set()
     FakeVenues.seen = []
     yield
     cm._cache_by_symbol.clear()
     cm._last_good_by_symbol.clear()
+    _reset_cvd_state()
 
 
 def _snap(sym):
