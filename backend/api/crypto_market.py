@@ -45,17 +45,42 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.8",
 }
 
-_cache: Dict[str, Any] = {"timestamp": 0.0, "data": None}
 CACHE_TTL_SECONDS = 4
-_last_good: Dict[str, Any] = {}
 _bybit_runtime_disabled = False
-_cvd_trend_state: Dict[str, Any] = {
-    "ema_ratio": None,
-    "direction": "NEUTRAL",
-    "pending_direction": None,
-    "pending_count": 0,
-    "updated_at": None,
-}
+# Keyed by canonical pair ("BTCUSDT"): see get_market_snapshot.
+_cache_by_symbol: Dict[str, Dict[str, Any]] = {}
+_last_good_by_symbol: Dict[str, Dict[str, Any]] = {}
+_cvd_state_by_symbol: Dict[str, Dict[str, Any]] = {}
+
+
+def _new_cvd_state() -> Dict[str, Any]:
+    return {"ema_ratio": None, "direction": "NEUTRAL", "pending_direction": None,
+            "pending_count": 0, "updated_at": None}
+
+
+def _cvd_state_for(pair: str) -> Dict[str, Any]:
+    return _cvd_state_by_symbol.setdefault(pair, _new_cvd_state())
+
+
+# BTC's state keeps its old name for anything that still reads it directly.
+_cvd_trend_state: Dict[str, Any] = _cvd_state_for("BTCUSDT")
+
+
+def _canonical_pair(raw: Optional[str]) -> str:
+    """'BTC', 'btc', 'BTC-USD', 'BTCUSDT', 'BTC-USDT-SWAP' -> 'BTCUSDT'.
+
+    Stater sent bare 'BTC', which every exchange rejected as a symbol, so each
+    venue failed and the endpoint fell back to remembered (other-coin) values.
+    An untracked symbol is upper-cased with separators removed and gets USDT
+    appended only when it carries no quote currency already.
+    """
+    base = normalize_crypto_ticker(raw)
+    if base:
+        return f"{base}USDT"
+    t = (raw or "BTCUSDT").upper().replace("-SWAP", "").replace("-", "").replace("/", "")
+    if t.endswith(".P"):
+        t = t[:-2]
+    return t if t.endswith(("USDT", "USDC", "USD")) else f"{t}USDT"
 
 
 async def _fetch_json(client: httpx.AsyncClient, url: str, params: Optional[dict] = None) -> Dict[str, Any]:
@@ -83,9 +108,15 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _classify_cvd_direction(net_usd: float, gross_usd: float) -> Dict[str, Any]:
-    """Return smoothed CVD direction using EMA + hysteresis deadband."""
-    global _cvd_trend_state
+def _classify_cvd_direction(net_usd: float, gross_usd: float,
+                            _cvd_trend_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Return smoothed CVD direction using EMA + hysteresis deadband.
+
+    The trend state is per symbol (Stater Phase 0): one coin's order flow must
+    never move another coin's smoothed direction. Defaults to BTC's state.
+    """
+    if _cvd_trend_state is None:
+        _cvd_trend_state = _cvd_state_for("BTCUSDT")
 
     if gross_usd <= 0:
         return {
@@ -184,12 +215,21 @@ def _classify_cvd_direction(net_usd: float, gross_usd: float) -> Dict[str, Any]:
 async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query(200, ge=50, le=1000)):
     global _bybit_runtime_disabled
     now = time.time()
-    if _cache["data"] and (now - _cache["timestamp"]) < CACHE_TTL_SECONDS:
-        return _cache["data"]
+    # Stater Phase 0 (R-IV.619): every piece of remembered state is PER SYMBOL. The
+    # response cache, the last-good fallbacks and the CVD trend state used to be
+    # one global each, so a Stater poll for HYPE could serve BTC's snapshot to the
+    # next caller within 4 s, and a failed HYPE feed was "filled" with BTC's last
+    # price. Agora (app.js) and the Discord bot read this endpoint for BTC; the
+    # response shape is unchanged.
+    symbol = _canonical_pair(symbol)
+    cache = _cache_by_symbol.setdefault(symbol, {"timestamp": 0.0, "data": None})
+    last_good = _last_good_by_symbol.setdefault(symbol, {})
+    if cache["data"] and (now - cache["timestamp"]) < CACHE_TTL_SECONDS:
+        return cache["data"]
 
     # Derive exchange-specific symbol formats from input (e.g. BTCUSDT)
     # Strip "USDT" suffix to get base asset, then build per-exchange pairs
-    base_asset = symbol.replace("USDT", "")  # BTC, ETH, etc.
+    base_asset = symbol[:-4] if symbol.endswith("USDT") else symbol  # BTC, ETH, etc.
     okx_spot_inst = f"{base_asset}-USDT"          # BTC-USDT
     okx_swap_inst = f"{base_asset}-USDT-SWAP"     # BTC-USDT-SWAP
     coinbase_pair = f"{base_asset}-USD"            # BTC-USD
@@ -286,15 +326,15 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     elif perp_price is None and not data_map["okx_perp_price"]["ok"]:
         errors.append(f"okx_perp_price: {data_map['okx_perp_price'].get('error')}")
 
-    if perp_price is None and _last_good.get("perp_price") is not None:
-        perp_price = _last_good["perp_price"]
-        perp_source = _last_good.get("perp_source")
-        perp_source_detail = _last_good.get("perp_source_detail")
+    if perp_price is None and last_good.get("perp_price") is not None:
+        perp_price = last_good["perp_price"]
+        perp_source = last_good.get("perp_source")
+        perp_source_detail = last_good.get("perp_source_detail")
         errors.append("perp_price: using cached fallback")
     elif perp_price is not None:
-        _last_good["perp_price"] = perp_price
-        _last_good["perp_source"] = perp_source
-        _last_good["perp_source_detail"] = perp_source_detail
+        last_good["perp_price"] = perp_price
+        last_good["perp_source"] = perp_source
+        last_good["perp_source_detail"] = perp_source_detail
 
     # Binance spot price
     binance_spot = None
@@ -311,11 +351,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 errors.append("binance_spot_price: using OKX spot fallback")
         except Exception:
             pass
-    if binance_spot is None and _last_good.get("binance_spot") is not None:
-        binance_spot = _last_good["binance_spot"]
+    if binance_spot is None and last_good.get("binance_spot") is not None:
+        binance_spot = last_good["binance_spot"]
         errors.append("binance_spot_price: using cached fallback")
     elif binance_spot is not None:
-        _last_good["binance_spot"] = binance_spot
+        last_good["binance_spot"] = binance_spot
 
     # Funding rates: Binance futures first, then OKX, then Bybit.
     funding_binance = None
@@ -332,13 +372,13 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         binance_funding_error = data_map["binance_funding"].get("error")
         if binance_funding_error:
             errors.append(f"binance_funding: {binance_funding_error}")
-    if funding_binance is None and _last_good.get("funding_binance") is not None:
-        funding_binance = _last_good["funding_binance"]
-        funding_binance_time = _last_good.get("funding_binance_time")
+    if funding_binance is None and last_good.get("funding_binance") is not None:
+        funding_binance = last_good["funding_binance"]
+        funding_binance_time = last_good.get("funding_binance_time")
         errors.append("binance_funding: using cached fallback")
     elif funding_binance is not None:
-        _last_good["funding_binance"] = funding_binance
-        _last_good["funding_binance_time"] = funding_binance_time
+        last_good["funding_binance"] = funding_binance
+        last_good["funding_binance_time"] = funding_binance_time
 
     funding_okx = None
     funding_okx_time = None
@@ -354,13 +394,13 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 funding_okx_time = None
     else:
         errors.append(f"okx_funding: {data_map['okx_funding'].get('error')}")
-    if funding_okx is None and _last_good.get("funding_okx") is not None:
-        funding_okx = _last_good["funding_okx"]
-        funding_okx_time = _last_good.get("funding_okx_time")
+    if funding_okx is None and last_good.get("funding_okx") is not None:
+        funding_okx = last_good["funding_okx"]
+        funding_okx_time = last_good.get("funding_okx_time")
         errors.append("okx_funding: using cached fallback")
     elif funding_okx is not None:
-        _last_good["funding_okx"] = funding_okx
-        _last_good["funding_okx_time"] = funding_okx_time
+        last_good["funding_okx"] = funding_okx
+        last_good["funding_okx_time"] = funding_okx_time
 
     funding_bybit = None
     funding_bybit_time = None
@@ -380,12 +420,12 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             _bybit_runtime_disabled = True
         elif BYBIT_ENABLED and bybit_funding_error != "disabled":
             errors.append(f"bybit_funding: {bybit_funding_error}")
-    if funding_bybit is None and _last_good.get("funding_bybit") is not None:
-        funding_bybit = _last_good["funding_bybit"]
-        funding_bybit_time = _last_good.get("funding_bybit_time")
+    if funding_bybit is None and last_good.get("funding_bybit") is not None:
+        funding_bybit = last_good["funding_bybit"]
+        funding_bybit_time = last_good.get("funding_bybit_time")
     elif funding_bybit is not None:
-        _last_good["funding_bybit"] = funding_bybit
-        _last_good["funding_bybit_time"] = funding_bybit_time
+        last_good["funding_bybit"] = funding_bybit
+        last_good["funding_bybit_time"] = funding_bybit_time
 
     funding_primary_rate = funding_binance if funding_binance is not None else (funding_okx if funding_okx is not None else funding_bybit)
     funding_primary_source = "binance" if funding_binance is not None else ("okx" if funding_okx is not None else ("bybit" if funding_bybit is not None else None))
@@ -399,11 +439,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             coinbase_spot = None
     else:
         errors.append(f"coinbase_spot: {data_map['coinbase_spot'].get('error')}")
-    if coinbase_spot is None and _last_good.get("coinbase_spot") is not None:
-        coinbase_spot = _last_good["coinbase_spot"]
+    if coinbase_spot is None and last_good.get("coinbase_spot") is not None:
+        coinbase_spot = last_good["coinbase_spot"]
         errors.append("coinbase_spot: using cached fallback")
     elif coinbase_spot is not None:
-        _last_good["coinbase_spot"] = coinbase_spot
+        last_good["coinbase_spot"] = coinbase_spot
 
     # Trades -> CVD + order flow
     cvd_btc = 0.0
@@ -492,8 +532,8 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             })
 
     gross_notional_usd = taker_buy_usd + taker_sell_usd
-    if not cvd_series and _last_good.get("cvd"):
-        cached_cvd = _last_good["cvd"]
+    if not cvd_series and last_good.get("cvd"):
+        cached_cvd = last_good["cvd"]
         cvd_btc = cached_cvd.get("net_btc", 0.0)
         cvd_usd = cached_cvd.get("net_usd", 0.0)
         cvd_direction = cached_cvd.get("direction", "NEUTRAL")
@@ -504,11 +544,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         gross_notional_usd = cached_cvd.get("gross_usd", 0.0)
         cvd_series = cached_cvd.get("cvd_series", [])
         cvd_source = cached_cvd.get("source")
-        trade_tape = _last_good.get("order_flow", [])
+        trade_tape = last_good.get("order_flow", [])
         errors.append("trades: using cached fallback")
     elif cvd_series:
-        trend_info = _classify_cvd_direction(cvd_usd, gross_notional_usd)
-        _last_good["cvd"] = {
+        trend_info = _classify_cvd_direction(cvd_usd, gross_notional_usd, _cvd_state_for(symbol))
+        last_good["cvd"] = {
             "net_btc": round(cvd_btc, 4),
             "net_usd": round(cvd_usd, 2),
             "direction": trend_info.get("direction", "NEUTRAL"),
@@ -523,7 +563,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             "source": cvd_source,
             "cvd_series": cvd_series[-120:],
         }
-        _last_good["order_flow"] = trade_tape
+        last_good["order_flow"] = trade_tape
 
     basis = None
     basis_pct = None
@@ -540,7 +580,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     if coinbase_spot is not None and binance_spot is not None:
         spot_spread = coinbase_spot - binance_spot
 
-    cvd_snapshot = _last_good.get("cvd", {})
+    cvd_snapshot = last_good.get("cvd", {})
     cvd_direction = cvd_snapshot.get("direction", "NEUTRAL")
     cvd_confidence = cvd_snapshot.get("direction_confidence", "LOW")
     cvd_raw_imbalance_pct = cvd_snapshot.get("raw_imbalance_pct")
@@ -595,8 +635,8 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         "errors": errors
     }
 
-    _cache["data"] = snapshot
-    _cache["timestamp"] = now
+    cache["data"] = snapshot
+    cache["timestamp"] = now
 
     return snapshot
 
