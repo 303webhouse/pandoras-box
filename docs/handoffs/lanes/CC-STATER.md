@@ -1,9 +1,10 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-01 00:45 MDT (06:45 UTC)
-**Worked against:** `origin/main` = `b0ada46` (fix(health): a class judged on being alive must read a row that can be a failure)
-**Worktree / branch:** Claude Code cloud session. `claude/stater-scope` (scope + mockup) → `claude/stater-phase0` (fixes, stacked on scope)
-**Hub at read time:** UW governor `outcome_resolver` 81 at 06:33 UTC (no Stater tab open, about 12/h)
+**Written:** 2026-10-01 10:45 MDT (16:45 UTC)
+**Worked against:** `origin/main` = `a338cce` (fix(positions): an option expired at the close now ends that evening…)
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-*` branches
+only (R-IV.628). It inherited the lane from the Claude Code cloud session, which ran out of credits.
+**Hub at read time:** prod runs `a338cce`, which includes BUILD's caller tags, since 15:31 UTC.
 
 ## Why this lane exists
 SPINE chartered CC-STATER (R-IV.618) to own Stater Swap, the hub's crypto surface.
@@ -16,44 +17,52 @@ It inherits S-6M's ownership of `stater.*`. It never touches Agora files, `backe
 `main.py`, schema or migrations, or positions and cash. It holds no exchange credentials and places
 no orders.
 
-## What this session did
-1. **Scope (R-IV.618)** on `claude/stater-scope`:
-   - `docs/stater/STATER-SCOPE-2026-10-01.md`;
-   - the Phase 1 mockup on sample data, `docs/stater/mockups/stater-phase1-sample.html` (the
-     principal has a private artifact copy);
-   - the relay to SPINE.
-2. **Phase 0 (R-IV.619)** on `claude/stater-phase0`, all six items in SPINE's order:
-   - [x] **P0.1** GETs read stored rows; no recompute, no writes, no events. Bars are cached.
-   - [x] **P0.2** BTC/ETH/SOL bars come from Coinbase Exchange public, with OKX as fallback. Zero UW.
-   - [x] **P0.3** `/crypto/market` cache, fallbacks and CVD state are per symbol, with the full pair.
-     The shape is unchanged.
-   - [x] **P0.4** Honest readings: the session key, the tape stale limit, N/A instead of 0, and the
-     dial respects `degraded`.
-   - [x] **P0.5** `GET /api/crypto/signals`, a crypto-only feed; Stater reads it.
-   - [x] **P0.6** The reset route is declared before `/{signal_id}`.
-   - **Tests:** 35 backend tests (each failure-expecting check carries a positive control) and 10
-     browser checks on fixtures. The same browser checks fail 6 times on `main`'s page.
-   - **Relay to BUILD:** `docs/handoffs/RELAY_CC-STATER_to_CC-BUILD_2026-10-01_phase0.md`.
-3. **UW drain, measured from the governor:** 1 UW call per `GET /crypto/state/BTC` (3 GETs moved
-   the counter +3). That is 2,880 a day from one open tab via that route alone. After the merge,
-   these paths make zero calls (tests). Re-take the snapshot after deploy.
+**On the principal's PC (R-IV.628(b)):**
+- Never check out, commit to or push `main`; BUILD merges.
+- The database login is read-only.
+- No Railway CLI, no deploys, no environment-variable changes.
 
-## In flight
-- Phase 1 waits for the principal's approval of the mockup.
-- Phase 0 waits for SPINE's ruling, then BUILD's review and merge.
-- Next items, not started:
-  - the geo-blocked strategy engine (`crypto_setups.py` → `fapi.binance.com` HTTP 451);
-  - the cycle engine's double count (two-sided vendor FIRING).
+## Branches
+| Branch | State | Ready for BUILD? |
+|---|---|---|
+| `claude/stater-p0-market` | New. Cut from `main` `a338cce`. `df7ce28` (P0.3 cherry-pick) + `5b45daa` (fallback TTLs). | **Yes, merge first.** |
+| `claude/stater-phase0` | All six Phase 0 items, plus `7c3295e` (the same TTL commit) and `0ecdb0d` (main merged in, caller-tag conflict resolved). 42 tests. | **Yes, after p0-market.** It still waits on SPINE's Phase 0 ruling. |
+| `claude/stater-scope` | Scope doc + Phase 1 mockup (docs only). Contained in phase0. | It merges along with phase0. |
+| `s6-stater-build` | Older S-6 cockpit work, from another session. Not touched. | Not this lane's to merge. |
 
-## Findings for other lanes (relayed as text; owners insert)
+## What was done for R-IV.623 (executed under R-IV.628)
+1. **Done: the per-symbol fallback store with TTLs** (`5b45daa`): 120 s for prices, CVD and order
+   flow, 900 s for funding. Past the limit the value is null and `errors` says "no fresh value". The shape is unchanged.
+   Also done: the vendor-format audit (in the commit message and the relay) and 7 tests with positive
+   controls. Shipped alone on `p0-market` and cherry-picked onto phase0.
+   - **Open:** I did not have BUILD's repro text, so the repro test is reconstructed from R-IV.623.
+     BUILD should compare it with theirs.
+2. **Done: the relay** `docs/handoffs/RELAY_CC-STATER_to_CC-ABACUS_CC-BUILD_2026-10-01_market-ttl.md`.
+   - The shape is unchanged. The bot and Stater handle null.
+   - **Agora does not crash, but its client-side last-good copy keeps showing an expired price.** That is ABACUS's decision.
+3. **Partly done: the measurement.** The caller tag is on `main` and deployed.
+   - **Before (passive, no Stater tab open):** since the 15:31 UTC deploy, about 68 min, the counts are
+     `crypto_bars_tape_health` 15 (about 13/h), `crypto_bars_regime` 3, `crypto_bars_state_api` 0, and
+     `crypto_bars_outcome_resolver` 0. The old `outcome_resolver` row holds 213, all from before the rename.
+   - **Still needed:** a reading with a Stater tab open. Either the principal opens Stater for 5
+     minutes, or SPINE grants a budget of about 3 UW calls for 3 `GET /crypto/state/BTC`. BUILD's own
+     before-figure is on record in `51732bd`: 4 calls per 30 s with a tab open.
+   - **After:** the same reading once phase0 is deployed. Expected: `crypto_bars_state_api` at 0 with a tab open.
+
+## Findings for other lanes (relayed as text; the owners insert)
+- **ABACUS:** `app.js` `cryptoMarketLastGood` has no time limit, so it masks the server's nulls. A null CVD direction shows as `NEUTRAL`.
 - **BUILD:**
-  - The README ownership row for CC-STATER.
-  - `uw_governor` `outcome_resolver` quota can drop after Phase 0 merges.
-  - The full backend suite rewrites the tracked `data/watchlist.json` (a test side effect, also on
-    `main`).
-- **ABACUS:** the R-IV.420(e) Stater pin is done here (`v2.css?v=39`). Nothing for ABACUS to do.
+  - `test_frontend_routes.py` hangs when run after the crypto tests in one process. This happens on `main` too.
+  - The `polygon-health` route test fails on `main`.
+  - Still open from before: the README ownership row and the `data/watchlist.json` test side effect.
+- **SPINE (this lane, needs a ruling):** `btc_market_structure._fetch_cvd` reads `cvd_analysis`,
+  which `/crypto/market` has never returned. So that strategy's CVD gate has always scored 0.
+  Fixing it changes signal scoring, so it waits for a ruling.
+- **Matrix:** HYPE is now listed on Binance spot (verified from the US, not yet from Railway).
 
 ## What the next CC-STATER session should do first
-Read SPINE's ruling on Phase 0 and the principal's on the mockup. If Phase 0 has merged, take the
-governor snapshot (`GET /api/uw/health/by_caller`, `outcome_resolver`) with a Stater tab open, to
-confirm the drain is gone. Then start the geo-blocked strategy engine item.
+1. Check whether BUILD merged `p0-market`, then phase0.
+2. Take the Stater-tab-open measurement (before, or after if phase0 has deployed) from
+   `GET /api/uw/health/by_caller`.
+3. Then the queued items: the geo-blocked strategy engine (`crypto_setups.py` → `fapi.binance.com`
+   451), the cycle engine's double count, and the `cvd_analysis` gate if SPINE rules on it.

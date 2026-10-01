@@ -599,3 +599,10 @@ Validation:
 - Follow-up fix for the Market Bias badge:
   - composite confidence lookup now supports both `CompositeConfidence` and `compositeConfidence`
   - CSS also forces both IDs to white to cover live DOM drift
+
+## 2026-10-01 16:45 UTC (10:45 AM MDT) — CC-STATER (Cursor, R-IV.628)
+- Took over the Stater lane from the cloud session. R-IV.623 had not been started.
+- `claude/stater-p0-market` (new, from main): `/api/crypto/market` fallbacks now expire (120 s for prices, CVD and order flow; 900 s for funding). Past that they are null with "no fresh value". Shape unchanged. 7 tests. The same commit is cherry-picked onto `claude/stater-phase0`.
+- Merged main into phase0 to resolve the `crypto_bars.py` conflict with BUILD's caller tags. Both branches are pushed and ready for BUILD (p0-market first).
+- Relay to ABACUS/BUILD: `docs/handoffs/RELAY_CC-STATER_to_CC-ABACUS_CC-BUILD_2026-10-01_market-ttl.md`. Lane status: `docs/handoffs/lanes/CC-STATER.md`.
+- Open: a Stater-tab-open UW measurement (needs the principal or a tiny budget); BUILD's repro text; SPINE ruling on `btc_market_structure`'s dead `cvd_analysis` read.
