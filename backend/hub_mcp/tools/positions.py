@@ -10,10 +10,14 @@ from ..envelope import make_response
 from services.position_economics import capital_at_risk_from_derived
 from services.read_only.positions import list_positions
 
+from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
+from models.accounts import account_choices as _account_choices
+from models.accounts import describe_accounts as _describe_accounts
+
 DESCRIPTION = (
     "Returns positions from the unified_positions table — the canonical source "
-    "of truth for Nick's trading book across Robinhood, Fidelity Roth IRA, "
-    "401k BrokerageLink, and Breakout Prop. Optionally filtered by account or "
+    "of truth for Nick's trading book across " + _describe_accounts() +
+    ", plus Breakout Prop (untracked). Optionally filtered by account or "
     "status. Use this whenever evaluating portfolio coherence (URSA's "
     "mandatory check), when a trade idea touches an existing position, when "
     "sizing recommendations need awareness of current exposure, when TORO is "
@@ -33,28 +37,22 @@ DESCRIPTION = (
     "account assignment."
 )
 
-Account = Literal[
-    "robinhood", "fidelity_roth", "brokerage_link_401k", "breakout_prop"
-]
+# R-IV.638(b)4: BUILT from the registry, not typed. `brokerage_link_401k` is GONE from the
+# offered values -- it is the retired merged snapshot of the parked 401(a)+403(b) under a
+# disputed label, and offering it beside the traded accounts is how a committee member sizes
+# off $11,642.35 that is in neither of them. `breakout_prop` stays: it is a real, separate,
+# deliberately untracked account, not the retired snapshot.
+Account = Literal[tuple(_account_choices() + ["breakout_prop"])]  # type: ignore[misc]
 Status = Literal["OPEN", "CLOSED", "ALL"]
 
-# R-IV.632(c): derived from models/accounts.py, not retyped. `brokerage_link_401k` and
-# `breakout_prop` are not canonical but remain filterable, so a reader can ask about a row
-# that exists under either label.
-from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
-
-_NON_CANONICAL_FILTERABLE = {"brokerage_link_401k", "breakout_prop"}
-_VALID_ACCOUNTS = {a.lower() for a in _CANONICAL_TUPLE} | _NON_CANONICAL_FILTERABLE
+_VALID_ACCOUNTS = set(_account_choices()) | {"breakout_prop"}
 _VALID_STATUS = {"OPEN", "CLOSED", "ALL"}
 
 
 def _normalize_account(value: str) -> str:
     """Map our normalized snake_case account names to DB account column values."""
     mapping = {a.lower(): a for a in _CANONICAL_TUPLE}
-    mapping.update({
-        "brokerage_link_401k": "BROKERAGE_LINK_401K",
-        "breakout_prop": "BREAKOUT_PROP",
-    })
+    mapping["breakout_prop"] = "BREAKOUT_PROP"
     return mapping.get(value, value.upper())
 
 

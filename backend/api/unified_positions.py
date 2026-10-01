@@ -1043,9 +1043,17 @@ async def _compute_positions(
         #
         # The bare alias resolves to the single account it has always meant (FIDELITY_ROTH,
         # per models.accounts.ALIASES), and anything else is matched exactly.
+        # R-IV.638(b)3: a bare Fidelity NAME is REFUSED, naming both keys. Passing it
+        # through as a literal would return zero rows -- a silent empty book that reads
+        # exactly like "this account holds nothing", which is the worst available answer
+        # and an invisible one. A combined view asks for both keys explicitly.
+        from models.accounts import canonical_account as _canon_account
+        from models.accounts import is_fidelity_name as _is_fid
         from models.accounts import normalize_account as _norm_account
 
         resolved = _norm_account(account_upper)
+        if resolved is None and _is_fid(account_upper):
+            _canon_account(account_upper, field="account")  # raises 400 with the reason
         conditions.append(f"account = ${idx}")
         params.append(resolved or account_upper)
         idx += 1

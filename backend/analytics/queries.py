@@ -11,6 +11,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from database.postgres_client import get_postgres_client
 from utils.json_sanitize import dumps_jsonb
 
+# Module scope on purpose: the row shaper below and get_book_rows are different
+# functions, and an import inside one does not bind a name used in the other --
+# a NameError py_compile cannot see (hit three times this session).
+from models.accounts import display_name as _account_display
+
 
 def _utc_now_naive() -> datetime:
     return datetime.utcnow().replace(tzinfo=None)
@@ -383,6 +388,9 @@ def book_row_to_trade_shape(r: Dict[str, Any]) -> Dict[str, Any]:
         "direction": r.get("direction"),
         "structure": r.get("structure"),
         "account": r.get("account"),
+        # R-IV.638(b)5: the display name travels with the row, so ABACUS's per-account P&L
+        # view labels and groups without inferring from the key (R-IV.633).
+        "account_display": _account_display(r.get("account")),
         "status": status.lower(),
         "opened_at": r.get("entry_date"),
         "closed_at": r.get("exit_date"),
