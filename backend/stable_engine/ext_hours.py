@@ -118,7 +118,13 @@ def _series(data, symbol: str, single: bool) -> pd.Series:
     if idx.tz is None:
         idx = idx.tz_localize("UTC")
     c.index = idx.tz_convert(ET)
-    return c.astype(float)
+    # SORTED, because every `iloc[-1]` below means "the newest bar" and that is only true of an
+    # ascending index. yfinance returns ascending today, so this changes nothing now -- but this
+    # repo has already shipped the same assumption and been wrong: `fetch_crypto_ohlc` returns
+    # vendor-order bars (UW and OKX descending, Binance ascending) and positional slices read
+    # the oldest bar as the newest. An unsorted frame here would take an overnight percent from
+    # a bar hours old and report it as current, with nothing raising.
+    return c.sort_index().astype(float)
 
 
 def _daily_close(data, symbol: str, session) -> float | None:
@@ -130,7 +136,8 @@ def _daily_close(data, symbol: str, session) -> float | None:
         c = sub["Close"].dropna()
     except Exception:
         return None
-    same = [float(v) for ts, v in c.items() if ts.date() == session]
+    # sorted for the same reason: `same[-1]` is "that session's last bar" only in order.
+    same = [float(v) for ts, v in c.sort_index().items() if ts.date() == session]
     return same[-1] if same else None
 
 

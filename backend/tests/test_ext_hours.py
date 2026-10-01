@@ -169,3 +169,31 @@ def test_off_hours_flatline_quiet_in_session_and_weekend(monkeypatch):
     _Fixed.now_value = _et(2026, 9, 29, 23, 0)             # overnight, quiet 1h
     assert js.feed_flatline("ext_hours", 3600) is True
     assert js.feed_flatline("ext_hours", 300) is False
+
+
+# ─────────── the bar-order assumption, made explicit (CC-BUILD, R-IV.615)
+
+def test_the_close_series_is_sorted_so_iloc_minus_one_is_the_newest_bar():
+    """`_series` never sorted, and every `iloc[-1]` below it means "the newest bar" — which is
+    only true of an ascending index.
+
+    yfinance returns ascending today, so this changed no behaviour. It is here because this repo
+    has already shipped exactly this assumption and been wrong: `fetch_crypto_ohlc` returns
+    vendor-order bars (UW and OKX descending, Binance ascending) and positional slices read the
+    oldest bar as the newest. Unsorted here would take an overnight percent from a bar hours old
+    and report it as current, with nothing raising.
+    """
+    import pandas as pd
+
+    from stable_engine import ext_hours
+
+    ts = pd.to_datetime(["2026-09-30 19:55", "2026-09-30 20:25", "2026-09-30 20:10"],
+                        utc=True)
+    frame = pd.DataFrame({"Close": [100.0, 103.0, 101.0]}, index=ts)
+    out = ext_hours._series(frame, "ES=F", single=True)
+
+    assert list(out.index) == sorted(out.index), "the series came back unsorted"
+    assert float(out.iloc[-1]) == 103.0, "iloc[-1] did not return the newest bar"
+    # POSITIVE CONTROL: the shuffled input really was out of order, so a pass here is the sort
+    # working rather than the fixture already being sorted.
+    assert list(ts) != sorted(ts)
