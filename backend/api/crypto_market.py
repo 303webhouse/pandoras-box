@@ -713,6 +713,12 @@ def _field_envelope(as_of_raw, degraded, **data):
     }
 
 
+from bias_filters.crypto_tape_health_engine import TAPE_STALE_AFTER_SECONDS  # noqa: E402
+
+
+from utils.crypto_sessions import session_block_fields as _session_fields  # noqa: E402
+
+
 _NOT_YET_WIRED = "not yet wired"  # retired: S-3 Phase 1.5 parametrized all six symbols
 _NOT_YET_BUILT_R1 = "not yet built (R-1 scope)"
 _NOT_YET_BUILT_R2 = "not yet built (R-2 scope)"
@@ -855,9 +861,7 @@ async def get_crypto_state(symbol: str):
         _sess = _get_session(now_utc, _scfg)
         session_field = _field_envelope(
             now_utc.isoformat(), False,
-            state=_sess.get("current_session"),
-            session_label=_sess.get("label"),
-            partition=_sess.get("partition"),
+            **_session_fields(_sess),
         )
     except Exception as exc:
         logger.warning("crypto state: session fetch failed: %s", exc)
@@ -926,7 +930,7 @@ async def get_crypto_state(symbol: str):
             _th_ca = _th_ca if _th_ca.tzinfo else _th_ca.replace(tzinfo=timezone.utc)
             _th_age = int((now_utc - _th_ca).total_seconds())
             tape_health_field = _field_envelope(
-                _th_ca.isoformat(), _th_row["degraded"] or _th_age > 600,
+                _th_ca.isoformat(), _th_row["degraded"] or _th_age > TAPE_STALE_AFTER_SECONDS,
                 state=_th_row["state"],
                 slope=_th_row["slope"],
                 spot_cvd=_th_row["spot_cvd"],
@@ -955,6 +959,54 @@ async def get_crypto_state(symbol: str):
         "liquidations": liquidations_field,
         "generated_at": now_utc.isoformat(),
     }
+
+
+@router.get("/signals")
+async def get_crypto_signals(limit: int = Query(20, ge=1, le=50),
+                             days: int = Query(14, ge=1, le=90),
+                             _=Depends(require_api_key)):
+    """Stater Phase 0 (R-IV.619): the crypto-only signal feed, read-only.
+
+    The Stater page read /api/trade-ideas and kept only CRYPTO rows, but that feed
+    has excluded crypto on the server since RV4 (R-IV.566(e)2), so the page's feed
+    was always empty. This route serves the crypto rows directly, newest first,
+    without touching /api/trade-ideas or its exclusion. Every crypto signal is
+    shadow (gating_enabled=false), and each row says so.
+    """
+    from database.postgres_client import get_postgres_client
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM signals
+            WHERE asset_class = 'CRYPTO'
+              AND created_at >= NOW() - make_interval(days => $2)
+            ORDER BY created_at DESC
+            LIMIT $1
+            """,
+            limit, days,
+        )
+    keep = ("signal_id", "ticker", "direction", "signal_type", "strategy", "source", "asset_class",
+            "entry_price", "stop_loss", "target_1", "score", "status", "created_at", "expires_at")
+    out = []
+    for r in rows:
+        d = dict(r)
+        row = {k: d.get(k) for k in keep}
+        for k in ("created_at", "expires_at"):
+            v = row.get(k)
+            if isinstance(v, datetime):
+                row[k] = (v if v.tzinfo else v.replace(tzinfo=timezone.utc)).isoformat()
+        for k in ("entry_price", "stop_loss", "target_1", "score"):
+            if row.get(k) is not None:
+                try:
+                    row[k] = float(row[k])
+                except (TypeError, ValueError):
+                    row[k] = None
+        row["shadow"] = True
+        out.append(row)
+    return {"as_of": datetime.now(timezone.utc).isoformat(), "window_days": days,
+            "count": len(out), "signals": out}
 
 
 @router.get("/regime")

@@ -46,7 +46,9 @@ logger = logging.getLogger(__name__)
 # thresholds (crypto_market.py:853 / :887) so this tool and that endpoint agree.
 CYCLE_STALE_SECONDS = 7200   # 2x the ~hourly cycle cadence
 REGIME_STALE_SECONDS = 7200  # matches the live endpoint
-TAPE_STALE_SECONDS = 600     # matches the live endpoint
+# Stater Phase 0 (R-IV.619): 600 s sat under the tape job's 900 s cadence, so a
+# healthy feed read stale for a third of every cycle. One cadence plus grace.
+from bias_filters.crypto_tape_health_engine import TAPE_STALE_AFTER_SECONDS as TAPE_STALE_SECONDS  # noqa: E402
 
 # The four cycle-log cells this tool surfaces, mapped to their block name.
 _CYCLE_CELL_FOR_BLOCK = {
@@ -279,12 +281,8 @@ async def _read_session(now: datetime) -> Dict[str, Any]:
         from utils.crypto_sessions import get_session_state
         _cv, scfg = await get_gate_config()
         sess = get_session_state(now, scfg)
-        return _block(
-            "ok", now, now,
-            state=sess.get("current_session"),
-            session_label=sess.get("label"),
-            partition=sess.get("partition"),
-        )
+        from utils.crypto_sessions import session_block_fields
+        return _block("ok", now, now, **session_block_fields(sess))
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("crypto_state: session compute failed: %s", exc)
         return _block("degraded", None, now, state=None, error=str(exc))
