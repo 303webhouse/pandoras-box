@@ -94,6 +94,21 @@ async def get_single_signal(signal_id: str):
     return {"signal_id": signal_id, **signal}
 
 
+# Stater Phase 0 (R-IV.619): a fixed path must be declared BEFORE the parameterised one
+# (CLAUDE.md route ordering). Declared after it, POST /bottom-signals/reset was matched
+# by /bottom-signals/{signal_id} with signal_id="reset" and failed body validation (422),
+# so the reset could never run.
+@router.post("/bottom-signals/reset")
+async def reset_signals(_=Depends(require_api_key)):
+    """Reset all signals to UNKNOWN status and clear manual overrides"""
+    try:
+        await reset_all_signals()
+        return {"status": "success", "message": "All signals reset to UNKNOWN"}
+    except Exception as e:
+        logger.error(f"Error resetting signals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/bottom-signals/{signal_id}")
 async def update_signal(signal_id: str, update: ManualSignalUpdate, _=Depends(require_api_key)):
     """
@@ -116,17 +131,6 @@ async def update_signal(signal_id: str, update: ManualSignalUpdate, _=Depends(re
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error updating signal {signal_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/bottom-signals/reset")
-async def reset_signals(_=Depends(require_api_key)):
-    """Reset all signals to UNKNOWN status and clear manual overrides"""
-    try:
-        await reset_all_signals()
-        return {"status": "success", "message": "All signals reset to UNKNOWN"}
-    except Exception as e:
-        logger.error(f"Error resetting signals: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -513,3 +513,89 @@ def _build_coverage_note(symbol: str, tier: int, deribit_cap_cell: Optional[Dict
         return f"{symbol} (Tier-2): partial dial — Coinalyze LIVE; Deribit skew NA:SOL_ZERO_INSTRUMENTS; basis/OI/funding available via OKX fallback"
     else:  # HYPE, ZEC, FARTCOIN
         return f"{symbol} (Tier-3): partial dial — Coinalyze LIVE; Deribit NA; spot orderbook via OKX; constraints per A-4"
+
+
+# ── Read path (Stater Phase 0, R-IV.619) ─────────────────────────────────────
+# A GET must READ what the hourly job wrote. evaluate_cycle_extremes() makes a
+# dozen vendor calls per symbol and inserts a crypto_cycle_log row; run from a
+# 30-second page poll that was ~17k rows a day from one open tab. The hourly job
+# (scheduler/bias_scheduler.py, crypto_cycle) stays the only writer.
+CYCLE_JOB_CADENCE_SECONDS = 3600
+CYCLE_STALE_AFTER_SECONDS = CYCLE_JOB_CADENCE_SECONDS + 900   # one missed run + grace
+
+
+def _stored_row_to_payload(row: Dict[str, Any], now_utc: datetime) -> Dict[str, Any]:
+    """One crypto_cycle_log row -> the payload shape evaluate_cycle_extremes() returns."""
+    import json as _json
+    cells = row.get("cells")
+    if isinstance(cells, str):
+        try:
+            cells = _json.loads(cells)
+        except ValueError:
+            cells = []
+    cells = cells or []
+    cap = [c for c in cells if c.get("column") == "CAPITULATION"]
+    froth = [c for c in cells if c.get("column") == "FROTH"]
+    ca = row["computed_at"]
+    ca = ca if ca.tzinfo else ca.replace(tzinfo=timezone.utc)
+    age = int((now_utc - ca).total_seconds())
+    stale = age > CYCLE_STALE_AFTER_SECONDS
+    score = row.get("composite_score")
+    tier = row.get("tier") or get_tier(row["symbol"]) or 3
+    deribit_cap = next((c for c in cap if c.get("signal_id") == "skew_25delta"), None)
+    reason = row.get("degrade_reason")
+    if stale:
+        reason = (reason + "; " if reason else "") + f"last stored evaluation is {age}s old (job runs hourly)"
+    return {
+        "symbol": row["symbol"],
+        "tier": tier,
+        "computed_at": ca.isoformat(),
+        "data_age_seconds": age,
+        "stale": stale,
+        "source": "crypto_cycle_log (hourly job)",
+        "composite_score": float(score) if score is not None else None,
+        "composite_method": row.get("composite_method"),
+        "degraded": bool(row.get("degraded")) or stale,
+        "degrade_reason": reason,
+        "live_cell_count": row.get("live_cell_count"),
+        "config_version": row.get("config_version"),
+        "coverage_note": _build_coverage_note(row["symbol"], tier, deribit_cap),
+        "froth_context_copy": FROTH_CONTEXT_COPY,
+        "capitulation_context_copy": CAPITULATION_CONTEXT_COPY,
+        "capitulation_cells": cap,
+        "froth_cells": froth,
+    }
+
+
+async def read_latest_cycle(symbols: Optional[List[str]] = None,
+                            now_utc: Optional[datetime] = None) -> Dict[str, Any]:
+    """Newest stored evaluation per symbol. No vendor call, no write."""
+    from config.crypto_symbol_matrix import CRYPTO_SYMBOL_MATRIX
+    from database.postgres_client import get_postgres_client
+
+    wanted = [s.upper() for s in (symbols or list(CRYPTO_SYMBOL_MATRIX))]
+    now_utc = now_utc or datetime.now(timezone.utc)
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (symbol) symbol, tier, computed_at, composite_score,
+                   composite_method, degraded, degrade_reason, live_cell_count,
+                   cells, config_version
+            FROM crypto_cycle_log
+            WHERE symbol = ANY($1::text[])
+            ORDER BY symbol, computed_at DESC
+            """,
+            wanted,
+        )
+    by_sym = {r["symbol"]: dict(r) for r in rows}
+    out = {}
+    for sym in wanted:
+        row = by_sym.get(sym)
+        out[sym] = _stored_row_to_payload(row, now_utc) if row else {
+            "symbol": sym, "tier": get_tier(sym), "composite_score": None, "degraded": True,
+            "degrade_reason": "no stored evaluation yet", "computed_at": None,
+            "capitulation_cells": [], "froth_cells": [], "source": "crypto_cycle_log (hourly job)",
+        }
+    return out
+

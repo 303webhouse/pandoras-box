@@ -102,3 +102,18 @@ No new vendor was sanctioned in this pass (Hyperliquid was verified but not sanc
 2. **F-3's `hub_get_crypto_quote` must null-check UW's `data` field, not just HTTP status** (Finding 2) — a required implementation detail, not a suggestion.
 3. **F-2's resolver bars-source decision is per-symbol, not universal**: UW OHLC for BTC/ETH/SOL; Binance spot klines for ZEC (UW quote works, UW OHLC doesn't); OKX candles for HYPE/FARTCOIN. A single "use UW for crypto bars" rule would silently break ZEC/HYPE/FARTCOIN outcome tracking exactly like the `Session_Sweep` ticker-format bug found in Phase 0.
 4. **SOL's Deribit "coverage" is nominal, not functional** — the currency is listed but zero option instruments exist. Any code checking "is SOL a Deribit currency" without also checking instrument count would report false coverage.
+
+## Re-verification 2026-10-01 (CC-STATER, R-IV.623 audit, recorded under R-IV.637(d))
+
+Free, keyless public GETs at 16:22 UTC, sent **from the principal's PC (US), not from the Railway container**. Each venue was sent the symbol format `/api/crypto/market` builds, for all six coins. Every format was accepted; the only failures were coins that are not listed or regions that are refused.
+
+| Coin | Venue | Request | Result | Matrix cell |
+|---|---|---|---|---|
+| HYPE | Binance spot | `data-api.binance.vision/api/v3/ticker/price?symbol=HYPEUSDT` | HTTP 200, price returned. **Now listed** (was 400 on 2026-07-13) | `binance_spot_orderbook` → LIVE, marked `not_routed` |
+| FARTCOIN | Binance spot | same, `symbol=FARTCOINUSDT` | HTTP 400, `-1121 Invalid symbol` | unchanged (UNAVAILABLE), re-dated |
+| FARTCOIN | OKX spot | `okx.com/api/v5/market/ticker?instId=FARTCOIN-USDT` | HTTP 200 but `code 51001`, empty data: **not listed** | `fallback_status` → UNAVAILABLE (was LIVE) |
+| FARTCOIN | OKX swap, Coinbase spot | `FARTCOIN-USDT-SWAP`, `/v2/prices/FARTCOIN-USD/spot` | HTTP 200 with data | — |
+| all six | Binance perps | `fapi.binance.com/fapi/v1/ticker/price` | HTTP 451 (region), as recorded from Railway | unchanged |
+| all six | Bybit linear | `api.bybit.com/v5/market/tickers` | HTTP 403 (CloudFront region block) | — |
+
+Routing is unchanged. `binance_client._BINANCE_SPOT_SYMBOL["HYPE"]` is still `None`, and `_OKX_SPOT_INSTID` / `_OKX_SPOT_BOOK_INSTID` still ask OKX spot for FARTCOIN. Changing either goes on its own branch after BUILD merges `claude/stater-p0-market` and `claude/stater-phase0` (R-IV.637(d)). A check from Railway should precede routing HYPE to Binance spot.
