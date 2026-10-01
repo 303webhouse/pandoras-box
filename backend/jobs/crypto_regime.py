@@ -56,7 +56,7 @@ async def evaluate_symbol_regime(symbol: str, config: dict, config_version: int)
     to UNKNOWN with a degrade_reason rather than propagating.
     """
     from config.crypto_symbol_matrix import get_symbol_entry, get_tier
-    from jobs.crypto_bars import fetch_crypto_ohlc
+    from jobs.crypto_bars import CALLER_REGIME, fetch_crypto_ohlc
     from indicators.adx import latest_adx
     from utils.crypto_sessions import get_session_state
 
@@ -101,7 +101,7 @@ async def evaluate_symbol_regime(symbol: str, config: dict, config_version: int)
     result["bars_source"] = _BAR_SOURCE_LABELS.get(vendor, vendor)
 
     try:
-        bars = await fetch_crypto_ohlc(base, use_daily=True)
+        bars = await fetch_crypto_ohlc(base, use_daily=True, caller=CALLER_REGIME)
     except Exception as exc:
         logger.warning("crypto_regime: bar fetch failed for %s: %s", symbol, exc)
         result["degrade_reason"] = f"FETCH_ERROR:{type(exc).__name__}"

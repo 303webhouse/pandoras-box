@@ -28,6 +28,7 @@ from integrations import uw_api  # noqa: E402
 from jobs import crypto_bars as cb  # noqa: E402
 
 T0 = 1790812800  # 2026-10-01 00:00 UTC
+_CALLER = cb.CALLER_STATE_API
 
 
 def _run(coro):
@@ -102,20 +103,20 @@ def test_all_six_symbols_fetch_with_zero_uw_calls_and_uw_vendor_trips_the_guard(
     with patch.object(uw_api, "_uw_request", boom), patch.object(cb.httpx, "AsyncClient", FakeHTTP):
         for sym in matrix.CRYPTO_SYMBOL_MATRIX:
             for daily in (False, True):
-                _run(cb.fetch_crypto_ohlc(sym, use_daily=daily))
+                _run(cb.fetch_crypto_ohlc(sym, use_daily=daily, caller=_CALLER))
         assert calls == []
         # Positive control: point one symbol back at UW and the same guard fires.
         uw_entry = {"bar_walk_source": {"vendor": "uw_crypto_ohlc", "status": "LIVE"}}
         with patch.object(cb, "get_symbol_entry", lambda s: uw_entry):
             cb._bars_cache.clear()
             with pytest.raises(AssertionError):
-                _run(cb.fetch_crypto_ohlc("BTC", use_daily=True))
+                _run(cb.fetch_crypto_ohlc("BTC", use_daily=True, caller=_CALLER))
     assert len(calls) == 1
 
 
 def test_coinbase_row_order_is_parsed_low_high_open_close():
     with patch.object(cb.httpx, "AsyncClient", FakeHTTP):
-        bars = _run(cb.fetch_crypto_ohlc("BTC", use_daily=False))
+        bars = _run(cb.fetch_crypto_ohlc("BTC", use_daily=False, caller=_CALLER))
     # ascending by time, (ts, open, high, low, close)
     assert [b[1:] for b in bars] == [(96.0, 101.0, 95.0, 100.0), (100.0, 110.0, 99.0, 105.0)]
 
@@ -124,7 +125,7 @@ def test_incoherent_coinbase_row_is_dropped():
     FakeHTTP.coinbase_rows = [[T0, 120.0, 110.0, 100.0, 105.0, 1.0],   # low above high
                               [T0 - 900, 95.0, 101.0, 96.0, 100.0, 1.0]]
     with patch.object(cb.httpx, "AsyncClient", FakeHTTP):
-        bars = _run(cb.fetch_crypto_ohlc("ETH", use_daily=True))
+        bars = _run(cb.fetch_crypto_ohlc("ETH", use_daily=True, caller=_CALLER))
     assert len(bars) == 1 and bars[0][4] == 100.0
 
 
@@ -132,22 +133,22 @@ def test_empty_coinbase_falls_back_to_okx_and_empty_is_not_cached():
     FakeHTTP.coinbase_rows = []
     FakeHTTP.okx_rows = []
     with patch.object(cb.httpx, "AsyncClient", FakeHTTP):
-        assert _run(cb.fetch_crypto_ohlc("SOL", use_daily=True)) == []
+        assert _run(cb.fetch_crypto_ohlc("SOL", use_daily=True, caller=_CALLER)) == []
         assert any("okx.com" in u for u in FakeHTTP.calls)
         assert not any(k[:2] == ("SOL", True) for k in cb._bars_cache)   # nothing remembered
         FakeHTTP.okx_rows = [[str((T0 - 900) * 1000), "10", "11", "9", "10.5", "1"]]
-        bars = _run(cb.fetch_crypto_ohlc("SOL", use_daily=True))
+        bars = _run(cb.fetch_crypto_ohlc("SOL", use_daily=True, caller=_CALLER))
     assert bars and bars[0][4] == 10.5
 
 
 def test_cache_reuses_a_bar_set_within_its_window():
     with patch.object(cb.httpx, "AsyncClient", FakeHTTP):
-        _run(cb.fetch_crypto_ohlc("BTC", use_daily=False))
+        _run(cb.fetch_crypto_ohlc("BTC", use_daily=False, caller=_CALLER))
         n = len(FakeHTTP.calls)
-        _run(cb.fetch_crypto_ohlc("BTC", use_daily=False))
+        _run(cb.fetch_crypto_ohlc("BTC", use_daily=False, caller=_CALLER))
         assert len(FakeHTTP.calls) == n                      # served from cache
         cb._bars_cache.clear()
-        _run(cb.fetch_crypto_ohlc("BTC", use_daily=False))
+        _run(cb.fetch_crypto_ohlc("BTC", use_daily=False, caller=_CALLER))
         assert len(FakeHTTP.calls) > n                       # positive control: refetches
 
 

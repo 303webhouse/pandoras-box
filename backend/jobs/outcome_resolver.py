@@ -181,7 +181,7 @@ async def _walk_bars_crypto(
     # runtime (uvicorn runs with cwd=backend/). Keeping this import local to
     # the one function that needs it avoids breaking test collection for
     # every other test in this module.
-    from jobs.crypto_bars import normalize_crypto_ticker, fetch_crypto_bars
+    from jobs.crypto_bars import CALLER_OUTCOME_RESOLVER, normalize_crypto_ticker, fetch_crypto_bars
 
     base_symbol = normalize_crypto_ticker(ticker)
     if base_symbol is None:
@@ -193,7 +193,7 @@ async def _walk_bars_crypto(
     if use_daily:
         logger.info("Crypto signal for %s (%s) is %d days old — falling back to daily bars", ticker, base_symbol, signal_age_days)
 
-    bars = await fetch_crypto_bars(base_symbol, signal_ts, use_daily)
+    bars = await fetch_crypto_bars(base_symbol, signal_ts, use_daily, caller=CALLER_OUTCOME_RESOLVER)
     if not bars:
         return None, None, None
 

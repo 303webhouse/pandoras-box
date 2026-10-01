@@ -12,8 +12,11 @@ from __future__ import annotations
 import argparse, json, pathlib, sys
 import psycopg2
 
-VOCAB = ["CORE", "B1_MACRO", "B1_C_CONVEXITY", "B2_TACTICAL", "B3_SCALP",
-         "HEDGE", "MOMENTUM", "OTHER"]
+# The vocabulary moved to backend/models/strategy_tag.py (R-IV.624(d)2). It was declared here
+# as a list AND retyped into the COMMENT below, in this same file — two copies, so one edit
+# made the file disagree with itself. Both now come from the one author.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "backend"))
+from models.strategy_tag import TAGS, all_recognised, column_comment  # noqa: E402
 
 
 def dsn() -> str:
@@ -38,12 +41,8 @@ def main() -> int:
         cur.execute("ALTER TABLE unified_positions ADD COLUMN strategy_tag text")
         print("  + strategy_tag text (nullable, no CHECK)")
 
-    cur.execute("""COMMENT ON COLUMN unified_positions.strategy_tag IS
-        'Documentary strategy vocabulary (R-IV.143(2)): CORE | B1_MACRO | B1_C_CONVEXITY | '
-        'B2_TACTICAL | B3_SCALP | HEDGE | MOMENTUM | OTHER. Deliberately NO CHECK constraint '
-        '(documentary-vocabulary precedent, as cash_flows.flow_type): enforcement belongs to '
-        'the entry UI, where an unknown value can be a prompt rather than a 500. NULL means '
-        'untagged, never OTHER — OTHER is a deliberate classification, NULL is its absence.'""")
+    cur.execute("COMMENT ON COLUMN unified_positions.strategy_tag IS %s", (column_comment(),))
+    print(f"  COMMENT generated from models.strategy_tag: canonical {list(TAGS)}")
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_unified_positions_strategy_tag "
                 "ON unified_positions(strategy_tag) WHERE strategy_tag IS NOT NULL")
@@ -58,7 +57,17 @@ def main() -> int:
     cur.execute("SELECT COUNT(*), COUNT(strategy_tag) FROM unified_positions")
     n, tagged = cur.fetchone()
     print(f"  rows {n}, tagged {tagged}, untagged {n - tagged}")
-    print(f"  documented vocabulary: {' | '.join(VOCAB)}")
+    print(f"  canonical vocabulary: {' | '.join(TAGS)}")
+    print(f"  also recognised:      {' | '.join(w for w in all_recognised() if w not in TAGS)}")
+
+    # The stored values are reported against the vocabulary, because for three months the two
+    # were disjoint but for CORE and nothing was looking (R-IV.624(d)2).
+    cur.execute("""SELECT strategy_tag, COUNT(*) FROM unified_positions
+                   WHERE strategy_tag IS NOT NULL GROUP BY 1 ORDER BY 2 DESC""")
+    from models.strategy_tag import is_known
+    for tag, cnt in cur.fetchall():
+        mark = "ok" if is_known(tag) else "NOT IN THE VOCABULARY"
+        print(f"    {tag:18} {cnt:4}  {mark}")
 
     if a.apply:
         conn.commit(); print("COMMITTED")
