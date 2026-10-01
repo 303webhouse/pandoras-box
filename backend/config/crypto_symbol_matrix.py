@@ -184,10 +184,12 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "fallback_verified": "2026-07-13: OKX HYPE-USDT-SWAP ticker HTTP 200 with data",
         },
         "binance_spot_orderbook": {
-            "status": "UNAVAILABLE",
-            "reason": "data-api.binance.vision returned HTTP 400 'Invalid symbol' for HYPEUSDT (verified 2026-07-13) — not listed on Binance spot",
+            "status": "LIVE",
+            "verified": "2026-10-01 16:22 UTC: data-api.binance.vision /api/v3/ticker/price?symbol=HYPEUSDT HTTP 200 with a price — HYPE is now listed on Binance spot. Checked from the principal's PC (US), not yet from the Railway container. (Was HTTP 400 'Invalid symbol', verified 2026-07-13.)",
+            "not_routed": "binance_client._BINANCE_SPOT_SYMBOL['HYPE'] is still None, so nothing asks Binance spot for HYPE yet. Routing it is its own branch (R-IV.637(d)).",
             "fallback_vendor": "okx",
             "fallback_status": "LIVE",
+            "fallback_verified": "2026-10-01 16:22 UTC: OKX /market/ticker instId=HYPE-USDT HTTP 200 with data",
         },
         "uw_crypto_quote": {
             "status": "UNAVAILABLE",
@@ -264,9 +266,10 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         },
         "binance_spot_orderbook": {
             "status": "UNAVAILABLE",
-            "reason": "data-api.binance.vision returned HTTP 400 'Invalid symbol' for FARTCOINUSDT (verified 2026-07-13) — not listed on Binance spot",
+            "reason": "data-api.binance.vision returned HTTP 400 'Invalid symbol' for FARTCOINUSDT (verified 2026-07-13; again 2026-10-01 16:22 UTC, code -1121) — not listed on Binance spot",
             "fallback_vendor": "okx",
-            "fallback_status": "LIVE",
+            "fallback_status": "UNAVAILABLE",
+            "fallback_reason": "2026-10-01 16:22 UTC: OKX /market/ticker instId=FARTCOIN-USDT HTTP 200 with code 51001 (instrument does not exist) and empty data — not listed on OKX spot either. OKX FARTCOIN-USDT-SWAP and Coinbase FARTCOIN-USD spot both answer. Checked from the principal's PC (US). binance_client still asks OKX spot for FARTCOIN; stopping that is its own branch (R-IV.637(d)).",
         },
         "uw_crypto_quote": {
             "status": "UNAVAILABLE",

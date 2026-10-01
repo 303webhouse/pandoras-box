@@ -606,3 +606,7 @@ Validation:
 - Merged main into phase0 to resolve the `crypto_bars.py` conflict with BUILD's caller tags. Both branches are pushed and ready for BUILD (p0-market first).
 - Relay to ABACUS/BUILD: `docs/handoffs/RELAY_CC-STATER_to_CC-ABACUS_CC-BUILD_2026-10-01_market-ttl.md`. Lane status: `docs/handoffs/lanes/CC-STATER.md`.
 - Open: a Stater-tab-open UW measurement (needs the principal or a tiny budget); BUILD's repro text; SPINE ruling on `btc_market_structure`'s dead `cvd_analysis` read.
+## 2026-10-01 17:51 UTC (11:51 AM MDT) — CC-STATER (Cursor, R-IV.637)
+- Probe with a tab's request set (budget 5): it spent 1 UW call (`crypto_bars_state_api`, from `/crypto/state/BTC`). `cycle-extremes` wrote 6 `crypto_cycle_log` rows, probably 6 more; their ids weren't read because no read-only DB login exists yet. `tape-health` returned 401 without a session. No signals. Every `/market` call stalls about 8 s.
+- The vendor matrix records HYPE (now on Binance spot, not routed) and FARTCOIN (on neither Binance nor OKX spot); the evidence is in the symbol-capability-matrix doc. The `btc_market_structure` CVD read is noted as a known defect, left by ruling.
+- Holding for BUILD's merge of `claude/stater-p0-market`, then `claude/stater-phase0`.
