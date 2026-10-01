@@ -76,7 +76,8 @@
     return `${s}$${a.toFixed(2)}`;
   }
   function fmtPct(v) { const n = Number(v); return isFinite(n) ? `${n >= 0 ? '+' : ''}${n.toFixed(2)}%` : null; }
-  function fmtNum(v) { const n = Number(v); return isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : null; }
+  // null/undefined are "no reading", never 0 (Number(null) === 0 is how a missing CVD read "0 / 0").
+  function fmtNum(v) { if (v == null || v === '') return null; const n = Number(v); return isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : null; }
   function mtTime(iso) {
     if (!iso) return '—';
     const d = new Date(/[Z]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');  // backend stores UTC, often tz-less
@@ -254,6 +255,16 @@
     if (!btcTape) { body.innerHTML = '<span class="pending-note">N/A — tape-health unavailable</span>'; if (dot) dot.className = 'health-dot bad'; return; }
     const st = btcTape.state || 'NA';
     const stCls = st === 'SPOT_LED' ? 'up' : st === 'PERP_LED' ? 'down' : st === 'MIXED' ? 'muted' : 'muted';
+    // Stater Phase 0: a missing leg is N/A with its reason, never "ALIGNED 0 / 0" under a green dot.
+    if (btcTape.spot_cvd == null || btcTape.perp_cvd == null) {
+      if (dot) dot.className = 'health-dot na';
+      body.innerHTML =
+        `<div class="tape-row1"><span class="tape-state-chip muted">${esc(st)}</span>
+           <span class="tape-div seam">CVD · N/A — ${esc(btcTape.reason || btcTape.degrade_reason || 'a CVD leg is missing')}</span></div>
+         <div class="cvd-legend"><span>SPOT CVD <span class="v seam">${esc(fmtNum(btcTape.spot_cvd) ?? 'N/A')}</span></span>
+           <span>PERP CVD <span class="v seam">${esc(fmtNum(btcTape.perp_cvd) ?? 'N/A')}</span></span></div>`;
+      return;
+    }
     const spot = Number(btcTape.spot_cvd), perp = Number(btcTape.perp_cvd);
     const aSpot = Math.abs(spot) || 0, aPerp = Math.abs(perp) || 0, tot = (aSpot + aPerp) || 1;
     // divergence derived honestly from spot/perp CVD sign agreement (no backend field exists)
@@ -290,9 +301,13 @@
     const s10 = cells.find(c => c.signal_id === 's10_etf_flow_exhaustion');
     const s10note = (s10 && s10.state === 'NA') ? ' · S-10 ETF-flow input deferred (S-5)' : '';
     if (cov) cov.textContent = cyc.coverage_note ? cyc.coverage_note.split('—')[0].trim() : '';
+    // Stater Phase 0: a score built from too few live inputs (or an old evaluation) is shown
+    // as degraded with its reason, never as an authoritative reading.
+    const deg = !!cyc.degraded;
     el.innerHTML =
-      `<div class="dial-top"><span class="score">${score.toFixed(0)}</span><span class="ctx">${esc(lean || '')}</span></div>
-       <div class="dial-track"><span class="dial-marker" style="left:${pct.toFixed(1)}%"></span></div>
+      `<div class="dial-top"><span class="score${deg ? ' seam' : ''}">${score.toFixed(0)}</span><span class="ctx">${esc(lean || '')}</span></div>` +
+      (deg ? `<div class="dial-degraded">DEGRADED — ${esc(cyc.degrade_reason || 'too few live inputs')}</div>` : '') +
+      `<div class="dial-track"><span class="dial-marker${deg ? ' degraded' : ''}" style="left:${pct.toFixed(1)}%"></span></div>
        <div class="dial-ends"><span>CAPITULATION</span><span>FROTH</span></div>
        <div class="dial-note">FROTH → "reduce new risk", never "sell"${esc(s10note)}</div>`;
   }
@@ -302,7 +317,13 @@
     const list = document.getElementById('feedList');
     const cnt = document.getElementById('feedCount');
     if (!list) return;
-    const sigs = ((ideas && ideas.signals) || []).filter(s => s.asset_class === 'CRYPTO');
+    if (!ideas) {
+      // A failed request is not an empty feed (sign-in expired, or the server did not answer).
+      if (cnt) cnt.textContent = 'N/A';
+      list.innerHTML = '<div class="feed-empty seam">Feed unavailable — the server did not answer. Sign in again if this persists.</div>';
+      return;
+    }
+    const sigs = (ideas.signals || []).filter(s => s.asset_class === 'CRYPTO');
     sigs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     if (cnt) cnt.textContent = `${sigs.length} crypto`;
     if (!sigs.length) {
@@ -379,7 +400,7 @@
       jget('/api/crypto/cycle-extremes'),
       jget('/api/analytics/risk-budget'),
       jget('/api/crypto/state/BTC'),            // macro band + master tape band
-      jget('/api/trade-ideas?limit=50'),        // signal feed (filtered to crypto client-side)
+      jget('/api/crypto/signals?limit=20'),     // crypto-only feed (/api/trade-ideas excludes crypto since RV4)
     ]);
     const regime = settledVal(regimeR), clock = settledVal(clockR),
           tape = settledVal(tapeR), cycle = settledVal(cycleR), risk = settledVal(riskR),
@@ -388,7 +409,7 @@
     // price fan-out (per-symbol /market). NOTE: deployed-polling fetch strategy
     // (batched vs fan-out) is a perf item to settle before SG-2.
     const marketRs = await Promise.allSettled(
-      SYMS.map(s => jget(`/api/crypto/market?symbol=${encodeURIComponent(s.base)}`)));
+      SYMS.map(s => jget(`/api/crypto/market?symbol=${encodeURIComponent(s.base + 'USDT')}`)));   // full pair: venues reject bare 'BTC'
     const prices = {};
     SYMS.forEach((s, i) => { prices[s.base] = priceOf(settledVal(marketRs[i])); });
     _last = { cycle, prices };
