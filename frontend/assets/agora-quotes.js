@@ -1,0 +1,467 @@
+/* Agora top-bar quotes. Restored from the v1 header (commit 612baa7, removed 093d678).
+   Five moods, picked from the composite regime (v2.js QUOTE_MOOD):
+   TORO_MAJOR -> greedy · TORO_MINOR -> optimistic · NEUTRAL -> pragmatic ·
+   URSA_MINOR -> pessimistic · URSA_MAJOR -> cynical.
+   Entries are [text, author] or [text, author, olympusLane] for the committee's picks.
+   Data only: served from /assets because that is the folder the backend serves wholesale. */
+window.AGORA_QUOTES = {
+    greedy: [
+        ["Be fearful when others are greedy and greedy only when others are fearful.", "Warren Buffett"],
+        ["Bull markets are born on pessimism, grow on skepticism, mature on optimism, and die on euphoria.", "John Templeton"],
+        ["The most common cause of low prices is pessimism... It\u2019s optimism that is the enemy of the rational buyer.", "Warren Buffett"],
+        ["They know that overstaying the festivities... will eventually bring on pumpkins and mice.", "Warren Buffett"],
+        ["There\u2019s a problem, though: They are dancing in a room in which the clocks have no hands.", "Warren Buffett"],
+        ["When I see a bubble forming, I rush in to buy, adding fuel to the fire.", "George Soros"],
+        ["Three things ruin people: drugs, liquor, and leverage.", "Charlie Munger"],
+        ["The game of speculation is the most uniformly fascinating game in the world.", "Jesse Livermore"],
+        ["Greed, for lack of a better word, is good.", "Gordon Gekko"],
+        ["Greed is all right, by the way. I think greed is healthy.", "Ivan Boesky"],
+        ["The four most dangerous words in investing are: \u2018This time it\u2019s different.\u2019", "John Templeton"],
+        ["Only when the tide goes out do you discover who\u2019s been swimming naked.", "Warren Buffett"],
+        ["There is nothing new in Wall Street. There can\u2019t be because speculation is as old as the hills.", "Jesse Livermore"],
+        ["Markets are constantly in a state of uncertainty and flux and money is made by discounting the obvious and betting on the unexpected.", "George Soros"],
+        ["When beggars and shoeshine boys can tell you how to get rich, it is time to remind yourself that there is no more dangerous illusion than the belief that one can get something for nothing.", "Bernard Baruch"],
+        ["People calculate too much and think too little.", "Charlie Munger"],
+        ["It is not the strong who survive, but those who can manage change.", "Leon C. Megginson"],
+        ["Don\u2019t be a hero. Don\u2019t have an ego.", "Paul Tudor Jones"],
+        ["The idea of caring that someone is making money faster than you is one of the deadly sins.", "Charlie Munger"],
+        ["What the wise man does in the beginning, the fool does in the end.", "Old proverb (quoted by Warren Buffett)"],
+        ["The three stages of a bull market are the first, when only a few unusually perceptive people believe things will get better; the second, when most investors realize improvement is taking place; and the third, when everyone concludes things will get better forever.", "Howard Marks"],
+        ["You adapt, evolve, compete or die.", "Paul Tudor Jones"],
+        ["The problem with experts is that they do not know what they do not know.", "Nassim Nicholas Taleb"],
+        ["People overvalue their knowledge and underestimate the probability of their being wrong.", "Nassim Nicholas Taleb"],
+        ["For investors as a whole, returns decrease as motion increases.", "Warren Buffett"],
+        ["The stock market is a device for transferring money from the impatient to the patient.", "Warren Buffett"],
+        ["If you don\u2019t know who you are, this is an expensive place to find out.", "‘Adam Smith’ (George J. W. Goodman), The Money Game"],
+        ["The market can stay irrational longer than you can stay solvent.", "attributed to John Maynard Keynes"],
+        ["What counts for most people in investing is not how much they know, but rather how realistically they define what they don\u2019t know.", "Warren Buffett"],
+        ["It never was my thinking that made the big money for me. It always was my sitting.", "Jesse Livermore"],
+        ["The big money is not in the buying and selling, but in the waiting.", "Charlie Munger"],
+        ["Learn to use your emotions to think, not think with your emotions.", "Robert Kiyosaki"],
+        ["The trend is your friend until the end when it bends.", "Ed Seykota"],
+        ["Risk means more things can happen than will happen.", "Elroy Dimson"],
+        ["Far more money has been lost by investors preparing for corrections than in corrections themselves.", "Peter Lynch"],
+        ["Successful speculation requires capital, courage and judgment.", "Philip Carret"],
+        ["Nothing sedates rationality like large doses of effortless money.", "Warren Buffett"],
+        ["Some people seem to like to lose, so they win by losing money.", "Ed Seykota"],
+        ["Never ask a barber if you need a haircut.", "Warren Buffett"],
+        ["If you buy them cheap enough, they watch themselves.", "Philip Carret"]
+    ],
+    optimistic: [
+        ["Never bet against America.", "Warren Buffett"],
+        ["An investment in knowledge pays the best interest.", "Benjamin Franklin"],
+        ["Our favorite holding period is forever.", "Warren Buffett"],
+        ["Don\u2019t look for the needle in the haystack. Just buy the haystack!", "John Bogle"],
+        ["The time of maximum pessimism is the best time to buy.", "John Templeton"],
+        ["Corporate profits will be a lot higher 10 years from now. They\u2019ll be a lot higher 20 years from now.", "Peter Lynch"],
+        ["The stock market is filled with individuals who know the price of everything, but the value of nothing.", "Philip Fisher"],
+        ["I\u2019m an optimist, both as a person and an investor.", "Philip Carret"],
+        ["If you aren\u2019t willing to own a stock for ten years, don\u2019t even think about owning it for ten minutes.", "Warren Buffett"],
+        ["The best chance to deploy capital is when things are going down.", "Warren Buffett"],
+        ["Wide diversification is only required when investors do not understand what they are doing.", "Warren Buffett"],
+        ["Opportunities come infrequently. When it rains gold, put out the bucket, not the thimble.", "Warren Buffett"],
+        ["It\u2019s an opportunity to buy more.", "John Bogle"],
+        ["The courage to press on regardless... is the quintessential attribute of the successful investor.", "John Bogle"],
+        ["Given a 10% chance of a 100 times payoff, you should take that bet every time.", "Jeff Bezos"],
+        ["With a good perspective on history, we can have a better understanding of the past and present, and thus a clear vision of the future.", "Carlos Slim Helu"],
+        ["Courage taught me no matter how bad a crisis gets... any sound investment will eventually pay off.", "Carlos Slim Helu"],
+        ["The stock market is a no-called-strike game. You don\u2019t have to swing at everything\u2014you can wait for your pitch.", "Warren Buffett"],
+        ["The best thing to do is to own the S&P 500 index fund.", "Warren Buffett"],
+        ["If you invested in a very low-cost index fund... you\u2019ll do better than 90% of people who start investing at the same time.", "Warren Buffett"],
+        ["Buy into a company because you want to own it, not because you want the stock to go up.", "Warren Buffett"],
+        ["The best thing that happens to us is when a great company gets into temporary trouble.", "Warren Buffett"],
+        ["Time is the friend of the wonderful company, the enemy of the mediocre.", "Warren Buffett"],
+        ["The stock market is designed to transfer money from the active to the patient.", "Warren Buffett"],
+        ["In the short run, the market is a voting machine but in the long run it is a weighing machine.", "Benjamin Graham"],
+        ["Invest for the long haul. Don\u2019t get too greedy and don\u2019t get too scared.", "Shelby M.C. Davis"],
+        ["I make no attempt to forecast the general market\u2014my efforts are devoted to finding undervalued securities.", "Warren Buffett"],
+        ["The most important quality for an investor is temperament, not intellect.", "Warren Buffett"],
+        ["Behind every stock is a company. Find out what it\u2019s doing.", "Peter Lynch"],
+        ["Know what you own, and know why you own it.", "Peter Lynch"],
+        ["To the extent we have been successful, it is because we concentrated on identifying one-foot hurdles that we could step over.", "Warren Buffett"],
+        ["Traders rarely die rich, patient investors often do.", "Philip Carret"],
+        ["All intelligent investing is value investing\u2014acquiring more than you are paying for.", "Charlie Munger"],
+        ["The best way to own common stocks is through an index fund.", "John Bogle"],
+        ["Finding the really outstanding companies and staying with them through all the fluctuations of a gyrating market proved far more profitable than trying to buy them cheap and sell them dear.", "Philip A. Fisher"],
+        ["The great thing about the stock market is that it is the only place where things go on sale and all the customers run out of the store.", "Cullen Roche"],
+        ["Buy when everyone else is selling and hold until everyone else is buying.", "J. Paul Getty"],
+        ["To invest successfully over a lifetime does not require a stratospheric IQ, unusual business insights, or inside information.", "Warren Buffett"],
+        ["A low-cost index fund is the most sensible equity investment for the great majority of investors.", "John Bogle"],
+        ["Stay the course.", "John Bogle"]
+    ],
+    pragmatic: [
+        ["Price is what you pay; value is what you get.", "Warren Buffett"],
+        ["Risk comes from not knowing what you\u2019re doing.", "Warren Buffett"],
+        ["The essence of investment management is the management of risks, not the management of returns.", "Benjamin Graham"],
+        ["Investment is most intelligent when it is most businesslike.", "Benjamin Graham"],
+        ["The individual investor should act consistently as an investor and not as a speculator.", "Benjamin Graham"],
+        ["In the world of money, which is a world shaped by human behavior, nobody has the foggiest notion of what will happen in the future.", "John Kenneth Galbraith"],
+        ["Most of the time we are punished if we go against the trend. Only at an inflection point are we rewarded.", "George Soros"],
+        ["It\u2019s not whether you\u2019re right or wrong that\u2019s important, but how much money you make when you\u2019re right and how much you lose when you\u2019re wrong.", "George Soros"],
+        ["My approach works not by making valid predictions, but by allowing me to correct false ones.", "George Soros"],
+        ["Trade only when the market is clearly bullish or bearish.", "Jesse Livermore"],
+        ["There are many times when I have been completely in cash.", "Jesse Livermore"],
+        ["The change in the major trend is what hurts most speculators.", "Jesse Livermore"],
+        ["Don\u2019t be a hero. Don\u2019t have an ego. Always question yourself and your ability.", "Paul Tudor Jones"],
+        ["The most important rule of trading is to play great defense, not great offense.", "Paul Tudor Jones"],
+        ["Losers average losers.", "Paul Tudor Jones"],
+        ["If you have a losing position that is making you uncomfortable, the solution is very simple: get out.", "Paul Tudor Jones"],
+        ["Cut your losses.", "George Soros"],
+        ["The investor\u2019s chief problem\u2014and even his worst enemy\u2014is likely to be himself.", "Benjamin Graham"],
+        ["I react pragmatically. Where the market works, I\u2019m for that. Where the government is necessary, I\u2019m for that.", "John Kenneth Galbraith"],
+        ["It will fluctuate.", "J. P. Morgan"],
+        ["Inflation is always and everywhere a monetary phenomenon.", "Milton Friedman"],
+        ["Economics is not simply a topic on which to express opinions or vent emotions.", "Thomas Sowell"],
+        ["Everyone responds to incentives, including people you want to help.", "Thomas Sowell"],
+        ["Many things that are desirable are not feasible.", "Thomas Sowell"],
+        ["Other people have more information about their abilities, their efforts, and their preferences than you do.", "Thomas Sowell"],
+        ["The market is there to serve you, not to instruct you.", "Benjamin Graham"],
+        ["Basically, price fluctuations have only one significant meaning for the true investor.", "Benjamin Graham"],
+        ["At other times he will do better if he forgets about the stock market and pays attention to his dividend returns and to the operating results of his companies.", "Benjamin Graham"],
+        ["The principal role of the mutual fund is to serve its investors.", "John Bogle"],
+        ["Beating the market is a zero-sum game for investors.", "John Bogle"],
+        ["The zero-sum game before costs becomes a loser\u2019s game after costs.", "John Bogle"],
+        ["Stock prices will always be far more volatile than cash-equivalent holdings.", "Warren Buffett"],
+        ["Volatility is far from synonymous with risk.", "Warren Buffett"],
+        ["We have no theory of the duration of a bubble. It can always go on longer than anyone expects.", "Paul Samuelson"],
+        ["The real reason that physicians are mediocre investors is that it never occurs to them that finance is a science.", "William J. Bernstein"],
+        ["A healthy portfolio requires a regular checkup\u2014perhaps every six months or so.", "Peter Lynch"],
+        ["The most important thing in investing is to use common sense.", "Philip Carret"],
+        ["If you don\u2019t understand a company, if you can\u2019t explain it to a ten-year-old in two minutes or less, don\u2019t own it.", "Peter Lynch"],
+        ["You get recessions, you have stock market declines. If you don\u2019t understand that\u2019s going to happen, then you\u2019re not ready.", "Peter Lynch"],
+        ["A speculator is a man who observes the future, and acts before it occurs.", "Bernard Baruch"]
+    ],
+    cynical: [
+        ["The function of economic forecasting is to make astrology look respectable.", "John Kenneth Galbraith"],
+        ["There are two kinds of forecasters: those who don\u2019t know, and those who don\u2019t know they don\u2019t know.", "John Kenneth Galbraith"],
+        ["The stock market has forecast nine of the last five recessions.", "Paul Samuelson"],
+        ["The world of finance is a mysterious world in which, incredible as the fact may appear, evaporation precedes liquidation.", "Joseph Conrad"],
+        ["FINANCE, n. The art or science of managing revenues and resources for the best advantage of the manager.", "Ambrose Bierce"],
+        ["ECONOMY, n. Purchasing the barrel of whiskey that you do not need for the price of the cow that you cannot afford.", "Ambrose Bierce"],
+        ["We have met the enemy and he is us.", "Walt Kelly (Pogo)"],
+        ["The business model of Wall Street is fraud.", "Bernie Sanders"],
+        ["Wall Street regulates the Congress.", "Bernie Sanders"],
+        ["The U.S. brokerage and investment banking industry has transformed the modern American stock market into nothing more than a mechanism for transferring wealth from shareholders to management.", "Peter Schiff"],
+        ["The dumbest reason in the world to buy a stock is because it\u2019s going up.", "Warren Buffett"],
+        ["Forecasts may tell you a great deal about the forecaster; they tell you nothing about the future.", "Warren Buffett"],
+        ["We\u2019ve long felt that the only value of stock forecasters is to make fortune tellers look good.", "Warren Buffett"],
+        ["Nothing in finance is more fatuous and harmful... than the attitude: \u2018If you don\u2019t like the management, sell your stock.\u2019", "Benjamin Graham"],
+        ["The public owners seem to have abdicated all claim to control over the paid superintendents of their property.", "Benjamin Graham"],
+        ["If past history was all there was to the game, the richest people would be librarians.", "Warren Buffett"],
+        ["It is difficult to get a man to understand something when his salary depends upon his not understanding it.", "Upton Sinclair"],
+        ["The whole notion of the free market... is a very thin rationale for unmitigated greed by a tiny oligarchic elite.", "Chris Hedges"],
+        ["When people behave badly they always invent a philosophy of life which represents their bad actions... as results of unalterable laws beyond their control.", "Leo Tolstoy"],
+        ["Capitalism is the astonishing belief that the nastiest motives of the nastiest men somehow or other work together for the best results.", "attributed to John Maynard Keynes"],
+        ["Wealth, in even the most improbable cases, manages to convey the aspect of intelligence.", "John Kenneth Galbraith"],
+        ["Politics is not the art of the possible. It consists in choosing between the disastrous and the unpalatable.", "John Kenneth Galbraith"],
+        ["There\u2019s no longer any reason to believe that the wizards of Wall Street actually contribute anything positive to society.", "Paul Krugman"],
+        ["It\u2019s hard to think of any major recent financial innovations that actually aided society, as opposed to being new, improved ways to blow bubbles.", "Paul Krugman"],
+        ["The U.S. stock market was now a class system, rooted in speed, of haves and have-nots.", "Michael Lewis"],
+        ["What had once been the world\u2019s most public, most democratic financial market had become... a private viewing of a stolen work of art.", "Michael Lewis"],
+        ["Money never sleeps.", "Gordon Gekko"],
+        ["The problem with money... it makes you do things you don\u2019t want to do.", "Lou Mannheim"],
+        ["Kid, you\u2019re on a roll. Enjoy it while it lasts, because it never does.", "Lou Mannheim"],
+        ["No such thing except death and taxes.", "Lou Mannheim"],
+        ["Quick-buck artists come and go with every bull market, but the steady players make it through the bear market.", "Lou Mannheim"],
+        ["It\u2019s a zero-sum game\u2014somebody wins, somebody loses.", "Gordon Gekko"],
+        ["I create nothing. I own.", "Gordon Gekko"],
+        ["We make the rules, pal.", "Gordon Gekko"],
+        ["The main purpose of the stock market is to make fools of as many men as possible.", "Bernard Baruch"],
+        ["Markets don\u2019t look after social needs.", "George Soros"],
+        ["Markets are designed to allow individuals to look after their private needs and to pursue profit.", "George Soros"],
+        ["I can hire one half of the working class to kill the other half.", "attributed to Jay Gould"]
+    ],
+    pessimistic: [
+        ["Many of the greatest economic evils of our time are the fruits of risk, uncertainty, and ignorance.", "John Maynard Keynes"],
+        ["Bottoms in the investment world don\u2019t end with four-year lows; they end with 10- or 15-year lows.", "Jim Rogers"],
+        ["I haven\u2019t the faintest idea where the stock market is going. But I can promise you that someday there will be a big bear market\u2014and a lot of people will lose money.", "Philip Carret"],
+        ["I can calculate the movement of the stars, but not the madness of men.", "attributed to Isaac Newton"],
+        ["It was one of those rare manifestations of mass financial madness.", "Benjamin Graham"],
+        ["That man would be better off if his stocks had no market quotation at all.", "Benjamin Graham"],
+        ["The debt crisis is not a temporary problem, it is a structural one. We need rehab.", "Nassim Nicholas Taleb"],
+        ["Economic life should be definancialised.", "Nassim Nicholas Taleb"],
+        ["Markets do not harbour the certainties that normal citizens require.", "Nassim Nicholas Taleb"],
+        ["Prices are too high is far from synonymous with the next move will be downward.", "Howard Marks"],
+        ["In bear markets, things first decline to reasonable prices, then they fall to cheap prices, and then they reach unbelievable giveaway prices.", "Jim Rogers"],
+        ["After that, things get really bad, and everybody gets cleaned out.", "Jim Rogers"],
+        ["If the market persists in behaving foolishly, all he seems to need is ordinary common sense in order to exploit its foolishness.", "Benjamin Graham"],
+        ["Not all bubbles involve the extension of credit; some are based on equity leveraging.", "George Soros"],
+        ["Equilibrium itself has rarely been observed in real life\u2014market prices have a notorious habit of fluctuating.", "George Soros"],
+        ["The usual way I lose money is by buying concept stocks.", "Philip Carret"],
+        ["The investors operate with limited intelligence: they do not know everything.", "George Soros"],
+        ["The nature of unemployment today is totally different from what it was a year ago.", "John Maynard Keynes"],
+        ["Capitalism, wisely managed, can probably be made more efficient... but in itself it is in many ways extremely objectionable.", "John Maynard Keynes"],
+        ["The pre-1800 pattern of commercial panics had to be a case of non macro-efficiency of markets.", "Paul Samuelson"],
+        ["You cannot make money on correcting macro inefficiencies in the price level of the stock market.", "Paul Samuelson"],
+        ["We have no theory of the duration of a bubble.", "Paul Samuelson"],
+        ["The future can well witness the oldest business cycle mechanism, the South Sea Bubble, and that kind of thing.", "Paul Samuelson"],
+        ["The world is not driven by greed. It\u2019s driven by envy.", "Charlie Munger"],
+        ["Envy is a really stupid sin because it\u2019s the only one you could never possibly have any fun at.", "Charlie Munger"],
+        ["When everybody thinks alike, everybody is likely to be wrong.", "Humphrey B. Neill"],
+        ["If you\u2019ve been playing poker for half an hour and you still don\u2019t know who the patsy is, you\u2019re the patsy.", "Warren Buffett (quoting a poker proverb)"],
+        ["There are old traders and there are bold traders, but there are very few old, bold traders.", "Wall Street saying"],
+        ["The first rule is not to lose. The second rule is not to forget the first rule.", "Warren Buffett"],
+        ["We know from experience that eventually the market catches up with value.", "Benjamin Graham"],
+        ["History never looks like history when you are living through it.", "John W. Gardner"],
+        ["For every action, there is an equal and opposite government program.", "Bob Wells"],
+        ["Speculation is most dangerous when it looks easiest.", "Warren Buffett"],
+        ["Investing is a popularity contest, and the most dangerous thing is to buy something at the peak of its popularity.", "Howard Marks"],
+        ["Skepticism and pessimism aren\u2019t synonymous. Skepticism calls for pessimism when optimism is excessive.", "Howard Marks"],
+        ["Bullish or bearish are terms used by people who do not engage in practicing uncertainty.", "Nassim Nicholas Taleb"],
+        ["The more the market goes up, the lower the prospective return.", "Howard Marks"],
+        ["This is not a market for the complacent.", "Howard Marks"]
+    ]
+};
+
+/* Olympus committee picks (2026-09-30 UI review): 5 per lane, each verified against the
+   source named in its 4th field. Entry: [text, author, lane, source]. */
+(function (Q) {
+  var picks = [
+  [
+    "When you have tremendous conviction on a trade, you have to go for the jugular. It takes courage to be a pig.",
+    "Stanley Druckenmiller",
+    "TORO",
+    "https://www.brainyquote.com/quotes/stanley_druckenmiller_897233",
+    "greedy"
+  ],
+  [
+    "The real key to making money in stocks is not to get scared out of them.",
+    "Peter Lynch",
+    "TORO",
+    "https://www.crossingwallstreet.com/archives/2020/01/the-short-and-long-term.html",
+    "optimistic"
+  ],
+  [
+    "Don't fight the tape.",
+    "Martin Zweig",
+    "TORO",
+    "https://tradingmomentum.substack.com/p/marty-zweigs-rules-dont-fight-the",
+    "pragmatic"
+  ],
+  [
+    "You can't predict. You can prepare.",
+    "Howard Marks",
+    "TORO",
+    "https://www.oaktreecapital.com/docs/default-source/memos/2001-11-20-you-cant-predict-you-can-prepare.pdf",
+    "pessimistic"
+  ],
+  [
+    "There is the plain fool, who does the wrong thing at all times everywhere, but there is the Wall Street fool, who thinks he must trade all the time.",
+    "Edwin Lefevre (Jesse Livermore's voice)",
+    "TORO",
+    "Full text of Reminiscences of a Stock Operator",
+    "cynical"
+  ],
+  [
+    "Speculators may do no harm as bubbles on a steady stream of enterprise. But the position is serious when enterprise becomes the bubble on a whirlpool of speculation.",
+    "John Maynard Keynes",
+    "URSA",
+    "The General Theory of Employment, Interest and Money (1936), ch. 12 (marxists.org text)",
+    "greedy"
+  ],
+  [
+    "The way to build long-term returns is through preservation of capital and home runs.",
+    "Stanley Druckenmiller",
+    "URSA",
+    "https://www.marketfolly.com/2013/03/lessons-from-stanley-druckenmiller.html",
+    "optimistic"
+  ],
+  [
+    "Being too far ahead of your time is indistinguishable from being wrong.",
+    "Howard Marks",
+    "URSA",
+    "Oaktree memo 'On Bubble Watch' (oaktreecapital.com), an adage Marks learned in the early 1970s",
+    "pragmatic"
+  ],
+  [
+    "Avoiding loss should be the primary goal of every investor.",
+    "Seth Klarman",
+    "URSA",
+    "https://jamesclear.com/book-summaries/margin-of-safety-risk-averse-value-investing-strategies-for-the-thoughtful-investor",
+    "pessimistic"
+  ],
+  [
+    "October. This is one of the peculiarly dangerous months to speculate in stocks in. The others are July, January, September, April, November, May, March, June, December, August, and February.",
+    "Mark Twain",
+    "URSA",
+    "Project Gutenberg text of Pudd'nhead Wilson, https://www.gutenberg.org/cache/epub/102/pg102.txt, lines 3034-3044",
+    "cynical"
+  ],
+  [
+    "A trader who forces a trade when there is no real opportunity in the market is like a basketball player who forces a shot when he is off-balance or heavily guarded—the chances of scoring are low.",
+    "James F. Dalton",
+    "PYTHIA",
+    "Mind Over Markets (Dalton, Jones, Dalton), Goodreads quotes",
+    "pragmatic"
+  ],
+  [
+    "To progress beyond the average, beyond the middle of the bell curve and into the upper extremes of excellence, you must achieve self-understanding.",
+    "James F. Dalton",
+    "PYTHIA",
+    "Mind Over Markets (Dalton, Jones, Dalton), Goodreads quotes",
+    "optimistic"
+  ],
+  [
+    "Every indicator eventually bites the dust.",
+    "Marty Zweig",
+    "PYTHIA",
+    "https://tradingmomentum.substack.com/p/marty-zweigs-rules-dont-fight-the",
+    "cynical"
+  ],
+  [
+    "Don't focus on making money; focus on protecting what you have.",
+    "Paul Tudor Jones",
+    "PYTHIA",
+    "https://finance.yahoo.com/news/legendary-trader-paul-tudor-jones-180042155.html",
+    "pessimistic"
+  ],
+  [
+    "I just wait until there is money lying in the corner, and all I have to do is go over there and pick it up.",
+    "Jim Rogers",
+    "PYTHIA",
+    "https://www.azquotes.com/quote/726761",
+    "greedy"
+  ],
+  [
+    "What seems too high and risky to the majority usually goes higher and what seems low and cheap usually goes lower.",
+    "William J. O'Neil",
+    "PYTHAGORAS",
+    "How to Make Money in Stocks (O'Neil); wording seen in secondary sources only, not checked against the book",
+    "greedy"
+  ],
+  [
+    "The big money was not in the individual fluctuations but in the main movements; that is, not in reading the tape but in sizing up the entire market and its trend.",
+    "Jesse Livermore (as written by Edwin Lefevre)",
+    "PYTHAGORAS",
+    "Full text of Reminiscences of a Stock Operator",
+    "optimistic"
+  ],
+  [
+    "The elements of good trading are: (1) cutting losses, (2) cutting losses, and (3) cutting losses.",
+    "Ed Seykota",
+    "PYTHAGORAS",
+    "https://www.turtletrader.com/market-quotes/",
+    "pragmatic"
+  ],
+  [
+    "If you're playing for the emotional satisfaction, you're bound to lose, because what feels good is often the wrong thing to do.",
+    "William Eckhardt",
+    "PYTHAGORAS",
+    "The New Market Wizards (Schwager, 1992), Eckhardt interview",
+    "pessimistic"
+  ],
+  [
+    "Technical analysis tracks the past; it does not predict the future.",
+    "Bruce Kovner",
+    "PYTHAGORAS",
+    "Market Wizards (Schwager, 1989), Kovner interview (full text checked)",
+    "cynical"
+  ],
+  [
+    "When the music stops, in terms of liquidity, things will be complicated. But as long as the music is playing, you've got to get up and dance. We're still dancing.",
+    "Chuck Prince",
+    "DAEDALUS",
+    "https://fcic-static.law.stanford.edu/cdn_media/fcic-docs/2007-07-09%20Citigroup%20chief%20stay%20bullish%20on%20buyouts%20(The%20Financial%20Times).pdf",
+    "greedy"
+  ],
+  [
+    "Wind extinguishes a candle and energizes fire. Likewise with randomness, uncertainty, chaos: you want to use them, not hide from them.",
+    "Nassim Nicholas Taleb",
+    "DAEDALUS",
+    "https://www.fooledbyrandomness.com/prologue.pdf",
+    "optimistic"
+  ],
+  [
+    "I will never sacrifice reality for elegance without explaining why I have done so.",
+    "Emanuel Derman and Paul Wilmott",
+    "DAEDALUS",
+    "https://emanuelderman.com/the-financial-modelers-manifesto/",
+    "pragmatic"
+  ],
+  [
+    "Derivatives are financial weapons of mass destruction, carrying dangers that, while now latent, are potentially lethal.",
+    "Warren Buffett",
+    "DAEDALUS",
+    "https://www.berkshirehathaway.com/letters/2002pdf.pdf",
+    "pessimistic"
+  ],
+  [
+    "Noise makes trading in financial markets possible, and thus allows us to observe prices for financial assets.",
+    "Fischer Black",
+    "DAEDALUS",
+    "https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1540-6261.1986.tb04513.x",
+    "cynical"
+  ],
+  [
+    "There is nothing so disturbing to one's well-being and judgment as to see a friend get rich.",
+    "Charles P. Kindleberger",
+    "THALES",
+    "https://barrypopik.com/blog/there_is_nothing_so_disturbing_to_ones_well_being_and_judgment_as_to_see_a",
+    "greedy"
+  ],
+  [
+    "Whether we're talking about socks or stocks, I like buying quality merchandise when it is marked down.",
+    "Warren Buffett",
+    "THALES",
+    "https://www.berkshirehathaway.com/letters/2008ltr.pdf",
+    "optimistic"
+  ],
+  [
+    "It's far better to buy a wonderful company at a fair price than a fair company at a wonderful price.",
+    "Warren Buffett",
+    "THALES",
+    "Berkshire Hathaway 1989 shareholder letter (berkshirehathaway.com/letters/1989.html)",
+    "pragmatic"
+  ],
+  [
+    "Financial genius is before the fall.",
+    "John Kenneth Galbraith",
+    "THALES",
+    "https://www.amazon.com/Short-History-Financial-Euphoria-Genius/dp/096247455X",
+    "pessimistic"
+  ],
+  [
+    "Never, ever, think about something else when you should be thinking about the power of incentives.",
+    "Charlie Munger",
+    "THALES",
+    "https://fs.blog/great-talks/psychology-human-misjudgment/",
+    "cynical"
+  ],
+  [
+    "The speculator's deadly enemies are: Ignorance, greed, fear and hope.",
+    "Edwin Lefevre",
+    "PIVOT",
+    "Reminiscences of a Stock Operator (Project Gutenberg #60979, full text checked)",
+    "greedy"
+  ],
+  [
+    "Men who can both be right and sit tight are uncommon. I found it one of the hardest things to learn.",
+    "Edwin Lefevre (Jesse Livermore's voice)",
+    "PIVOT",
+    "Full text of Reminiscences of a Stock Operator",
+    "optimistic"
+  ],
+  [
+    "I know where I'm getting out before I get in.",
+    "Bruce Kovner",
+    "PIVOT",
+    "Market Wizards (Schwager, 1989), Kovner interview (full text checked)",
+    "pragmatic"
+  ],
+  [
+    "I have two basic rules about winning in trading as well as in life: (1) If you don't bet, you can't win. (2) If you lose all your chips, you can't bet.",
+    "Larry Hite",
+    "PIVOT",
+    "https://www.goodreads.com/quotes/11714331-have-two-basic-rules-about-winning-in-trading-as-well",
+    "pessimistic"
+  ],
+  [
+    "The first principle is that you must not fool yourself—and you are the easiest person to fool.",
+    "Richard P. Feynman",
+    "PIVOT",
+    "https://calteches.library.caltech.edu/51/2/CargoCult.htm",
+    "cynical"
+  ]
+];
+  picks.forEach(function (e) { (Q[e[4]] = Q[e[4]] || []).push([e[0], e[1], e[2], e[3]]); });
+})(window.AGORA_QUOTES);

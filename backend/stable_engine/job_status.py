@@ -16,7 +16,7 @@ Two coupled signals:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytz
 
@@ -29,8 +29,12 @@ SLO_SECONDS = {
     "nightly": 26 * 3600,   # close theme scores: nightly recompute every ~24h (+2h grace)
     "strip": 30 * 60,       # index/rates/fx live strip: 10-min cadence, 30-min SLO (RTH)
     "movers": 30 * 60,      # movers screener: 10-min cadence, 30-min SLO (RTH)
+    "ext_hours": 30 * 60,   # overnight futures: 5-min cadence, 30-min SLO (outside RTH)
 }
 RTH_ONLY_FEEDS = {"strip", "movers"}
+# The mirror image: written only while the regular session is SHUT (and not over
+# the weekend, when futures themselves are shut). Quiet during RTH is expected.
+OFF_HOURS_FEEDS = {"ext_hours"}
 FAILURE_ALERT_THRESHOLD = 2  # consecutive failures before a flatline alert fires
 
 # The scheduled jobs we track (job_name -> which feed it freshens).
@@ -39,6 +43,7 @@ JOB_FEEDS = {
     "provisional": "nightly",  # provisional snapshots also write theme_scores
     "strip": "strip",
     "movers": "movers",
+    "ext_hours": "ext_hours",
 }
 
 
@@ -60,12 +65,37 @@ def feed_flatline(feed: str, age_seconds: float | None, dt_et: datetime | None =
     slo = SLO_SECONDS.get(feed)
     if slo is None:
         return False  # tide / unknown -> exempt
+    if feed in OFF_HOURS_FEEDS:
+        return _off_hours_flatline(age_seconds, slo)
     if age_seconds is None:
         # No data at all is only "dead" when the feed should be flowing.
         return (feed not in RTH_ONLY_FEEDS) or is_market_hours(dt_et)
     if feed in RTH_ONLY_FEEDS and not is_market_hours(dt_et):
         return False
     return age_seconds > slo
+
+
+def _off_hours_flatline(age_seconds: float | None, slo: float) -> bool:
+    """An off-hours feed is dead only when it should be flowing and has not: the
+    regular session is shut (THE calendar), the fetch window is open, and the
+    feed has been quiet past its SLO -- measured from when the window last
+    re-opened, so the first minutes after the close or the Sunday open never
+    read as dead. An unreadable calendar exempts rather than accuses."""
+    try:
+        from stable_engine.ext_hours import window_open
+        from stable_engine.sessions import REGULAR, session_at
+        now = datetime.now(timezone.utc)
+        s = session_at(now)
+        if s is None or s == REGULAR or not window_open(now):
+            return False
+        # Quiet time that falls inside the regular session or the weekend is
+        # expected; only the part since the flow window re-opened counts.
+        since = now - timedelta(seconds=slo)
+        if session_at(since) == REGULAR or not window_open(since):
+            return False
+    except Exception:
+        return False
+    return age_seconds is None or age_seconds > slo
 
 
 async def _ensure_table(conn) -> None:

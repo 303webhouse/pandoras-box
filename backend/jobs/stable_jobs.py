@@ -252,6 +252,39 @@ async def stable_strip_loop():
         await asyncio.sleep(STRIP_REFRESH_SECONDS)
 
 
+def _ext_hours_work() -> dict:
+    from stable_engine import ext_hours
+    return ext_hours.run_ext_hours_update()
+
+
+async def run_ext_hours() -> dict:
+    return await asyncio.to_thread(_ext_hours_work)
+
+
+# Overnight futures + pre/after-hours ETFs. Two batched yfinance requests per tick,
+# zero UW. Runs only OUTSIDE the regular session (THE calendar, sessions.session_at,
+# not this file's weekday is_rth): inside it the regular strip is the live read.
+EXT_HOURS_REFRESH_SECONDS = 300
+
+
+async def stable_ext_hours_loop():
+    """Refresh overnight futures every 5 min whenever the regular session is not open."""
+    from stable_engine import ext_hours
+    from stable_engine.sessions import REGULAR, session_at
+
+    await asyncio.sleep(90)  # let the DB pool settle after boot
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            # None (calendar cannot answer) fetches anyway: a wasted request is
+            # cheaper than a dark overnight bar.
+            if session_at(now) != REGULAR and ext_hours.window_open(now):
+                await _record("ext_hours", run_ext_hours)
+        except Exception as e:
+            logger.warning("[stable_jobs] ext-hours loop error: %s", e)
+        await asyncio.sleep(EXT_HOURS_REFRESH_SECONDS)
+
+
 def _movers_work() -> dict:
     from stable_engine import movers
     return movers.run_movers_update()
