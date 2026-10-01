@@ -505,3 +505,76 @@ async def compute_all_tape_health(config: Optional[dict] = None) -> Dict[str, An
             logger.error("Tape-health computation failed for %s: %s", sym, exc)
             results[sym] = _na_tape_cell(sym, f"ENGINE_ERROR:{exc}")
     return results
+
+
+# ── Read path (Stater Phase 0, R-IV.619) ─────────────────────────────────────
+# A GET must READ what the 15-minute job wrote, never recompute. Recomputing on
+# every poll inserted a crypto_tape_health_log row per symbol per request, could
+# fire CVD events from a browser tab, and pulled bars through the paid feed for
+# event detection. The job (scheduler/bias_scheduler.py, crypto_tape_health) is
+# the only writer; this is the only thing a request runs.
+TAPE_JOB_CADENCE_SECONDS = 900                    # the scheduler's interval
+TAPE_STALE_AFTER_SECONDS = TAPE_JOB_CADENCE_SECONDS + 300   # one missed run + grace
+_STORED_SOURCE = "crypto_tape_health_log (15-min job)"
+
+
+def _row_to_cell(row: Dict[str, Any], now_utc: datetime) -> Dict[str, Any]:
+    """One stored row -> the same cell shape compute_tape_health() returns."""
+    ca = row["computed_at"]
+    ca = ca if ca.tzinfo else ca.replace(tzinfo=timezone.utc)
+    age = int((now_utc - ca).total_seconds())
+    stale = age > TAPE_STALE_AFTER_SECONDS
+    spot, perp = row.get("spot_cvd"), row.get("perp_cvd")
+    reason = None
+    if row.get("state") == "NA":
+        # The table does not store the NA reason; the legs say which one was missing.
+        reason = _SPOT_FEED_NA_REASON if spot is None else ("PERP_FEED_UNAVAILABLE" if perp is None else "NA")
+    return {
+        "symbol": row["symbol"],
+        "state": row.get("state"),
+        "value": (spot - perp) if (spot is not None and perp is not None) else None,
+        "slope": row.get("slope"),
+        "spot_cvd": spot,
+        "perp_cvd": perp,
+        "as_of": ca.isoformat(),
+        "computed_at": ca.isoformat(),
+        "data_age_seconds": age,
+        "stale": stale,
+        "source": _STORED_SOURCE,
+        "degraded": bool(row.get("degraded")) or stale,
+        "degrade_reason": row.get("degrade_reason") or (
+            f"last stored reading is {age}s old (job runs every {TAPE_JOB_CADENCE_SECONDS}s)" if stale else None),
+        "reason": reason,
+    }
+
+
+async def read_latest_tape_health(symbols: Optional[List[str]] = None,
+                                  now_utc: Optional[datetime] = None) -> Dict[str, Any]:
+    """Newest stored tape-health row per symbol. No vendor call, no write, no event.
+
+    A symbol with no stored row is an honest NA, never a fabricated reading.
+    """
+    from config.crypto_symbol_matrix import CRYPTO_SYMBOL_MATRIX
+    from database.postgres_client import get_postgres_client
+
+    wanted = [s.upper() for s in (symbols or list(CRYPTO_SYMBOL_MATRIX))]
+    now_utc = now_utc or datetime.now(timezone.utc)
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (symbol) symbol, state, slope, spot_cvd, perp_cvd,
+                   degraded, degrade_reason, computed_at
+            FROM crypto_tape_health_log
+            WHERE symbol = ANY($1::text[])
+            ORDER BY symbol, computed_at DESC
+            """,
+            wanted,
+        )
+    by_sym = {r["symbol"]: dict(r) for r in rows}
+    out = {}
+    for sym in wanted:
+        row = by_sym.get(sym)
+        out[sym] = _row_to_cell(row, now_utc) if row else _na_tape_cell(sym, "NO_STORED_READING")
+    return out
+
