@@ -28,9 +28,32 @@ HOOK = """#!/bin/sh
 # Refuse a commit carrying a credential-shaped string. The staged blobs are scanned, not the
 # working tree -- scanning the tree while committing the index is how a scanner passes on content
 # that is not what is being committed.
-python scripts/secret_scan.py --staged || {
+#
+# The scanner is resolved from the MAIN worktree, never by a path relative to the current one.
+# Measured 2026-10-01 in C:/th-cursor (R-IV.627(b)2): hooks are shared through the common git
+# dir, so the hook fired there -- but `python scripts/secret_scan.py` resolved against THAT
+# worktree, whose branch predates the scanner. Every commit in it was refused with a
+# missing-file error wearing the words of a secret finding, which both bricks the lane and
+# invites an author to stamp "# secret-scan: allow" on something to get past it.
+common_dir=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)
+scan="$common_dir/../scripts/secret_scan.py"
+[ -f "$scan" ] || scan="$(git rev-parse --show-toplevel)/scripts/secret_scan.py"
+
+# Fail closed, but say which failure it is. "Cannot scan" and "found something" are
+# different facts and only one of them is about the content being committed.
+if [ ! -f "$scan" ]; then
     echo ""
-    echo "pre-commit: refused. Nothing was committed."
+    echo "pre-commit: CANNOT SCAN -- secret_scan.py was not found."
+    echo "This is NOT a finding. Nothing was committed, and nothing was checked."
+    echo "Do not add an allow marker. Fix the scanner:"
+    echo "    python scripts/install_git_hooks.py"
+    exit 1
+fi
+
+python "$scan" --staged || {
+    echo ""
+    echo "pre-commit: refused -- a staged blob carries a credential-shaped string."
+    echo "Nothing was committed."
     echo "If the value is genuinely safe, mark the line with"
     echo "    # secret-scan: allow <why>"
     exit 1
@@ -69,14 +92,9 @@ def main() -> int:
                        capture_output=True, text=True)
     others = [l.split(" ", 1)[1].strip() for l in r.stdout.split("\n")
               if l.startswith("worktree ")]
-    missing = []
-    for w in others:
-        p = os.path.join(w, ".git")
-        # a worktree's hooks live in the main repo's common dir, so one install usually covers
-        # them -- but a separate CLONE does not. Report what is not covered.
-        if os.path.isdir(p) and not os.path.samefile(
-                os.path.dirname(hooks), os.path.join(p, "")) if os.path.isdir(p) else False:
-            missing.append(w)
+    # A worktree's hooks live in the main repo's common dir, so one install covers them all --
+    # which is why the hook must not resolve the SCANNER relative to the current worktree. A
+    # separate clone shares nothing and needs its own install.
     if others:
         print("\nworktrees sharing this hook directory: %d" % len(others))
         for w in others:
