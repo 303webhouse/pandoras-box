@@ -302,10 +302,10 @@ class UpdatePositionRequest(BaseModel):
     # client-side and sends both.
     reason: Optional[str] = None
     actor: Optional[str] = None
-    # R-IV.143(2). Documentary vocabulary, no CHECK constraint: CORE | B1_MACRO |
-    # B1_C_CONVEXITY | B2_TACTICAL | B3_SCALP | HEDGE | MOMENTUM | OTHER. A semantic
-    # field, so MANUAL_EDIT may write it — the D1 allowlist refuses marks and realized
-    # fields, not position semantics. NULL is untagged; OTHER is a deliberate choice.
+    # Vocabulary: models/strategy_tag.py is the one author (R-IV.624(d)2) — not restated
+    # here, because a third copy of a list is a third thing to forget. Still no CHECK
+    # constraint. A semantic field, so MANUAL_EDIT may write it — the D1 allowlist refuses
+    # marks and realized fields, not position semantics. NULL is untagged, never OTHER.
     strategy_tag: Optional[str] = None
     status: Optional[str] = None  # OPEN, CLOSED, EXPIRED — allows reopening closed positions
     direction: Optional[str] = None  # LONG, SHORT
