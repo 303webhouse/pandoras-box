@@ -326,8 +326,20 @@ async def signals_freshness_summary() -> dict:
         # once-a-session producer on row age over a weekend.
         ages.pop(cls, None)
         try:
-            from jobs.job_runs import last_completed
-            row = await last_completed(AGE_SOURCE_JOB_NAME.get(cls, cls))
+            from jobs.job_runs import last_completed, last_run
+
+            job = AGE_SOURCE_JOB_NAME.get(cls, cls)
+            if cls in JOB_ALIVE_CLASSES:
+                # `last_completed` is deliberately BLIND to failure -- it returns only `ok` or
+                # `skipped`, because the T3 sentinel measures a pass that ran. For a class
+                # judged on being ALIVE that is exactly backwards: an errored run would come
+                # back as None and render `no_data` instead of the flatline it is. It also
+                # selects neither `rows_touched` nor `skip_reason`, so the quiet reason and the
+                # emitted count were both invisible -- the block read "ran and emitted nothing"
+                # while the row said "quiet: all assets in no-signal zones (MAX_LONG)".
+                row = await last_run(job)
+            else:
+                row = await last_completed(job)
             if row and row.get("finished_at") is not None:
                 fin = row["finished_at"]
                 if fin.tzinfo is None:

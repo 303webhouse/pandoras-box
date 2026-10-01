@@ -168,3 +168,47 @@ def test_the_block_says_which_signal_moved_the_status():
 def test_only_the_crypto_scanner_is_split_for_now():
     """The change is narrow: every other class keeps the status it had."""
     assert JOB_ALIVE_CLASSES == frozenset({"crypto_scanner"})
+
+
+# ─────────── it must read a row that can be a FAILURE (R-IV.617(b), second pass)
+
+def test_a_job_alive_class_reads_last_run_not_last_completed():
+    """`last_completed` is deliberately blind to failure — it returns only `ok` or `skipped`,
+    because the T3 sentinel measures a pass that ran. For a class judged on being ALIVE that is
+    backwards: an errored run comes back as None and renders `no_data` instead of the flatline
+    it is.
+
+    It also selects neither `rows_touched` nor `skip_reason`. The first live read proved it: the
+    run row said `quiet: all assets in no-signal zones (MAX_LONG)` with `rows_touched=0`, while
+    /health reported `signals_emitted: null` and the generic `ran and emitted nothing`. The
+    verdict was right and the reason was invented.
+    """
+    code = _code("stable_engine/signals_freshness.py")
+    # Both branches exist, and the alive class takes the one that can report a failure.
+    assert "row = await last_run(job)" in code
+    assert "row = await last_completed(job)" in code
+    assert code.index("row = await last_run(job)") < code.index("row = await last_completed(job)")
+
+
+def test_last_run_carries_the_columns_the_split_needs():
+    """If these ever stop being selected, the quiet reason goes silent again."""
+    import inspect
+
+    from jobs import job_runs
+    src = inspect.getsource(job_runs.last_run)
+    for col in ("status", "rows_touched", "skip_reason", "error", "finished_at"):
+        assert col in src, col
+    # ...and last_completed still does NOT, which is why the switch was needed.
+    lc = inspect.getsource(job_runs.last_completed)
+    assert "rows_touched" not in lc
+    assert "skip_reason" not in lc
+
+
+def test_last_completed_still_excludes_failures_for_everyone_else():
+    """POSITIVE CONTROL: the T3 sentinel's contract is untouched — it measures a pass that ran,
+    and `timeout`/`error` are excluded there on purpose."""
+    import inspect
+
+    from jobs import job_runs
+    src = inspect.getsource(job_runs.last_completed)
+    assert "STATUS_OK" in src and "STATUS_SKIPPED" in src
