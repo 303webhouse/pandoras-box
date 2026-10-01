@@ -3575,6 +3575,24 @@ CRYPTO_TICKERS = [
 # outside the six-symbol v2 universe, zero open positions + zero unresolved
 # signals confirmed via FA-1 pre-flight (2026-07-16). See s3-phase0-findings.md §1.6.
 
+async def _finish_crypto_run(run_id, status: str, rows: int,
+                             skip_reason=None, error=None) -> None:
+    """Close the crypto scan's job_runs record. Never raises into the scan.
+
+    A failure to RECORD the run must not fail the run, but it must not look like success
+    either -- the check reads this row, so a silent write failure would leave the job
+    looking dead. Logged loudly instead.
+    """
+    if run_id is None:
+        return
+    try:
+        from jobs.job_runs import finish_run
+        await finish_run(run_id, status, rows_touched=rows,
+                         skip_reason=skip_reason, error=error)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("crypto scan: could not close its job_runs record (%s): %s", status, exc)
+
+
 async def run_crypto_scan_scheduled():
     """
     Run crypto scanner 24/7 and push signals to Trade Ideas.
@@ -3597,6 +3615,24 @@ async def run_crypto_scan_scheduled():
     """
     logger.info("ðŸª™ Running scheduled Crypto scan...")
 
+    # R-IV.617(b): THE SCAN RECORDS THAT IT RAN.
+    #
+    # It kept its state only in `_scheduler_status`, an in-memory dict lost on every restart and
+    # unreadable by the freshness check -- so the only thing /health could measure was the age of
+    # the newest crypto SIGNAL. That made a quiet regime indistinguishable from a dead job, and
+    # it raised eleven false flatlines in sixty days.
+    #
+    # `job_runs` is durable and is what the check now reads for "job alive". `rows_touched` is
+    # the signals emitted, which is informational and never degrades anything.
+    _run_id = None
+    _zones_seen: set = set()
+    try:
+        from datetime import date as _date
+        from jobs.job_runs import start_run as _start_run
+        _run_id = await _start_run("crypto_scanner", _date.today())
+    except Exception as _jr:
+        logger.warning("crypto scan: could not open a job_runs record: %s", _jr)
+
     try:
         from scanners.cta_scanner import analyze_ticker_cta as analyze_single_ticker, CTA_SCANNER_AVAILABLE as SCANNER_AVAILABLE
         from scoring.trade_ideas_scorer import calculate_signal_score
@@ -3605,6 +3641,8 @@ async def run_crypto_scan_scheduled():
         if not SCANNER_AVAILABLE:
             logger.warning("CTA Scanner not available for crypto scan")
             _scheduler_status["crypto_scanner"]["status"] = "unavailable"
+            await _finish_crypto_run(_run_id, "error", 0,
+                                     error="CTA Scanner unavailable")
             return
         
         # Get current bias for scoring
@@ -3623,6 +3661,10 @@ async def run_crypto_scan_scheduled():
                 result = await analyze_single_ticker(ticker)
                 if not result or result.get("error"):
                     continue
+
+                _zone = (result.get("cta_analysis") or {}).get("cta_zone")
+                if _zone:
+                    _zones_seen.add(str(_zone))
 
                 signals = result.get("signals", [])
                 if not signals:
@@ -3719,11 +3761,22 @@ async def run_crypto_scan_scheduled():
         _scheduler_status["crypto_scanner"]["last_run"] = get_eastern_now().isoformat()
         _scheduler_status["crypto_scanner"]["signals_found"] = signals_found
         _scheduler_status["crypto_scanner"]["status"] = "completed"
-        
-        logger.info(f"âœ… Crypto scan complete - {signals_found} signals found")
-        
+        _scheduler_status["crypto_scanner"]["zones"] = sorted(_zones_seen)
+
+        # A completed scan that emitted nothing is QUIET, not broken -- and the reason is which
+        # zones the assets were in. Measured 2026-10-01: all twelve read MAX_LONG, whose own
+        # recommendation is HOLD_OR_WAIT_PULLBACK, so no entry signal exists to emit.
+        _quiet = None
+        if signals_found == 0 and _zones_seen:
+            _quiet = "quiet: all assets in no-signal zones (%s)" % ", ".join(sorted(_zones_seen))
+        await _finish_crypto_run(_run_id, "ok", signals_found, skip_reason=_quiet)
+
+        logger.info("Crypto scan complete - %d signals found%s",
+                    signals_found, (" | " + _quiet) if _quiet else "")
+
     except Exception as e:
         _scheduler_status["crypto_scanner"]["status"] = f"error: {str(e)}"
+        await _finish_crypto_run(_run_id, "error", 0, error=str(e)[:400])
         logger.error(f"Error in crypto scan: {e}")
         import traceback
         traceback.print_exc()
