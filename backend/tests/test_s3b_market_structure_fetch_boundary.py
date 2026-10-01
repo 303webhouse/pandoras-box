@@ -106,8 +106,12 @@ def test_volume_profile_reroute_canonical_in_profile_out():
                 ticker="BTC", entry_price=64050.0, direction="LONG"
             )
             # Canonical ticker passed straight through to the F-2 source --
-            # no Binance-pair conversion needed for this leg.
-            mock_fetch.assert_awaited_once_with("BTC", use_daily=False)
+            # no Binance-pair conversion needed for this leg. The caller tag is
+            # pinned too (R-IV.624(b)): this consumer must spend under its OWN
+            # name, not the resolver's, or the governor cannot attribute it.
+            from jobs.crypto_bars import CALLER_MARKET_STRUCTURE
+            mock_fetch.assert_awaited_once_with("BTC", use_daily=False,
+                                                caller=CALLER_MARKET_STRUCTURE)
             return result
 
     result = asyncio.run(_run())

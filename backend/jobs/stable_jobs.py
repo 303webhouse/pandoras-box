@@ -170,7 +170,13 @@ async def _record(job_name: str, coro_fn, session_date=None):
     try:
         res = await coro_fn()
         await job_status.mark_success(job_name)
-        await _finish_run(run_id, "ok")
+        # THE CONVENTION: a job that knows how much it touched returns a dict carrying
+        # `rows_touched`, and only that key is read. Guessing a per-job key here would be a
+        # second place to keep each job's return shape, which is how the two drift apart.
+        # A job that returns anything else records NULL, as before — honestly absent rather
+        # than a fabricated zero.
+        rows = res.get("rows_touched") if isinstance(res, dict) else None
+        await _finish_run(run_id, "ok", rows_touched=rows if isinstance(rows, int) else None)
         return res
     except OutputCheckFailed as e:
         # A FAILURE (job_status, alert) that is a COMPLETED PASS (job_runs) -- R-IV.426(b).
@@ -190,14 +196,23 @@ async def _record(job_name: str, coro_fn, session_date=None):
         return None
 
 
-async def _finish_run(run_id, status: str, error: str = None) -> None:
+async def _finish_run(run_id, status: str, error: str = None,
+                      rows_touched: int = None) -> None:
     """Close the job_runs row. Swallows everything: this is the supervision
-    channel, and it must not be able to fail the job it is supervising."""
+    channel, and it must not be able to fail the job it is supervising.
+
+    `rows_touched` — R-IV.629(b). `finish_run` has always accepted it and this wrapper
+    never passed it, so EVERY run of every job routed through `_record` recorded NULL.
+    Measured on the expiry sweep: eight consecutive `ok` runs, `rows_touched` NULL on all
+    eight, so the run record could not answer whether the pass had ended anything. A job
+    whose own record cannot report what it did leaves a reader inferring.
+    """
     if run_id is None:
         return
     try:
         from jobs.job_runs import finish_run
-        await finish_run(run_id, status, error=(error or "")[:500] or None)
+        await finish_run(run_id, status, rows_touched=rows_touched,
+                         error=(error or "")[:500] or None)
     except Exception as exc:
         logger.warning("[stable_jobs] job_runs finish_run failed: %s", exc)
 
@@ -525,6 +540,66 @@ EXPIRY_SWEEP_JOB = "expiry_sweep"
 EXPIRY_SWEEP_TIME_ET = (6, 30)
 _expiry_attempted_on: set = set()
 
+# ── The post-close pass (R-IV.629(b)) ───────────────────────────────────────────────────
+# THE 06:30 PASS IS NOT LATE BY ACCIDENT; IT IS EARLY BY DESIGN AND THEREFORE ALWAYS LATE.
+# It can only use `expiry < CURRENT_DATE` — strictly before today — because at 06:30 an
+# option expiring today is still live. So the earliest it can end a Friday expiry is the
+# next weekday run, and MEASURED it trailed every expiry by 1 to 3 days. In between, an
+# expired option read OPEN to the loss alert, the caps and the River.
+#
+# An option expires at its session's close, so after that close it IS expired and the
+# inclusive cutoff is sound. This pass runs then, and the 06:30 pass stays as the backstop
+# that catches anything a restart or an outage lost.
+#
+# The time derives from sessions.REGULAR_CLOSE so the close has one author, plus a few
+# minutes' grace so nothing races the bell. Early closes are deliberately NOT modelled
+# there, which is safe in this direction only: on a half day this runs three hours after
+# the real close, never before it.
+_POSTCLOSE_GRACE_MIN = 5
+EXPIRY_SWEEP_POSTCLOSE_JOB = "expiry_sweep_postclose"
+_postclose_attempted_on: set = set()
+
+
+def _postclose_time_et():
+    """(hour, minute) of the post-close pass, derived from the session calendar."""
+    from datetime import datetime as _dt, timedelta as _td
+
+    from stable_engine.sessions import REGULAR_CLOSE
+
+    t = (_dt(2000, 1, 1, REGULAR_CLOSE.hour, REGULAR_CLOSE.minute)
+         + _td(minutes=_POSTCLOSE_GRACE_MIN))
+    return (t.hour, t.minute)
+
+
+async def _maybe_run_expiry_sweep_postclose(et) -> None:
+    """Never raises. Ends today's expiries, now that today's session has closed."""
+    from jobs.job_runs import has_completed
+
+    day = et.date()
+    if day in _postclose_attempted_on:
+        return
+    try:
+        done = await has_completed(EXPIRY_SWEEP_POSTCLOSE_JOB, day)
+    except Exception as exc:
+        logger.warning("[expiry_sweep_postclose] completion check failed: %s", exc)
+        done = None
+    if done is True:
+        _postclose_attempted_on.add(day)
+        return
+    _postclose_attempted_on.add(day)
+
+    async def _run():
+        from api.unified_positions import _sweep_expired_positions
+
+        # INCLUSIVE of today, which is the whole point, and sound only because the
+        # caller below has established that today is a trading day and its close has
+        # passed. _sweep_expired_positions refuses a future date on its own account.
+        ended = await _sweep_expired_positions(through=day)
+        return {"rows_touched": len(ended), "ended": len(ended),
+                "position_ids": [e["position_id"] for e in ended]}
+
+    await _record(EXPIRY_SWEEP_POSTCLOSE_JOB, _run, session_date=day)
+
 
 async def _maybe_run_expiry_sweep(et) -> None:
     """Never raises."""
@@ -546,7 +621,8 @@ async def _maybe_run_expiry_sweep(et) -> None:
     async def _run():
         from api.unified_positions import _sweep_expired_positions
         ended = await _sweep_expired_positions()
-        return {"ended": len(ended), "position_ids": [e["position_id"] for e in ended]}
+        return {"rows_touched": len(ended), "ended": len(ended),
+                "position_ids": [e["position_id"] for e in ended]}
 
     await _record(EXPIRY_SWEEP_JOB, _run, session_date=day)
 
@@ -665,9 +741,31 @@ async def stable_engine_loop():
                         logger.error("[circes_stew] market calendar cannot answer for %s -- "
                                      "pass NOT run. Extend MARKET_HOLIDAYS.", et.date())
                 # ── The expiry sweep (R-IV.454(d)) — off the read path ────────
+                # The BACKSTOP now (R-IV.629(b)): strictly-before-today, so it catches
+                # whatever a restart or an outage lost, and nothing on its own expiry day.
                 eh, em = EXPIRY_SWEEP_TIME_ET
                 if (et.hour, et.minute) >= (eh, em):
                     await _maybe_run_expiry_sweep(et)
+
+                # ── The expiry sweep, post-close (R-IV.629(b)) ───────────────
+                # A date the calendar cannot answer for is not a session: UNKNOWN is not
+                # YES, so no inclusive sweep runs on it. The backstop still covers it the
+                # next weekday, which is the behaviour this pass improves on, not replaces.
+                # Imported here rather than relying on the CIRCE block above having run:
+                # a name bound by another section's import is a NameError waiting for the
+                # day that section is reordered, and py_compile cannot see it.
+                from stable_engine.market_calendar import (is_trading_day_or_none
+                                                           as _traded_day)
+                pch, pcm = _postclose_time_et()
+                if (et.hour, et.minute) >= (pch, pcm):
+                    _traded = _traded_day(et.date())
+                    if _traded is True:
+                        await _maybe_run_expiry_sweep_postclose(et)
+                    elif _traded is None and et.date() not in _postclose_attempted_on:
+                        _postclose_attempted_on.add(et.date())
+                        logger.error("[expiry_sweep_postclose] market calendar cannot answer "
+                                     "for %s -- inclusive pass NOT run; the 06:30 backstop "
+                                     "will catch it. Extend MARKET_HOLIDAYS.", et.date())
                 # ── The shadow grader (R-IV.429(b)) ──────────────────────────
                 from backtest import job as _grader
                 from stable_engine.market_calendar import is_trading_day_or_none as _open_day

@@ -378,9 +378,9 @@ async def get_market_structure_context(
             vp_data = cached_vp
         else:
             from datetime import datetime, timezone
-            from jobs.crypto_bars import fetch_crypto_ohlc
+            from jobs.crypto_bars import CALLER_MARKET_STRUCTURE, fetch_crypto_ohlc
             bars_1h = sorted(
-                await fetch_crypto_ohlc(ticker, use_daily=False) or [],
+                await fetch_crypto_ohlc(ticker, use_daily=False, caller=CALLER_MARKET_STRUCTURE) or [],
                 key=lambda b: b[0],
             )  # ORDERING FIX -- never trust vendor order
             if bars_1h:

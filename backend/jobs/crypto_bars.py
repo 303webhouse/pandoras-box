@@ -37,6 +37,37 @@ BINANCE_SPOT_URL = "https://data-api.binance.vision/api/v3"
 COINBASE_EXCHANGE_URL = "https://api.exchange.coinbase.com"
 OKX_MARKET_URL = "https://www.okx.com/api/v5/market"
 
+# ── Who is spending the UW crypto-bar budget — R-IV.624(b) ───────────────
+# Every crypto bar fetch used to reach the governor tagged `outcome_resolver`,
+# this module's first consumer. Five more arrived; the tag did not move. So the
+# governor counted six consumers under one wrong name, its 4,500 quota sat on a
+# path that spends ~370/day, and a budget alarm naming `outcome_resolver` sent a
+# reader to the wrong job. Measured 2026-10-01: an open Stater tab is 4 calls
+# per 30s (11,520/day, 41% of DAILY_BUDGET) and was INDISTINGUISHABLE here from
+# the resolver's own traffic.
+#
+# These constants are the ONE place a crypto-bar caller tag is written. Callers
+# pass one; `caller` has no default, so a new consumer cannot inherit another's
+# name by omission. test_crypto_bar_caller_tags.py proves every tag below has
+# an explicit uw_governor.QUOTAS entry — an undeclared tag silently takes
+# DEFAULT_QUOTA 500, which is exactly how `outcome_resolver` came to spend
+# 2,764 against a default meant for unknown code paths (see that table's note).
+CALLER_OUTCOME_RESOLVER = "crypto_bars_outcome_resolver"
+CALLER_TAPE_HEALTH = "crypto_bars_tape_health"
+CALLER_STATE_API = "crypto_bars_state_api"
+CALLER_REGIME = "crypto_bars_regime"
+CALLER_VP_MCP = "crypto_bars_vp_mcp"
+CALLER_MARKET_STRUCTURE = "crypto_bars_market_structure"
+
+CRYPTO_BAR_CALLERS = frozenset({
+    CALLER_OUTCOME_RESOLVER,
+    CALLER_TAPE_HEALTH,
+    CALLER_STATE_API,
+    CALLER_REGIME,
+    CALLER_VP_MCP,
+    CALLER_MARKET_STRUCTURE,
+})
+
 
 def normalize_crypto_ticker(raw_ticker: Optional[str]) -> Optional[str]:
     """Map a raw signals.ticker value to one of the six tracked base symbols.
@@ -70,12 +101,19 @@ def _parse_iso_ts(raw: Optional[str]) -> Optional[datetime]:
         return None
 
 
-async def _fetch_uw_bars_full(base_symbol: str, candle_size: str, limit: int = 500) -> List[Tuple[datetime, float, float, float, float]]:
-    """Returns (ts, open, high, low, close) tuples."""
+async def _fetch_uw_bars_full(base_symbol: str, candle_size: str, *, caller: str, limit: int = 500) -> List[Tuple[datetime, float, float, float, float]]:
+    """Returns (ts, open, high, low, close) tuples.
+
+    `caller` must be one of CRYPTO_BAR_CALLERS. The assert guards a programming
+    error, not a data condition — every value reaching it is a module constant,
+    so it cannot fire on live traffic, and it keeps an unrecognised tag from
+    being spent under DEFAULT_QUOTA where no one would look for it.
+    """
     from integrations import uw_api
 
+    assert caller in CRYPTO_BAR_CALLERS, f"undeclared crypto-bar caller tag: {caller!r}"
     pair = f"{base_symbol}-USD"
-    resp = await uw_api._uw_request(f"/api/crypto/{pair}/ohlc/{candle_size}", params={"limit": limit}, caller="outcome_resolver")
+    resp = await uw_api._uw_request(f"/api/crypto/{pair}/ohlc/{candle_size}", params={"limit": limit}, caller=caller)
     data = resp.get("data") if isinstance(resp, dict) else None
     if not data:
         return []
@@ -200,11 +238,12 @@ BARS_CACHE_TTL_SECONDS = {False: 300, True: 3600}   # keyed by use_daily
 _bars_cache: dict = {}
 
 
-async def _fetch_full_ohlc(base_symbol: str, use_daily: bool) -> List[Tuple[datetime, float, float, float, float]]:
+async def _fetch_full_ohlc(base_symbol: str, use_daily: bool, *, caller: str) -> List[Tuple[datetime, float, float, float, float]]:
     """Shared vendor dispatch, per crypto_symbol_matrix's bar_walk_source, behind a
     short per-(symbol, interval) cache. Returns [] (never raises) if the symbol has
     no LIVE bar_walk_source. Internal -- fetch_crypto_bars() and fetch_crypto_ohlc()
-    both wrap this.
+    both wrap this. A cache hit spends nothing, so only the caller whose call
+    reached the vendor is counted against its quota.
     """
     import time as _time
     # The vendor is part of the key, so re-pointing a symbol in the matrix can
@@ -214,13 +253,13 @@ async def _fetch_full_ohlc(base_symbol: str, use_daily: bool) -> List[Tuple[date
     hit = _bars_cache.get(key)
     if hit and _time.monotonic() - hit[0] < BARS_CACHE_TTL_SECONDS[bool(use_daily)]:
         return list(hit[1])
-    bars = await _fetch_full_ohlc_uncached(base_symbol, use_daily)
+    bars = await _fetch_full_ohlc_uncached(base_symbol, use_daily, caller=caller)
     if bars:
         _bars_cache[key] = (_time.monotonic(), bars)
     return list(bars)
 
 
-async def _fetch_full_ohlc_uncached(base_symbol: str, use_daily: bool) -> List[Tuple[datetime, float, float, float, float]]:
+async def _fetch_full_ohlc_uncached(base_symbol: str, use_daily: bool, *, caller: str) -> List[Tuple[datetime, float, float, float, float]]:
     """Vendor dispatch without the cache."""
     entry = get_symbol_entry(base_symbol)
     if not entry:
@@ -241,7 +280,7 @@ async def _fetch_full_ohlc_uncached(base_symbol: str, use_daily: bool) -> List[T
     elif vendor == "uw_crypto_ohlc":
         # Retained for any matrix entry that still names it; since Stater Phase 0 no
         # tracked symbol does, so this branch spends no UW calls in production.
-        bars = await _fetch_uw_bars_full(base_symbol, "1d" if use_daily else "15m")
+        bars = await _fetch_uw_bars_full(base_symbol, "1d" if use_daily else "15m", caller=caller)
     elif vendor == "binance_spot_klines":
         bars = await _fetch_binance_spot_klines_full(base_symbol, "1d" if use_daily else "15m")
     elif vendor == "okx_candles":
@@ -261,7 +300,7 @@ async def _fetch_full_ohlc_uncached(base_symbol: str, use_daily: bool) -> List[T
     return sorted(bars, key=lambda b: b[0])
 
 
-async def fetch_crypto_bars(base_symbol: str, signal_ts: datetime, use_daily: bool) -> List[Tuple[datetime, float, float]]:
+async def fetch_crypto_bars(base_symbol: str, signal_ts: datetime, use_daily: bool, *, caller: str) -> List[Tuple[datetime, float, float]]:
     """Dispatch to the correct vendor per crypto_symbol_matrix's bar_walk_source
     for `base_symbol`. Returns [] (never raises) if the symbol has no LIVE
     bar_walk_source -- the caller (outcome_resolver) treats that as
@@ -272,14 +311,14 @@ async def fetch_crypto_bars(base_symbol: str, signal_ts: datetime, use_daily: bo
     need open/close. Existing callers/contract unchanged; see
     fetch_crypto_ohlc() for the full-OHLC variant (S-2 regime classifier).
     """
-    full = await _fetch_full_ohlc(base_symbol, use_daily)
+    full = await _fetch_full_ohlc(base_symbol, use_daily, caller=caller)
     return [(ts, hi, lo) for ts, _o, hi, lo, _c in full]
 
 
-async def fetch_crypto_ohlc(base_symbol: str, use_daily: bool = True) -> List[Tuple[datetime, float, float, float, float]]:
+async def fetch_crypto_ohlc(base_symbol: str, use_daily: bool = True, *, caller: str) -> List[Tuple[datetime, float, float, float, float]]:
     """Full (ts, open, high, low, close) tuples via the same per-symbol vendor
     routing as fetch_crypto_bars() -- for consumers that need close prices
     (DMA, slope, ADX). S-2 (R-1) regime classifier's only consumer today.
     Returns [] (never raises) if the symbol has no LIVE bar_walk_source.
     """
-    return await _fetch_full_ohlc(base_symbol, use_daily)
+    return await _fetch_full_ohlc(base_symbol, use_daily, caller=caller)

@@ -89,7 +89,7 @@ def test_get_market_structure_context_uses_current_window(monkeypatch):
     anchors POC to the stale ~60k tail; post-fix sort anchors it to current tape."""
     bars = _rising_bars_newest_first(old=60000.0, new=66000.0, n=200)  # descending, fresh
 
-    async def _fake_fetch(ticker, use_daily=True):
+    async def _fake_fetch(ticker, use_daily=True, *, caller=None):
         return bars
 
     monkeypatch.setattr("jobs.crypto_bars.fetch_crypto_ohlc", _fake_fetch)
@@ -112,7 +112,7 @@ def test_stale_bars_fail_closed_to_zero_score(monkeypatch):
         for i in range(120)
     ]
 
-    async def _fake_fetch(ticker, use_daily=True):
+    async def _fake_fetch(ticker, use_daily=True, *, caller=None):
         return stale
 
     monkeypatch.setattr("jobs.crypto_bars.fetch_crypto_ohlc", _fake_fetch)
@@ -146,11 +146,12 @@ def test_fetch_full_ohlc_sorts_source_level(monkeypatch):
         lambda s: {"bar_walk_source": {"status": "LIVE", "vendor": "uw_crypto_ohlc"}},
     )
 
-    async def _fake_uw(base, size, limit=500):
+    async def _fake_uw(base, size, *, caller, limit=500):
         return desc
 
     monkeypatch.setattr(cb, "_fetch_uw_bars_full", _fake_uw)
-    out = asyncio.run(cb._fetch_full_ohlc("BTC", use_daily=False))
+    out = asyncio.run(cb._fetch_full_ohlc("BTC", use_daily=False,
+                                          caller=cb.CALLER_OUTCOME_RESOLVER))
     ts = [b[0] for b in out]
     assert ts == sorted(ts), "source fetch must emit ascending-by-timestamp"
     assert out[-1][0] == max(ts), "newest bar must be last, so consumer [-1] is the current bar"

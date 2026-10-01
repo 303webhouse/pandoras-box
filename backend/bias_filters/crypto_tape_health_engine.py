@@ -258,10 +258,10 @@ async def _detect_cvd_events(
         # redesign lands (append a crypto_cycle_config row flipping this True).
         divergence_enabled = bool(cvd_cfg.get("divergence_enabled", False))
 
-        from jobs.crypto_bars import fetch_crypto_ohlc
+        from jobs.crypto_bars import CALLER_TAPE_HEALTH, fetch_crypto_ohlc
         from strategies.btc_market_structure import compute_volume_profile
 
-        bars = await fetch_crypto_ohlc(symbol, use_daily=False)
+        bars = await fetch_crypto_ohlc(symbol, use_daily=False, caller=CALLER_TAPE_HEALTH)
         if not bars or len(bars) < max(lookback_bars, 5):
             return events
 

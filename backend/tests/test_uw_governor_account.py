@@ -196,8 +196,13 @@ def test_hub_quota_table_fits_inside_the_hub_budget():
 
 def test_every_measured_caller_has_an_explicit_entry():
     """`outcome_resolver` was the largest hub caller on 2026-09-14 and was not in
-    the table at all, running on the 500 default meant for unknown code paths."""
-    for caller in ("outcome_resolver", "ohlc_quote", "flow_per_expiry",
+    the table at all, running on the 500 default meant for unknown code paths.
+
+    RENAMED 2026-10-01 (R-IV.624(b)) to `crypto_bars_outcome_resolver`: the old tag
+    named a job, not an endpoint, and SIX consumers shared it. The historical figure
+    follows the resolver, which is the safe direction — see that table's sizing note.
+    """
+    for caller in ("crypto_bars_outcome_resolver", "ohlc_quote", "flow_per_expiry",
                    "ohlc_sector", "technical_indicator", "ohlc_bars"):
         assert caller in g.QUOTAS, "%s has no explicit quota" % caller
 
@@ -205,7 +210,7 @@ def test_every_measured_caller_has_an_explicit_entry():
 def test_measured_monday_demand_does_not_trip_the_table():
     """The retune exists because the old table blocked three live callers on
     sight, one of them FOREGROUND."""
-    measured = {"outcome_resolver": 2764, "ohlc_quote": 1439, "technical_indicator": 1419,
+    measured = {"crypto_bars_outcome_resolver": 2764, "ohlc_quote": 1439, "technical_indicator": 1419,
                 "ohlc_sector": 1417, "flow_per_expiry": 1140, "ohlc_bars": 1109,
                 "option_contracts": 1052, "snapshot": 445}
     for caller, used in measured.items():

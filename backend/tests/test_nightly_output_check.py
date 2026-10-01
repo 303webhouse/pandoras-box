@@ -59,8 +59,12 @@ def test_missing_fields_are_not_success():
 def _run_record(coro_fn):
     finished = []
 
-    async def fake_finish(run_id, status, error=None):
-        finished.append((status, error))
+    async def fake_finish(run_id, status, error=None, rows_touched=None):
+        # `rows_touched` accepted since R-IV.629(b): _record now forwards the job's own
+        # count. A stub that refuses the keyword raises INSIDE _record's try, and the
+        # TypeError is then recorded as a failed job — a stub's signature silently
+        # inverting the result it is there to observe.
+        finished.append((status, error, rows_touched))
 
     with patch.object(job_runs, "start_run", AsyncMock(return_value=7)), \
          patch.object(stable_jobs, "_finish_run", side_effect=fake_finish), \
