@@ -32,6 +32,9 @@ _CRYPTO_BASE_SYMBOLS = ("BTC", "ETH", "SOL", "HYPE", "ZEC", "FARTCOIN")
 _KNOWN_SUFFIXES = ("-USD", "USD", "-USDT", "USDT", "PERP", "-PERP", "USDTPERP")
 
 BINANCE_SPOT_URL = "https://data-api.binance.vision/api/v3"
+# Coinbase Exchange public market data: free, keyless, US-reachable from Railway.
+# Stater Phase 0 (R-IV.619) moved BTC/ETH/SOL bars here from UW's metered OHLC.
+COINBASE_EXCHANGE_URL = "https://api.exchange.coinbase.com"
 OKX_MARKET_URL = "https://www.okx.com/api/v5/market"
 
 
@@ -85,6 +88,55 @@ async def _fetch_uw_bars_full(base_symbol: str, candle_size: str, limit: int = 5
             bars.append((ts, float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])))
         except (KeyError, TypeError, ValueError):
             continue
+    return bars
+
+
+async def _fetch_coinbase_candles_full(base_symbol: str, use_daily: bool) -> List[Tuple[datetime, float, float, float, float]]:
+    """Returns (ts, open, high, low, close) tuples from Coinbase Exchange public candles.
+
+    Row order on the wire is [time, LOW, HIGH, open, close, volume] -- low before
+    high, unlike every other vendor here -- newest first. Up to 350 rows per call
+    (measured 2026-10-01: 350 daily / 350 15-min rows for BTC, ETH and SOL).
+    """
+    product = f"{base_symbol}-USD"
+    granularity = 86400 if use_daily else 900
+    # 15-min bars take a second, older page: the outcome resolver walks 15-min bars
+    # for signals up to 55 days old, and UW's 500-row window reached ~5.2 days.
+    # Two pages reach ~7 days, so no signal loses coverage in the move.
+    pages = 1 if use_daily else 2
+    rows: list = []
+    try:
+        async with httpx.AsyncClient(timeout=15.0, headers={"User-Agent": "pandoras-box/stater"}) as client:
+            params = {"granularity": granularity}
+            for _ in range(pages):
+                r = await client.get(f"{COINBASE_EXCHANGE_URL}/products/{product}/candles", params=params)
+                if r.status_code != 200:
+                    logger.warning("Coinbase candles %s failed: HTTP %d", product, r.status_code)
+                    break
+                page = r.json()
+                if not isinstance(page, list) or not page:
+                    break
+                rows.extend(page)
+                oldest = min(int(x[0]) for x in page)
+                params = {"granularity": granularity,
+                          "start": datetime.fromtimestamp(oldest - 300 * granularity, tz=timezone.utc).isoformat(),
+                          "end": datetime.fromtimestamp(oldest - granularity, tz=timezone.utc).isoformat()}
+    except Exception as e:
+        logger.warning("Coinbase candles %s request failed: %s", product, e)
+    seen = set()
+    bars = []
+    for row in rows:
+        if not isinstance(row, list) or not row or row[0] in seen:
+            continue
+        seen.add(row[0])
+        try:
+            ts = datetime.fromtimestamp(int(row[0]), tz=timezone.utc)
+            lo, hi, op, cl = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if not (lo <= min(op, cl) and hi >= max(op, cl) and lo > 0):
+            continue   # a row whose own range does not contain its open/close is not a bar
+        bars.append((ts, op, hi, lo, cl))
     return bars
 
 
@@ -155,7 +207,10 @@ async def _fetch_full_ohlc(base_symbol: str, use_daily: bool) -> List[Tuple[date
     both wrap this.
     """
     import time as _time
-    key = (base_symbol, bool(use_daily))
+    # The vendor is part of the key, so re-pointing a symbol in the matrix can
+    # never serve the previous vendor's bars from memory.
+    vendor = ((get_symbol_entry(base_symbol) or {}).get("bar_walk_source") or {}).get("vendor")
+    key = (base_symbol, bool(use_daily), vendor)
     hit = _bars_cache.get(key)
     if hit and _time.monotonic() - hit[0] < BARS_CACHE_TTL_SECONDS[bool(use_daily)]:
         return list(hit[1])
@@ -178,7 +233,14 @@ async def _fetch_full_ohlc_uncached(base_symbol: str, use_daily: bool) -> List[T
         return []
 
     vendor = bar_walk.get("vendor")
-    if vendor == "uw_crypto_ohlc":
+    if vendor == "coinbase_exchange_candles":
+        bars = await _fetch_coinbase_candles_full(base_symbol, use_daily)
+        if not bars:
+            # Free fallback, same instrument family the tape-health engine already reads.
+            bars = await _fetch_okx_candles_full(base_symbol, "1D" if use_daily else "15m")
+    elif vendor == "uw_crypto_ohlc":
+        # Retained for any matrix entry that still names it; since Stater Phase 0 no
+        # tracked symbol does, so this branch spends no UW calls in production.
         bars = await _fetch_uw_bars_full(base_symbol, "1d" if use_daily else "15m")
     elif vendor == "binance_spot_klines":
         bars = await _fetch_binance_spot_klines_full(base_symbol, "1d" if use_daily else "15m")

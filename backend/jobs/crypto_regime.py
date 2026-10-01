@@ -31,6 +31,7 @@ MASTER_SYMBOL = "BTC-USD"
 
 _BAR_SOURCE_LABELS = {
     "uw_crypto_ohlc": "UW_OHLC",
+    "coinbase_exchange_candles": "COINBASE",
     "binance_spot_klines": "BINANCE_SPOT",
     "okx_candles": "OKX",
 }
