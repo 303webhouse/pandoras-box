@@ -77,9 +77,11 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "note": "already in tradingview.py CRYPTO_TICKERS set",
         },
         "bar_walk_source": {
-            "vendor": "uw_crypto_ohlc",
+            # Stater Phase 0 (R-IV.619): moved off UW's metered OHLC to a free, keyless source.
+            "vendor": "coinbase_exchange_candles",
             "status": "LIVE",
-            "verified": "2026-07-13: /api/crypto/BTC-USD/ohlc/1d HTTP 200, real candles",
+            "fallback": "okx_candles",
+            "verified": "2026-10-01: Coinbase Exchange /products/BTC-USD/candles HTTP 200, 350 rows at 900s and 86400s. (Was uw_crypto_ohlc, verified 2026-07-13.)",
         },
         "binance_fail_fallback": "okx",
     },
@@ -115,9 +117,11 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "note": "already in tradingview.py CRYPTO_TICKERS set",
         },
         "bar_walk_source": {
-            "vendor": "uw_crypto_ohlc",
+            # Stater Phase 0 (R-IV.619): moved off UW's metered OHLC to a free, keyless source.
+            "vendor": "coinbase_exchange_candles",
             "status": "LIVE",
-            "verified": "2026-07-13: /api/crypto/ETH-USD/ohlc/1d HTTP 200, real candles",
+            "fallback": "okx_candles",
+            "verified": "2026-10-01: Coinbase Exchange /products/ETH-USD/candles HTTP 200, 350 rows at 900s and 86400s. (Was uw_crypto_ohlc, verified 2026-07-13.)",
         },
         "binance_fail_fallback": "okx",
     },
@@ -153,9 +157,11 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "note": "already in tradingview.py CRYPTO_TICKERS set",
         },
         "bar_walk_source": {
-            "vendor": "uw_crypto_ohlc",
+            # Stater Phase 0 (R-IV.619): moved off UW's metered OHLC to a free, keyless source.
+            "vendor": "coinbase_exchange_candles",
             "status": "LIVE",
-            "verified": "2026-07-13: /api/crypto/SOL-USD/ohlc/1d HTTP 200, real candles",
+            "fallback": "okx_candles",
+            "verified": "2026-10-01: Coinbase Exchange /products/SOL-USD/candles HTTP 200, 350 rows at 900s and 86400s. (Was uw_crypto_ohlc, verified 2026-07-13.)",
         },
         "binance_fail_fallback": "okx",
     },
