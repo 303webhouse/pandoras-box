@@ -95,9 +95,19 @@ async def get_tide() -> dict:
                     tide, as_of = _tide_from(td, _parse_ts(td.get("timestamp") or td.get("date") or td.get("time")))
     except Exception as exc:
         logger.warning("[services.board] tide read failed: %s", exc)
-        return _envelope(None, None, True, tide=None)
+        return _envelope(None, None, True, tide=None, **_session_fields())
 
-    return _envelope(as_of, "provisional" if tide else None, tide is None, tide=tide)
+    return _envelope(as_of, "provisional" if tide else None, tide is None, tide=tide, **_session_fields())
+
+
+def _session_fields() -> dict:
+    """The tide warmer runs in regular hours only, so its read says which session
+    it is served in (R-IV.416(c)); the screen never infers that from a clock."""
+    try:
+        from stable_engine.sessions import envelope_session_fields
+        return envelope_session_fields()
+    except Exception:
+        return {"market_session": None, "session": None}
 
 
 async def _persisted_cb_record() -> str:
