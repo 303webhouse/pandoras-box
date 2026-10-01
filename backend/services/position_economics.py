@@ -183,6 +183,64 @@ def close_date_from_lots(
     return (ft.date() if hasattr(ft, "date") else ft), closer.get("id"), None
 
 
+# Structures that take cash in. The vocabulary the close path already uses lives in
+# api/unified_positions as CREDIT_STRUCTURES; this is the same question asked of a row here,
+# component by component so `put_credit_spread+long_put` is still read as credit-bearing.
+CREDIT_COMPONENTS = frozenset({
+    "put_credit_spread", "call_credit_spread", "bull_put_spread", "bear_call_spread",
+    "short_put", "short_call",
+})
+
+
+def is_credit_structure(structure: Optional[str]) -> bool:
+    parts = [p.strip() for p in (structure or "").strip().lower().split("+") if p.strip()]
+    return bool(parts) and parts[0] in CREDIT_COMPONENTS
+
+
+def spread_width(row: Dict[str, Any]) -> Optional[Decimal]:
+    """|short_strike - long_strike|, or None when either is absent or they are equal.
+
+    Equal strikes are not a spread, and a width of zero would make max_loss the negative of the
+    credit -- a worse answer than refusing.
+    """
+    lo, sh = _d(row.get("long_strike")), _d(row.get("short_strike"))
+    if lo is None or sh is None:
+        return None
+    w = abs(sh - lo)
+    return w if w > 0 else None
+
+
+def _credit_max_loss(row: Dict[str, Any], cost_total: Decimal,
+                     rem: Decimal, mult: Decimal) -> Optional[Dict[str, Any]]:
+    """`{max_loss, basis}` for a credit structure, or None when the row is not one.
+
+    `cost_total` is signed and NEGATIVE for a credit, so the credit kept is its magnitude.
+    """
+    if not is_credit_structure(row.get("structure")):
+        return None
+    width = spread_width(row)
+    if width is None:
+        return {"max_loss": None,
+                "basis": ("a credit structure's worst case is its width minus the credit, and "
+                          "this row does not carry both strikes; no max_loss is published")}
+    # THE CREDIT IS THE MAGNITUDE, not the sign. Measured on SOUN 234, the book's first credit
+    # spread: its lots store the opening as qty +1 at price 0.48, so `surviving_cost` returns
+    # +96.00, while the ROW's `cost_basis` is -95.82. Same money, opposite conventions -- the
+    # lots record the size of the leg held and leave the direction to the structure.
+    #
+    # So the sign is read from the STRUCTURE, which is already known here, rather than from a
+    # number whose convention differs between the two places it is stored. Taking the sign
+    # literally made the credit 0 and the worst case the full width, overstating the risk on
+    # this row by the whole premium.
+    credit_kept = abs(cost_total)
+    worst = width * mult * rem - credit_kept
+    if worst < 0:
+        worst = Decimal("0")        # a credit larger than the width cannot lose money
+    return {"max_loss": worst,
+            "basis": ("width %s x %s x %s remaining, less the %s credit kept"
+                      % (width, mult, rem, credit_kept))}
+
+
 def economics(
     row: Dict[str, Any],
     lots: Sequence[Dict[str, Any]],
@@ -253,7 +311,37 @@ def economics(
     # A defined-risk structure whose worst case is narrower than its debit is not
     # decided here -- that is gap 3's stop/invalidation work -- but it can never
     # again be WIDER than the position actually held, which is the whole fault.
-    out["max_loss"] = money(cost_total)
+    #
+    # R-IV.605(f): A CREDIT SPREAD'S WORST CASE IS NOT ITS COST.
+    #
+    # Everything above assumes long premium: you can lose what you paid. A credit spread took
+    # cash IN, so `cost_total` is NEGATIVE, and publishing that as `max_loss` would report the
+    # position as risking a negative amount -- which reads as no risk at all on a structure whose
+    # real exposure is the width of the spread.
+    #
+    # Worst case is the width assigned minus the credit kept:
+    #
+    #     max_loss = |short_strike - long_strike| x 100 x qty  -  credit received
+    #
+    # The width comes from the row's own strikes. Without both, there is NO figure and the reason
+    # says so -- a credit spread of unknown width has unknown risk, and the one thing not to do
+    # is fall back to the cost, which is the number this branch exists to stop.
+    credit = _credit_max_loss(row, cost_total, rem, mult)
+    if credit is not None:
+        # R-IV.605(f): signed, NEGATIVE when the position took cash in. The lots cannot say so
+        # (they hold a positive price either way), so the structure does. Without this a reader
+        # is told a credit spread cost him 96 when it paid him 96.
+        if cost_total > 0:
+            out["cost_at_remainder"] = money(-cost_total)
+            out["basis_direction"] = "credit"
+        else:
+            out["basis_direction"] = "credit"
+        out["max_loss"] = money(credit["max_loss"]) if credit["max_loss"] is not None else None
+        out["max_loss_basis"] = credit["basis"]
+        if credit["max_loss"] is None:
+            out["basis_reason"] = credit["basis"]
+    else:
+        out["max_loss"] = money(cost_total)
 
     m = _d(mark)
     if m is None:
@@ -261,7 +349,17 @@ def economics(
         return out
     value = m * rem * mult
     out["market_value"] = money(value)
-    out["unrealized_pnl"] = money(value - cost_total)
+    # R-IV.605(f) / R-IV.607(c): READ BY CASH DIRECTION.
+    #
+    # `value - cost` is right for long premium: it rose, you gained. A credit spread is the
+    # other way round -- you were PAID to open it and you pay to close it, so the gain is the
+    # credit kept less what it now costs to buy back. Measured on SOUN 234's shape: sold at
+    # 0.48 with a mark of 0.30, the unsigned form reports -36.00 on a position that is 36.00 up.
+    if credit is not None:
+        out["unrealized_pnl"] = money(abs(cost_total) - value)
+        out["pnl_direction"] = "credit: the premium kept, less the cost to close"
+    else:
+        out["unrealized_pnl"] = money(value - cost_total)
     return out
 
 
