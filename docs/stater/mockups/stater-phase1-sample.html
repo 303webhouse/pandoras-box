@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- SAMPLE DATA ONLY. Stater Swap Phase 1 mockup (R-IV.618). Every number is generated in-page; nothing is fetched. -->
+<style>body{margin:0}</style></head><body>
+<title>Stater Bottom Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
+<style>
+/* Layout: the hub's own cockpit — stage track across the top, chart + oscillator as the
+   main column, evidence cards in a rail. Dark only, like every hub page (v2.css tokens). */
+:root {
+  color-scheme: dark;
+  --bg: #050810; --panel: #0b1122; --panel-2: #0d152b; --border: #1b2745; --border-strong: #223258;
+  --teal: #14b8a6; --up: #7CFF6B; --down: #ff5c33; --amber: #f5a524;
+  --text: #e2e8f0; --text-2: #8b98ad; --text-3: #70829d;
+  --teal-wash: rgba(20,184,166,.12); --down-wash: rgba(255,92,51,.14); --amber-wash: rgba(245,165,36,.12);
+  --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --brand: "Orbit", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.45; }
+.num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 0 40px; }
+
+.sample-bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--amber); color: #1a1205;
+  font: 700 12px/1.3 var(--mono); letter-spacing: 1.2px; text-align: center; padding: 7px 16px; }
+.sample-bar span { font-weight: 400; letter-spacing: .3px; }
+
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-block: 14px; border-bottom: 1px solid var(--border); }
+.brand { font-family: var(--brand); color: var(--teal); letter-spacing: 3px; font-size: 16px; }
+.sub { font: 11px var(--mono); letter-spacing: 1.6px; color: var(--text-2); text-transform: uppercase; }
+.spacer { flex: 1; }
+.chip { font: 10px/1 var(--mono); letter-spacing: 1px; text-transform: uppercase; padding: 5px 8px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); white-space: nowrap; }
+.chip.teal { color: var(--teal); border-color: var(--teal); }
+.chip.amber { color: var(--amber); border-color: var(--amber); }
+.chip.sample { color: var(--amber); border: 1px dashed var(--amber); }
+
+h1 { font: 600 20px/1.25 var(--sans); margin: 18px 0 4px; text-wrap: balance; }
+.lede { color: var(--text-2); max-width: 70ch; margin: 0 0 16px; }
+
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.ph { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); border-radius: 10px 10px 0 0; }
+.pt { font: 11px var(--mono); letter-spacing: 1.6px; text-transform: uppercase; color: var(--text-2); }
+.pb { padding: 12px; }
+.src { font: 10px/1.4 var(--mono); color: var(--text-3); padding: 8px 12px 10px; border-top: 1px solid var(--border); }
+
+/* Stage track */
+.track { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.stage { padding: 12px 14px 14px; border-right: 1px solid var(--border); position: relative; min-width: 0; }
+.stage:last-child { border-right: 0; }
+.stage .sn { font: 11px var(--mono); letter-spacing: 1.4px; color: var(--text-3); text-transform: uppercase; }
+.stage .sw { font: 700 17px/1.2 var(--mono); letter-spacing: 1px; margin: 3px 0 2px; color: var(--text-2); }
+.stage .sd { font: 11px var(--mono); color: var(--text-3); min-height: 15px; }
+.stage.done .sw { color: var(--text); }
+.stage.now { background: var(--teal-wash); box-shadow: inset 0 3px 0 var(--teal); }
+.stage.now .sw { color: var(--teal); }
+.stage.now .sd { color: var(--teal); }
+.ev { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 5px; }
+.ev li { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 6px; font-size: 12px; color: var(--text-2); }
+.ev li b { font-weight: 600; color: var(--text); }
+.ev .m { font: 700 11px/1.5 var(--mono); text-align: center; }
+.ev .met .m { color: var(--teal); }
+.ev .no .m { color: var(--text-3); }
+.ev .na .m { color: var(--amber); }
+.ev .na { color: var(--amber); }
+.why { padding: 11px 14px; border-top: 1px solid var(--border); color: var(--text); font-size: 13px; }
+.why b { color: var(--teal); font-weight: 600; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; margin-top: 14px; align-items: start; }
+.rail { display: grid; gap: 14px; align-content: start; }
+.chart svg { display: block; width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font: 11px var(--mono); color: var(--text-2); padding: 0 12px 10px; }
+.legend i { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
+
+.kv { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px 10px; font-size: 12.5px; }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.big { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.big .v { font: 700 26px/1 var(--mono); }
+.big .w { font: 700 12px var(--mono); letter-spacing: 1.2px; }
+.c-teal { color: var(--teal); } .c-up { color: var(--up); } .c-down { color: var(--down); } .c-amber { color: var(--amber); } .c-2 { color: var(--text-2); }
+.spark svg { display: block; width: 100%; height: 56px; }
+.note { font-size: 12px; color: var(--text-2); margin: 8px 0 0; }
+
+.paper { opacity: 1; border-style: dashed; }
+.paper .pb { display: grid; gap: 8px; }
+.fee { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+.fee > div { border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.fee .k { font: 10px var(--mono); letter-spacing: 1px; color: var(--text-3); text-transform: uppercase; }
+.fee .v { font: 700 16px var(--mono); margin-top: 2px; }
+
+.foot { margin-top: 18px; color: var(--text-3); font: 11px/1.6 var(--mono); }
+.foot b { color: var(--text-2); font-weight: 600; }
+
+@media (max-width: 980px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .track { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stage:nth-child(2) { border-right: 0; }
+  .stage:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+}
+@media (max-width: 520px) {
+  .track { grid-template-columns: minmax(0, 1fr); }
+  .stage { border-right: 0; border-bottom: 1px solid var(--border); }
+  .fee { grid-template-columns: minmax(0, 1fr); }
+  h1 { font-size: 18px; }
+}
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+</style>
+
+<div class="sample-bar" role="note">SAMPLE DATA — NOT LIVE · <span>every number on this page is made up to show the layout. Nothing here is a reading of the market.</span></div>
+<div class="wrap">
+  <header class="topbar">
+    <span class="brand">PANDORA</span><span class="sub">Stater Swap · Phase 1 mockup</span>
+    <span class="spacer"></span>
+    <span class="chip teal">Session · NY</span>
+    <span class="chip">Read-only · no orders</span>
+    <span class="chip sample">Sample</span>
+  </header>
+
+  <h1>BTC bottom watch</h1>
+  <p class="lede">A bottom usually starts with a sharp flush where spreads blow out and liquidations spike, then goes quiet: volatility dies and price builds a base. This screen tracks which of those stages BTC is in, and shows the evidence for each.</p>
+
+  <section class="panel" aria-labelledby="t-track">
+    <div class="ph"><span class="pt" id="t-track">Bottom-timing track · BTC</span><span class="spacer"></span><span class="chip sample">Sample</span></div>
+    <div class="track" id="track"></div>
+    <div class="why" id="why"></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel chart" aria-labelledby="t-chart">
+      <div class="ph"><span class="pt" id="t-chart">BTC-USD · daily · last 160 days</span><span class="spacer"></span><span class="chip sample">Sample</span></div>
+      <div id="priceChart"></div>
+      <div class="legend"><span><i style="background:var(--down)"></i>Flush day</span><span><i style="background:var(--teal)"></i>Quiet range (20-day high / low)</span></div>
+      <div class="ph" style="border-radius:0;border-top:1px solid var(--border)"><span class="pt">LBR 3/10 oscillator · daily close</span><span class="spacer"></span><span class="chip" id="oscState">—</span></div>
+      <div id="oscChart"></div>
+      <div class="legend"><span><i style="background:var(--teal)"></i>Fast: 3-day minus 10-day average</span><span><i style="background:var(--amber)"></i>Slow: 16-day average of fast</span></div>
+      <div class="src">Live source when built: Coinbase Exchange public candles (BTC-USD, no key), OKX public as fallback. The 3/10 follows the repo's crypto Pine script (docs/pinescript/lbr_3_10_oscillator.pine).</div>
+    </section>
+
+    <div class="rail">
+      <section class="panel" aria-labelledby="t-vol">
+        <div class="ph"><span class="pt" id="t-vol">Volatility</span><span class="spacer"></span><span class="chip sample">Sample</span></div>
+        <div class="pb">
+          <div class="big"><span class="v num" id="rv7">—</span><span class="w c-teal" id="rvWord">—</span></div>
+          <div class="spark" id="rvSpark"></div>
+          <dl class="kv" id="volKv"></dl>
+        </div>
+        <div class="src">Realised vol and range from the candles above. Implied vol: Deribit DVOL index (public, no key).</div>
+      </section>
+
+      <section class="panel" aria-labelledby="t-spread">
+        <div class="ph"><span class="pt" id="t-spread">Spread &amp; liquidity</span><span class="spacer"></span><span class="chip sample">Sample</span></div>
+        <div class="pb">
+          <div class="big"><span class="v num" id="spNow">—</span><span class="w c-2">bps now</span></div>
+          <div class="spark" id="spSpark"></div>
+          <dl class="kv" id="spKv"></dl>
+        </div>
+        <div class="src">Coinbase Exchange public order book (BTC-USD level 2, no key); OKX books as fallback.</div>
+      </section>
+
+      <section class="panel" aria-labelledby="t-pos">
+        <div class="ph"><span class="pt" id="t-pos">Positioning</span><span class="spacer"></span><span class="chip sample">Sample</span></div>
+        <div class="pb"><dl class="kv" id="posKv"></dl>
+          <p class="note">Funding, open interest and liquidations are already on today's Stater page. The tape state and the capitulation-to-froth dial stay as they are.</p></div>
+        <div class="src">Coinalyze (free tier), OKX public, and the hub's existing tape-health and cycle jobs.</div>
+      </section>
+
+      <section class="panel paper" aria-labelledby="t-paper">
+        <div class="ph"><span class="pt" id="t-paper">Paper sandbox · Phase 2</span><span class="spacer"></span><span class="chip amber">Not active</span></div>
+        <div class="pb">
+          <p class="note" style="margin:0">Phase 2 would paper-trade these stages on the sandbox the principal set aside, with real fees and spread, before any money moves. It needs its own ruling. What fees do to a small account:</p>
+          <div class="fee">
+            <div><div class="k">Taker fee</div><div class="v num">1.20%</div></div>
+            <div><div class="k">Round trip</div><div class="v num">2.40%</div></div>
+            <div><div class="k">Break-even move</div><div class="v num c-amber">+2.4%</div></div>
+          </div>
+          <p class="note" style="margin:0">Coinbase Advanced's entry tier (under $1K of 30-day volume) is 0.60% maker and 1.20% taker. Resting limit orders halve the cost. Check the live schedule before Phase 2.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <p class="foot"><b>What this mockup is.</b> Phase 1 of the Stater Swap scope (R-IV.618): a read-only screen. No orders, no exchange keys, no paid data. Every panel names the free public source it would read once built. <b>Nothing here goes live until the principal approves this layout.</b></p>
+</div>
+
+<script>
+(function () {
+  // Deterministic sample generator: a decline, one flush, then a dead-quiet base.
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+  const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const N = 160, FLUSH = 130, QUIET = 136;
+  const bars = []; let c = 74200;
+  for (let i = 0; i < N; i++) {
+    let o = c, sig, target;
+    if (i < FLUSH) { target = 74200 - (74200 - 57400) * (i / (FLUSH - 1)); sig = i < 100 ? 0.028 : 0.034; }
+    else if (i < QUIET) { target = 52600; sig = 0.03; }
+    else { target = 53300 - 1400 * (i - QUIET) / (N - 1 - QUIET); sig = 0.0085; }
+    let cl, hi, lo;
+    if (i === FLUSH) { o = c; lo = 48900; cl = 51800; hi = o * 1.004; }
+    else {
+      cl = target * (1 + sig * gauss() * 0.9) * 0.5 + o * 0.5 * (1 + sig * gauss() * 0.5);
+      if (i >= QUIET) cl = Math.min(53600, Math.max(51100, cl));
+      const w = Math.max(sig, 0.004) * (0.6 + rnd());
+      hi = Math.max(o, cl) * (1 + w * 0.5); lo = Math.min(o, cl) * (1 - w * 0.5);
+    }
+    bars.push({ o, h: hi, l: lo, c: cl }); c = cl;
+  }
+  const closes = bars.map((b) => b.c);
+  const sma = (a, n, i) => { if (i < n - 1) return null; let s = 0; for (let k = i - n + 1; k <= i; k++) s += a[k]; return s / n; };
+  const fast = closes.map((_, i) => { const a = sma(closes, 3, i), b = sma(closes, 10, i); return a == null || b == null ? null : a - b; });
+  const slow = fast.map((_, i) => { if (i < 9 + 15) return null; let s = 0; for (let k = i - 15; k <= i; k++) s += fast[k]; return s / 16; });
+  const ret = closes.map((v, i) => i ? Math.log(v / closes[i - 1]) : 0);
+  const rv = (i, n) => { if (i < n) return null; const r = ret.slice(i - n + 1, i + 1); const m = r.reduce((a, b) => a + b, 0) / n; return Math.sqrt(r.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1) * 365) * 100; };
+  const rv7 = closes.map((_, i) => rv(i, 7));
+  const last = N - 1;
+  const rvSeries = rv7.filter((v) => v != null);
+  const rvPct = Math.round(rvSeries.filter((v) => v <= rv7[last]).length / rvSeries.length * 100);
+  const tr = bars.map((b, i) => i ? Math.max(b.h - b.l, Math.abs(b.h - bars[i - 1].c), Math.abs(b.l - bars[i - 1].c)) : b.h - b.l);
+  const atr14 = tr.slice(-14).reduce((a, b) => a + b, 0) / 14;
+  const win = bars.slice(-20); const hi20 = Math.max(...win.map((b) => b.h)), lo20 = Math.min(...win.map((b) => b.l));
+  const range20 = (hi20 - lo20) / closes[last] * 100;
+  const spread = closes.map((_, i) => i === FLUSH ? 38.4 : i === FLUSH + 1 ? 14.2 : i === FLUSH + 2 ? 6.1 : i > FLUSH && i < QUIET ? 2.4 + rnd() * 1.4 : i >= QUIET ? 0.7 + rnd() * 0.4 : 1.0 + rnd() * 0.7);
+  const med = [...spread.slice(last - 30, last)].sort((a, b) => a - b)[15];
+  const daysSinceFlush = last - FLUSH, quietDays = last - QUIET + 1;
+  const fastAboveSlow = fast[last] > slow[last];
+  // A base signal is the fast line crossing up through the slow line while both sit below zero.
+  let baseCross = false;
+  for (let i = last - 9; i <= last; i++) if (fast[i] > slow[i] && fast[i - 1] <= slow[i - 1] && fast[i] < 0) baseCross = true;
+
+  const fmt = (v, d = 0) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const $ = (id) => document.getElementById(id);
+
+  // Stage track
+  const st = [
+    { n: 'Stage 1', w: 'FLUSH', d: daysSinceFlush + ' days ago', cls: 'done', ev: [
+      ['met', 'Spread blew out', '38 bps vs ~1.3 normal'], ['met', 'Liquidations spiked', '$1.9B in 24 h'],
+      ['met', 'Funding went deeply negative', '−0.045% / 8 h'], ['met', 'Down 2.5× ATR in one day', '−9.4%'],
+      ['na', 'Spot ETF outflow spike', 'no free source yet']] },
+    { n: 'Stage 2', w: 'DEATH OF VOL', d: 'day ' + quietDays, cls: 'now', ev: [
+      [rvPct <= 10 ? 'met' : 'no', '7-day vol in the bottom 10%', fmt(rv7[last], 0) + '% · rank ' + rvPct + '%'], ['met', 'Implied vol (DVOL) under 40', '38'],
+      [range20 < 6 ? 'met' : 'no', '20-day range under 6%', fmt(range20, 1) + '%'], ['met', 'Funding back near zero', '+0.004%'],
+      ['met', 'Spread back to normal', fmt(spread[last], 1) + ' bps'], ['no', 'Open interest flat for 14 days', '+6% · not yet']] },
+    { n: 'Stage 3', w: 'BASE', d: 'watching', cls: '', ev: [
+      ['no', 'Higher low above the flush low', ''], [baseCross ? 'met' : 'no', '3/10 fast crosses above slow, below zero', baseCross ? 'crossed' : 'not yet'],
+      ['no', 'Close above the 20-day high', fmt(hi20, 0)]] },
+    { n: 'Stage 4', w: 'TREND', d: '', cls: '', ev: [
+      [closes[last] > sma(closes, 50, last) ? 'met' : 'no', 'Above the 50-day average', fmt(sma(closes, 50, last))], [fast[last] > 0 ? 'met' : 'no', '3/10 fast above zero', '']] },
+  ];
+  const mark = { met: '✓', no: '○', na: 'N/A' };
+  $('track').innerHTML = st.map((s) => `<div class="stage ${s.cls}"${s.cls === 'now' ? ' aria-current="step"' : ''}><div class="sn">${s.n}</div><div class="sw">${s.w}</div><div class="sd">${s.d}</div>
+    <ul class="ev">${s.ev.map(([k, t, v]) => `<li class="${k}"><span class="m">${mark[k] === 'N/A' ? '–' : mark[k]}</span><span><b>${t}</b>${v ? ' · <span class="num">' + v + '</span>' : ''}${k === 'na' ? ' (N/A)' : ''}</span></li>`).join('')}</ul></div>`).join('');
+  $('why').innerHTML = `<b>Now: death of vol, day ${quietDays}.</b> The flush was ${daysSinceFlush} days ago. Since then 7-day volatility has fallen to ${fmt(rv7[last], 0)}% and price has held a ${fmt(range20, 1)}% range. Next to watch: ${baseCross ? 'the 3/10 has turned up from below zero; a higher low would confirm the base' : 'a higher low and the 3/10 turning up from below zero'}.`;
+
+  // Price chart (candles), one scale for marks, ticks and labels.
+  const W = 960, H = 300, P = { l: 8, r: 64, t: 12, b: 24 };
+  const lo = Math.min(...bars.map((b) => b.l)), hi = Math.max(...bars.map((b) => b.h));
+  const yMin = Math.floor(lo / 2000) * 2000, yMax = Math.ceil(hi / 2000) * 2000;
+  const x = (i) => P.l + (i + 0.5) * (W - P.l - P.r) / N, bw = (W - P.l - P.r) / N * 0.62;
+  const y = (v) => P.t + (yMax - v) / (yMax - yMin) * (H - P.t - P.b);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Sample BTC daily candles with the flush day and the quiet range marked">`;
+  for (let v = yMin; v <= yMax; v += 4000) s += `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="#1b2745" stroke-width="1"/><text x="${W - P.r + 6}" y="${y(v) + 4}" fill="#70829d" font-family="ui-monospace,Menlo,monospace" font-size="11">${(v / 1000).toFixed(0)}k</text>`;
+  s += `<rect x="${x(QUIET) - bw}" y="${y(hi20)}" width="${x(last) - x(QUIET) + bw * 2}" height="${y(lo20) - y(hi20)}" fill="rgba(20,184,166,.12)" stroke="#14b8a6" stroke-dasharray="4 3"/>`;
+  s += `<rect x="${x(FLUSH) - bw}" y="${P.t}" width="${bw * 2}" height="${H - P.t - P.b}" fill="rgba(255,92,51,.16)"/>`;
+  bars.forEach((b, i) => { const up = b.c >= b.o, col = up ? '#14b8a6' : '#ff5c33';
+    s += `<line x1="${x(i)}" x2="${x(i)}" y1="${y(b.h)}" y2="${y(b.l)}" stroke="${col}" stroke-width="1"/><rect x="${x(i) - bw / 2}" y="${y(Math.max(b.o, b.c))}" width="${bw}" height="${Math.max(1, Math.abs(y(b.o) - y(b.c)))}" fill="${col}"/>`; });
+  [[0, '160d ago'], [40, '120d'], [80, '80d'], [120, '40d'], [last, 'today']].forEach(([i, t]) => { s += `<text x="${x(i)}" y="${H - 6}" fill="#70829d" font-family="ui-monospace,Menlo,monospace" font-size="11" text-anchor="${i === 0 ? 'start' : i === last ? 'end' : 'middle'}">${t}</text>`; });
+  s += `<text x="${x(FLUSH) - bw - 4}" y="${y(48900) + 4}" fill="#ff5c33" font-family="ui-monospace,Menlo,monospace" font-size="11" text-anchor="end">flush · 48.9k</text>`;
+  $('priceChart').innerHTML = s + '</svg>';
+
+  // 3/10 oscillator
+  const H2 = 130, vals = fast.concat(slow).filter((v) => v != null);
+  const m = Math.ceil(Math.max(...vals.map(Math.abs)) / 1000) * 1000;
+  const y2 = (v) => 8 + (m - v) / (2 * m) * (H2 - 30);
+  const path = (a) => a.map((v, i) => v == null ? '' : `${a[i - 1] == null ? 'M' : 'L'}${x(i).toFixed(1)},${y2(v).toFixed(1)}`).join('');
+  let o = `<svg viewBox="0 0 ${W} ${H2}" role="img" aria-label="Sample LBR 3/10 oscillator, fast and slow lines">`;
+  [m, 0, -m].forEach((v) => { o += `<line x1="${P.l}" x2="${W - P.r}" y1="${y2(v)}" y2="${y2(v)}" stroke="${v ? '#1b2745' : '#223258'}" stroke-width="1"/><text x="${W - P.r + 6}" y="${y2(v) + 4}" fill="#70829d" font-family="ui-monospace,Menlo,monospace" font-size="11">${v > 0 ? '+' : ''}${v}</text>`; });
+  o += `<path d="${path(slow)}" fill="none" stroke="#f5a524" stroke-width="1.6"/><path d="${path(fast)}" fill="none" stroke="#14b8a6" stroke-width="1.8"/>`;
+  o += `<circle cx="${x(last)}" cy="${y2(fast[last])}" r="3.5" fill="#14b8a6"/>`;
+  $('oscChart').innerHTML = o + '</svg>';
+  $('oscState').textContent = fastAboveSlow ? (fast[last] < 0 ? 'Fast above slow · below zero' : 'Fast above slow · above zero') : 'Fast below slow';
+  $('oscState').className = 'chip ' + (fastAboveSlow ? 'teal' : '');
+
+  // Sparklines
+  const spark = (a, col, thr) => { const v = a.filter((q) => q != null); const mx = Math.max(...v, thr || 0), mn = Math.min(...v, 0);
+    const sx = (i) => i / (v.length - 1) * 300, sy = (q) => 52 - (q - mn) / (mx - mn || 1) * 48;
+    let p = `<svg viewBox="0 0 300 56" preserveAspectRatio="none" aria-hidden="true">`;
+    if (thr) p += `<line x1="0" x2="300" y1="${sy(thr)}" y2="${sy(thr)}" stroke="#f5a524" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>`;
+    p += `<path d="M0,${sy(v[0])}${v.map((q, i) => `L${sx(i)},${sy(q)}`).join('')}L300,56L0,56Z" fill="${col}" fill-opacity=".14"/><path d="${v.map((q, i) => `${i ? 'L' : 'M'}${sx(i)},${sy(q)}`).join('')}" fill="none" stroke="${col}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+    return p + `<circle cx="300" cy="${sy(v[v.length - 1])}" r="3" fill="${col}"/></svg>`; };
+  $('rv7').textContent = fmt(rv7[last], 0) + '%';
+  $('rvWord').textContent = rvPct <= 10 ? 'DEAD QUIET' : rvPct <= 30 ? 'QUIET' : 'ACTIVE';
+  $('rvSpark').innerHTML = spark(rv7.slice(-60), '#14b8a6');
+  $('volKv').innerHTML = `<dt>7-day realised vol, rank in window</dt><dd>lowest ${rvPct}%</dd><dt>Implied vol (Deribit DVOL)</dt><dd>38 · was 62 at flush</dd><dt>ATR(14) as % of price</dt><dd>${fmt(atr14 / closes[last] * 100, 2)}%</dd><dt>20-day high / low</dt><dd>${fmt(hi20)} / ${fmt(lo20)}</dd>`;
+  $('spNow').textContent = fmt(spread[last], 1);
+  $('spSpark').innerHTML = spark(spread.slice(-40), '#ff5c33', med * 5);
+  $('spKv').innerHTML = `<dt>Peak on flush day</dt><dd class="c-down">38.4 bps</dd><dt>Blowout line (5× 30-day median)</dt><dd>${fmt(med * 5, 1)} bps</dd><dt>Bids within 2% of price</dt><dd>$41.2M</dd><dt>Asks within 2% of price</dt><dd>$38.7M</dd>`;
+  $('posKv').innerHTML = `<dt>Funding (8 h)</dt><dd>+0.004%</dd><dt>Open interest, 14-day change</dt><dd>+6.1%</dd><dt>Liquidations, 24 h</dt><dd>$142M</dd><dt>Tape</dt><dd class="c-teal">SPOT_LED</dd><dt>Capitulation ↔ froth dial</dt><dd>−42 · capitulation lean</dd>`;
+})();
+</script>
+</body></html>
