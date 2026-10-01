@@ -137,11 +137,36 @@ async def _fetch_okx_candles_full(base_symbol: str, bar: str, limit: int = 300) 
     return bars
 
 
+# Stater Phase 0 (R-IV.619): one bar set per (symbol, interval) is shared by every
+# consumer for a short window. Before this, each of the regime job, tape-health
+# event detection, the outcome resolver and every GET /crypto/state (ATR) fetched
+# its own copy -- the /crypto/state path alone did so on every 30-second page poll.
+# A 15-minute bar cannot change faster than its own close, so 5 minutes of reuse
+# loses nothing a 15-minute consumer could see. Empty results are never cached,
+# so a vendor hiccup is retried on the next call rather than remembered.
+BARS_CACHE_TTL_SECONDS = {False: 300, True: 3600}   # keyed by use_daily
+_bars_cache: dict = {}
+
+
 async def _fetch_full_ohlc(base_symbol: str, use_daily: bool) -> List[Tuple[datetime, float, float, float, float]]:
-    """Shared vendor dispatch, per crypto_symbol_matrix's bar_walk_source.
-    Returns [] (never raises) if the symbol has no LIVE bar_walk_source.
-    Internal -- fetch_crypto_bars() and fetch_crypto_ohlc() both wrap this.
+    """Shared vendor dispatch, per crypto_symbol_matrix's bar_walk_source, behind a
+    short per-(symbol, interval) cache. Returns [] (never raises) if the symbol has
+    no LIVE bar_walk_source. Internal -- fetch_crypto_bars() and fetch_crypto_ohlc()
+    both wrap this.
     """
+    import time as _time
+    key = (base_symbol, bool(use_daily))
+    hit = _bars_cache.get(key)
+    if hit and _time.monotonic() - hit[0] < BARS_CACHE_TTL_SECONDS[bool(use_daily)]:
+        return list(hit[1])
+    bars = await _fetch_full_ohlc_uncached(base_symbol, use_daily)
+    if bars:
+        _bars_cache[key] = (_time.monotonic(), bars)
+    return list(bars)
+
+
+async def _fetch_full_ohlc_uncached(base_symbol: str, use_daily: bool) -> List[Tuple[datetime, float, float, float, float]]:
+    """Vendor dispatch without the cache."""
     entry = get_symbol_entry(base_symbol)
     if not entry:
         logger.debug("No matrix entry for crypto symbol %s -- shadow-only, skipping", base_symbol)

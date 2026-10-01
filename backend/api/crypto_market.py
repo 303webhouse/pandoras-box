@@ -990,15 +990,17 @@ async def get_crypto_clock():
 
 @router.get("/cycle-extremes")
 async def get_cycle_extremes(symbol: Optional[str] = Query(None)):
-    """S-3 Phase 4 (§6.1) — Cycle Extremes dial.
+    """S-3 Phase 4 (§6.1) — Cycle Extremes dial, READ from the hourly job's rows.
 
-    Returns per-symbol composite + full cell set with §4.2 staleness contracts,
-    coverage headers, and canonical copy strings. Optional ?symbol= filters to
-    a single symbol; omitting returns all six.
+    Stater Phase 0 (R-IV.619): this GET used to run a full evaluation per request
+    (vendor calls + one crypto_cycle_log insert per symbol). It now serves the
+    newest stored evaluation; the hourly scheduler job is the only writer. Each
+    payload carries its own computed_at / data_age_seconds, and reads `degraded`
+    once the job has missed a run. Optional ?symbol= filters to a single symbol.
 
-    The dial writes ZERO rows to the signals table (D3 rule). Data-layer only.
+    The dial writes ZERO rows to the signals table (D3 rule), and a read writes none at all.
     """
-    from bias_filters.crypto_cycle_engine import evaluate_cycle_extremes, evaluate_all_symbols
+    from bias_filters.crypto_cycle_engine import read_latest_cycle
 
     if symbol:
         from jobs.crypto_bars import normalize_crypto_ticker
@@ -1008,32 +1010,28 @@ async def get_cycle_extremes(symbol: Optional[str] = Query(None)):
                 "error": f"'{symbol}' is not a recognized crypto symbol",
                 "valid_symbols": ["BTC", "ETH", "SOL", "HYPE", "ZEC", "FARTCOIN"],
             }
-        return await evaluate_cycle_extremes(canon)
+        return (await read_latest_cycle([canon]))[canon]
 
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "symbols": await evaluate_all_symbols(),
+        "source": "crypto_cycle_log (hourly job)",
+        "symbols": await read_latest_cycle(),
     }
 
 
 @router.get("/tape-health")
 async def get_tape_health(symbol: Optional[str] = Query(None),
                           _=Depends(require_api_key)):
-    """S-3 Phase 4 (§6.1) / S-3b Items 1+2 — CVD tape-health state.
+    """S-3 Phase 4 (§6.1) / S-3b — CVD tape-health state, READ from the 15-min job's rows.
 
-    Returns spot-vs-perp CVD split, state (SPOT_LED / PERP_LED / MIXED / NA),
-    and slope per covered symbol. Uncovered symbols (or a transient fetch
-    failure on either leg) return explicit NA state with a leg-specific
-    reason — never a fabricated value.
-
-    §5.1 HARD-STOP RESOLVED (S-3b, 2026-07-17): OKX spot trades are wired in
-    alongside the already-live OKX swap (perp) feed. CVD event detection
-    (§5.3/§5.4) runs after each live computation and fires shadow events
-    (CVD_DIVERGENCE/CVD_ABSORPTION) through process_signal_unified() when
-    conditions are met — asset_class=CRYPTO, gating_enabled stays false, no
-    live behavior change. Optional ?symbol= filters to a single symbol.
+    Stater Phase 0 (R-IV.619): this GET used to recompute per request -- an OKX
+    trade pull per leg, a crypto_tape_health_log insert per symbol, CVD event
+    detection (bars through the paid feed) and possible shadow events from a
+    browser tab. It now serves the newest stored row per symbol; the scheduler
+    job is the only writer and the only thing that can fire an event. NA states
+    stay per-symbol/per-leg; a symbol with no row is NA, never a fabricated value.
     """
-    from bias_filters.crypto_tape_health_engine import compute_tape_health, compute_all_tape_health
+    from bias_filters.crypto_tape_health_engine import read_latest_tape_health
 
     if symbol:
         from jobs.crypto_bars import normalize_crypto_ticker
@@ -1043,16 +1041,10 @@ async def get_tape_health(symbol: Optional[str] = Query(None),
                 "error": f"'{symbol}' is not a recognized crypto symbol",
                 "valid_symbols": ["BTC", "ETH", "SOL", "HYPE", "ZEC", "FARTCOIN"],
             }
-        try:
-            from config.crypto_cycle_loader import get_cycle_config
-            _, config = await get_cycle_config()
-        except Exception:
-            config = {}
-        return await compute_tape_health(canon, config)
+        return (await read_latest_tape_health([canon]))[canon]
 
-    results = await compute_all_tape_health()
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "note": "Spot+perp CVD live via OKX (S-3b) — NA states are per-symbol/per-leg, not a blanket outage",
-        "symbols": results,
+        "note": "Stored readings from the 15-min tape-health job (spot+perp CVD via OKX); NA states are per-symbol/per-leg",
+        "symbols": await read_latest_tape_health(),
     }
