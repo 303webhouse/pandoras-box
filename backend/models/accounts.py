@@ -46,15 +46,107 @@ DISPLAY_NAMES = {
 # Provisional names, declared so a rename is a known operation rather than a discovery.
 PROVISIONAL_NAMES = (FIDELITY_401A,)
 
+# ── IDENTITY BY NUMBER — R-IV.638(b)1 ───────────────────────────────────────────────────────
+#
+# A NAME CANNOT TELL THE TWO FIDELITY ACCOUNTS APART, AND IT NEVER COULD.
+# Both are Fidelity BrokerageLink accounts. "Fidelity", "BrokerageLink", "401k", "Brokerage"
+# describe both of them equally, and the 09-22 rule that every Fidelity name means the Roth
+# was only ever true while there was one. It is retired.
+#
+# It is worse than ambiguous. The scope normaliser lowercases and turns underscores into
+# spaces, so `'Fidelity 401A'` -- the PARKED mutual-fund history, 90 snapshot rows up to
+# $11,075.62 -- and `'FIDELITY_401A'`, the tradeable account, collapse to the SAME key. No
+# name-based rule can separate them, which is ABACUS's catch (R-IV.638(b)2): bringing the
+# 401(a) into scope by NAME would have pulled the parked history in with it.
+#
+# So the account number is the identity. POSITIONS read both from the principal's files.
+ACCOUNT_NUMBERS = {
+    FIDELITY_ROTH: "652303158",
+    FIDELITY_401A: "653641836",
+}
+ACCOUNT_BY_NUMBER = {num: key for key, num in ACCOUNT_NUMBERS.items()}
+
+# Names that USED to route to FIDELITY_ROTH and no longer route anywhere. Kept as a declared
+# set so the refusal can name them, rather than a caller guessing why its string stopped
+# working. Rows already stored under these spellings are LEFT ALONE (R-IV.638(b)3): this
+# governs resolution for a new write, not a rewrite of history.
+# ── Spellings a RECONCILIATION READ must still look under ───────────────────────────────────
+# Separate from ALIASES on purpose. ALIASES feeds `normalize_account`, which is the WRITE path,
+# and (b)3 closes that to Fidelity names. But the reconciliation doctrine below is explicit
+# that an account-scoped READ missing a row reports ABSENCE where there is DUPLICATION, and
+# then writes the row it believes is missing. Closing the write path must not blind the read.
+#
+# FIDELITY_401A HAS NONE, DELIBERATELY. It is new, so no row was ever written under a historical
+# spelling FOR it -- and `'Fidelity 401A'` names the PARKED mutual-fund money (90 snapshot rows
+# to 2026-07-23), which is a different pot. Giving it that spelling is exactly ABACUS's catch.
+HISTORICAL_SPELLINGS = {
+    FIDELITY_ROTH: ("FIDELITY", "FIDELITY - INDIVIDUAL", "FID", "FIDELITY ROTH"),
+    ROBINHOOD: ("ROBINHOOD ",),
+    FIDELITY_401A: (),
+}
+
+RETIRED_FIDELITY_NAMES = frozenset({
+    "FIDELITY", "FIDELITY - INDIVIDUAL", "FID", "FIDELITY ROTH", "FIDELITY 401A",
+    "BROKERAGELINK", "BROKERAGE LINK", "BROKERAGE", "401K", "403B",
+    "FIDELITY BROKERAGELINK", "FIDELITY 401K", "FIDELITY 403B",
+})
+
+
+def describe_accounts() -> str:
+    """One sentence naming every account a committee tool may ask for — R-IV.638(b)4.
+
+    GENERATED, because both MCP tools had it typed as prose: they offered a fixed list and
+    described "401k BrokerageLink", so the committee could not ask for the new account at all
+    while it COULD reach the retired parked snapshot under a name that now sounds like the
+    traded one. A description is a vocabulary surface like any other.
+    """
+    parts = []
+    for key in CANONICAL_ACCOUNTS:
+        name = DISPLAY_NAMES[key]
+        num = ACCOUNT_NUMBERS.get(key)
+        parts.append(f"{name} ({key}{', #' + num if num else ''})")
+    return ", ".join(parts)
+
+
+def account_choices() -> list:
+    """The account values a tool may accept, lowercase, canonical only.
+
+    The retired snapshot is NOT here: `brokerage_link_401k` is the merged parked
+    401(a)+403(b) under a disputed label, and offering it beside the traded accounts is how a
+    committee member sizes off $11,642.35 that is in neither of them (R-IV.638(b)2/4).
+    """
+    return [k.lower() for k in CANONICAL_ACCOUNTS]
+
+
+def account_for_number(number) -> Optional[str]:
+    """The canonical key for an account NUMBER, or None if it is not one we track.
+
+    Digits only, so '653641836', 'X653641836' and '...1836' do not accidentally agree: a
+    partial match on an account number is how money lands in the wrong account.
+    """
+    if number is None:
+        return None
+    digits = "".join(ch for ch in str(number) if ch.isdigit())
+    return ACCOUNT_BY_NUMBER.get(digits)
+
+
+def is_fidelity_name(value: Optional[str]) -> bool:
+    """True when `value` is a Fidelity-ish NAME that can no longer resolve on its own."""
+    if value is None:
+        return False
+    key = " ".join(str(value).strip().upper().split())
+    if key in RETIRED_FIDELITY_NAMES:
+        return True
+    return "FIDELITY" in key or "BROKERAGE" in key
+
 # Spellings that have meant a canonical account and are normalised on the way in. `FIDELITY`
 # resolves to FIDELITY_ROTH: that is what the alias has meant since the remap, and it is the
 # label the five rows written under it on 2026-09-16 belong to.
+# R-IV.638(b)3: THE FIDELITY NAME ALIASES ARE GONE. Every one of them resolved a name to an
+# account, and with two Fidelity accounts a name is not an identity. `RETIRED_FIDELITY_NAMES`
+# below records them so a refusal can say what happened. Robinhood keeps its alias: there is
+# one Robinhood account and no number is needed to tell it from another.
 ALIASES = {
-    "FIDELITY": FIDELITY_ROTH,
-    "FIDELITY - INDIVIDUAL": FIDELITY_ROTH,
-    "FID": FIDELITY_ROTH,
-    "FIDELITY ROTH": FIDELITY_ROTH,
-    "FIDELITY 401A": FIDELITY_401A,
     "ROBINHOOD ": ROBINHOOD,
 }
 
@@ -71,6 +163,12 @@ def normalize_account(value: Optional[str]) -> Optional[str]:
     key = " ".join(str(value).strip().upper().split())
     if key in CANONICAL_ACCOUNTS:
         return key
+    # An ACCOUNT NUMBER is the identity (R-IV.638(b)1), so it resolves on its own -- the
+    # refusal below tells a caller to send one, and it would be a poor instruction if the
+    # number were then rejected.
+    by_number = account_for_number(key)
+    if by_number:
+        return by_number
     return ALIASES.get(key)
 
 
@@ -83,9 +181,38 @@ def canonical_account(value: Optional[str], *, field: str = "account") -> str:
     resolved = normalize_account(value)
     if resolved:
         return resolved
+
+    # R-IV.638(b)3: a Fidelity NAME is refused with its reason, never defaulted to the Roth.
+    # Defaulting is what the 09-22 rule did, and it was right while there was one Fidelity
+    # account. There are two, and a silent default would file the new account's money in the
+    # old one -- the single worst outcome available here, and an invisible one.
+    bare = " ".join(str(value or "").strip().upper().split())
+    if bare in DISPUTED:
+        # Checked BEFORE the Fidelity-name branch: this label has its own, more specific
+        # reason, and it is also the retired June snapshot ($11,642.35, 2026-06-09) that
+        # must never be reachable as either tradeable account (R-IV.638(b)2).
+        raise HTTPException(
+            status_code=400,
+            detail=(f"{field}: '{value}' is the RETIRED merged snapshot of the parked "
+                    f"401(a) + 403(b), under a label disputed as to which plan it names "
+                    f"(DEF-ACCOUNT-LABEL-DUP). It is not a write target, and it is not the "
+                    f"traded 401(a): that is {FIDELITY_401A} "
+                    f"({ACCOUNT_NUMBERS[FIDELITY_401A]})."))
+
+    if is_fidelity_name(value):
+        pairs = ", ".join(f"{k} ({ACCOUNT_NUMBERS[k]})" for k in ACCOUNT_NUMBERS)
+        raise HTTPException(
+            status_code=400,
+            detail=(f"{field}: '{value}' names Fidelity without saying WHICH Fidelity "
+                    f"account, and there are now two: {pairs}. A name cannot tell them "
+                    f"apart -- both are BrokerageLink accounts -- so this is refused rather "
+                    f"than defaulted to the Roth, which is what it used to do (retired "
+                    f"R-IV.638(b)3). Send the account number, or the key itself. For a "
+                    f"combined view, ask for both keys explicitly."))
+
     disputed = " ".join(str(value or "").strip().upper().split()) in DISPUTED
-    detail = (f"{field} must be one of {list(CANONICAL_ACCOUNTS)} (case-insensitive; "
-              f"'FIDELITY' is accepted as {FIDELITY_ROTH}); got '{value}'")
+    detail = (f"{field} must be one of {list(CANONICAL_ACCOUNTS)} (case-insensitive); "
+              f"got '{value}'")
     if disputed:
         detail += (" — that label is under an unresolved dispute about which plan it names "
                    "and is not a write target")
@@ -157,8 +284,14 @@ def scope_for(account: Optional[str]) -> list:
     scoping to exactly what was typed is the failure this exists to prevent.
     """
     canonical = canonical_account(account)
-    aliases = sorted(spelling for spelling, target in ALIASES.items() if target == canonical)
-    return [canonical] + aliases
+    # HISTORICAL_SPELLINGS, not ALIASES: the write path no longer resolves Fidelity names
+    # (R-IV.638(b)3), and a read that followed it would stop seeing rows filed under the old
+    # vocabulary -- the label half of the rule below, reintroduced by the fix to a different
+    # half. Measured before shipping: scope_for(FIDELITY_ROTH) had silently narrowed to one
+    # spelling.
+    spellings = sorted(set(HISTORICAL_SPELLINGS.get(canonical, ()))
+                       | {sp for sp, t in ALIASES.items() if t == canonical})
+    return [canonical] + [sp for sp in spellings if sp != canonical]
 
 
 def scope_sql(account: Optional[str], column: str = "account") -> tuple:

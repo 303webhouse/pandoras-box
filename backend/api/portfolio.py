@@ -475,23 +475,41 @@ async def get_portfolio_pnl():
             ORDER BY account_name, snapshot_date DESC
         """, target_date)
         if not rows:
-            return None
-        return sum(float(r["balance"] or 0) for r in rows)
+            return None, set()
+        names = {r["account_name"] for r in rows}
+        return sum(float(r["balance"] or 0) for r in rows), names
 
-    daily_snap = await get_snapshot_total(yesterday)
-    weekly_snap = await get_snapshot_total(last_friday)
-    monthly_snap = await get_snapshot_total(first_of_month)
+    daily_snap, daily_names = await get_snapshot_total(yesterday)
+    weekly_snap, weekly_names = await get_snapshot_total(last_friday)
+    monthly_snap, monthly_names = await get_snapshot_total(first_of_month)
 
-    def calc_pnl(prev_total):
+    def calc_pnl(prev_total, prev_names):
+        """THE MIRROR OF DEF-DAYPNL-PHANTOM — R-IV.638(b)2.
+
+        The filter above handles an account being RETIRED: a name no longer in
+        account_balances drops off the historical side, matching the current side.
+        ADDING an account breaks it the other way. A new account is in
+        account_balances today and has no snapshot before the date it was created,
+        so `current_total` carries its balance and `prev_total` cannot. The whole
+        balance then reads as one day's profit.
+
+        FIDELITY_401A was registered 2026-10-01 at 0.00, so nothing is wrong today
+        -- the error appears the moment the principal enters its real cash, which is
+        the next thing he does. Both sides are therefore compared over the SAME set
+        of accounts: the ones that have a snapshot at or before the date. An account
+        with no history yet is in neither total, which is honest -- there is no prior
+        figure to compare it against, and inventing one is the fault either way.
+        """
         if prev_total is None or prev_total == 0:
             return None, None
-        dollar = round(current_total - prev_total, 2)
+        comparable = sum(v for k, v in current.items() if k in prev_names)
+        dollar = round(comparable - prev_total, 2)
         pct = round((dollar / prev_total) * 100, 2)
         return dollar, pct
 
-    daily_dollar, daily_pct = calc_pnl(daily_snap)
-    weekly_dollar, weekly_pct = calc_pnl(weekly_snap)
-    monthly_dollar, monthly_pct = calc_pnl(monthly_snap)
+    daily_dollar, daily_pct = calc_pnl(daily_snap, daily_names)
+    weekly_dollar, weekly_pct = calc_pnl(weekly_snap, weekly_names)
+    monthly_dollar, monthly_pct = calc_pnl(monthly_snap, monthly_names)
 
     return {
         "current_total": current_total,

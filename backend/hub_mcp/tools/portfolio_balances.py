@@ -9,6 +9,13 @@ from ..decorators import mcp_tool
 from ..envelope import make_response
 from services.read_only.balances import get_account_balances
 
+# Imported ABOVE the DESCRIPTION that reads them: a module-level name used before its
+# import is a NameError at import time, which py_compile cannot see (R-IV.638(b)4).
+from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
+from models.accounts import DISPLAY_NAMES as _ACCOUNT_DISPLAY
+from models.accounts import account_choices as _account_choices
+from models.accounts import describe_accounts as _describe_accounts
+
 DESCRIPTION = (
     "Returns live account balances across all four trading accounts — total "
     "balance, cash, buying power, margin. Use this whenever sizing "
@@ -23,23 +30,17 @@ DESCRIPTION = (
     "Do NOT call this for position-level data (use `hub_get_positions`). Do "
     "NOT call this for historical balance changes (v2 candidate).\n\n"
     "Returns per-account balance, cash, buying power, margin, last-updated "
-    "timestamp."
+    "timestamp.\n\nAccounts: " + _describe_accounts() + "."
 )
 
-# R-IV.632(c)2: `fidelity_401a` joins the tool. The canonical half of this map is DERIVED
-# from models/accounts.py rather than retyped -- a hand-kept copy here is exactly how the
-# account became writable through the API while remaining invisible to this tool.
-# `brokerage_link_401k` and `breakout_prop` stay listed: neither is canonical, and both are
-# surfaced as explicitly untracked rather than omitted (honest absence).
-from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
-from models.accounts import DISPLAY_NAMES as _ACCOUNT_DISPLAY
 
-Account = Literal[
-    "robinhood", "fidelity_roth", "fidelity_401a", "brokerage_link_401k", "breakout_prop"
-]
+# R-IV.638(b)4: built from the registry. `brokerage_link_401k` is GONE from the offered
+# values -- it is the retired merged snapshot ($11,642.35, 2026-06-09) of the parked
+# 401(a)+403(b), and it must not be reachable under a name that now sounds like the traded
+# 401(a). `breakout_prop` stays, surfaced as explicitly untracked.
+Account = Literal[tuple(_account_choices() + ["breakout_prop"])]  # type: ignore[misc]
 
-_NON_CANONICAL_SURFACED = {"brokerage_link_401k", "breakout_prop"}
-_VALID_ACCOUNTS = {a.lower() for a in _CANONICAL_TUPLE} | _NON_CANONICAL_SURFACED
+_VALID_ACCOUNTS = set(_account_choices()) | {"breakout_prop"}
 
 _DB_TO_NORMAL = {a: a.lower() for a in _CANONICAL_TUPLE}
 _DB_TO_NORMAL.update({

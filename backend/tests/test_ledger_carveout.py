@@ -79,12 +79,22 @@ def test_exactly_three_canonical_accounts():
 
 # ── the startswith defect, stated as its own test ──
 
-@pytest.mark.parametrize("raw", ["FIDELITY_401A", "Fidelity 401A", "fidelity 401(a)"])
-def test_the_401a_is_now_in_scope_and_resolves_to_itself(raw):
-    """The other half of the same ruling: it must not merely stop being OUT_OF_SCOPE, it must
-    resolve to its own account rather than to UNKNOWN or to the Roth."""
-    assert acc.normalize_account(raw) == acc.FIDELITY_401A
-    assert acc.is_in_scope(raw)
+def test_the_401a_is_in_scope_under_its_EXACT_key_only():
+    """AMENDED R-IV.638(b)2 — ABACUS's catch. The first pass parametrised this over
+    'Fidelity 401A' and 'fidelity 401(a)' too, and those must NOT be in scope: `_key()`
+    collapses case and underscores, so the PARKED mutual-fund history 'Fidelity 401A' (90
+    snapshot rows to 2026-07-23, up to $11,075.62) and the TRADEABLE 'FIDELITY_401A' become
+    the same string. Accepting the display spelling would have pulled a different pot of money
+    into the traded account. Only the exact canonical key reaches it."""
+    assert acc.normalize_account("FIDELITY_401A") == acc.FIDELITY_401A
+    assert acc.is_in_scope("FIDELITY_401A")
+
+
+@pytest.mark.parametrize("parked", ["Fidelity 401A", "fidelity 401a", "fidelity401a"])
+def test_the_parked_401a_spelling_stays_out_of_scope(parked):
+    """The same string, different money. This is the half that had to be got right."""
+    assert acc.normalize_account(parked) == acc.OUT_OF_SCOPE
+    assert not acc.is_in_scope(parked)
 
 
 def test_fidelity_filter_does_not_match_the_parked_accounts():

@@ -68,20 +68,32 @@ _ALIASES = {
     "rh": ROBINHOOD,
     "robinhood - individual": ROBINHOOD,
     "robinhood individual": ROBINHOOD,
-    "fidelity 401a": FIDELITY_401A,
-    "fidelity_401a": FIDELITY_401A,
-    "fidelity401a": FIDELITY_401A,
-    "fidelity 401(a)": FIDELITY_401A,
-    "401a": FIDELITY_401A,
 }
+
+# ── ABACUS'S CATCH — R-IV.638(b)2 ───────────────────────────────────────────────────────────
+# `_key()` lowercases and turns underscores into spaces, so the PARKED mutual-fund history
+# `'Fidelity 401A'` (90 snapshot rows, 2026-03-20 to 2026-07-23, up to $11,075.62) and the
+# TRADEABLE `'FIDELITY_401A'` collapse to the identical key "fidelity 401a".
+#
+# An earlier pass of R-IV.632(c) aliased that key to FIDELITY_401A. It would have brought the
+# parked history into scope along with the account -- the tradeable 401(a) reading $11,075.62
+# of money that is not in it. NO NAME-BASED RULE CAN SEPARATE THEM, which is exactly why
+# R-IV.638(b)1 makes the ACCOUNT NUMBER the identity.
+#
+# So the canonical key is matched EXACTLY, before any normalisation, and every other spelling
+# that collapses to a Fidelity name is the old vocabulary and stays out of scope. The
+# retired-snapshot labels below are unchanged.
+_PARKED_FIDELITY_KEYS = {"fidelity 401a", "fidelity401a", "fidelity 403b", "fidelity403b"}
 
 # ── OUT OF SCOPE. NOT aliases of anything. ─────────────────────────────
 # R-IV.284(c). Parked money and a retired broker. Rows carrying these names are
 # tagged and preserved; they are never summed with the trading accounts and never
 # resolved to one.
 OUT_OF_SCOPE = "OUT_OF_SCOPE"
-# R-IV.632(c): the 401(a) spellings are GONE from this set -- that account is traded now.
+# R-IV.638(b)2: the 401(a) DISPLAY-STYLE spellings are back here -- they name the PARKED
+# history, not the traded account, and only the exact canonical key reaches the latter.
 _OUT_OF_SCOPE_LABELS = {
+    "fidelity 401a", "fidelity401a",
     "fidelity 403b", "fidelity_403b", "fidelity403b",
     "brokerage_link_401k", "brokerage link 401k",
     "interactive brokers", "interactive_brokers", "ibkr",
@@ -103,6 +115,12 @@ def normalize_account(name: Optional[str]) -> str:
     UNKNOWN rather than being resolved to the nearest thing. A wrong resolution on
     a money surface is worse than an unresolved one, because it is spendable.
     """
+    # EXACT canonical key first, before _key() collapses case and underscores. This is the
+    # only thing that distinguishes the traded FIDELITY_401A from the parked 'Fidelity 401A'
+    # (R-IV.638(b)2) -- after normalisation they are the same string.
+    if name is not None and str(name).strip() in CANONICAL_ACCOUNTS:
+        return str(name).strip()
+
     k = _key(name)
     if not k:
         return UNKNOWN

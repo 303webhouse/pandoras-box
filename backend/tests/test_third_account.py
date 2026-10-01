@@ -36,7 +36,7 @@ from config.accounts import is_in_scope
 from config.accounts import normalize_account as scope_normalize
 from models.accounts import (CANONICAL_ACCOUNTS, FIDELITY_401A, FIDELITY_ROTH,
                              PROVISIONAL_NAMES, ROBINHOOD, account_envelope, display_name,
-                             normalize_account)
+                             is_fidelity_name, normalize_account)
 
 BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -84,9 +84,13 @@ class TestRegistered:
         the account is called. Every surface deriving it would get it subtly differently."""
         assert display_name(FIDELITY_401A) != FIDELITY_401A.replace("_", " ").title()
 
-    @pytest.mark.parametrize("spelling", ["FIDELITY_401A", "fidelity 401a", "FIDELITY 401A"])
-    def test_the_spellings_that_resolve(self, spelling):
-        assert normalize_account(spelling) == FIDELITY_401A
+    def test_only_the_exact_key_or_the_number_resolves(self):
+        """AMENDED R-IV.638(b)1/2. The first pass accepted 'fidelity 401a' and
+        'FIDELITY 401A' as well — and those name the PARKED money, which collapses to the
+        same normalised string as the traded key. The account number is the identity now."""
+        assert normalize_account("FIDELITY_401A") == FIDELITY_401A
+        assert normalize_account("653641836") == FIDELITY_401A
+        assert normalize_account("fidelity 401a") is None   # a name no longer routes
 
 
 # ─────────────────────── the two registries can no longer disagree
@@ -104,10 +108,14 @@ class TestOneRegistry:
     def test_the_account_is_in_scope_for_money(self):
         """It was classified as parked mutual-fund money. It is traded now, so the
         classification is false rather than stale — a scope class is re-decided, not
-        refreshed, and a ruling has re-decided it."""
+        refreshed, and a ruling has re-decided it.
+
+        AMENDED R-IV.638(b)2: the EXACT key only. 'Fidelity 401(a)' as a display string is
+        not a scope input — the parked history collapses to the same normalised key, and no
+        name-based rule can separate the two pots."""
         assert is_in_scope(FIDELITY_401A)
         assert scope_normalize(FIDELITY_401A) == FIDELITY_401A
-        assert scope_normalize("Fidelity 401(a)") == FIDELITY_401A
+        assert not is_in_scope("Fidelity 401A")
 
     @pytest.mark.parametrize("label", ["Fidelity 403B", "fidelity_403b",
                                        "BROKERAGE_LINK_401K", "IBKR"])
@@ -272,8 +280,10 @@ class TestNoPrefixMatching:
         code = _code("api/unified_positions.py")
         assert "account LIKE 'FIDELITY%'" not in code
 
-    def test_the_bare_alias_still_means_the_account_it_has_always_meant(self):
-        """A caller that has been right for months must not start failing — but it must
-        also not silently acquire a second account's rows."""
-        assert normalize_account("FIDELITY") == FIDELITY_ROTH
-        assert normalize_account("FIDELITY") != FIDELITY_401A
+    def test_the_bare_alias_now_resolves_to_nothing_at_all(self):
+        """SUPERSEDED R-IV.638(b)3. The first pass kept `FIDELITY` -> FIDELITY_ROTH so a
+        long-right caller would not start failing. But with two BrokerageLink accounts the
+        kind answer is the dangerous one: it files the new account's money in the old one.
+        It resolves to nothing, and the write path refuses it by name with both numbers."""
+        assert normalize_account("FIDELITY") is None
+        assert is_fidelity_name("FIDELITY")
