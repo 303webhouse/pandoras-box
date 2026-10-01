@@ -225,3 +225,9 @@
   .drawer { width: 100vw; max-width: 100vw; }            /* full-height sheet */
   .sc-price { font-size: 23px; }
 }
+
+/* Stater Phase 0 (R-IV.619): honest states. A degraded dial says so; a missing CVD leg reads N/A. */
+.dial-degraded { font-family: var(--mono); font-size: 10px; letter-spacing: .5px; color: var(--amber); margin: 2px 0 4px; }
+.dial-marker.degraded { background: transparent; border: 2px dashed var(--amber); }
+.health-dot.na { background: transparent; border: 1px dashed var(--text-3); }
+

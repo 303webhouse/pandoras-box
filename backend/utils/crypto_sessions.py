@@ -138,3 +138,24 @@ def get_session_state(ts: datetime, config: dict) -> Dict[str, Any]:
         "next_transitions": next_transitions,
         "weekend_holiday_flag": weekend_holiday,
     }
+
+
+def session_block_fields(sess: Dict[str, Any]) -> Dict[str, Any]:
+    """The `session` block fields for a state envelope, from get_session_state().
+
+    Stater Phase 0 (R-IV.619): the state readers used to ask get_session_state()
+    for `current_session` and `label`, keys it has never returned, so `state` was
+    always null. The state IS the partition (ASIA / LONDON / NY); the label adds
+    any active event window and the thin-liquidity weekend/holiday flag.
+    """
+    partition = sess.get("partition")
+    windows = list(sess.get("event_windows_active") or [])
+    label = partition
+    if partition and windows:
+        label = f"{partition} · {', '.join(str(w) for w in windows)}"
+    if partition and sess.get("weekend_holiday_flag"):
+        label = f"{label} · thin (weekend/holiday)"
+    return {"state": partition, "session_label": label, "partition": partition,
+            "event_windows_active": windows,
+            "weekend_holiday_flag": sess.get("weekend_holiday_flag")}
+
