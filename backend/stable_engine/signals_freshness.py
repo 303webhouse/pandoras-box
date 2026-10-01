@@ -83,6 +83,12 @@ REGISTERED_CLASSES: frozenset[str] = frozenset({
 AGE_SOURCE_SIGNALS = "signals"
 AGE_SOURCE_JOB_RUNS = "job_runs"
 AGE_SOURCES: dict[str, str] = {
+    # R-IV.617(b): the crypto scanner is judged on whether it RAN, not on whether it emitted.
+    # Crypto trades round the clock, so there is no session to excuse a quiet hour -- but a
+    # scanner correctly declining to signal in a saturated regime is not a dead job. Measured
+    # over 60 days: median gap between signals 0.5h, yet ELEVEN gaps past the 12h SLO and nine
+    # past 24h, the longest 131.9h. Judged on signal age it raised eleven false flatlines.
+    "crypto_scanner": AGE_SOURCE_JOB_RUNS,
     "triton_grader": AGE_SOURCE_JOB_RUNS,
     "circes_stew": AGE_SOURCE_JOB_RUNS,
     "circes_stew_unsurfaced": AGE_SOURCE_JOB_RUNS,
@@ -91,6 +97,18 @@ AGE_SOURCES: dict[str, str] = {
 # job_runs name per class, where it differs from the class. Both CIRCE source values are
 # written by ONE pass.
 AGE_SOURCE_JOB_NAME: dict[str, str] = {"circes_stew_unsurfaced": "circes_stew"}
+
+# R-IV.617(b): TWO SIGNALS, AND ONLY ONE OF THEM DEGRADES.
+#
+#   job alive        from the job's own run record: did the scan run, and did it finish ok?
+#                    This is what escalates.
+#   signals emitted  how many rows it produced. INFORMATIONAL. A zero never degrades, because
+#                    "nothing qualified" and "nothing ran" are opposite facts and only the
+#                    second is a fault.
+#
+# A class here is judged on its run row. Its emitted count is reported beside the status and
+# cannot move it.
+JOB_ALIVE_CLASSES: frozenset[str] = frozenset({"crypto_scanner"})
 
 # Classes whose work is expected once per TRADING SESSION rather than continuously.
 # Their SLO is only evaluated when a pass was actually due -- see _pass_overdue().
@@ -228,6 +246,41 @@ def _class_status(cls: str, age: float | None, rejected: int,
     return "ok"
 
 
+def _job_alive_status(cls: str, age: float | None, run: dict | None):
+    """`(status, note)` for a class judged on whether its JOB ran. R-IV.617(b).
+
+    The question is not "did rows arrive" but "did the scan run and finish cleanly". A scanner
+    that ran and emitted nothing because every asset sits in a no-signal zone is QUIET, and
+    quiet is not an alarm -- it is the answer to a different question, reported beside the
+    status and unable to move it.
+
+    Degrades on three things, and only these:
+      * the run ERRORED                     -- it tried and failed
+      * no run record at all                -- unknown, and unknown escalates
+      * the last run is older than the SLO  -- the scheduler is not firing
+    """
+    if run is None:
+        # No run row. The job may never have run, or the read failed; either way nothing here
+        # can say the job is alive, and claiming health on an absent record is the fault this
+        # whole split exists to remove.
+        return ("no_data", "no run record: the scan has not reported since this check began")
+
+    status = (run.get("status") or "").lower()
+    if status and status not in ("ok", "success", "completed", "skipped"):
+        err = (run.get("error") or "").strip()
+        return ("flatline", "the scan errored: %s" % (err[:160] or status))
+
+    if age is not None and age > SLO_SECONDS.get(cls, DEFAULT_SLO_SECONDS):
+        return ("flatline",
+                "the scan has not run for %d minutes; the scheduler is not firing" % (age // 60))
+
+    # It ran and it finished. Whether it emitted anything is the other signal.
+    note = run.get("skip_reason") or None
+    if note is None and not run.get("rows_touched"):
+        note = "ran and emitted nothing"
+    return ("ok", note)
+
+
 async def signals_freshness_summary() -> dict:
     """The /health signals_freshness block. Mirrors health_summary()'s contract."""
     now = datetime.now(timezone.utc)
@@ -264,6 +317,7 @@ async def signals_freshness_summary() -> dict:
     # Consumer jobs do not appear in the signals query above; their age comes from
     # job_runs. Read per class so a failure on one never blanks the others.
     session_dates: dict[str, object] = {}
+    run_rows: dict[str, dict] = {}
     for cls, src in AGE_SOURCES.items():
         if src != AGE_SOURCE_JOB_RUNS:
             continue
@@ -280,6 +334,11 @@ async def signals_freshness_summary() -> dict:
                     fin = fin.replace(tzinfo=timezone.utc)
                 ages[cls] = (now - fin).total_seconds()
                 session_dates[cls] = row.get("session_date")
+                # R-IV.617(b): the run's OWN verdict, for a class judged on being alive.
+                run_rows[cls] = {"status": row.get("status"),
+                                 "skip_reason": row.get("skip_reason"),
+                                 "rows_touched": row.get("rows_touched"),
+                                 "error": row.get("error")}
         except Exception as e:
             # Unknown, NOT stale. Leaving the age absent renders "no_data";
             # inventing a large age would render "flatline" and fabricate an
@@ -296,8 +355,12 @@ async def signals_freshness_summary() -> dict:
     for cls in sorted(REGISTERED_CLASSES | set(ages) | set(counters)):
         c = counters.get(cls, {"persisted": 0, "rejected": 0, "deduped": 0})
         age = ages.get(cls)
-        status = _class_status(cls, age, c["rejected"],
-                               last_session_date=session_dates.get(cls))
+        if cls in JOB_ALIVE_CLASSES:
+            status, alive_note = _job_alive_status(cls, age, run_rows.get(cls))
+        else:
+            alive_note = None
+            status = _class_status(cls, age, c["rejected"],
+                                   last_session_date=session_dates.get(cls))
         if _RANK[status] > _RANK[worst]:
             worst = status
         if age is not None and (cls not in RTH_ONLY_CLASSES or is_market_hours()):
@@ -312,6 +375,16 @@ async def signals_freshness_summary() -> dict:
             "registered": cls in REGISTERED_CLASSES,
             "last_error": _LAST_ERROR.get(cls),
         }
+        if cls in JOB_ALIVE_CLASSES:
+            # R-IV.617(b): the second signal, reported and inert. `signals_emitted` is what the
+            # run produced; `judged_on` says plainly which of the two moved the status, so a
+            # reader never has to work out why a zero did not degrade anything.
+            run = run_rows.get(cls) or {}
+            classes[cls]["judged_on"] = "job alive (its own run record)"
+            classes[cls]["signals_emitted"] = run.get("rows_touched")
+            classes[cls]["emitted_degrades"] = False
+            if alive_note:
+                classes[cls]["note"] = alive_note
 
     return {
         "worst_status": worst,
