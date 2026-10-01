@@ -70,6 +70,21 @@ def money(x: Optional[Decimal]) -> Optional[float]:
     return float(x.quantize(CENT, rounding=ROUND_HALF_UP))
 
 
+def money_in(x: Any) -> Optional[float]:
+    """Any inbound number as a money figure. R-IV.613(c)3.
+
+    `money()` takes a Decimal, which is right for figures this module computes. A value arriving
+    from a FORM is a float, and a float written straight into NUMERIC carries its binary tail:
+    564 QQQ stored a cost basis of 7.000000000000001, and every figure derived from it inherited
+    that. This is the entry point for the other direction -- parse, then quantize, so the column
+    receives cents.
+
+    None for anything unreadable, never 0: a price nobody gave and a price of zero are different
+    claims, and the economics already reports a missing basis honestly.
+    """
+    return money(_d(x))
+
+
 def _sorted_lots(lots: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Oldest fill first; a lot with no fill_time sorts last, never silently first."""
     def key(l):
