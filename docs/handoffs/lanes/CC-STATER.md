@@ -1,4 +1,4 @@
-﻿# CC-STATER lane â€” status
+# CC-STATER lane â€” status
 
 **Written:** 2026-10-01 11:51 MDT (17:51 UTC); first written 10:45 MDT for R-IV.628, updated for R-IV.637
 **Worked against:** `origin/main` = `a338cce` (fix(positions): an option expired at the close now ends that eveningâ€¦)
