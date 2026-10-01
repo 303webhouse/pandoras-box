@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS system_config (
 | VPS env: `HERMES_API_KEY` | ✅ Set | Same value, in `/etc/openclaw/openclaw.env` |
 | VPS env: `ANTHROPIC_API_KEY` | ✅ Set | In `/etc/openclaw/openclaw.env` |
 | VPS env: `PANDORA_API_URL` | ✅ Already existed | `https://pandoras-box-production.up.railway.app/api` |
-| VPS env: `PIVOT_API_KEY` | ✅ Already existed | `rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk` |
+| VPS env: `PIVOT_API_KEY` | ✅ Already existed | `<REDACTED — PIVOT_API_KEY, rotated>` |
 
 ---
 

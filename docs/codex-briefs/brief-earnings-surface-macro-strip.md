@@ -24,13 +24,13 @@ The `earnings_calendar` table is populated daily at 6 AM ET by `jobs/chronos_ing
 Before building, verify the backend is returning data. Run:
 
 ```bash
-curl -s "https://pandoras-box-production.up.railway.app/api/chronos/this-week" -H "X-API-Key: rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk" | python3 -m json.tool | head -30
+curl -s "https://pandoras-box-production.up.railway.app/api/chronos/this-week" -H "X-API-Key: <REDACTED — PIVOT_API_KEY, rotated>" | python3 -m json.tool | head -30
 ```
 
 If `total_earnings` is 0 or the table is empty, trigger a manual refresh first:
 
 ```bash
-curl -s -X POST "https://pandoras-box-production.up.railway.app/api/chronos/refresh" -H "X-API-Key: rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk" | python3 -m json.tool
+curl -s -X POST "https://pandoras-box-production.up.railway.app/api/chronos/refresh" -H "X-API-Key: <REDACTED — PIVOT_API_KEY, rotated>" | python3 -m json.tool
 ```
 
 If that fails, check that `FMP_API_KEY` is set in Railway env vars. If earnings data is confirmed flowing, proceed with the build.

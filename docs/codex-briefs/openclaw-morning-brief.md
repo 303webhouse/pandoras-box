@@ -70,7 +70,7 @@ Rationale: 15 minutes after market open lets the opening rotation settle. Nick g
 ### Railway API Details
 
 - **Base URL:** `https://pandoras-box-production.up.railway.app/api`
-- **Auth:** `Authorization: Bearer rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk`
+- **Auth:** `Authorization: Bearer <REDACTED — PIVOT_API_KEY, rotated>`
 - **Endpoints used:**
   - `GET /bias/composite` — factor scores, bias level, active/stale factors
   - `GET /analytics/convergence-stats?days=1&min_sources=2` — signal convergence (EOD only)
@@ -206,7 +206,7 @@ Store the Railway API key in OpenClaw's config (NOT hardcoded in skills):
 ```bash
 su - openclaw
 openclaw config set env.PANDORA_API_URL "https://pandoras-box-production.up.railway.app/api"
-openclaw config set env.PIVOT_API_KEY "rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk"
+openclaw config set env.PIVOT_API_KEY "<REDACTED — PIVOT_API_KEY, rotated>"
 ```
 
 Or add to the systemd service file environment:

@@ -24,7 +24,7 @@ BOOT = ROOT / "backend" / "database" / "postgres_client.py"
 def test_the_api_key_itself_is_never_the_caller_identity():
     """FastAPI's auth dependency returns the KEY on the header path. Passing that through
     would write a live secret into a table and into every log line quoting it."""
-    secret = "a-secret-value-that-must-not-propagate"
+    secret = "a-secret-value-that-must-not-propagate"  # secret-scan: allow a test fixture, and the string the test is about
     assert fwa.auth_mode(secret) == "api_key"
     assert secret not in fwa.auth_mode(secret)
 

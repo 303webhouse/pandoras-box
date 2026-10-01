@@ -7,7 +7,7 @@ DB_CONFIG = {
     "port": 25012,
     "database": "railway",
     "user": "postgres",
-    "password": "sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty",
+    "password": "<REDACTED — Postgres password, rotated 2026-07-24>",
 }
 
 DDL = """

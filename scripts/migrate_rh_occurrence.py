@@ -30,7 +30,7 @@ DB = {
     "port": int(os.getenv("DB_PORT") or 25012),
     "database": os.getenv("DB_NAME") or "railway",
     "user": os.getenv("DB_USER") or "postgres",
-    "password": os.getenv("DB_PASSWORD") or "sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty",
+    "password": os.getenv("DB_PASSWORD") or "<REDACTED — Postgres password, rotated 2026-07-24>",
 }
 
 OLD_CONSTRAINT = "rh_trade_history_activity_date_ticker_description_trans_cod_key"

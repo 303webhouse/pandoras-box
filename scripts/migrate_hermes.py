@@ -12,7 +12,7 @@ async def main():
         port=25012,
         database="railway",
         user="postgres",
-        password="sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty",
+        password="<REDACTED — Postgres password, rotated 2026-07-24>",
         min_size=1,
         max_size=2,
     )

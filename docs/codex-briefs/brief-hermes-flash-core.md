@@ -95,7 +95,7 @@ INSERT INTO system_config (key, value) VALUES (
         "correlation_window_minutes": 5,
         "correlation_min_tickers": 2,
         "vps_trigger_url": "http://188.245.250.2:8000/api/hermes/trigger",
-        "vps_api_key": "REPLACE_WITH_SHARED_SECRET",
+        "vps_api_key": "<REDACTED — hermes key, rotated>",
         "cooldown_minutes": 15
     }'
 ) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
@@ -429,7 +429,7 @@ import logging
 logger = logging.getLogger("hermes_trigger")
 router = APIRouter()
 
-HERMES_API_KEY = "REPLACE_WITH_SHARED_SECRET"  # Must match Railway config
+HERMES_API_KEY = "<REDACTED — hermes key, rotated>"  # Must match Railway config
 
 @router.post("/api/hermes/trigger")
 async def hermes_trigger(request: Request):
