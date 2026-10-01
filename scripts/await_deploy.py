@@ -26,13 +26,64 @@ with the two values side by side, never a quiet retry.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
 HEALTH = "https://pandoras-box-production.up.railway.app/health"
+RAILWAY_JSON = "railway.json"
+
+
+def watched_patterns(path: str = RAILWAY_JSON):
+    """Railway's `build.watchPatterns`, or None when the file cannot be read.
+
+    None means "unknown", and an unknown watch list must NOT be read as "nothing is
+    watched" -- that would turn every real failed deploy into a cheerful no-op.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return ((json.load(fh).get("build") or {}).get("watchPatterns")) or None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _matches_pattern(rel: str, pattern: str) -> bool:
+    """`backend/**` matches anything under backend/; a bare name matches itself."""
+    if pattern.endswith("/**"):
+        return rel.startswith(pattern[:-2])
+    return fnmatch.fnmatch(rel, pattern)
+
+
+def deploy_expected(commit: str, patterns):
+    """`(expected, reason)` -- whether this commit should trigger a Railway build.
+
+    R-IV.638(c), SECOND PASS. The first version treated "not served" as a failure full
+    stop, and then cried wolf on the very next commit: `e9a2a95` was docs-only, and
+    `docs/**` is deliberately outside watchPatterns since f555dcc (2026-09-23,
+    "docs commits stop redeploying the app"). A watcher that reports a non-event as a
+    failure is one people stop reading -- which is how the false LIVE went unnoticed in
+    the first place.
+    """
+    if not patterns:
+        return True, "watchPatterns unknown, so a deploy is assumed"
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", f"{commit}^1", commit],
+            capture_output=True, text=True, check=True).stdout
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return True, f"could not list the commit's files ({type(exc).__name__}), so a deploy is assumed"
+    files = [f.strip().replace("\\", "/") for f in out.splitlines() if f.strip()]
+    if not files:
+        return True, "the commit touches no files this could read, so a deploy is assumed"
+    hits = [f for f in files if any(_matches_pattern(f, p) for p in patterns)]
+    if hits:
+        return True, f"{len(hits)} of {len(files)} changed file(s) are watched"
+    return False, (f"none of the {len(files)} changed file(s) match watchPatterns "
+                   f"({', '.join(patterns)})")
 
 
 def read_served(url: str = HEALTH, timeout: float = 20.0):
@@ -73,6 +124,15 @@ def main() -> int:
     ap.add_argument("--once", action="store_true", help="one read, no waiting")
     ap.add_argument("--url", default=HEALTH)
     a = ap.parse_args()
+
+    # A commit Railway will not build is not a failed deploy. Checked BEFORE waiting, so
+    # a docs-only commit returns at once instead of burning the whole timeout.
+    expected, why = deploy_expected(a.commit, watched_patterns())
+    if not expected:
+        served, status, _ = read_served(a.url)
+        print(f"NO DEPLOY EXPECTED  commit={a.commit}  ({why})")
+        print(f"                    serving={served}  status={status} — unchanged, correctly")
+        return 0
 
     deadline = time.monotonic() + (0 if a.once else a.timeout)
     attempts, served, status, err = 0, None, None, None
