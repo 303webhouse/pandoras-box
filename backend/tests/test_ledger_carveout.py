@@ -35,8 +35,10 @@ def test_robinhood_forms(raw):
     assert acc.normalize_account(raw) == acc.ROBINHOOD
 
 
+# R-IV.632(c): the 401(a) spellings LEFT this list -- that account is traded now. The 403(b),
+# the parked SUM under a disputed name, and the retired broker are unchanged.
 @pytest.mark.parametrize("raw", [
-    "FIDELITY_401A", "Fidelity 401A", "fidelity 403b", "FIDELITY_403B",
+    "fidelity 403b", "FIDELITY_403B",
     "BROKERAGE_LINK_401K", "brokerage link 401k", "Interactive Brokers", "IBKR",
 ])
 def test_parked_and_retired_labels_are_out_of_scope(raw):
@@ -59,11 +61,31 @@ def test_unknown_is_not_in_scope():
     assert acc.is_in_scope(None) is False
 
 
-def test_exactly_two_canonical_accounts():
-    assert acc.CANONICAL_ACCOUNTS == {acc.FIDELITY_ROTH, acc.ROBINHOOD}
+def test_exactly_three_canonical_accounts():
+    """SUPERSEDED R-IV.632(c), recorded rather than quietly edited. R-IV.284(a) said TWO,
+    and that was right: the 401(a) was parked mutual-fund money. The principal has since
+    converted it into a second Fidelity BrokerageLink account and started trading in it, so
+    the scope class is now factually false rather than stale -- and this module's own design
+    note is why that distinction matters: a scope class cannot be refreshed, it has to be
+    re-decided, and a ruling has re-decided it.
+
+    The set is now IMPORTED from models/accounts.py, which is why this asserts against it
+    rather than a literal: the two modules had disagreed about this very account for weeks."""
+    from models.accounts import CANONICAL_ACCOUNTS as registry
+
+    assert acc.CANONICAL_ACCOUNTS == frozenset(registry)
+    assert acc.CANONICAL_ACCOUNTS == {acc.FIDELITY_ROTH, acc.ROBINHOOD, acc.FIDELITY_401A}
 
 
 # ── the startswith defect, stated as its own test ──
+
+@pytest.mark.parametrize("raw", ["FIDELITY_401A", "Fidelity 401A", "fidelity 401(a)"])
+def test_the_401a_is_now_in_scope_and_resolves_to_itself(raw):
+    """The other half of the same ruling: it must not merely stop being OUT_OF_SCOPE, it must
+    resolve to its own account rather than to UNKNOWN or to the Roth."""
+    assert acc.normalize_account(raw) == acc.FIDELITY_401A
+    assert acc.is_in_scope(raw)
+
 
 def test_fidelity_filter_does_not_match_the_parked_accounts():
     """THE DEFECT: `startswith('fidelity')` matched Fidelity Roth, 401A and 403B

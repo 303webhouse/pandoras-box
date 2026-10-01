@@ -115,9 +115,14 @@ class TestTheDirectionMap:
     def test_the_block_serves_the_direction_beside_the_relation(self):
         """So a null relation is distinguishable from a null direction: the first means the
         signal was unreadable, the second means the structure was."""
-        b = touches_block({"position_id": "POS_X", "structure": "put_debit_spread"}, "SHORT")
+        b = touches_block({"position_id": "POS_X", "structure": "put_debit_spread",
+                           "account": "ROBINHOOD"}, "SHORT")
+        # The account travels with the touch since R-IV.632(c)3, so ABACUS does not join
+        # back to the book to answer "which account contradicts this signal" -- a question
+        # that now has three possible answers.
         assert b == {"position_id": "POS_X", "structure": "put_debit_spread",
-                     "position_direction": BEARISH, "relation": CONFIRMS}
+                     "position_direction": BEARISH, "relation": CONFIRMS,
+                     "account": "ROBINHOOD", "account_display": "Robinhood"}
 
     def test_one_author(self):
         """This was about to be a fourth reading of `structure`."""

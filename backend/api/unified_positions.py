@@ -444,6 +444,18 @@ def _row_to_dict(row) -> dict:
             d[k] = v.isoformat()
         elif isinstance(v, list) and v and isinstance(v[0], Decimal):
             d[k] = [float(x) for x in v]
+    # R-IV.632(c)3 / R-IV.633: every position carries its account's DISPLAY NAME beside the
+    # key, served from the registry rather than inferred. Done HERE because this is the one
+    # serialiser every position row passes through -- stamping it at each route is how one
+    # surface ends up calling the account something no other surface calls it.
+    #
+    # Only when the row has an `account` column at all: adding the field to a row that has
+    # no account would assert the position is unlabelled, which is a different claim from
+    # "this query did not ask".
+    if "account" in d:
+        from models.accounts import display_name as _acct_display
+
+        d["account_display"] = _acct_display(d.get("account"))
     return d
 
 
@@ -1023,12 +1035,20 @@ async def _compute_positions(
         idx += 1
 
     if account_upper:
-        if account_upper == "FIDELITY":
-            conditions.append("account LIKE 'FIDELITY%'")
-        else:
-            conditions.append(f"account = ${idx}")
-            params.append(account_upper)
-            idx += 1
+        # R-IV.632(c)3. `account LIKE 'FIDELITY%'` was a PREFIX, and a prefix is not a
+        # classification: it answers "does this name begin with those letters" on a surface
+        # where the question is which account owns the money. With a second traded Fidelity
+        # account it now matches FIDELITY_ROTH **and FIDELITY_401A**, so a request for one
+        # silently returns both, mixed, under one total.
+        #
+        # The bare alias resolves to the single account it has always meant (FIDELITY_ROTH,
+        # per models.accounts.ALIASES), and anything else is matched exactly.
+        from models.accounts import normalize_account as _norm_account
+
+        resolved = _norm_account(account_upper)
+        conditions.append(f"account = ${idx}")
+        params.append(resolved or account_upper)
+        idx += 1
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
 

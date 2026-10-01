@@ -51,7 +51,23 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("loss_alert")
 
-ACCOUNT = "FIDELITY_ROTH"
+from models.accounts import FIDELITY_401A, FIDELITY_ROTH
+from models.accounts import display_name as _account_display
+
+# The DEFAULT scope of the pure functions, not the only account they can be asked about.
+ACCOUNT = FIDELITY_ROTH
+
+# ── Every account this job watches — R-IV.632(c)2 ───────────────────────────────────────────
+# The alert was written for ONE account and the name was a module constant, so the second
+# BrokerageLink account would have been invisible to it: its positions are in the book, its
+# losses are real, and a 2% trigger computed from the Roth's value is not its trigger.
+# "2% of THAT account's own value" means a threshold per account, from that account's own
+# cash ledger and its own positions.
+#
+# ROBINHOOD is deliberately NOT here. It was never covered, and it is not the same problem:
+# it holds options, where this job's T1 "unstopped loss" and the cost-recovery trigger were
+# both reasoned about an account that holds none. Adding it is a ruling, not a loop entry.
+LOSS_ALERT_ACCOUNTS = (FIDELITY_ROTH, FIDELITY_401A)
 
 # The Roth total in the principal's own positions file, downloaded 2026-09-24 11:09 ET
 # (R-IV.539(c); it superseded the ~$11,200 figure R-IV.517(d) started from). It is a
@@ -112,8 +128,13 @@ def account_value_usd() -> Optional[float]:
 
 
 def account_value(rows: List[Dict[str, Any]], derived_cash: Optional[Any],
-                  cash_reason: Optional[str] = None) -> Dict[str, Any]:
+                  cash_reason: Optional[str] = None,
+                  account: str = ACCOUNT) -> Dict[str, Any]:
     """The account's value: DERIVED CASH plus its open positions at their marks.
+
+    `account` scopes which rows count (R-IV.632(c)2). It defaults to the Roth, so every
+    existing caller is unchanged, and the pass passes each watched account explicitly --
+    a value computed over the wrong account's rows is a threshold for no account at all.
 
     R-IV.551(c). The $11,319.53 constant is retired -- it was a figure typed off a
     statement, and money integrity now answers the same question from the book
@@ -139,7 +160,7 @@ def account_value(rows: List[Dict[str, Any]], derived_cash: Optional[Any],
     missing: List[Any] = []
     counted = 0
     for r in rows:
-        if (r.get("account") or "").upper() != ACCOUNT:
+        if (r.get("account") or "").upper() != account:
             continue
         if (r.get("status") or "OPEN").upper() != "OPEN":
             continue
@@ -347,7 +368,8 @@ def evaluate_rows(rows: List[Dict[str, Any]], *, now: Optional[datetime] = None,
                   after_close: bool = False,
                   expect_live_mark: bool = True,
                   threshold: Optional[float] = None,
-                  account_value_usd_: Optional[float] = None) -> List[Dict[str, Any]]:
+                  account_value_usd_: Optional[float] = None,
+                  account: str = ACCOUNT) -> List[Dict[str, Any]]:
     """Every alert the book earns right now. Pure: no I/O, so the tests can drive it.
 
     `expect_live_mark` is False outside the hours when the mark job runs. A mark that
@@ -370,7 +392,7 @@ def evaluate_rows(rows: List[Dict[str, Any]], *, now: Optional[datetime] = None,
         remainder = _f(r.get("remainder"))
         lot_cost = _f(r.get("lot_cost"))
         mark = _f(r.get("current_price"))
-        in_account = (r.get("account") or "").upper() == ACCOUNT
+        in_account = (r.get("account") or "").upper() == account
 
         live, why = mark_is_live(r.get("mark_status"), r.get("mark_checked_at"), now)
 
@@ -499,9 +521,11 @@ def _digest_body(notices: List[Dict[str, Any]]) -> Tuple[str, str]:
         "- **%s** (%s): %s" % (n.get("ticker") or "?", n.get("account"), n["reason"])
         for n in notices
     )
+    _acct = (notices[0].get("account") if notices else None) or ACCOUNT
     return (
         "Loss alert is blind on %d %s position%s"
-        % (len(notices), ACCOUNT, "" if len(notices) == 1 else "s"),
+        % (len(notices), _account_display(_acct) or _acct,
+           "" if len(notices) == 1 else "s"),
         "The loss alert cannot measure these, so no trigger can fire on them:\n%s"
         % lines
     )
@@ -617,7 +641,8 @@ async def _session_closes(tickers: List[str], session: date) -> Dict[str, float]
     return out
 
 
-async def _account_value_now(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def _account_value_now(rows: List[Dict[str, Any]],
+                             account: str = ACCOUNT) -> Dict[str, Any]:
     """The account value from the live book: derived cash + open positions at marks.
 
     The env override still wins when set, because a day the ledger cannot answer is
@@ -638,12 +663,13 @@ async def _account_value_now(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             events = await conn.fetch(
                 """SELECT id, flow_type, amount, activity_date
                      FROM cash_flows WHERE account_name = $1
-                    ORDER BY activity_date, id""", ACCOUNT)
+                    ORDER BY activity_date, id""", account)
         derived = balance_from_events([dict(e) for e in events])
-        return account_value(rows, derived["balance"], derived["reason"])
+        return account_value(rows, derived["balance"], derived["reason"], account=account)
     except Exception as exc:  # noqa: BLE001
         return account_value(rows, None,
-                             "the cash ledger could not be read (%s)" % type(exc).__name__)
+                             "the cash ledger could not be read (%s)" % type(exc).__name__,
+                             account=account)
 
 
 async def run_loss_alert(*, injected_rows: Optional[List[Dict[str, Any]]] = None,
@@ -683,35 +709,68 @@ async def run_loss_alert(*, injected_rows: Optional[List[Dict[str, Any]]] = None
             if want:
                 closes = await _session_closes(want, session)
 
-        # R-IV.551(c): the account value, computed. Derived cash plus this account's
-        # open positions at their marks -- not a constant typed off a statement.
-        av = await _account_value_now(rows)
-        result["account_value"] = av
-        threshold = loss_threshold_usd(av.get("value"))
-        result["threshold"] = threshold
-        if threshold is None:
-            # Loud: T1 is the trigger this job exists for, and it is not firing.
-            logger.warning("loss_alert: no account value (%s) - the 2%% trigger cannot "
-                           "fire this pass", av.get("reason"))
-        elif av.get("partial"):
-            logger.warning("loss_alert: account value is PARTIAL (%d position(s) "
-                           "unvalued); the threshold understates and errs toward "
-                           "alerting", len(av.get("positions_unvalued") or []))
+        # ── ONE THRESHOLD PER ACCOUNT — R-IV.632(c)2 ───────────────────────────────
+        # "2% of that account's own value". A single threshold across accounts is the
+        # wrong number for every account but one: computed off the Roth it would be far
+        # too large for a smaller book and too small for a larger one, and the trigger
+        # this job exists for would be mis-set in both directions at once.
+        #
+        # One account's failure must not silence another's: each is valued, thresholded
+        # and evaluated on its own, and `per_account` records what each one produced so a
+        # reader can see which accounts actually ran.
+        alerts: List[Dict[str, Any]] = []
+        per_account: Dict[str, Any] = {}
+        for _acct in LOSS_ALERT_ACCOUNTS:
+            # R-IV.551(c): the account value, computed. Derived cash plus THIS account's
+            # open positions at their marks -- not a constant typed off a statement.
+            av = await _account_value_now(rows, _acct)
+            threshold = loss_threshold_usd(av.get("value"))
+            per_account[_acct] = {"account_display": _account_display(_acct),
+                                  "account_value": av, "threshold": threshold}
+            if threshold is None:
+                # Loud: T1 is the trigger this job exists for, and it is not firing.
+                logger.warning("loss_alert[%s]: no account value (%s) - the 2%% trigger "
+                               "cannot fire this pass", _acct, av.get("reason"))
+            elif av.get("partial"):
+                logger.warning("loss_alert[%s]: account value is PARTIAL (%d position(s) "
+                               "unvalued); the threshold understates and errs toward "
+                               "alerting", _acct,
+                               len(av.get("positions_unvalued") or []))
 
-        alerts = evaluate_rows(rows, now=now, session_closes=closes,
-                               after_close=after_close,
-                               expect_live_mark=marks_expected(et),
-                               threshold=threshold,
-                               account_value_usd_=av.get("value"))
-        if threshold is None:
+            acct_alerts = evaluate_rows(rows, now=now, session_closes=closes,
+                                        after_close=after_close,
+                                        expect_live_mark=marks_expected(et),
+                                        threshold=threshold,
+                                        account_value_usd_=av.get("value"),
+                                        account=_acct)
+            per_account[_acct]["alerts"] = len(acct_alerts)
+            alerts.extend(acct_alerts)
+
+        result["per_account"] = per_account
+        # The default account's figures stay at the top level under their old keys, so
+        # every existing reader of this result keeps working unchanged.
+        _default = per_account.get(ACCOUNT) or {}
+        av = _default.get("account_value") or {}
+        threshold = _default.get("threshold")
+        result["account_value"] = av
+        result["threshold"] = threshold
+
+        # An account whose value could not be computed says so ONCE, by name. Before, the
+        # notice was hard-coded to the single account and would have reported the Roth
+        # while a different account was the unmeasurable one.
+        for _acct, _info in per_account.items():
+            if _info.get("threshold") is not None:
+                continue
+            _av = _info.get("account_value") or {}
+            _label = _info.get("account_display") or _acct
             alerts.append({
                 "trigger": NOTICE_UNMEASURABLE, "id": None,
-                "position_id": "ACCOUNT:%s" % ACCOUNT, "ticker": ACCOUNT,
-                "account": ACCOUNT,
+                "position_id": "ACCOUNT:%s" % _acct, "ticker": _label,
+                "account": _acct, "account_display": _info.get("account_display"),
                 "reason": "the account value cannot be computed (%s), so the "
-                          "%d%% loss trigger did not run at all"
-                          % (av.get("reason") or "no reason given",
-                             int(LOSS_FRACTION * 100)),
+                          "%d%% loss trigger did not run at all for %s"
+                          % (_av.get("reason") or "no reason given",
+                             int(LOSS_FRACTION * 100), _label),
             })
         result["alerts"] = len(alerts)
 

@@ -5,12 +5,29 @@ the third account's NAME, not merely its casing: `Fidelity 401A`/`Fidelity 403B`
 the seed, `BROKERAGE_LINK_401K` in the MCP map, `FIDELITY_401A` in two others,
 `brokerage_link_401k` in a fifth.
 
-THE PRINCIPAL FACT (R-IV.284(a)): Pandora tracks EXACTLY TWO accounts.
+AMENDED R-IV.632(c): Pandora tracks EXACTLY THREE accounts.
 
-    FIDELITY_ROTH   the Roth 401k BrokerageLink -- the account actually traded
+    FIDELITY_ROTH   the Roth 401k BrokerageLink -- traded
     ROBINHOOD       high-risk: options primarily, with crypto/ETFs/stocks at times
+    FIDELITY_401A   the 401(a), CONVERTED to a second BrokerageLink and now traded
 
-Everything else is PARKED MUTUAL-FUND MONEY, untraded, OUT OF SCOPE.
+THE PREMISE CHANGED; THE MODULE WAS NOT WRONG WHEN IT WAS WRITTEN. R-IV.284(a) said two,
+and `fidelity_401a` sat in _OUT_OF_SCOPE_LABELS below because it named PARKED MUTUAL-FUND
+MONEY. The principal has since converted that 401(a) into a second BrokerageLink account
+and started trading in it, so the classification is now factually false rather than merely
+stale -- and this is precisely the distinction this module's own design note draws. A
+scope class cannot be "refreshed"; it has to be re-decided, and a ruling has re-decided it.
+
+IT WAS ALSO ALREADY CONTRADICTORY. `models/accounts.py` has had FIDELITY_401A in its
+CANONICAL_ACCOUNTS since R-IV.445(a), so the account was a legal WRITE target for positions
+while every money aggregate here classified it OUT_OF_SCOPE: writable and unsummable at the
+same time. The canonical set is now IMPORTED from that module rather than retyped, so the
+two cannot disagree again.
+
+STILL OUT OF SCOPE, and for the unchanged reason: the 403(b), `BROKERAGE_LINK_401K` (the
+parked SUM under a misleading name, now additionally wrong because the 401(a) half of it has
+been converted away -- see DEF-ACCOUNT-LABEL-DUP, which is not this ruling's to settle), and
+the retired IBKR.
 
 WHY OUT_OF_SCOPE IS A CLASS AND NOT A STALENESS FLAG -- this is the whole design,
 and R-IV.284 corrected an earlier ruling specifically to get it right:
@@ -32,10 +49,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-# ── The two canonical accounts ──────────────────────────────────────────
-FIDELITY_ROTH = "FIDELITY_ROTH"
-ROBINHOOD = "ROBINHOOD"
-CANONICAL_ACCOUNTS = frozenset({FIDELITY_ROTH, ROBINHOOD})
+# ── The canonical accounts — ONE AUTHOR, imported, never retyped ────────
+# models/accounts.py is the registry (R-IV.445(a)); this module adds the scope CLASS and a
+# never-raising normaliser on top of it. Retyping the set here is what let the two disagree
+# about FIDELITY_401A for weeks.
+from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
+from models.accounts import DISPLAY_NAMES, FIDELITY_401A, FIDELITY_ROTH, ROBINHOOD
+
+CANONICAL_ACCOUNTS = frozenset(_CANONICAL_TUPLE)
 
 # ── Aliases. Free text that MEANS a canonical account. ──────────────────
 # Keys are compared case-insensitively with underscores and spaces equivalent.
@@ -47,6 +68,11 @@ _ALIASES = {
     "rh": ROBINHOOD,
     "robinhood - individual": ROBINHOOD,
     "robinhood individual": ROBINHOOD,
+    "fidelity 401a": FIDELITY_401A,
+    "fidelity_401a": FIDELITY_401A,
+    "fidelity401a": FIDELITY_401A,
+    "fidelity 401(a)": FIDELITY_401A,
+    "401a": FIDELITY_401A,
 }
 
 # ── OUT OF SCOPE. NOT aliases of anything. ─────────────────────────────
@@ -54,8 +80,8 @@ _ALIASES = {
 # tagged and preserved; they are never summed with the trading accounts and never
 # resolved to one.
 OUT_OF_SCOPE = "OUT_OF_SCOPE"
+# R-IV.632(c): the 401(a) spellings are GONE from this set -- that account is traded now.
 _OUT_OF_SCOPE_LABELS = {
-    "fidelity 401a", "fidelity_401a", "fidelity401a",
     "fidelity 403b", "fidelity_403b", "fidelity403b",
     "brokerage_link_401k", "brokerage link 401k",
     "interactive brokers", "interactive_brokers", "ibkr",

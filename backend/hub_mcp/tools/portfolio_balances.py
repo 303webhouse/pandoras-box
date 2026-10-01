@@ -26,18 +26,26 @@ DESCRIPTION = (
     "timestamp."
 )
 
+# R-IV.632(c)2: `fidelity_401a` joins the tool. The canonical half of this map is DERIVED
+# from models/accounts.py rather than retyped -- a hand-kept copy here is exactly how the
+# account became writable through the API while remaining invisible to this tool.
+# `brokerage_link_401k` and `breakout_prop` stay listed: neither is canonical, and both are
+# surfaced as explicitly untracked rather than omitted (honest absence).
+from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
+from models.accounts import DISPLAY_NAMES as _ACCOUNT_DISPLAY
+
 Account = Literal[
-    "robinhood", "fidelity_roth", "brokerage_link_401k", "breakout_prop"
+    "robinhood", "fidelity_roth", "fidelity_401a", "brokerage_link_401k", "breakout_prop"
 ]
 
-_VALID_ACCOUNTS = {"robinhood", "fidelity_roth", "brokerage_link_401k", "breakout_prop"}
+_NON_CANONICAL_SURFACED = {"brokerage_link_401k", "breakout_prop"}
+_VALID_ACCOUNTS = {a.lower() for a in _CANONICAL_TUPLE} | _NON_CANONICAL_SURFACED
 
-_DB_TO_NORMAL = {
-    "ROBINHOOD": "robinhood",
-    "FIDELITY_ROTH": "fidelity_roth",
+_DB_TO_NORMAL = {a: a.lower() for a in _CANONICAL_TUPLE}
+_DB_TO_NORMAL.update({
     "BROKERAGE_LINK_401K": "brokerage_link_401k",
     "BREAKOUT_PROP": "breakout_prop",
-}
+})
 
 # breakout_prop is intentionally NOT balance-tracked (DESCOPED 2026-07-23): no row
 # exists in account_balances by design. We surface it EXPLICITLY as untracked

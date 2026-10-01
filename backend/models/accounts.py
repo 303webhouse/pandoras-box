@@ -28,6 +28,24 @@ FIDELITY_401A = "FIDELITY_401A"
 # The only values a write may store.
 CANONICAL_ACCOUNTS = (ROBINHOOD, FIDELITY_ROTH, FIDELITY_401A)
 
+# ── The display name, served rather than inferred (R-IV.632(c), R-IV.633) ───────────────────
+#
+# ABACUS must label, sort and filter by account WITHOUT inferring, so the name travels with
+# every row instead of being reconstructed from the key at each surface. A key is not a label:
+# `FIDELITY_401A.replace("_"," ").title()` gives "Fidelity 401A", which is not what the account
+# is called, and every surface would get it subtly differently.
+#
+# FIDELITY_401A's name is PROVISIONAL — R-IV.632(c)1 says Trade Analysis may rename it. It is
+# one string in one dict, so a rename is one edit and no surface disagrees in the meantime.
+DISPLAY_NAMES = {
+    ROBINHOOD: "Robinhood",
+    FIDELITY_ROTH: "Fidelity Roth",
+    FIDELITY_401A: "Fidelity 401(a)",
+}
+
+# Provisional names, declared so a rename is a known operation rather than a discovery.
+PROVISIONAL_NAMES = (FIDELITY_401A,)
+
 # Spellings that have meant a canonical account and are normalised on the way in. `FIDELITY`
 # resolves to FIDELITY_ROTH: that is what the alias has meant since the remap, and it is the
 # label the five rows written under it on 2026-09-16 belong to.
@@ -72,6 +90,28 @@ def canonical_account(value: Optional[str], *, field: str = "account") -> str:
         detail += (" — that label is under an unresolved dispute about which plan it names "
                    "and is not a write target")
     raise HTTPException(status_code=400, detail=detail)
+
+
+def display_name(value: Optional[str]) -> Optional[str]:
+    """The account's human name, or None when `value` is not a canonical account.
+
+    None rather than the raw string: a surface that prints whatever arrived would show
+    `BROKERAGE_LINK_401K` to the principal as though it were a name, and that label is
+    under dispute about which plan it even denotes.
+    """
+    resolved = normalize_account(value)
+    return DISPLAY_NAMES.get(resolved) if resolved else None
+
+
+def account_envelope(value: Optional[str]) -> dict:
+    """`{"account": <key>, "account_display": <name>}` — what every row carries.
+
+    One shape, so a consumer never has to ask which of the two it was given. Both keys are
+    present even when the row has no account, because a missing key and a null read
+    differently in JSON and only one of them is honest about an unlabelled row.
+    """
+    resolved = normalize_account(value)
+    return {"account": resolved, "account_display": DISPLAY_NAMES.get(resolved) if resolved else None}
 
 
 def non_canonical(values: Iterable[Optional[str]]) -> list:
