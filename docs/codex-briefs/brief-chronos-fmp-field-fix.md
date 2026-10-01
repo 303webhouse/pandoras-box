@@ -182,7 +182,7 @@ If this is too complex for this fix cycle, skip it — the system works fine wit
 After deploying, run:
 ```
 POST /api/chronos/refresh
-Header: X-API-Key: ***REMOVED-SECRET***
+Header: X-API-Key: <REDACTED — PIVOT_API_KEY, rotated>
 ```
 
 Expected: `{"status": "ok", "message": "Earnings refresh complete"}` (no 500)

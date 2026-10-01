@@ -8,12 +8,12 @@ import httpx
 import asyncpg
 
 BASE_URL = "https://pandoras-box-production.up.railway.app"
-API_KEY = "***REMOVED-SECRET***"
+API_KEY = "<REDACTED — PIVOT_API_KEY, rotated>"
 DB_HOST = "trolley.proxy.rlwy.net"
 DB_PORT = 25012
 DB_NAME = "railway"
 DB_USER = "postgres"
-DB_PASSWORD = os.getenv("DB_PASSWORD", "***REMOVED-SECRET***")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "<REDACTED — Postgres password, rotated 2026-07-24>")
 
 
 async def api(client, method, path, **kwargs):

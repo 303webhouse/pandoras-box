@@ -14,7 +14,7 @@ or on demand when Nick asks for a deep review.
 ### 1. Check for new committee reviews
 Query the Railway API for reviews posted since last check:
 ```
-curl -sH "X-API-Key: ***REMOVED-SECRET***" \
+curl -sH "X-API-Key: <REDACTED — PIVOT_API_KEY, rotated>" \
   "https://pandoras-box-production.up.railway.app/api/committee/history?limit=5"
 ```
 If no new reviews since last check, stop.

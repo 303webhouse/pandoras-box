@@ -44,7 +44,7 @@ Search Railway logs for recent whale and footprint webhook activity:
 
 ```bash
 # Check the /health endpoint first to confirm Railway is up
-curl -s -H "X-API-Key: ***REMOVED-SECRET***" \
+curl -s -H "X-API-Key: <REDACTED — PIVOT_API_KEY, rotated>" \
   https://pandoras-box-production.up.railway.app/api/health
 ```
 
@@ -137,7 +137,7 @@ Check that the committee can access whale data when reviewing a signal:
 Also check the Railway API endpoint the committee calls:
 
 ```bash
-curl -s -H "X-API-Key: ***REMOVED-SECRET***" \
+curl -s -H "X-API-Key: <REDACTED — PIVOT_API_KEY, rotated>" \
   "https://pandoras-box-production.up.railway.app/api/whale/recent?ticker=SPY"
 ```
 

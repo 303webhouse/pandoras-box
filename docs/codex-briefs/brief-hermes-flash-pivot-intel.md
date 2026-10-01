@@ -55,7 +55,7 @@ logger = logging.getLogger("hermes_pivot")
 router = APIRouter()
 
 # === CONFIG ===
-HERMES_API_KEY = os.environ.get("HERMES_API_KEY", "REPLACE_WITH_SHARED_SECRET")
+HERMES_API_KEY = os.environ.get("HERMES_API_KEY", "<REDACTED — hermes key, rotated>")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")  # Already set for committee pipeline
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")  # Service key for direct DB writes
@@ -647,7 +647,7 @@ echo $SUPABASE_URL       # Should be set
 echo $SUPABASE_SERVICE_KEY  # May need to add — different from anon key
 
 # Add HERMES_API_KEY — must match the value set in Railway's system_config
-export HERMES_API_KEY="REPLACE_WITH_SHARED_SECRET"
+export HERMES_API_KEY="<REDACTED — hermes key, rotated>"
 ```
 
 Add `HERMES_API_KEY` to whatever env management the VPS uses (`.env` file, systemd service file, etc.) so it persists across restarts.
