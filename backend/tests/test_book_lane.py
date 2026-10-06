@@ -120,9 +120,14 @@ class TestTheDirectionMap:
         # The account travels with the touch since R-IV.632(c)3, so ABACUS does not join
         # back to the book to answer "which account contradicts this signal" -- a question
         # that now has three possible answers.
+        # R-IV.660(b)2 adds the open quantity: "this touches your book" is not usable without
+        # how much of the book it touches. Both are None here because this caller passed no
+        # lots -- which is itself the point of `open_quantity_basis` travelling with the figure.
+        # Still EXACT equality: a field nobody meant to add should fail this test.
         assert b == {"position_id": "POS_X", "structure": "put_debit_spread",
                      "position_direction": BEARISH, "relation": CONFIRMS,
-                     "account": "ROBINHOOD", "account_display": "Robinhood"}
+                     "account": "ROBINHOOD", "account_display": "Robinhood",
+                     "open_quantity": None, "open_quantity_basis": None}
 
     def test_one_author(self):
         """This was about to be a fourth reading of `structure`."""

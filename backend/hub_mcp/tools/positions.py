@@ -34,7 +34,21 @@ DESCRIPTION = (
     "`signal_outcomes`, a v2 tool).\n\n"
     "Returns full position records including structure, strikes, expiry, "
     "quantity, entry price, current value, unrealized PnL, stop loss, and "
-    "account assignment."
+    "account assignment.\n\n"
+    "SIZE: TWO FIELDS, AND THEY ANSWER DIFFERENT QUESTIONS (convention #29, "
+    "R-IV.660). `quantity` is the size the position was OPENED at, including any "
+    "adds -- it does NOT shrink when part of the position is closed, because the "
+    "cost basis and every percentage computed from it belong to the trade as "
+    "taken. `open_quantity` is what is STILL OPEN: the sum of the position's lot "
+    "quantities, with closes subtracted. For how much exposure the book carries "
+    "right now -- sizing, risk, concentration, an add-to-position decision, or "
+    "anything multiplied by a price -- READ `open_quantity`. Reading `quantity` "
+    "for that overstates any position that has been partially closed. "
+    "`open_quantity_basis` says where the figure came from: `lots` means "
+    "measured; a null `open_quantity` means the position has no lots and its "
+    "remainder is UNKNOWN -- that is not zero, and it must not be treated as a "
+    "flat position. `open_remainder` is an older name for `open_quantity` and "
+    "carries the identical value."
 )
 
 # R-IV.638(b)4: BUILT from the registry, not typed. `brokerage_link_401k` is GONE from the
@@ -94,6 +108,11 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         # basis says None, and `basis_reason` says why.
         "unrealized_pnl": row.get("unrealized_pnl"),
         "max_loss": row.get("max_loss"),
+        # R-IV.660(b)2. TWO FIGURES, NEVER ONE. `quantity` above is the size OPENED;
+        # `open_quantity` is what is still held. `open_remainder` is the older key for the
+        # same figure, kept so nothing reading it breaks -- same author, not a second answer.
+        "open_quantity": row.get("open_quantity"),
+        "open_quantity_basis": row.get("open_quantity_basis"),
         "open_remainder": row.get("open_remainder"),
         "basis_reason": (row.get("derived") or {}).get("basis_reason"),
         "long_strike": row.get("long_strike"),

@@ -170,13 +170,23 @@ class TestHistoricalReadsStillWork:
 
 class TestTheRetiredSnapshotIsUnreachable:
 
-    def test_the_parked_spelling_and_the_traded_key_part_ways(self):
-        """They collapse to the same normalised key, so the canonical key is matched EXACTLY,
-        before normalisation. This is the only thing that separates them."""
+    def test_the_parked_rows_are_separated_by_identity_not_by_spelling(self):
+        """AMENDED R-IV.660(c)1. This asserted that the canonical key and the parked display
+        label part ways in the scope module -- an exact-case match being "the only thing that
+        separates them". It separated them by CAPITALISATION, which every boundary that folds
+        case silently inverts, and the balances MCP tool inverted it: the traded 401(a) was
+        dropped from the headline total as parked money.
+
+        The scope module no longer tries. Both spellings name the traded account, and the parked
+        snapshot rows are excluded by the day-P&L reader's exact-name filter against
+        account_balances -- which is what scope_for below keeps narrow for the same reason."""
         assert scope_normalize(FIDELITY_401A) == FIDELITY_401A
         assert is_in_scope(FIDELITY_401A)
-        assert scope_normalize(PARKED_401A_LABEL) == OUT_OF_SCOPE
-        assert not is_in_scope(PARKED_401A_LABEL)
+        assert scope_normalize(PARKED_401A_LABEL) == FIDELITY_401A
+        assert is_in_scope(PARKED_401A_LABEL)
+        # The READ scope stays one spelling: a read that followed the parked label would pull
+        # 90 snapshot rows of a different pot in.
+        assert scope_for(FIDELITY_401A) == [FIDELITY_401A]
 
     @pytest.mark.parametrize("label", [RETIRED_LABEL, "brokerage_link_401k",
                                        "brokerage link 401k", "Fidelity 403B"])

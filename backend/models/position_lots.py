@@ -153,6 +153,49 @@ def _f(v: Any) -> float:
     return float(v or 0)
 
 
+# ── CONVENTION #29, with both figures in one place — R-IV.660(b) ────────────────────────────
+#
+# `quantity` is THE SIZE OPENED, adds included. What is still open is the OPEN REMAINDER, the
+# sum of lot quantities. They are different numbers and they were being written to the same
+# column: /reduce stored the remainder in `quantity`, so a reduced row forgot how big it had
+# been, while /close (since R-IV.657(c)) leaves `quantity` alone -- so the two routes disagreed
+# about what the column meant.
+#
+# A disposal lot is NEGATIVE (R-IV.566(c)), which makes the two sums trivially distinguishable:
+#
+#   size opened     = sum of the POSITIVE lot quantities      (acquisitions, adds included)
+#   open remainder  = sum of ALL lot quantities               (acquisitions less disposals)
+#
+# Both derive from the lots, so neither can drift from the other or from the fills.
+
+
+def size_opened(lots: Iterable[Mapping[str, Any]]) -> float:
+    """Convention #29's `quantity`: everything ever acquired, adds included.
+
+    Disposals are excluded rather than subtracted -- that is the whole distinction. A position
+    the principal opened at 5 and closed in three parts was still a 5-contract position, and
+    every percentage computed against its basis depends on saying so.
+    """
+    return sum(q for q in (_f(l.get("qty")) for l in lots) if q > 0)
+
+
+def open_remainder(lots: Iterable[Mapping[str, Any]]) -> float:
+    """What is still open: acquisitions less disposals. Zero on a fully closed position.
+
+    This is the figure a valuation, a mark, a loss threshold and a risk cap all want, and the
+    one no consumer should compute for itself -- which is why it is served as `open_quantity`
+    rather than left derivable.
+
+    THE ARITHMETIC LIVES HERE, ONCE. `services.position_economics.open_remainder` is the
+    POLICY layer above it: same addition, but it answers None where the lot set cannot support
+    a figure at all (no lots, or a lot with no qty), because an unknown size and a flat
+    position are opposite facts with opposite remedies. This function always answers a number,
+    which is what a caller holding a known lot set wants. Two separate additions would be two
+    chances to disagree about the empty case -- which is exactly what they did disagree about.
+    """
+    return sum(_f(l.get("qty")) for l in lots)
+
+
 def derive_aggregate(lots: Iterable[Mapping[str, Any]], asset_type: Optional[str] = None
                      ) -> Dict[str, Any]:
     """The position figures implied by a lot set.
@@ -162,7 +205,7 @@ def derive_aggregate(lots: Iterable[Mapping[str, Any]], asset_type: Optional[str
     the basis is unknown when it is.
     """
     lots = list(lots)
-    qty = sum(_f(l.get("qty")) for l in lots)
+    qty = open_remainder(lots)   # the same addition as everywhere else, not a third copy
     priced = [l for l in lots if l.get("price") is not None]
     unpriced = len(lots) - len(priced)
     priced_qty = sum(_f(l.get("qty")) for l in priced)

@@ -61,7 +61,13 @@ CANONICAL_ACCOUNTS = frozenset(_CANONICAL_TUPLE)
 # ── Aliases. Free text that MEANS a canonical account. ──────────────────
 # Keys are compared case-insensitively with underscores and spaces equivalent.
 _ALIASES = {
-    "fidelity": FIDELITY_ROTH,
+    # R-IV.660(c)1: `"fidelity": FIDELITY_ROTH` STOOD HERE and is gone. `models/accounts.py`
+    # has refused a bare `FIDELITY` since R-IV.638(b)3 -- with a 400 that names both keys and
+    # both account numbers -- while this module went on resolving the same string to the Roth.
+    # One question, two registries, opposite answers: whichever one a surface happened to ask
+    # decided whether the principal's filter was refused or silently narrowed to one of two
+    # Fidelity accounts. The refusal is the correct answer and it lives in the registry, so
+    # this module stops answering. The specific spellings below are unaffected.
     "fidelity roth": FIDELITY_ROTH,
     "fidelity_roth": FIDELITY_ROTH,
     "robinhood": ROBINHOOD,
@@ -80,20 +86,44 @@ _ALIASES = {
 # of money that is not in it. NO NAME-BASED RULE CAN SEPARATE THEM, which is exactly why
 # R-IV.638(b)1 makes the ACCOUNT NUMBER the identity.
 #
-# So the canonical key is matched EXACTLY, before any normalisation, and every other spelling
-# that collapses to a Fidelity name is the old vocabulary and stays out of scope. The
-# retired-snapshot labels below are unchanged.
-_PARKED_FIDELITY_KEYS = {"fidelity 401a", "fidelity401a", "fidelity 403b", "fidelity403b"}
+# R-IV.660(c)1 SETTLES IT, AND THE PREVIOUS ANSWER WAS THE WRONG KIND OF RULE.
+#
+# The remedy above was to match the canonical key EXACTLY, before normalisation, and leave
+# every other spelling out of scope. That made the scope of an account depend on its
+# CAPITALISATION: `is_in_scope("FIDELITY_401A")` was True and `is_in_scope("fidelity_401a")`
+# was False, for the same account. Case is itself a name-based rule -- the very thing the
+# comment above correctly says cannot separate these two pots -- and it is the most fragile
+# one available, because every boundary that folds case (a URL, a form, a JSON key, a lower()
+# on the way to a display label) silently flips the answer.
+#
+# It flipped one. `hub_get_portfolio_balances` lowercases the name for its own payload key and
+# then asked this module: the traded 401(a) came back OUT OF SCOPE, was dropped from
+# `total_balance`, and the tool reported 12,881.24 across "2 of 3 accounts" while naming the
+# third as excluded parked money. Measured 2026-10-06.
+#
+# WHAT ACTUALLY SEPARATES THEM IS NOT A NAME AT ALL, and it is already in place: the parked
+# history lives in `balance_snapshots` (90 rows as 'Fidelity 401A'), and the day-P&L reader
+# selects `account_name = ANY(<the exact names in account_balances>) AND basis = 'derived'`.
+# `account_balances` holds only the canonical `FIDELITY_401A`, so a parked snapshot row cannot
+# match that filter whatever this module says about its spelling. Identity and an exact
+# membership test do the work; the casing trick was never what held the parked money out.
+#
+# So the 401(a) spellings come OUT of the out-of-scope set below. The 403(b) and
+# BROKERAGE_LINK_401K stay: that money is still parked, and it is not what was converted.
+#
+# (`_PARKED_FIDELITY_KEYS` stood here holding the same four strings and was read by nothing in
+# the repo -- a second scope list that no caller consulted. Removed rather than amended: an
+# unread vocabulary cannot be trusted to still mean what it says.)
 
 # ── OUT OF SCOPE. NOT aliases of anything. ─────────────────────────────
 # R-IV.284(c). Parked money and a retired broker. Rows carrying these names are
 # tagged and preserved; they are never summed with the trading accounts and never
 # resolved to one.
 OUT_OF_SCOPE = "OUT_OF_SCOPE"
-# R-IV.638(b)2: the 401(a) DISPLAY-STYLE spellings are back here -- they name the PARKED
-# history, not the traded account, and only the exact canonical key reaches the latter.
+# R-IV.660(c)1: the 401(a) spellings are GONE from this set -- see the long note above. Every
+# casing of the traded account now resolves to FIDELITY_401A, and the parked history is held
+# out by the exact-name filter on `account_balances`, which is what was holding it out anyway.
 _OUT_OF_SCOPE_LABELS = {
-    "fidelity 401a", "fidelity401a",
     "fidelity 403b", "fidelity_403b", "fidelity403b",
     "brokerage_link_401k", "brokerage link 401k",
     "interactive brokers", "interactive_brokers", "ibkr",
@@ -115,9 +145,11 @@ def normalize_account(name: Optional[str]) -> str:
     UNKNOWN rather than being resolved to the nearest thing. A wrong resolution on
     a money surface is worse than an unresolved one, because it is spendable.
     """
-    # EXACT canonical key first, before _key() collapses case and underscores. This is the
-    # only thing that distinguishes the traded FIDELITY_401A from the parked 'Fidelity 401A'
-    # (R-IV.638(b)2) -- after normalisation they are the same string.
+    # EXACT canonical key first, as a fast path. It no longer carries any distinction:
+    # R-IV.660(c)1 removed the 401(a) spellings from the out-of-scope set, so this branch and
+    # the normalised one below now agree on every casing of every canonical account. It is kept
+    # only because a caller passing the canonical key should not pay for normalisation -- NOT,
+    # as it was, because the answer differs.
     if name is not None and str(name).strip() in CANONICAL_ACCOUNTS:
         return str(name).strip()
 
@@ -136,7 +168,7 @@ def normalize_account(name: Optional[str]) -> str:
 
 
 def is_in_scope(name: Optional[str]) -> bool:
-    """True only for the two traded accounts.
+    """True only for the THREE traded accounts, in any casing (R-IV.660(c)1).
 
     UNKNOWN is NOT in scope. An account nobody has classified must not be summed
     into a tradeable total on the strength of not having been recognised -- that

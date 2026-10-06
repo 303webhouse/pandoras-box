@@ -118,6 +118,7 @@ def attach_economics(positions: List[Dict[str, Any]],
     ride along in the derived block. Staleness is NOT re-litigated here: the mark
     job already decides what to keep and labels it, and gap 1 is about scope.
     """
+    from services.open_quantity import stamp_open_quantity_from_lots
     from services.position_economics import close_date_from_lots, economics
 
     for p in positions:
@@ -129,7 +130,13 @@ def attach_economics(positions: List[Dict[str, Any]],
         p["unrealized_pnl_stored"] = p.get("unrealized_pnl")
         p["max_loss"] = e["max_loss"]
         p["unrealized_pnl"] = e["unrealized_pnl"]
+        # R-IV.660(b)2: the ruled name is `open_quantity`, and it is stamped HERE because
+        # this is the one function where a lot-derived figure reaches a position dict --
+        # stamping it per route is how one surface ends up without it. `open_remainder` is
+        # kept as the older key for the MCP tool that already reads it; they are the SAME
+        # figure from the same author, not two answers.
         p["open_remainder"] = e["open_remainder"]
+        stamp_open_quantity_from_lots([p], {p.get("position_id"): lots})
         # R-IV.517(e): a closure's close date is its disposal lot's fill_time,
         # never `created_at`. Derived on read; no new column.
         if (p.get("status") or "").upper() in ("CLOSED", "EXPIRED"):
