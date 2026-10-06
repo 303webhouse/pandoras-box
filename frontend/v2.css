@@ -549,6 +549,14 @@ body {
 .pos-modal .bar .x { margin-left: auto; cursor: pointer; color: var(--text-3); }
 .pos-modal .body { padding: 14px 16px; overflow: auto; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+/* R-IV.651(c)2: the typed field takes the room; the native picker sits beside it as a second
+   way in, never the only one. */
+.fld-row { display: flex; gap: 6px; align-items: stretch; }
+.fld-row > input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.fld-row > input[type="date"] { flex: 0 0 auto; width: 44px; padding: 0 4px; }
+.fld-echo { font-family: var(--mono); font-size: 10px; line-height: 1.4; min-height: 14px; color: var(--text-3); }
+.fld-echo.ok { color: var(--up); }
+.fld-echo.bad { color: var(--amber); }
 .form-grid .full { grid-column: 1 / -1; }
 .fld { display: flex; flex-direction: column; gap: 3px; }
 .fld label { font-family: var(--mono); font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px; }
@@ -738,7 +746,10 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   .tile { height: auto !important; }
   /* The second half of the nested-scroller fix. */
   .tile-body { overflow: visible !important; max-height: none !important; }
-  .book-positions, .drawer-body, .member-popup .body, .pos-modal .body { overflow: visible !important; }
+  /* R-IV.651(b)1: `.pos-modal .body` is NOT in this list. The others are inside the page's own
+     scroll; the modal is a FIXED overlay with a height cap, so making its body overflow:visible
+     clipped every field past the cap with no way to scroll to them. */
+  .book-positions, .drawer-body, .member-popup .body { overflow: visible !important; }
   .tile-header { flex-wrap: wrap; row-gap: 4px; padding: 10px 12px; }
 
   /* Movers: at 390px the marquee text runs under the staleness pill, and the
@@ -806,7 +817,38 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 
   /* ── Overlay surfaces usable at phone width ──────────────────────────────── */
   .drawer { width: 100%; max-width: 100%; }
-  .pos-modal, .member-popup { width: 96vw; max-width: 96vw; }
+  .member-popup { width: 96vw; max-width: 96vw; }
+
+  /* ── R-IV.651(c)1 · the add/close form as a full-height sheet ──────────────────────────────
+     Three bugs met here, and each needs its own line:
+       - 88vh on iOS is measured with the toolbar HIDDEN, so the modal overshot the screen
+         whenever the toolbar was showing. `100dvh` is the dynamic viewport — the visible one —
+         and the vh line stays first as the fallback for engines without dvh.
+       - the deck bar is z-index 90 and the modal was 76, so the bar sat over the modal's bottom
+         edge: that was the field he could not reach. The panel and the chart were lifted above
+         the bar on phones; this never was.
+       - a fixed, TRANSFORMED element is the usual suspect when a tap lands nowhere under an
+         open keyboard, so the sheet is positioned with inset instead of translate. */
+  .modal-backdrop { z-index: 94; }
+  .pos-modal {
+    inset: 0; top: 0; left: 0; transform: none;
+    width: 100%; max-width: 100%;
+    height: 100vh; height: 100dvh;
+    max-height: 100vh; max-height: 100dvh;
+    border-radius: 0; border: 0; z-index: 95;
+  }
+  /* The one scroller, and it owns the space the bar and the actions do not. */
+  .pos-modal .body { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  /* Create and Cancel ride at the bottom of the sheet, keyboard open or not, so reaching them
+     never depends on scrolling to the end of the form. */
+  .pos-modal .form-foot {
+    position: sticky; bottom: 0; margin: 0 -16px -14px; padding: 10px 16px;
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  /* The refusal rides WITH the buttons. Sticking only the buttons left the message underneath
+     them — the one line he needs to read to know why nothing happened. */
+  .pos-modal .form-foot .form-msg:empty { display: none; }
   .tv-popover { width: 96vw !important; max-width: 96vw; height: min(60vh, 520px) !important; top: 50% !important; transform: translateY(-50%); z-index: 96; }
 }
 
