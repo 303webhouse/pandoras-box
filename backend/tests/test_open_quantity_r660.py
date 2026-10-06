@@ -167,12 +167,29 @@ class TestReduceLeavesQuantityAtTheSizeOpened:
         assert '"open_quantity_after"' in body
         assert '"size_opened"' in body
 
-    def test_the_add_path_still_writes_the_size_opened(self):
-        """POSITIVE CONTROL. The add path ALSO writes `quantity = stored_qty`, and that is
-        CORRECT -- #29 says adds are included. A fix that changed every `quantity =` write
-        would have broken it, and this is what tells the two writes apart."""
+    def test_the_lots_add_path_writes_the_size_opened(self):
+        """POSITIVE CONTROL. `/lots` ALSO writes `quantity = stored_qty`, and that is CORRECT --
+        #29 says adds are included. A fix that changed every `quantity =` write would have
+        broken it, and this is what tells the two writes apart."""
         src = _code("api/unified_positions.py")
         assert "stored_qty" in src
+
+    def test_the_legacy_add_path_keeps_the_size_opened_and_scales_legs_to_the_remainder(self):
+        """A THIRD write path, found while tracing the trade date. The add-to-existing branch
+        set `quantity` from `derive_aggregate(...)["qty"]` -- the open REMAINDER -- so adding to
+        a partially-closed position would have stored remainder-plus-add and the row would have
+        forgotten how big it had been.
+
+        The two figures are now tracked apart in that branch, because the legs genuinely need
+        the remainder (the R-IV.517(c) trigger refuses the commit otherwise) while the row needs
+        the size opened. One variable serving both was the whole fault."""
+        src = _code("api/unified_positions.py")
+        body = src[src.index("async def create_position"):src.index("\n@router", src.index(
+            "async def create_position"))]
+        assert "new_qty = size_opened(_lot_rows)" in body
+        assert 'remainder_qty = agg["qty"]' in body
+        assert "_scale_legs_to_remainder(conn, pos_id, float(remainder_qty))" in body
+        assert "_scale_legs_to_remainder(conn, pos_id, float(new_qty))" not in body
 
 
 class TestTheCloseDecisionIsAgainstWhatIsHeld:

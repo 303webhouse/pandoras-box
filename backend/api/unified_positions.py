@@ -632,6 +632,11 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         add_entry = req.entry_price
 
         new_qty = old_qty + add_qty
+        # R-IV.660(b): `new_qty` is the SIZE OPENED -- the row's own quantity plus this add,
+        # both of which are opened sizes under #29. The legs follow the open REMAINDER, which is
+        # a different figure the moment the position has been partially closed, so the two are
+        # tracked apart from here on rather than one standing in for the other.
+        remainder_qty = new_qty
         new_entry = ((old_entry * old_qty) + (add_entry * add_qty)) / new_qty if new_qty else add_entry
 
         # Recompute cost basis
@@ -676,13 +681,20 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
                 lots = await conn.fetch(
                     "SELECT qty, price, fees FROM position_lots WHERE position_id = $1",
                     pos_id)
-                agg = derive_aggregate([dict(l) for l in lots], existing.get("asset_type"))
-                new_qty = agg["qty"]
+                _lot_rows = [dict(l) for l in lots]
+                agg = derive_aggregate(_lot_rows, existing.get("asset_type"))
+                # `agg["qty"]` is the open REMAINDER. Writing it into `quantity` was a third
+                # violation of #29: adding to a partially-closed position would have set the
+                # row to remainder-plus-add, so the position would forget how big it had been
+                # and every percentage over its basis would divide by the wrong number.
+                remainder_qty = agg["qty"]
+                new_qty = size_opened(_lot_rows)
                 if agg["entry_price"] is not None:
                     new_entry = agg["entry_price"]
                 if agg["cost_basis"] is not None:
                     new_cost_basis = agg["cost_basis"]
-            await _scale_legs_to_remainder(conn, pos_id, float(new_qty))
+            # The legs track the REMAINDER or the R-IV.517(c) trigger refuses the commit.
+            await _scale_legs_to_remainder(conn, pos_id, float(remainder_qty))
             row = await conn.fetchrow("""
                 UPDATE unified_positions
                 SET quantity = $2, entry_price = $3, cost_basis = $4,
@@ -701,10 +713,14 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             is_short_equity = d_existing == "SHORT" and is_stock
             cash_delta = add_cost if (s in CREDIT_STRUCTURES or is_short_equity) else -add_cost
             try:
+                # R-IV.660(c)2: an add is a fill and it happened on the principal's day, not on
+                # the write's. The lot above already uses `entry_date`; the money follows it.
                 cash_ok = await _adjust_account_cash(
                     pool, account, cash_delta,
                     source_ref=existing.get("position_id"),
-                    description="added to position")
+                    description="added to position",
+                    event_date=(_when(req.entry_date, "entry_date").date()
+                                if req.entry_date else None))
             except Exception as e:
                 logger.error("Cash adjustment failed on add-to-position: %s", e)
                 cash_ok = False
@@ -883,9 +899,17 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         is_short_equity = d == "SHORT" and s in ("stock", "stock_short", "short_stock", "")
         cash_delta = cost_basis if (s in CREDIT_STRUCTURES or is_short_equity) else -cost_basis
         try:
+            # R-IV.660(c)2: THE EVENT IS DATED WHEN THE TRADE HAPPENED. The row and the
+            # opening lot have carried the principal's `entry_date` since R-IV.464(a), but this
+            # event defaulted to `date.today()` -- so BX, traded 09-30 and logged 10-06, put its
+            # money in the wrong week and the wrong month. `activity_date` is what every
+            # reconciliation against a broker statement joins on, and what the weekly and
+            # monthly figures bucket by.
             cash_ok = await _adjust_account_cash(
                 pool, account, cash_delta, source_ref=position_id,
-                description="position opened")
+                description="position opened",
+                event_date=(_when(req.entry_date, "entry_date").date()
+                            if req.entry_date else None))
         except Exception as e:
             logger.error("Cash adjustment failed on create: %s", e)
             cash_ok = False
@@ -2238,6 +2262,30 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                     raise HTTPException(status_code=404, detail=f"Open position {position_id} not found")
 
                 pos = _row_to_dict(row)
+                # R-IV.660(c)2 -- THE BOUND THIS ROUTE ALREADY CLAIMED TO HAVE. The comment at
+                # the top of the route says the exit date is "bounded on both sides": the future
+                # side is refused by `_when`, but nothing compared it against the position's own
+                # entry. `/closed-from-evidence` has had that check all along, so the two paths
+                # disagreed about the same impossible row. A comment asserting a guard that does
+                # not exist is worse than no comment: it stops the next reader looking.
+                if req.exit_date:
+                    _opened = pos.get("entry_date") or pos.get("created_at")
+                    if _opened:
+                        try:
+                            _opened_at = (datetime.fromisoformat(str(_opened))
+                                          if isinstance(_opened, str) else _opened)
+                        except ValueError:
+                            _opened_at = None
+                        if _opened_at is not None:
+                            if _opened_at.tzinfo is None:
+                                _opened_at = _opened_at.replace(tzinfo=timezone.utc)
+                            if now < _opened_at:
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=(f"exit_date {req.exit_date} is before the position "
+                                            f"was opened ({_opened_at.date().isoformat()}). A "
+                                            f"close cannot precede the fill it closes -- this "
+                                            f"is a typo rather than a correction."))
                 entry_price = pos.get("entry_price") or 0
                 structure = pos.get("structure") or ""
 
@@ -2544,10 +2592,15 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                     is_short_equity = d_close == "SHORT" and is_stock
                     cash_delta = -exit_value if (s in CREDIT_STRUCTURES or is_short_equity) else exit_value
                     try:
+                        # R-IV.660(c)2: dated the day the exit happened. `now` is the exit
+                        # instant -- today when the caller gave no `exit_date`, and the
+                        # principal's own day when he did -- so a close recorded late no longer
+                        # books its proceeds in the week it was typed in.
                         close_cash_ok = await _adjust_account_cash_with_conn(
                             conn, pos.get("account", "ROBINHOOD"), cash_delta,
                             source_ref=pos.get("position_id"),
-                            description="closed position")
+                            description="closed position",
+                            event_date=now.date())
                     except Exception as e:
                         logger.error("Cash adjustment failed on close: %s", e)
                         close_cash_ok = False
