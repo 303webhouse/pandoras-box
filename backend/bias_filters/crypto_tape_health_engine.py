@@ -8,8 +8,8 @@
   in S-3's FA-7 parametrization pass but unused until now). Zero new vendor,
   $0 spend, per the S-3b micro-brief and the post-R-2 checkpoint ruling.
 
-  Symbols without _OKX_SPOT_INSTID coverage (none today — all six are
-  covered) stay honestly NA:SPOT_FEED_UNAVAILABLE, per §5.2's explicit N/A
+  Symbols without _OKX_SPOT_INSTID coverage (FARTCOIN — not listed on OKX
+  spot, code 51001) stay honestly NA:SPOT_FEED_UNAVAILABLE, per §5.2's explicit N/A
   path: "symbols lacking a live spot or perp flow feed get explicit N/A
   tape-health states, no events." Runtime fetch failure (network/API error)
   degrades the same way, honestly, never a fabricated state.
