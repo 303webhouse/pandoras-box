@@ -43,6 +43,47 @@ def _row_to_dict(row) -> dict:
 
 # ── 1. GET /balances ──
 
+@router.get("/sleeve-ceiling", dependencies=[Depends(require_api_key)])
+async def get_sleeve_ceiling():
+    """The Robinhood sleeve ceiling — R-IV.644(d) / TA-070.
+
+    FIRST READ ENDPOINT FOR IT. The figure lived as prose in the committee parameters and as
+    a hardcoded `ceiling: 968` mock in `frontend/v2.js`, whose own note says it has no read
+    endpoint. Both written forms name TWO accounts, so a third tracked account silently
+    dropped out of the base; this sums over the REGISTRY, so the next one cannot.
+    """
+    from services.sleeve_ceiling import ceiling_from_balances
+
+    pool = await get_postgres_client()
+    rows = await pool.fetch("SELECT account_name, balance FROM account_balances")
+    balances = {r["account_name"]: r["balance"] for r in rows}
+
+    # A STATED ZERO THAT IS NOT A READING. FIDELITY_401A was registered at 0.00 as a
+    # placeholder because the column is NOT NULL (R-IV.632(c)), and measured 2026-10-05 it
+    # holds FOUR open positions against that 0.00. The pure function cannot tell a
+    # placeholder from a true zero -- both are the number 0 -- so the cross-check lives
+    # here, where the positions can be counted: an account with open positions and a zero
+    # balance is not a credible base input, and summing it understates the ceiling.
+    held = await pool.fetch(
+        """SELECT account, COUNT(*) AS n FROM unified_positions
+            WHERE status = 'OPEN' AND account IS NOT NULL GROUP BY account""")
+    holds_positions = {r["account"]: r["n"] for r in held}
+    suspect = [a for a, b in balances.items()
+               if a in holds_positions and b is not None and float(b) == 0.0]
+    for a in suspect:
+        balances[a] = None            # UNKNOWN, which the function reports as partial
+
+    out = ceiling_from_balances(balances)
+    if suspect:
+        out["partial_reason"] = (
+            (out.get("partial_reason") or "") +
+            "; " + ", ".join(
+                f"{a} has a 0.00 balance while holding {holds_positions[a]} open "
+                f"position(s) — a placeholder, not a reading" for a in suspect)
+        ).lstrip("; ")
+    return out
+
+
 @router.get("/balances", dependencies=[Depends(require_api_key)])
 async def get_balances():
     """Account balances, THROUGH THE ONE READ SERVICE.
@@ -448,6 +489,36 @@ async def get_portfolio_pnl():
     current = {r["account_name"]: float(r["balance"] or 0) for r in current_rows}
     current_total = sum(current.values())
 
+    # Every cash event from the earliest window start, read ONCE. Classified in Python
+    # rather than filtered in SQL, because `cash_ledger.normalise_type` is the one author
+    # of this vocabulary -- `ACH` is 22 of the rows and means money IN or OUT depending on
+    # its sign, which a `flow_type IN (...)` clause cannot know.
+    _earliest = min(yesterday, last_friday, first_of_month)
+    _flow_rows = await pool.fetch(
+        """SELECT account_name, flow_type, amount, activity_date
+             FROM cash_flows
+            WHERE activity_date > $1""", _earliest)
+
+    def funding_since(after, names):
+        """Net non-performance money that entered these accounts after `after`.
+
+        Subtracted from the balance difference so a deposit, a transfer or a correction
+        cannot read as a gain. Scoped to the SAME accounts the comparison uses, or an
+        account excluded from both balances would still have its funding removed.
+        """
+        from services.cash_ledger import moves_balance_without_performing
+
+        total = 0.0
+        for r in _flow_rows:
+            if r["activity_date"] is None or r["activity_date"] <= after:
+                continue
+            if names is not None and r["account_name"] not in names:
+                continue
+            if not moves_balance_without_performing(dict(r)):
+                continue
+            total += float(r["amount"] or 0)
+        return round(total, 2)
+
     async def get_snapshot_total(target_date):
         """Total balance from the latest snapshot on or before target_date,
         restricted to CURRENTLY-ACTIVE accounts.
@@ -483,7 +554,7 @@ async def get_portfolio_pnl():
     weekly_snap, weekly_names = await get_snapshot_total(last_friday)
     monthly_snap, monthly_names = await get_snapshot_total(first_of_month)
 
-    def calc_pnl(prev_total, prev_names):
+    def calc_pnl(prev_total, prev_names, after):
         """THE MIRROR OF DEF-DAYPNL-PHANTOM — R-IV.638(b)2.
 
         The filter above handles an account being RETIRED: a name no longer in
@@ -499,23 +570,44 @@ async def get_portfolio_pnl():
         of accounts: the ones that have a snapshot at or before the date. An account
         with no history yet is in neither total, which is honest -- there is no prior
         figure to compare it against, and inventing one is the fault either way.
+
+        FUNDING IS NOT PERFORMANCE — R-IV.644(c). This differenced two BALANCES, so
+        every deposit, every transfer and every correction to a past entry read as that
+        day's profit. `cash_ledger` has said so since R-IV.539(d) -- *"money walking in
+        the door is not a gain, and an account value that grew by a deposit has not
+        performed"* -- and this computation simply never asked it. With POSITIONS booking
+        the 401(a)'s funding and rebuilding the Roth's past entries (R-IV.642), all three
+        were about to land at once.
+
+        So the window's non-performance flows are subtracted, and reported beside the
+        figure as `funding_excluded` rather than silently applied: a day that reads flat
+        after $2,000 walked in is a different fact from a day that was flat.
         """
         if prev_total is None or prev_total == 0:
             return None, None
         comparable = sum(v for k, v in current.items() if k in prev_names)
-        dollar = round(comparable - prev_total, 2)
-        pct = round((dollar / prev_total) * 100, 2)
+        funded = funding_since(after, prev_names)
+        dollar = round(comparable - prev_total - funded, 2)
+        # The denominator carries the funding too: money that arrived mid-window was
+        # capital for part of it, and dividing a flow-adjusted gain by the un-adjusted
+        # opening balance overstates the percentage on exactly the days funding lands.
+        base = prev_total + funded
+        pct = round((dollar / base) * 100, 2) if base else None
         return dollar, pct
 
-    daily_dollar, daily_pct = calc_pnl(daily_snap, daily_names)
-    weekly_dollar, weekly_pct = calc_pnl(weekly_snap, weekly_names)
-    monthly_dollar, monthly_pct = calc_pnl(monthly_snap, monthly_names)
+    daily_dollar, daily_pct = calc_pnl(daily_snap, daily_names, yesterday)
+    weekly_dollar, weekly_pct = calc_pnl(weekly_snap, weekly_names, last_friday)
+    monthly_dollar, monthly_pct = calc_pnl(monthly_snap, monthly_names, first_of_month)
 
     return {
         "current_total": current_total,
-        "daily": {"dollar": daily_dollar, "pct": daily_pct, "compare_date": yesterday.isoformat()},
-        "weekly": {"dollar": weekly_dollar, "pct": weekly_pct, "compare_date": last_friday.isoformat()},
-        "monthly": {"dollar": monthly_dollar, "pct": monthly_pct, "compare_date": first_of_month.isoformat()},
+        "daily": {"dollar": daily_dollar, "pct": daily_pct, "compare_date": yesterday.isoformat(),
+                  "funding_excluded": funding_since(yesterday, daily_names)},
+        "weekly": {"dollar": weekly_dollar, "pct": weekly_pct, "compare_date": last_friday.isoformat(),
+                   "funding_excluded": funding_since(last_friday, weekly_names)},
+        "monthly": {"dollar": monthly_dollar, "pct": monthly_pct,
+                    "compare_date": first_of_month.isoformat(),
+                    "funding_excluded": funding_since(first_of_month, monthly_names)},
     }
 
 

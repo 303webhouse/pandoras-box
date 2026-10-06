@@ -9,7 +9,9 @@ from models.position_status import STATUSES as _POSITION_STATUSES
 from models.signal_lifecycle import STATUS_VALUES as _SIGNAL_STATUS_VALUES
 from models.exit_plan import STOP_TYPES as _STOP_TYPES
 from models.position_lots import (LOT_SOURCES as _LOT_SOURCES,
-                                  PRINCIPAL_ENTRY_SOURCE_REGEX as _PRINCIPAL_ENTRY_SOURCE_REGEX)
+                                  PRINCIPAL_ENTRY_SOURCE_REGEX as _PRINCIPAL_ENTRY_SOURCE_REGEX,
+                                  BROKER_REF_EXPORT_REGEX as _BROKER_REF_EXPORT_REGEX,
+                                  BROKER_REF_FIDELITY_REGEX as _BROKER_REF_FIDELITY_REGEX)
 import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
@@ -1310,6 +1312,10 @@ async def init_database():
             # No backfill: measured 2026-09-24, 114 lots carry a ref, 114 distinct, 107 export
             # form + 7 confirmation form, 0 malformed. The form is what makes a ref unique and
             # resolvable; it does NOT make it true — that is the re-derivation test beside it.
+            # GENERATED from models.position_lots (R-IV.644(e)), not retyped. The pattern had
+            # been written out here AND copied into test_broker_ref_form.py under the comment
+            # "the regex the constraint carries, verbatim" -- three authors for one form, and
+            # the test would have gone on passing against its own stale copy.
             ("broker_ref form: position_lots", """
                 DO $$
                 BEGIN
@@ -1317,11 +1323,11 @@ async def init_database():
                     ALTER TABLE position_lots ADD CONSTRAINT position_lots_broker_ref_form
                         CHECK (
                             broker_ref IS NULL
-                            OR broker_ref ~ '^[0-9a-f]{12}:L[0-9]+(-L[0-9]+|(,L[0-9]+)*)(#[0-9]+-[0-9]+)?$'
-                            OR broker_ref ~ '^[0-9]{5}-[A-Z0-9]{6}$'
+                            OR broker_ref ~ '%s'
+                            OR broker_ref ~ '%s'
                         );
                 END $$
-            """),
+            """ % (_BROKER_REF_EXPORT_REGEX, _BROKER_REF_FIDELITY_REGEX)),
             # One author for the status vocabulary (conventions #9).
             ("provenance vocabulary: position_legs", """
                 DO $$

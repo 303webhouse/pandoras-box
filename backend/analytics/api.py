@@ -63,6 +63,11 @@ from analytics.queries import (
 )
 from analytics.robinhood_parser import parse_robinhood_csv_bytes
 from utils.json_sanitize import dumps_jsonb
+
+# Module scope: used by /oracle far below, and an import inside one function does not
+# bind a name used in another -- a NameError py_compile cannot see.
+from models.accounts import canonical_account
+from models.accounts import display_name as account_display
 # (log_signal import removed 2026-07-21 with the /log-signal endpoint --
 #  this module no longer writes to `signals` directly.)
 
@@ -2586,12 +2591,24 @@ async def get_oracle_insights(
     Re-enable after analytics backend is optimized + worker count is bumped
     with proper background-task gating.
     """
+    # R-IV.644(f): the account filter is VALIDATED even while the payload is stubbed, so
+    # the contract is right the day it is re-enabled and a caller learns now that a bare
+    # Fidelity name is not an account. `canonical_account` refuses one naming both keys and
+    # both numbers (R-IV.638(b)3); a combined view asks for both keys explicitly.
+    resolved_account = canonical_account(account, field="account") if account else None
+
     return {
         "system_health": {},
         "narrative": None,
         "current_streak": None,
         "stub": True,
         "stub_reason": "P1.4 hotfix - endpoint disabled to prevent worker stalls during market hours",
+        # Named rather than silently dropped: a caller who filtered and got everything back
+        # would read the stub as an answer about that account.
+        "account": resolved_account,
+        "account_display": account_display(resolved_account) if resolved_account else None,
+        "filters_applied": False,
+        "filters_reason": "the payload is stubbed, so no filter is applied to it",
     }
     # Original logic preserved below — re-enable after backend optimization
     from database.redis_client import get_redis_client
