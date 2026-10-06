@@ -52,35 +52,45 @@ async def get_sleeve_ceiling():
     endpoint. Both written forms name TWO accounts, so a third tracked account silently
     dropped out of the base; this sums over the REGISTRY, so the next one cannot.
     """
+    from services.read_only.balances import get_account_balances
     from services.sleeve_ceiling import ceiling_from_balances
 
-    pool = await get_postgres_client()
-    rows = await pool.fetch("SELECT account_name, balance FROM account_balances")
-    balances = {r["account_name"]: r["balance"] for r in rows}
+    # THE BASE IS EACH ACCOUNT'S VALUE AS THE BALANCES SERVICE SERVES IT — R-IV.647(b).
+    #
+    # This route read `account_balances.balance` directly, which is the RETIRED stored
+    # figure: the Roth's 8,842.09 and Robinhood's 835.69 are numbers typed from a
+    # statement, not broker figures (R-IV.642(e)). That is also why the old mock's 968
+    # matched my first computation exactly — both read the same two stale numbers, so the
+    # agreement proved nothing about either.
+    #
+    # The service's `balance` is derived: cash from the ledger plus that account's open
+    # positions at their marks, through the SAME `account_value` arithmetic the loss
+    # alert's threshold uses — so a committee sizing off the ceiling and an alert firing
+    # off the threshold cannot disagree about what an account is worth. It is None with a
+    # reason when the ledger cannot be read, and `balance_partial` is True when a position
+    # in scope has no mark.
+    rows = await get_account_balances() or []
 
-    # A STATED ZERO THAT IS NOT A READING. FIDELITY_401A was registered at 0.00 as a
-    # placeholder because the column is NOT NULL (R-IV.632(c)), and measured 2026-10-05 it
-    # holds FOUR open positions against that 0.00. The pure function cannot tell a
-    # placeholder from a true zero -- both are the number 0 -- so the cross-check lives
-    # here, where the positions can be counted: an account with open positions and a zero
-    # balance is not a credible base input, and summing it understates the ceiling.
-    held = await pool.fetch(
-        """SELECT account, COUNT(*) AS n FROM unified_positions
-            WHERE status = 'OPEN' AND account IS NOT NULL GROUP BY account""")
-    holds_positions = {r["account"]: r["n"] for r in held}
-    suspect = [a for a, b in balances.items()
-               if a in holds_positions and b is not None and float(b) == 0.0]
-    for a in suspect:
-        balances[a] = None            # UNKNOWN, which the function reports as partial
+    balances, understated, notes = {}, set(), []
+    for r in rows:
+        name = r.get("account_name")
+        if not name:
+            continue
+        balances[name] = r.get("balance")          # None stays None: UNKNOWN, not zero
+        if r.get("balance") is not None and r.get("balance_partial"):
+            understated.add(name)
+        if r.get("balance") is None or r.get("balance_partial"):
+            notes.append(f"{name}: {r.get('balance_reason') or 'no derived value this cycle'}"
+                         + (f" ({len(r.get('balance_positions_unvalued') or [])} unvalued)"
+                            if r.get("balance_partial") else ""))
 
-    out = ceiling_from_balances(balances)
-    if suspect:
-        out["partial_reason"] = (
-            (out.get("partial_reason") or "") +
-            "; " + ", ".join(
-                f"{a} has a 0.00 balance while holding {holds_positions[a]} open "
-                f"position(s) — a placeholder, not a reading" for a in suspect)
-        ).lstrip("; ")
+    out = ceiling_from_balances(balances, understated=understated)
+    out["base_source"] = ("derived: cash from the ledger plus open positions at their marks "
+                          "(R-IV.647(b)) — not account_balances' retired stored total")
+    out["base_stored_for_contrast"] = {
+        r.get("account_name"): r.get("balance_stored") for r in rows if r.get("account_name")}
+    if notes:
+        out["partial_detail"] = notes
     return out
 
 
@@ -484,9 +494,23 @@ async def get_portfolio_pnl():
     # First of month
     first_of_month = today.replace(day=1)
 
-    # Current balances
-    current_rows = await pool.fetch("SELECT account_name, balance FROM account_balances")
-    current = {r["account_name"]: float(r["balance"] or 0) for r in current_rows}
+    # CURRENT VALUE, DERIVED — R-IV.647(b). This read `account_balances.balance`, whose
+    # only writer is the manual POST /balances route, so it had not moved since 09-24 and
+    # every P&L window read 0.00 for eleven days.
+    from services.read_only.balances import get_account_balances
+
+    _bal_rows = await get_account_balances() or []
+    current, current_partial, current_unavailable = {}, set(), {}
+    for r in _bal_rows:
+        name = r.get("account_name")
+        if not name:
+            continue
+        if r.get("balance") is None:
+            current_unavailable[name] = r.get("balance_reason") or "no derived value"
+            continue
+        current[name] = float(r["balance"])
+        if r.get("balance_partial"):
+            current_partial.add(name)
     current_total = sum(current.values())
 
     # Every cash event from the earliest window start, read ONCE. Classified in Python
@@ -538,13 +562,21 @@ async def get_portfolio_pnl():
         hardcoded list: accounts are merged and retired over time, and this must
         stay correct the next time that happens.
         """
+        # LIKE AGAINST LIKE, OR NOTHING — R-IV.647(b). `basis = 'derived'` is required on
+        # BOTH sides: the 600 pre-existing rows are stored-basis, and comparing today's
+        # derived value against one of them would book the gap between the two bases as a
+        # day's gain (+1,129.83 on 2026-10-05). `partial IS NOT TRUE` for the same reason
+        # in a smaller key: a value missing a mark understates, and the difference of an
+        # understated figure and a complete one is not performance.
         rows = await pool.fetch("""
             SELECT DISTINCT ON (account_name) account_name, balance
             FROM balance_snapshots
             WHERE snapshot_date <= $1
-              AND account_name IN (SELECT account_name FROM account_balances)
+              AND basis = 'derived'
+              AND partial IS NOT TRUE
+              AND account_name = ANY($2::text[])
             ORDER BY account_name, snapshot_date DESC
-        """, target_date)
+        """, target_date, [n for n in current if n not in current_partial])
         if not rows:
             return None, set()
         names = {r["account_name"] for r in rows}
@@ -601,6 +633,15 @@ async def get_portfolio_pnl():
 
     return {
         "current_total": current_total,
+        # R-IV.647(b): say which basis produced this, and what is missing from it. A
+        # figure whose basis a reader cannot see is a figure they cannot check.
+        "basis": "derived (cash ledger + open positions at marks)",
+        "accounts_counted": sorted(current),
+        "accounts_partial": sorted(current_partial) or None,
+        "accounts_unavailable": current_unavailable or None,
+        "comparison_rule": ("both sides must be derived-basis and complete; an account that "
+                            "is partial, unavailable, or has only stored-basis history is "
+                            "excluded from BOTH sides rather than compared across bases"),
         "daily": {"dollar": daily_dollar, "pct": daily_pct, "compare_date": yesterday.isoformat(),
                   "funding_excluded": funding_since(yesterday, daily_names)},
         "weekly": {"dollar": weekly_dollar, "pct": weekly_pct, "compare_date": last_friday.isoformat(),
@@ -612,30 +653,62 @@ async def get_portfolio_pnl():
 
 
 async def snapshot_account_balances():
+    """Save a daily snapshot of each account's DERIVED value, for P&L — R-IV.647(b).
+
+    IT USED TO SNAPSHOT THE STORED FIGURE, AND THE STORED FIGURE DOES NOT MOVE. The only
+    writer of `account_balances.balance` is the manual POST /balances route; nothing
+    automatic updates it. Measured 2026-10-05: FIDELITY_ROTH 8,842.09 and ROBINHOOD 835.69
+    in EVERY snapshot from 09-24 to 10-05 — eleven identical days. P&L differences two
+    snapshots, and the difference of a constant is zero, so **day, weekly and monthly P&L
+    had all read 0.00 for eleven days**. Not a quiet book: a frozen input, reported as flat.
+
+    So the snapshot records the value the balances service derives — cash from the ledger
+    plus that account's open positions at their marks — and says which BASIS it used and
+    whether that value was PARTIAL. Both are needed by the reader: comparing a derived
+    endpoint against a stored one would fabricate the whole gap between them as one day's
+    gain, which here is +1,129.83.
+
+    The row is written even when partial, because the history is worth keeping; it is the
+    P&L's job to refuse a comparison that rests on one.
     """
-    Save a daily snapshot of each account balance for PnL tracking.
-    Uses UPSERT so running multiple times per day just updates the snapshot.
-    Called automatically after mark-to-market during market hours.
-    """
-    pool = await get_postgres_client()
     import logging
+
+    from services.read_only.balances import get_account_balances
+
+    pool = await get_postgres_client()
     logger = logging.getLogger(__name__)
 
     try:
-        rows = await pool.fetch("SELECT account_name, balance, cash FROM account_balances")
+        rows = await get_account_balances() or []
         today = date.today()
+        written, skipped = 0, []
         for r in rows:
-            # Compute position_value = balance - cash
-            balance = float(r["balance"] or 0)
-            cash = float(r["cash"] or 0)
-            position_value = round(balance - cash, 2)
+            name = r.get("account_name")
+            value = r.get("balance")
+            if not name:
+                continue
+            if value is None:
+                # No derived value at all. A row here would be a number standing in for
+                # one that does not exist, and the P&L would difference it.
+                skipped.append(f"{name}: {r.get('balance_reason') or 'no derived value'}")
+                continue
+            cash = r.get("balance_cash")
             await pool.execute("""
-                INSERT INTO balance_snapshots (snapshot_date, account_name, balance, cash, position_value)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO balance_snapshots
+                       (snapshot_date, account_name, balance, cash, position_value,
+                        basis, partial)
+                VALUES ($1, $2, $3, $4, $5, 'derived', $6)
                 ON CONFLICT (snapshot_date, account_name)
-                DO UPDATE SET balance = $3, cash = $4, position_value = $5, created_at = NOW()
-            """, today, r["account_name"], balance, cash, position_value)
-        logger.info("📸 Balance snapshot saved for %d accounts", len(rows))
+                DO UPDATE SET balance = $3, cash = $4, position_value = $5,
+                              basis = 'derived', partial = $6, created_at = NOW()
+            """, today, name, float(value),
+                 float(cash) if cash is not None else None,
+                 r.get("balance_positions_value"),
+                 bool(r.get("balance_partial")))
+            written += 1
+        logger.info("Balance snapshot (derived basis) saved for %d account(s)", written)
+        for why in skipped:
+            logger.warning("Balance snapshot SKIPPED — %s", why)
     except Exception as e:
         logger.warning("Balance snapshot failed: %s", e)
 

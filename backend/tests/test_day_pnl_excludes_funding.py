@@ -170,6 +170,60 @@ def test_a_zero_base_yields_no_percentage_rather_than_a_crash():
     assert dollar == 0.0 and pct is None
 
 
+# ─────────────────────── the input was frozen, and the basis must match
+
+class TestTheBasisOfTheComparison:
+    """R-IV.647(b). The funding exclusion above was correct and was operating on a figure
+    that could not move. `/pnl` read `account_balances.balance`, whose ONLY writer is the
+    manual POST /balances route -- nothing automatic updates it.
+
+    MEASURED 2026-10-05: FIDELITY_ROTH 8,842.09 and ROBINHOOD 835.69 in EVERY snapshot from
+    09-24 to 10-05. Eleven identical days. P&L differences two snapshots, and the difference
+    of a constant is zero, so day, weekly and monthly had all read 0.00 for eleven days --
+    reported as flat, which is not the same as quiet.
+
+    Both sides now read the DERIVED value, and the comparison refuses to cross bases: the
+    600 pre-existing snapshot rows are stored-basis, and differencing today's derived value
+    against one of them would book the whole gap between the bases as a day's gain. Measured
+    on the switch date that gap was +1,129.83.
+    """
+
+    def test_the_current_total_comes_from_the_balances_service(self):
+        code = _code("api/portfolio.py")
+        assert "get_account_balances" in code
+        assert 'SELECT account_name, balance FROM account_balances' not in code
+
+    def test_the_comparison_requires_a_derived_basis_on_both_sides(self):
+        code = _code("api/portfolio.py")
+        assert "basis = 'derived'" in code
+        assert "partial IS NOT TRUE" in code
+
+    def test_the_snapshot_writes_the_derived_value_and_records_its_basis(self):
+        """A snapshot of the frozen figure is what made the series uncomparable."""
+        code = _code("api/portfolio.py")
+        i = code.index("async def snapshot_account_balances")
+        block = code[i:i + 2600]
+        assert "get_account_balances" in block
+        assert "'derived'" in block
+        assert "balance_partial" in block
+
+    def test_an_account_with_no_derived_value_is_not_snapshotted(self):
+        """A row here would be a number standing in for one that does not exist, and the
+        P&L would difference it."""
+        code = _code("api/portfolio.py")
+        i = code.index("async def snapshot_account_balances")
+        block = code[i:i + 2600]
+        assert "skipped.append" in block
+
+    def test_the_payload_names_its_basis_and_what_is_missing(self):
+        """A figure whose basis a reader cannot see is a figure they cannot check."""
+        code = _code("api/portfolio.py")
+        assert '"basis"' in code
+        assert '"accounts_partial"' in code
+        assert '"accounts_unavailable"' in code
+        assert '"comparison_rule"' in code
+
+
 # ─────────────────────── the vocabulary, and who owns it
 
 class TestTheVocabularyHasOneAuthor:

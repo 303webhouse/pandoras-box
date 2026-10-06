@@ -213,7 +213,13 @@ class TestTheRetiredSnapshotIsUnreachable:
         membership in account_balances, where no retired row exists — not a normalised
         comparison, which would have matched the parked spelling."""
         code = _code("api/portfolio.py")
-        assert "account_name IN (SELECT account_name FROM account_balances)" in code
+        # The mechanism changed under R-IV.647(b) and the guarantee did not. The comparison
+        # no longer subselects account_balances; it restricts to the accounts the BALANCES
+        # SERVICE returned a derived value for, which only ever names registry keys — so a
+        # retired label cannot enter either side, now by construction rather than by a join.
+        assert "basis = 'derived'" in code
+        assert "account_name = ANY($2::text[])" in code
+        assert "[n for n in current if n not in current_partial]" in code
 
     def test_the_loss_alert_values_one_named_account_at_a_time(self):
         """Its cash read is `WHERE account_name = $1` with a canonical key, so no label it was

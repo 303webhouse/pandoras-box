@@ -79,7 +79,11 @@ async def test_a_healthy_uw_does_not_defeat_the_pin(monkeypatch):
         called["uw"] += 1
         return list(UW_BARS)
 
-    async def fake_yf(ticker):
+    async def fake_yf(ticker, *, auto_adjust):
+        # R-IV.647(c): asserted, not merely accepted. A stub that tolerates the
+        # keyword would hide whether the grading leg asked for the UNADJUSTED
+        # basis, which is the whole of Amendment 5(a).
+        assert auto_adjust is False, "the grading leg must ask for the price-return basis"
         return list(YF_BARS)
 
     monkeypatch.setattr("integrations.uw_api.get_ohlc", fake_get_ohlc)
@@ -99,7 +103,8 @@ async def test_a_pinned_fetch_that_gets_nothing_does_not_fall_through_to_uw(monk
         called["uw"] += 1
         return list(UW_BARS)
 
-    async def fake_yf(ticker):
+    async def fake_yf(ticker, *, auto_adjust):
+        assert auto_adjust is False
         return []
 
     monkeypatch.setattr("integrations.uw_api.get_ohlc", fake_get_ohlc)
@@ -115,7 +120,11 @@ async def test_an_unpinned_fetch_still_prefers_uw(monkeypatch):
     async def fake_get_ohlc(*a, **k):
         return list(UW_BARS)
 
-    async def fake_yf(ticker):
+    async def fake_yf(ticker, *, auto_adjust):
+        # R-IV.647(c): asserted, not merely accepted. A stub that tolerates the
+        # keyword would hide whether the grading leg asked for the UNADJUSTED
+        # basis, which is the whole of Amendment 5(a).
+        assert auto_adjust is False, "the grading leg must ask for the price-return basis"
         return list(YF_BARS)
 
     monkeypatch.setattr("integrations.uw_api.get_ohlc", fake_get_ohlc)
