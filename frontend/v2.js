@@ -1663,8 +1663,8 @@
       ${greekNote}
       ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration${conc.theme ? ' · ' + esc(conc.theme) : ''}</span><span>${conc.pct != null ? conc.pct + '%' : ''}${conc.skipped ? ' ' + vintageChip({ unknownLabel: conc.pct != null ? 'partial: ' + conc.skipped + ' of ' + conc.total + ' left out' : 'no figures: ' + conc.skipped + ' of ' + conc.total + ' left out', unknownTitle: conc.skipped + ' of ' + conc.total + ' positions have no dollar figure and are left out of this percentage; it covers only the rest, and stays partial until every row has one' }) : ''}</span></div>` : ''}
       <div class="acct-chips">${accts.filter((a) => a.in_scope !== false).map((a) => {
-          const tag = esc((a.broker || a.account_name || '').slice(0, 4).toUpperCase());
-          return `<span class="acct-chip">${tag} ${fmt$(a.balance)}</span>`;
+          const tag = esc(a.account_display || (a.broker || '').toUpperCase().slice(0, 4) || '');
+          return `<span class="acct-chip">${tag ? tag + ' ' : ''}${fmt$(a.balance)}</span>`;
         }).join('')}</div>`;
     applyGlossary(el);
     _openPositions = (positions && positions.positions) || [];
@@ -1773,9 +1773,20 @@
   }
   function renderPositions() {
     const el = $('bookPositions'); if (!el) return;
-    const list = _openPositions;
-    if (!list.length) { el.innerHTML = '<div class="pos-empty">no open positions</div>'; return; }
-    el.innerHTML = groupPositions(list).map((g) => {
+    // R-IV.650(b)2: one filter and one sort, shared by every list of positions on the page.
+    const ctl = acctControlHtml();
+    const ctlHtml = ctl ? `<div class="acct-ctl">${ctl}</div>` : '';
+    const list = _openPositions.filter((p) => inAcct(p.account));
+    if (!_openPositions.length) { el.innerHTML = ctlHtml + '<div class="pos-empty">no open positions</div>'; return; }
+    if (!list.length) {
+      const who = (_acctOptions.find((a) => a.key === _acctFilter) || {}).label || 'that account';
+      el.innerHTML = ctlHtml + `<div class="pos-empty">no open positions in ${esc(who)}</div>`;
+      return;
+    }
+    let rows = groupPositions(list);
+    if (_acctSort) rows = rows.slice().sort((a, b) =>
+      acctRank(a.head.account) - acctRank(b.head.account) || String(a.head.ticker || '').localeCompare(String(b.head.ticker || '')));
+    el.innerHTML = ctlHtml + rows.map((g) => {
       const p = g.head;
       const pnl = g.pnl;
       const pct = g.pct;
@@ -1783,7 +1794,7 @@
       const dteStr = p.dte != null ? p.dte + ' DTE' : (p.asset_type === 'EQUITY' ? 'equity' : '');
       const pctTxt = pct != null ? (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%' : '';
       return `<div class="pos-row" data-pi="${g.idx}">
-        <span class="ptk">${esc(p.ticker)}${g.count > 1 ? `<span class="dup-count" title="${g.count} rows share this ticker, expiry and structure — the legs model decides whether that is one position or several">×${g.count}</span>` : ''}</span>
+        <span class="ptk">${acctChip(p.account, p.account_display)}${esc(p.ticker)}${g.count > 1 ? `<span class="dup-count" title="${g.count} rows share this ticker, expiry and structure — the legs model decides whether that is one position or several">×${g.count}</span>` : ''}</span>
         <span class="pmid"><span class="pstruct">${esc(structureStr(p))}</span><span class="pdte ${dteCls}">${dteStr}</span></span>
         <span class="ppnl ${g.suspect ? '' : signCls(pnl)}"><span class="amt">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(0) : noMoney(g.nullRow || p, 'pnl')}${g.partial ? vintageChip({ unknownLabel: 'partial', unknownTitle: 'some rows in this group have no figure; the sum leaves them out, so it is a floor' }) : ''}</span>${g.suspect ? `<span class="pct struck">${esc(pctTxt)}</span>${basisChip(g.suspect)}` : `<span class="pct">${pctTxt}</span>`}</span>
       </div>`;
@@ -1802,7 +1813,7 @@
     const tm = _themeMap[(p.ticker || '').toUpperCase()];
     body.innerHTML =
       kv('Structure', structureStr(p) + (p.structure ? '  (' + String(p.structure).replace(/_/g, ' ') + ')' : '')) +
-      kv('Direction', p.direction || '—') + kv('Account', p.account || '—') +
+      kv('Direction', p.direction || '—') + kv('Account', p.account_display || '—') +
       kv('Entry', p.entry_price != null ? p.entry_price : '—') + kv('Current', p.current_price != null ? p.current_price : '—') +
       kv('Stop', p.stop_loss != null ? p.stop_loss : '—') + kv('Target', p.target_1 != null ? p.target_1 : '—') +
       (openQty(p) != null
@@ -1957,6 +1968,38 @@
   // for is offered DISABLED with a plain reason rather than labelled with its key or dropped
   // silently — dropping it is how an account becomes unreachable without anyone noticing.
   let _acctOptions = [];
+  // ── R-IV.650 · every position says which account it is in, and one filter governs them all ──
+  // The filter is GENERATED from the accounts the hub serves, so a fourth account appears
+  // without a code change. 'all' is the default and is not an account.
+  let _acctFilter = 'all';
+  // R-IV.650(b)4: NEUTRAL chips. On this surface lime means a gain, vermilion a loss and amber
+  // "we cannot confirm this" — giving each account a fixed hue would teach a second meaning for
+  // the same three. The NAME identifies it; teal marks only the one being filtered to.
+  const acctChip = (key, display) => {
+    const label = display || (_acctOptions.find((a) => a.key === key) || {}).label;
+    if (!label) return '';          // never a key: a key is not a label (R-IV.650(a))
+    return `<span class="pos-acct${_acctFilter === key ? ' on' : ''}">${esc(label)}</span>`;
+  };
+  const inAcct = (key) => _acctFilter === 'all' || key === _acctFilter;
+  // Sorted by account, the lists group in the order the hub served them, then by ticker.
+  const acctRank = (key) => { const i = _acctOptions.findIndex((a) => a.key === key); return i < 0 ? 99 : i; };
+  function acctControlHtml() {
+    const named = _acctOptions.filter((a) => a.label);
+    if (named.length < 2) return '';      // one account needs no filter
+    const btn = (k, t) => `<button type="button" data-acctf="${esc(k)}" aria-pressed="${_acctFilter === k}">${esc(t)}</button>`;
+    return `<span class="seg acct-seg" role="group" aria-label="Filter positions by account">`
+      + btn('all', 'All') + named.map((a) => btn(a.key, a.label)).join('')
+      + `</span><button type="button" class="btn-add acct-sort" data-acctsort="1" aria-pressed="${_acctSort}"
+           title="Group the list by account instead of by size">by account</button>`;
+  }
+  let _acctSort = false;
+  // One delegated handler for every surface that renders the control.
+  document.addEventListener('click', (e) => {
+    const f = e.target.closest && e.target.closest('[data-acctf]');
+    if (f) { _acctFilter = f.dataset.acctf; loadBook(); renderRiver(); return; }
+    const so = e.target.closest && e.target.closest('[data-acctsort]');
+    if (so) { _acctSort = !_acctSort; loadBook(); renderRiver(); }
+  });
   function noteAccounts(positions, balances) {
     const seen = new Map();
     const add = (key, label) => {
@@ -2774,11 +2817,14 @@
     [...d.roster, ...d.shadow, ...d.nonRoster, ...d.unclassed].forEach((s) => {
       const t = s.touches;
       if (!Array.isArray(t) || !t.length) return;
-      t.forEach((h) => { if (h && h.position_id) out.push({ s, h }); });
+      // R-IV.650(b)2: the same account filter governs this lane. `touches` carries the account.
+      t.forEach((h) => { if (h && h.position_id && inAcct(h.account)) out.push({ s, h }); });
     });
     // CONTRADICTS first — the ruling's order, and the reason the lane is read at all.
     const rank = (r) => (r === 'CONTRADICTS' ? 0 : r === 'CONFIRMS' ? 1 : 2);
-    out.sort((a, b) => rank(a.h.relation) - rank(b.h.relation) || ((rowTime(b.s) || 0) - (rowTime(a.s) || 0)));
+    out.sort((a, b) => rank(a.h.relation) - rank(b.h.relation)
+      || (_acctSort ? acctRank(a.h.account) - acctRank(b.h.account) : 0)
+      || ((rowTime(b.s) || 0) - (rowTime(a.s) || 0)));
     return out;
   }
   // "Your exit: …" from the position's own block. `written` is the ONE field to test, as the
@@ -2810,7 +2856,7 @@
       ? `<span class="rl-verdict${bad ? ' bad' : ''}">${esc(h.relation)}</span>`
       : `<span class="rl-verdict quiet" title="${esc(h.position_direction ? 'The signal\u2019s own direction could not be read, so no verdict is claimed.' : 'This position\u2019s structure could not be read, so no verdict is claimed.')}">no verdict</span>`;
     return `<div class="rl-row${bad ? ' rl-contra' : ''}" data-sid="${esc(s.signal_id || '')}" data-pos="${esc(h.position_id)}">
-        <div class="rl-main">${badge} <b>${esc(s.ticker || '')}</b> <span class="rl-dir">${esc(side)}</span> ${esc(disp.name)}
+        <div class="rl-main">${badge}${acctChip(h.account, h.account_display)} <b>${esc(s.ticker || '')}</b> <span class="rl-dir">${esc(side)}</span> ${esc(disp.name)}
           <span class="rl-pos">your ${esc(String(h.structure || 'position').replace(/_/g, ' '))}${h.position_direction ? ' (' + esc(h.position_direction) + ')' : ''}</span></div>
         ${exitLine(h.position_id)}
         <div class="rl-sub">${laneTime(s)}</div>
@@ -2838,7 +2884,9 @@
     // MEASUREMENT (no idea touched the book this cycle), not the unknown it used to be.
     const book = bookEntries(d);
     const bookBody = book.length ? book.map(bookRow).join('')
-      : empty(d.answered ? 'No idea in the feed touches an open position this cycle.'
+      : empty(d.answered ? ('No idea in the feed touches an open position'
+            + (_acctFilter === 'all' ? '' : ' in ' + ((_acctOptions.find((a) => a.key === _acctFilter) || {}).label || 'that account'))
+            + ' this cycle.')
                          : 'The idea feed did not answer, so nothing could be matched against your book.');
 
     const circeToday = [..._river.values()].filter((i) => i.riverOnly && i.ts && etDate(i.ts) === etDate(now)).length;
