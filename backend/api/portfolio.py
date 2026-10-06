@@ -331,10 +331,21 @@ def _v2_to_legacy_dict(row) -> dict:
         spread_type = "credit" if "credit" in s else "debit"
 
     # Compute current_value: current_price × qty × multiplier
+    #
+    # R-IV.660(b)3 CENSUS. This multiplied the price by `quantity` -- the size OPENED (#29) --
+    # so a partially-closed position was valued at the size it started with. On money, in the
+    # direction that overstates. `open_quantity` is what is still held.
+    #
+    # A row whose remainder is UNKNOWN (no lots) gets current_value None, not a value computed
+    # off the opened size: this route's own convention is that an unpriced row reads None, and
+    # an unknown SIZE makes a value just as unknowable as an unknown price. Zero open rows are
+    # in that state today (measured 2026-10-06, 28 of 28 have lots).
     cp = d.get("current_price")
-    qty = float(d.get("quantity") or 0)   # R-IV.458(b): NUMERIC
+    qty = d.get("open_quantity")
+    qty = float(qty) if qty is not None else None
     multiplier = 1 if is_stock else 100
-    current_value = round(cp * multiplier * qty, 2) if cp is not None else None
+    current_value = (round(cp * multiplier * qty, 2)
+                     if cp is not None and qty is not None else None)
 
     # Compute unrealized_pnl_pct
     cost_basis = d.get("cost_basis")
@@ -348,7 +359,12 @@ def _v2_to_legacy_dict(row) -> dict:
         "ticker": d.get("ticker"),
         "position_type": pos_type,
         "direction": d.get("direction"),
+        # R-IV.660(b)3: this field has always MEANT the live size to its consumers, and now
+        # carries it. The size opened rides along under its own name so nothing is lost.
         "quantity": qty,
+        "quantity_opened": d.get("quantity"),
+        "open_quantity": qty,
+        "open_quantity_basis": d.get("open_quantity_basis"),
         "option_type": option_type,
         "strike": d.get("long_strike"),
         "short_strike": d.get("short_strike"),
@@ -383,7 +399,15 @@ async def get_positions():
         WHERE status = 'OPEN'
         ORDER BY expiry ASC NULLS LAST, ticker ASC
     """)
-    return [_v2_to_legacy_dict(r) for r in rows]
+    # R-IV.660(b)2/3: stamped BEFORE shaping, because the shaper multiplies a price by the
+    # size. One lot query for the whole response.
+    from services.open_quantity import stamp_open_quantity
+
+    # This module's own serialiser, the one `_v2_to_legacy_dict` already calls -- not a second
+    # one imported for the occasion.
+    dicts = [_row_to_dict(r) for r in rows]
+    await stamp_open_quantity(pool, dicts)
+    return [_v2_to_legacy_dict(d) for d in dicts]
 
 
 # ── Legacy RH-screenshot position sync — REMOVED 2026-06-17 ──

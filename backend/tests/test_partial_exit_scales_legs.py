@@ -39,10 +39,14 @@ OPEN_SPREAD = {
 }
 
 
-def _close_pool(row, *, has_lots, lots_sum, legs_shape):
+def _close_pool(row, *, has_lots, lots_sum, legs_shape, fills=None):
     """A conn that answers the close path's queries by their shape and records its writes."""
     conn = MagicMock()
     conn.executed = []
+    # HYG as the principal holds it: 5 contracts in two fills.
+    _fills = fills if fills is not None else [
+        {"id": 1, "fill_time": "2026-08-20", "qty": 3.0, "price": 0.136, "fees": 0},
+        {"id": 2, "fill_time": "2026-08-21", "qty": 2.0, "price": 0.136, "fees": 0}]
 
     async def fetchrow(sql, *args):
         s = " ".join(sql.split())
@@ -74,10 +78,18 @@ def _close_pool(row, *, has_lots, lots_sum, legs_shape):
         return None
 
     async def fetch(sql, *args):
-        # The close path reads the fills under FOR UPDATE to plan its allocations.
+        # The close path reads the fills twice: once to decide partial-vs-full against the
+        # OPEN REMAINDER (R-IV.660(b)3), and once under FOR UPDATE to plan its allocations.
+        #
+        # This used to answer both with a single lot of `lots_sum` -- 3.0 -- while the position
+        # row says `quantity` 5.0. That modelled a 5-contract position whose lots sum to 3,
+        # which is not the scenario: HYG holds 5 AS LOTS 3 + 2, and the remainder is 3 only
+        # AFTER the close. Nothing read it until the decision started reading the lots, and
+        # then the stub answered 3 where the book holds 5, so a close of 2 computed a remainder
+        # of 1. The fills are now the real pre-close lot set; `lots_sum` stays what it always
+        # meant -- the POST-disposal SUM the legs are scaled to.
         if "FROM position_lots" in " ".join(sql.split()):
-            return ([{"id": 1, "fill_time": "2026-10-01", "qty": lots_sum,
-                      "price": 0.03, "fees": 0}] if has_lots else [])
+            return ([dict(f) for f in _fills] if has_lots else [])
         return []
 
     async def execute(sql, *args):
@@ -91,9 +103,10 @@ def _close_pool(row, *, has_lots, lots_sum, legs_shape):
 
 
 def _close(monkeypatch, *, quantity, has_lots=True, lots_sum=3.0,
-           legs_shape={"n": 2, "shapes": 1}, row=OPEN_SPREAD):
+           legs_shape={"n": 2, "shapes": 1}, row=OPEN_SPREAD, fills=None):
     from api import unified_positions as U
-    pool, conn = _close_pool(row, has_lots=has_lots, lots_sum=lots_sum, legs_shape=legs_shape)
+    pool, conn = _close_pool(row, has_lots=has_lots, lots_sum=lots_sum,
+                             legs_shape=legs_shape, fills=fills)
     monkeypatch.setattr(U, "get_postgres_client", AsyncMock(return_value=pool))
     monkeypatch.setattr(U, "name_actor", AsyncMock())
     monkeypatch.setattr(U, "_adjust_account_cash_with_conn", AsyncMock(return_value=True))
@@ -353,3 +366,53 @@ def test_the_lots_route_scales_the_legs_too():
     src = inspect.getsource(U.add_position_lot)
     assert "_scale_legs_to_remainder(conn, position_id, stored_qty)" in src
     assert src.index("derive_aggregate(") < src.index("_scale_legs_to_remainder(")
+
+
+# --- R-IV.660(b)3: the decision is against what is HELD, not what was opened ---------------
+
+def test_closing_the_rest_of_a_partially_closed_position_reaches_closed(monkeypatch):
+    """THE REGRESSION R-IV.657(c) INTRODUCED, caught behaviourally rather than structurally.
+
+    HYG was opened at 5 and 2 were already closed, so its lots are [5, -2] and -- under #29,
+    now that /close no longer shrinks the column -- its `quantity` stays 5. Closing the
+    remaining 3 must CLOSE the position.
+
+    While the decision read `quantity` it computed `is_partial = 3 < 5` -> True: the position
+    would have been emptied to a remainder of zero and left OPEN, with its legs scaled to
+    nothing. A row in that state is not merely mislabelled -- it is an open position holding
+    nothing, which the loss alert and every exposure figure would go on reading.
+    """
+    row = dict(OPEN_SPREAD, quantity=5.0)      # #29: the size OPENED, after a partial close
+    out, conn = _close(monkeypatch, quantity=3, row=row, lots_sum=0.0,
+                       fills=[{"id": 1, "fill_time": "2026-08-20", "qty": 5.0,
+                               "price": 0.136, "fees": 0},
+                              {"id": 2, "fill_time": "2026-09-29", "qty": -2.0,
+                               "price": 0.40, "fees": 0}])
+    assert out["status"] == "closed", "3 of the 3 still held is a FULL close"
+    assert out["remaining_qty"] == 0
+    assert out["closed_against"] == 3.0, "the decision is against the remainder, not the 5"
+    assert out["closed_against_basis"] == "lots"
+    assert _legs_updates(conn) == [], "a full close leaves the legs as the record of what was held"
+
+
+def test_a_close_with_no_quantity_takes_the_remainder_not_the_opened_size(monkeypatch):
+    """The second half of the same fault: an unsized close defaulted to `quantity` and tried to
+    dispose of 5 where 3 remain. It must default to what is held."""
+    row = dict(OPEN_SPREAD, quantity=5.0)
+    out, _ = _close(monkeypatch, quantity=None, row=row, lots_sum=0.0,
+                    fills=[{"id": 1, "fill_time": "2026-08-20", "qty": 5.0,
+                            "price": 0.136, "fees": 0},
+                           {"id": 2, "fill_time": "2026-09-29", "qty": -2.0,
+                            "price": 0.40, "fees": 0}])
+    assert out["closed_qty"] == 3.0, "the default close size is the remainder"
+    assert out["status"] == "closed"
+
+
+def test_a_row_with_no_lots_still_decides_on_its_stored_quantity(monkeypatch):
+    """POSITIVE CONTROL (#30). With no lots the remainder is unknown, and `quantity` is the
+    only size the book has. Refusing to close such a row would strand exactly the rows the
+    lots trigger already exempts, so the fallback is taken knowingly and NAMED."""
+    out, _ = _close(monkeypatch, quantity=5, has_lots=False)
+    assert out["status"] == "closed"
+    assert out["closed_against"] == 5.0
+    assert "no lots" in out["closed_against_basis"]

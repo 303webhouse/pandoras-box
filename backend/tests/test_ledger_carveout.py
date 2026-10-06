@@ -22,12 +22,24 @@ from config import accounts as acc
 
 @pytest.mark.parametrize("raw", [
     "FIDELITY_ROTH", "fidelity_roth", "Fidelity Roth", "  fidelity roth  ",
-    "FIDELITY", "fidelity", "Fid",
 ])
-def test_fidelity_forms_resolve_to_the_roth(raw):
-    if raw.strip().lower() == "fid":
-        return                              # not an alias; see the UNKNOWN test
+def test_fidelity_forms_that_name_the_roth_resolve_to_it(raw):
+    """Only spellings that SAY which Fidelity account. `FIDELITY` used to be among them."""
     assert acc.normalize_account(raw) == acc.FIDELITY_ROTH
+
+
+@pytest.mark.parametrize("raw", ["FIDELITY", "fidelity", "Fid"])
+def test_a_bare_fidelity_resolves_to_nothing(raw):
+    """R-IV.660(c)1. The alias `fidelity -> FIDELITY_ROTH` stood in this vocabulary while
+    models/accounts.py had REFUSED the same string since R-IV.638(b)3, with a 400 naming both
+    keys and both account numbers. One question, two registries, opposite answers: whichever a
+    surface happened to ask decided whether a filter was refused or silently narrowed to one of
+    two Fidelity BrokerageLink accounts.
+
+    The refusal is the correct answer and it belongs to the registry, so this module stops
+    answering and returns UNKNOWN -- which is_in_scope already treats as out of scope."""
+    assert acc.normalize_account(raw) == acc.UNKNOWN
+    assert not acc.is_in_scope(raw)
 
 
 @pytest.mark.parametrize("raw", ["ROBINHOOD", "robinhood", "rh", "Robinhood - Individual"])
@@ -90,21 +102,44 @@ def test_the_401a_is_in_scope_under_its_EXACT_key_only():
     assert acc.is_in_scope("FIDELITY_401A")
 
 
-@pytest.mark.parametrize("parked", ["Fidelity 401A", "fidelity 401a", "fidelity401a"])
-def test_the_parked_401a_spelling_stays_out_of_scope(parked):
-    """The same string, different money. This is the half that had to be got right."""
-    assert acc.normalize_account(parked) == acc.OUT_OF_SCOPE
-    assert not acc.is_in_scope(parked)
+@pytest.mark.parametrize("spelling", ["Fidelity 401A", "fidelity 401a",
+                                     "FIDELITY_401A", "fidelity_401a"])
+def test_every_401a_spelling_names_the_traded_account(spelling):
+    """R-IV.660(c)1 REVERSED THIS TEST, and the reason is worth keeping.
+
+    It asserted that the display spellings stay OUT of scope, because 'Fidelity 401A' names 90
+    parked snapshot rows while FIDELITY_401A names the traded BrokerageLink. True of the data --
+    but the rule enforcing it was an exact-case match, which made an account's scope depend on
+    its capitalisation. The balances MCP tool lowercases the name for its payload key, asked
+    this module, and got OUT_OF_SCOPE: the traded 401(a) vanished from total_balance, reported
+    as excluded parked money.
+
+    The parked rows are held out by IDENTITY instead, which was doing the work anyway: they live
+    in balance_snapshots, and the day-P&L reader filters on the exact names in account_balances
+    (the three canonical keys) plus basis = 'derived'."""
+    assert acc.normalize_account(spelling) == acc.FIDELITY_401A
+    assert acc.is_in_scope(spelling)
 
 
-def test_fidelity_filter_does_not_match_the_parked_accounts():
-    """THE DEFECT: `startswith('fidelity')` matched Fidelity Roth, 401A and 403B
-    alike, so a request for the one traded account silently summed two parked ones
-    with it."""
-    assert acc.accounts_match("FIDELITY", "Fidelity Roth") is True
-    assert acc.accounts_match("FIDELITY", "Fidelity 401A") is False
-    assert acc.accounts_match("FIDELITY", "Fidelity 403B") is False
-    assert acc.accounts_match("FIDELITY", "BROKERAGE_LINK_401K") is False
+def test_a_bare_fidelity_filter_matches_nothing_at_all():
+    """THE DEFECT: a startswith match on `fidelity` matched Fidelity Roth, 401A and 403B alike,
+    so a request for the one traded account silently summed two parked ones with it.
+
+    The bare filter used to resolve to the Roth and match it. R-IV.660(c)1 removed that alias,
+    so it now matches NOTHING -- and the surfaces that accept the parameter refuse it outright
+    with a message naming both keys (portfolio_summary). Matching nothing silently would be its
+    own fault; the refusal is what makes this safe, and test_scope_does_not_depend_on_case.py
+    owns that control."""
+    for row in ("Fidelity Roth", "Fidelity 401A", "Fidelity 403B", "BROKERAGE_LINK_401K"):
+        assert acc.accounts_match("FIDELITY", row) is False, row
+
+
+def test_a_filter_that_names_its_account_matches_only_that_account():
+    """POSITIVE CONTROL. The fix must not leave every Fidelity filter matching nothing."""
+    assert acc.accounts_match("FIDELITY_ROTH", "Fidelity Roth") is True
+    assert acc.accounts_match("FIDELITY_401A", "FIDELITY_401A") is True
+    assert acc.accounts_match("FIDELITY_ROTH", "FIDELITY_401A") is False
+    assert acc.accounts_match("FIDELITY_401A", "Fidelity 403B") is False
 
 
 def test_a_prefix_that_is_not_an_account_matches_nothing():
@@ -293,3 +328,18 @@ def test_migration_032_has_a_down():
            / "032_mark_status.sql").read_text(encoding="utf-8")
     assert "-- DOWN" in sql
     assert "mark_status" in sql and "ABSENT" in sql
+
+
+@pytest.mark.parametrize("squashed", ["fidelity401a", "fidelityroth"])
+def test_a_spelling_with_no_separator_is_unknown_for_every_fidelity_account(squashed):
+    """`_key()` folds case and underscores, but it cannot invent a separator that is not there.
+
+    `fidelity401a` was previously listed as out-of-scope and `fidelityroth` never was, so the
+    two halves of the vocabulary disagreed about the same shape of string. Neither has a
+    producer -- the live rows are `FIDELITY_401A` and `FIDELITY_ROTH` -- so the answer is
+    UNKNOWN for both rather than an alias invented for a spelling nothing writes.
+
+    UNKNOWN is the safe answer here: it is not in scope, so such a string can never be summed
+    into a tradeable total on the strength of not having been recognised."""
+    assert acc.normalize_account(squashed) == acc.UNKNOWN
+    assert not acc.is_in_scope(squashed)

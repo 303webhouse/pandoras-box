@@ -23,11 +23,14 @@ from websocket.broadcaster import manager
 from models.position_risk import calculate_position_risk, infer_direction
 from models.position_lots import (  # R-IV.441(a): the position row is the AGGREGATE
     BROKER_VERIFIED, IMPORT_PARENT_SOURCES, LOT_SOURCE_PROVENANCE, SCREEN_VERIFIED,
-    derive_aggregate, fifo_plan, is_verified, outranks, provenance_for_lot, provenance_for_parent,
+    derive_aggregate, fifo_plan, is_verified, open_remainder, outranks, provenance_for_lot,
+    provenance_for_parent, size_opened,   # R-IV.660(b): the two #29 figures, one author
 )
 from models.accounts import (  # R-IV.445(a): one vocabulary, read by every write path
     CANONICAL_ACCOUNTS, canonical_account,
 )
+from models.accounts import FIDELITY_401A as FIDELITY_401A_KEY   # R-IV.660(d)
+from models.accounts import FIDELITY_ROTH as FIDELITY_ROTH_KEY
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
     entry_orientation, mark_from_legs, prior_is_good, stale_reason,
@@ -1207,7 +1210,9 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     """
     Portfolio summary for the bias row widget and committee context.
     Returns: total positions, capital at risk, net direction, nearest expiry.
-    Optional account filter: ?account=ROBINHOOD or ?account=FIDELITY
+    Optional account filter: ?account=ROBINHOOD, FIDELITY_ROTH or FIDELITY_401A, or either
+    Fidelity account NUMBER. A bare `FIDELITY` is REFUSED (R-IV.638(b)3): two of the three
+    accounts are Fidelity BrokerageLink accounts and no name tells them apart.
     """
     # R-IV.454(d): no sweep on a read — see _sweep_expired_positions.
 
@@ -1218,13 +1223,28 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             "SELECT * FROM unified_positions WHERE status = 'OPEN' ORDER BY COALESCE(expiry, '2099-12-31'::date) ASC"
         )
 
-    positions = [_row_to_dict(r) for r in rows]
+        positions = [_row_to_dict(r) for r in rows]
+        # R-IV.660(b)2/3: stamped before anything below reads a size. This route both SERVES
+        # positions and computes a money aggregate from them, and the aggregate below used
+        # `quantity` -- the size OPENED -- as the live size.
+        from services.open_quantity import stamp_open_quantity
+
+        await stamp_open_quantity(conn, positions)
 
     # Filter by account if specified
     if account:
         account_upper = account.upper()
-        # T2: one vocabulary. `FIDELITY` is an ALIAS of FIDELITY_ROTH, not a
-        # prefix family — the 401A/403B rows are parked money and out of scope.
+        # R-IV.660(c)1: a Fidelity filter must SAY WHICH. The registry owns that refusal and
+        # raises a 400 naming both keys and both account numbers; asking it here is what stops
+        # this route from quietly serving the Roth for `?account=FIDELITY`, which is what the
+        # config alias used to make it do. Non-Fidelity spellings (`rh`, `robinhood`) are not
+        # routed through it -- the registry does not carry those aliases and refusing them
+        # would break a filter that works.
+        from models.accounts import canonical_account as _canonical, is_fidelity_name
+
+        if is_fidelity_name(account):
+            _canonical(account)
+
         from config.accounts import accounts_match
         positions = [p for p in positions
                      if accounts_match(account, p.get("account") or "ROBINHOOD")]
@@ -1322,8 +1342,20 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             cost = p.get("cost_basis")
             if cost is None:
                 ep = p.get("entry_price") or 0
-                qty = float(p.get("quantity") or 0)
-                cost = ep * qty * 100
+                # R-IV.660(b)3 CENSUS. This read `quantity`, which convention #29 defines as
+                # the size OPENED -- so a partially-closed row was valued at the size the
+                # principal started with and this total overstated the book by the part
+                # already sold. `open_quantity` is what is still held.
+                #
+                # None is NOT 0 here: an open row with no lots has an unknown remainder, and
+                # valuing it at zero would quietly shrink the book. Such a row is counted as
+                # unpriced instead -- the population this total already names rather than
+                # guesses at.
+                oq = p.get("open_quantity")
+                if oq is None:
+                    unpriced_count += 1
+                    continue
+                cost = ep * float(oq) * 100
             pnl = p.get("unrealized_pnl") or 0
             total_position_value += cost + pnl
     total_position_value = round(total_position_value, 2)
@@ -1375,6 +1407,9 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             "structure": p.get("structure"),
             "direction": p.get("direction"),
             "quantity": p.get("quantity"),
+            # R-IV.660(b)2: the size opened AND what is still open, both named.
+            "open_quantity": p.get("open_quantity"),
+            "open_quantity_basis": p.get("open_quantity_basis"),
             "long_strike": p.get("long_strike"),
             "short_strike": p.get("short_strike"),
             "expiry": p.get("expiry"),
@@ -1702,14 +1737,20 @@ async def _portfolio_greeks_inner():
 @router.get("/v2/positions/{position_id}", dependencies=[Depends(require_api_key)])
 async def get_position(position_id: str):
     """Get a single position by ID."""
+    # R-IV.660(b)2: one position is still a position payload. A consumer reading this route
+    # must not have to compute the remainder that the list route serves it.
+    from services.open_quantity import stamp_open_quantity
+
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM unified_positions WHERE position_id = $1", position_id
         )
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
-    return _row_to_dict(row)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Position {position_id} not found")
+        out = _row_to_dict(row)
+        await stamp_open_quantity(conn, [out])
+    return out
 
 
 # ── UPDATE ────────────────────────────────────────────────────────────
@@ -2199,7 +2240,39 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                 pos = _row_to_dict(row)
                 entry_price = pos.get("entry_price") or 0
                 structure = pos.get("structure") or ""
-                total_qty = float(pos["quantity"] or 0)
+
+                # R-IV.660(b)3 CENSUS -- AND A REGRESSION R-IV.657(c) PUT HERE.
+                #
+                # This read `pos["quantity"]`. That was harmless only while a partial close
+                # shrank the column: `quantity` tracked the remainder, so comparing against it
+                # decided partial-vs-full correctly by accident. R-IV.657(c) correctly stopped
+                # the shrinking -- `quantity` is now the size OPENED (#29) -- and that turned
+                # this line into a fault:
+                #
+                #   * closing the REST of a partially-closed position (3 left of 5 opened)
+                #     computed `is_partial = 3 < 5` -> True, so the position would be closed
+                #     down to nothing and still be left OPEN, with legs scaled to zero;
+                #   * a close request with NO quantity defaulted to the size opened and tried
+                #     to dispose of 5 lots' worth where 3 remain.
+                #
+                # The decision belongs to what is HELD, so the remainder is read here, before
+                # it -- through the one author, not a fourth SQL sum of the same column.
+                from services.position_economics import open_remainder as _open_remainder
+
+                # This position's lots, not the batched multi-position reader: that one selects
+                # `position_id` to group by and this is a single row already under lock. The
+                # ARITHMETIC is still the one author below -- what is local here is the SELECT.
+                _lots_now = [dict(r) for r in await conn.fetch(
+                    "SELECT qty FROM position_lots WHERE position_id = $1", position_id)]
+                _rem = _open_remainder(_lots_now)
+                if _rem is not None:
+                    total_qty = float(_rem)
+                    total_qty_basis = "lots"
+                else:
+                    # No lots: `quantity` is the only size the book has for this row, and the
+                    # lots trigger already exempts it. Named, not silently substituted.
+                    total_qty = float(pos["quantity"] or 0)
+                    total_qty_basis = "row quantity (position has no lots)"
 
                 close_qty = req.quantity if req.quantity and req.quantity < total_qty else total_qty
                 is_partial = close_qty < total_qty
@@ -2548,6 +2621,11 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
         "trade_outcome": trade_outcome,
         "closed_qty": close_qty,
         "remaining_qty": total_qty - close_qty if is_partial else 0,
+        # R-IV.660(b)3: what the partial-vs-full decision was made AGAINST. A caller seeing
+        # `partial_close` on what it believed was a full close can tell from this whether the
+        # book disagreed about the size or merely about the request.
+        "closed_against": total_qty,
+        "closed_against_basis": total_qty_basis,
         "cash_adjusted": close_cash_ok,
     }
 
@@ -2952,13 +3030,45 @@ async def run_mark_to_market() -> dict:
         logger.warning("position_legs read failed; legs positions will read UNAVAILABLE: %s", e)
         legs_by_position = None
 
+    # R-IV.660(b)3 CENSUS -- THE MARK JOB. Every unrealized figure below was computed from
+    # `quantity`, the size OPENED (#29), so this job wrote an unrealized P&L for the whole of a
+    # position the principal had already part-sold. The read-only service happens to replace
+    # that figure with a lot-derived one on its way out, which is why it was invisible: the
+    # STORED column was wrong and the served value was right. Anything reading the column
+    # directly -- and the frontend does -- got the overstated one.
+    #
+    # One lot query for every open row, through the existing author.
+    lots_by_position: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        from services.read_only.positions import fetch_lots_by_position
+
+        async with pool.acquire() as conn:
+            lots_by_position = await fetch_lots_by_position(
+                conn, [r["position_id"] for r in rows])
+    except Exception as e:
+        # A failed lot read must not make every row read as flat. It falls back to the stored
+        # size per row below, and says so once here.
+        logger.warning("mark job: lots unreadable (%s) — sizes fall back to the stored "
+                       "quantity, which OVERSTATES any partially-closed row", type(e).__name__)
+        lots_by_position = {}
+
     # Cache chain snapshots per ticker to avoid duplicate API calls
     for row in rows:
         ticker = row["ticker"]
         structure = (row.get("structure") or "").lower()
         at = (row.get("asset_type") or "").upper()
         entry_price = float(row["entry_price"]) if row["entry_price"] else None
-        quantity = float(row["quantity"]) if row["quantity"] is not None else 0.0
+        # R-IV.660(b)3: the size to mark is what is HELD, not what was opened. `open_remainder`
+        # answers None where the lot set cannot support a figure, and the stored quantity is
+        # the only size available for such a row -- substituted KNOWINGLY here (this job's
+        # purpose is to value every open row) rather than silently.
+        from services.position_economics import open_remainder as _open_rem
+
+        _rem = _open_rem(lots_by_position.get(row["position_id"]) or [])
+        if _rem is not None:
+            quantity = float(_rem)
+        else:
+            quantity = float(row["quantity"]) if row["quantity"] is not None else 0.0
         expiry = row.get("expiry")
         long_strike = float(row["long_strike"]) if row.get("long_strike") else None
         short_strike = float(row["short_strike"]) if row.get("short_strike") else None
@@ -3270,9 +3380,18 @@ async def mark_to_market(_=Depends(require_api_key)):
 # allowlist refuses the ones a caller may not make. These add lots, manual edits with
 # a reason, and cash events — and the cash path deliberately touches no position row.
 
-# R-IV.75(d) ETF-only invariant. An option structure on the Roth is prima facie
-# mis-attributed, so it is refused at entry rather than corrected later.
-_ETF_ONLY_ACCOUNTS = {"FIDELITY_ROTH"}
+# R-IV.75(d) ETF-only invariant. An option structure on either Fidelity BrokerageLink is prima
+# facie mis-attributed, so it is refused at entry rather than corrected later.
+#
+# R-IV.660(d): FIDELITY_401A joins the Roth. The principal confirms the 401(a) cannot trade
+# options -- a FACT ABOUT THE BROKERAGE, which is why it is named here rather than inferred from
+# the account being a retirement account or from its history of holding only ETFs. It had been
+# left out since R-IV.638(f) pending that confirmation, and leaving it out meant an option row
+# could be filed against an account that cannot hold one, with nothing to catch it.
+#
+# Built from the registry's constants, not typed: a key that is renamed in one place and spelled
+# out in another is how an invariant comes to guard an account that no longer exists.
+_ETF_ONLY_ACCOUNTS = {FIDELITY_ROTH_KEY, FIDELITY_401A_KEY}
 
 
 def _assert_etf_only(account: Optional[str], asset_type: Optional[str]) -> None:
@@ -3424,11 +3543,23 @@ async def add_position_lot(position_id: str, req: AddLotRequest,
 async def get_lots_coverage(limit: int = Query(50, ge=0, le=500)):
     """How much of the book actually has lots behind it — the lots invariant, read live.
 
-    Two claims are checked per position: that it has at least one lot, and that its lots sum to
-    its stored quantity. Both are FALSE on part of the book today, and this surface exists so
-    that stays visible rather than being asserted away. It is not a display that has never been
-    seen to move: the counts are non-zero on the live book, and they move when a lot is added
-    or removed.
+    Two claims are checked per position: that it has at least one lot, and that its lots agree
+    with its stored quantity. Both are FALSE on part of the book today, and this surface exists
+    so that stays visible rather than being asserted away. It is not a display that has never
+    been seen to move: the counts are non-zero on the live book, and they move when a lot is
+    added or removed.
+
+    WHICH SUM AGREEMENT MEANS (R-IV.660(b)3). This compared `SUM(lot qty)` -- the OPEN
+    REMAINDER -- against `quantity`. Convention #29 makes those two figures deliberately
+    different on every partially-closed position: `quantity` is the size OPENED and the
+    remainder is what is left. So the old test reported `qty_mismatch` for rows that are
+    exactly right, and `holds` would have read false for good on a healthy book -- an alarm
+    that cannot be cleared is an alarm nobody reads. Measured 2026-10-06: 514 of 519 CLOSED
+    rows and 33 of 38 EXPIRED rows would have been flagged.
+
+    The invariant that actually holds is `SUM(qty WHERE qty > 0) == quantity`: everything ever
+    acquired equals the size the row claims to have been opened at. The remainder is reported
+    beside it as its own figure, not as a second opinion about the same one.
 
     Every population is counted and named — a position with no stored quantity cannot be
     checked against its lots and is its own line, never folded into either answer.
@@ -3442,25 +3573,33 @@ async def get_lots_coverage(limit: int = Query(50, ge=0, le=500)):
                       COUNT(*) FILTER (WHERE a.lots = 0)                   AS without_lots,
                       COUNT(*) FILTER (WHERE p.quantity IS NULL)           AS unquantified,
                       COUNT(*) FILTER (WHERE a.lots > 0 AND p.quantity IS NOT NULL
-                                         AND a.lot_qty <> p.quantity)      AS qty_mismatch,
+                                         AND a.opened <> p.quantity)       AS qty_mismatch,
+                      COUNT(*) FILTER (WHERE a.lots > 0
+                                         AND a.lot_qty <> a.opened)        AS partially_closed,
                       COUNT(*) FILTER (WHERE a.unpriced > 0)               AS with_unpriced_lot
                  FROM unified_positions p
                  JOIN LATERAL (
                         SELECT COUNT(*) AS lots,
                                COALESCE(SUM(l.qty), 0) AS lot_qty,
+                               -- #29's two figures, named apart: everything acquired, and
+                               -- what is left after disposals.
+                               COALESCE(SUM(l.qty) FILTER (WHERE l.qty > 0), 0) AS opened,
                                COUNT(*) FILTER (WHERE l.price IS NULL) AS unpriced
                           FROM position_lots l WHERE l.position_id = p.position_id
                       ) a ON TRUE
                 GROUP BY p.status ORDER BY p.status""")
         open_gaps = await conn.fetch(
             """SELECT p.position_id, p.ticker, p.quantity,
-                      COALESCE(SUM(l.qty), 0) AS lot_qty, COUNT(l.id) AS lots
+                      COALESCE(SUM(l.qty), 0) AS lot_qty,
+                      COALESCE(SUM(l.qty) FILTER (WHERE l.qty > 0), 0) AS opened,
+                      COUNT(l.id) AS lots
                  FROM unified_positions p
                  LEFT JOIN position_lots l ON l.position_id = p.position_id
                 WHERE p.status = 'OPEN'
                 GROUP BY p.position_id, p.ticker, p.quantity
                HAVING COUNT(l.id) = 0
-                   OR (p.quantity IS NOT NULL AND COALESCE(SUM(l.qty), 0) <> p.quantity)
+                   OR (p.quantity IS NOT NULL
+                       AND COALESCE(SUM(l.qty) FILTER (WHERE l.qty > 0), 0) <> p.quantity)
                 ORDER BY p.position_id LIMIT $1""", limit)
         prov = await conn.fetch(
             "SELECT provenance, COUNT(*) AS lots, "
@@ -3468,11 +3607,17 @@ async def get_lots_coverage(limit: int = Query(50, ge=0, le=500)):
             "FROM position_lots GROUP BY provenance ORDER BY provenance")
 
     keys = ("positions", "with_lots", "without_lots", "unquantified", "qty_mismatch",
-            "with_unpriced_lot")
+            "partially_closed", "with_unpriced_lot")
     by_status = {r["status"]: {k: r[k] for k in keys} for r in rows}
     totals = {k: sum(v[k] for v in by_status.values()) for k in keys}
     return {
-        "invariant": "every position has >= 1 lot and SUM(lot qty) == row qty",
+        # The sentence and the SQL are changed together, deliberately: a surface whose stated
+        # invariant and actual test drift apart is worse than one that tests nothing.
+        "invariant": ("every position has >= 1 lot and SUM(lot qty WHERE qty > 0) == row "
+                      "quantity (convention #29: the row's quantity is the size OPENED)"),
+        "partially_closed_note": ("`partially_closed` counts rows whose remainder is below "
+                                  "their opened size. That is CORRECT, not a fault -- it is "
+                                  "what a partial close looks like."),
         "holds": totals["without_lots"] == 0 and totals["qty_mismatch"] == 0,
         "totals": totals,
         "by_status": by_status,
@@ -3602,17 +3747,30 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
             # The position's own realized field is NOT written here. Realized belongs to the
             # close path and its allocations live in position_lot_closures; writing it from two
             # places is how a figure comes to have two owners and no author.
+            #
+            # CONVENTION #29, ruled everywhere by R-IV.660(b): `quantity` is the SIZE OPENED,
+            # adds included. This wrote the REMAINDER into it, so a reduced row forgot how big
+            # it had been -- and since R-IV.657(c) fixed /close to leave `quantity` alone, the
+            # two routes disagreed about what the column meant. `size_opened` sums the positive
+            # lot quantities; the remainder is served as `open_quantity` and stored nowhere.
             await conn.execute(
                 """UPDATE unified_positions
                    SET quantity = $1, entry_price = $2, cost_basis = $3,
                        basis_incomplete_reason = $4, updated_at = NOW()
                    WHERE position_id = $5""",
-                stored_qty, agg["entry_price"], agg["cost_basis"],
+                size_opened([dict(r) for r in remaining]),
+                agg["entry_price"], agg["cost_basis"],
                 (f"R-IV.456(a): {agg['unknown_reason']}" if agg["unknown_reason"] else None),
                 position_id)
 
     return {"status": "reduced", "position_id": position_id, "written": True,
-            "disposal_lot_id": disposal_id, "quantity_after": stored_qty,
+            # R-IV.660(b): both figures, each named for what it is. `quantity_after` meant the
+            # remainder and was the only one served, which is how a caller came to read a
+            # remainder as a size.
+            "disposal_lot_id": disposal_id,
+            "open_quantity_after": stored_qty,
+            "quantity_after": stored_qty,          # kept: existing callers read this key
+            "size_opened": size_opened([dict(r) for r in remaining]),
             "entry_price_after": agg["entry_price"], "cost_basis_after": agg["cost_basis"],
             "basis_known": agg["basis_known"], **plan}
 

@@ -138,6 +138,13 @@ def touches_block(position: dict, signal_direction: Optional[str]) -> dict:
         "structure": structure,
         "position_direction": direction_of_structure(structure),
         "relation": relation(structure, signal_direction),
+        # R-IV.660(b)2: HOW MUCH of the book this touches. `open_quantity` is the open
+        # remainder, never `quantity` -- a signal contradicting a position the principal has
+        # already half sold is a smaller problem than one contradicting the whole of it, and
+        # the size opened cannot tell the River which it is. `_basis` travels with it so an
+        # unknown remainder is distinguishable from a flat one.
+        "open_quantity": position.get("open_quantity"),
+        "open_quantity_basis": position.get("open_quantity_basis"),
         # R-IV.632(c)3 / R-IV.633: the account travels with the touch, key AND display
         # name. A touches block that names only the position_id makes ABACUS join back to
         # the book to answer "which account contradicts this signal" -- and with three

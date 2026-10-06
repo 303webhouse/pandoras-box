@@ -113,12 +113,27 @@ class TestOneRegistry:
         classification is false rather than stale — a scope class is re-decided, not
         refreshed, and a ruling has re-decided it.
 
-        AMENDED R-IV.638(b)2: the EXACT key only. 'Fidelity 401(a)' as a display string is
-        not a scope input — the parked history collapses to the same normalised key, and no
-        name-based rule can separate the two pots."""
+        AMENDED R-IV.638(b)2: the EXACT key only. 'Fidelity 401A' as a display string was not
+        a scope input, because the parked history collapses to the same normalised key and no
+        name-based rule can separate the two pots.
+
+        AMENDED AGAIN, R-IV.660(c)1, AND THIS IS THE DURABLE VERSION. "The exact key only" made
+        scope depend on CAPITALISATION: `is_in_scope("FIDELITY_401A")` was True and
+        `is_in_scope("fidelity_401a")` False for the same account. Case is itself a name-based
+        rule -- the thing the paragraph above correctly says cannot separate these pots -- and
+        every boundary that folds case flips the answer. One did: the balances MCP tool
+        lowercases the name for its payload key, so the traded 401(a) was dropped from
+        `total_balance` and reported as excluded parked money.
+
+        EVERY casing is in scope now. What holds the parked history out is not a spelling rule
+        at all: it lives in `balance_snapshots`, and the day-P&L reader filters on the exact
+        names present in `account_balances` plus `basis = 'derived'`. See
+        `tests/test_scope_does_not_depend_on_case.py`, which owns that control."""
         assert is_in_scope(FIDELITY_401A)
         assert scope_normalize(FIDELITY_401A) == FIDELITY_401A
-        assert not is_in_scope("Fidelity 401A")
+        for spelling in ("Fidelity 401A", "fidelity_401a", "fidelity 401a"):
+            assert is_in_scope(spelling), spelling
+            assert scope_normalize(spelling) == FIDELITY_401A
 
     @pytest.mark.parametrize("label", ["Fidelity 403B", "fidelity_403b",
                                        "BROKERAGE_LINK_401K", "IBKR"])

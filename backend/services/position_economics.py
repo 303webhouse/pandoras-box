@@ -105,12 +105,15 @@ def open_remainder(lots: Sequence[Dict[str, Any]]) -> Optional[Decimal]:
     """
     if not lots:
         return None
-    total = Decimal("0")
+    # The ADDITION is models.position_lots.open_remainder -- one expression for the whole
+    # codebase. What is decided HERE is the policy this module exists for: a lot with no qty
+    # makes the remainder unknowable, and None is the only honest answer for it.
     for l in lots:
-        q = _d(l.get("qty"))
-        if q is None:
+        if _d(l.get("qty")) is None:
             return None
-        total += q
+    from models.position_lots import open_remainder as _sum_qty
+
+    total = _d(_sum_qty(lots)) or Decimal("0")
     return total
 
 

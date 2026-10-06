@@ -145,6 +145,11 @@ async def open_positions_by_ticker(pool) -> Dict[str, list]:
     Only the columns the block needs. A feed row must not carry the position's money: the River
     says "this touches your book", and what the position is worth is the positions surface's
     answer, computed from lots there.
+
+    R-IV.660(b)2 adds `open_quantity`, which is a SIZE and not money -- "this touches your book"
+    is not usable without how much of the book it touches, and the alternative was the reader
+    taking `quantity` and overstating a partially-closed position. Still ONE extra query for the
+    whole feed, through the existing batched lot reader, never one per row.
     """
     out: Dict[str, list] = {}
     try:
@@ -153,11 +158,19 @@ async def open_positions_by_ticker(pool) -> Dict[str, list]:
                 # `account` is SELECTed because touches_block serves it (R-IV.632(c)3).
                 # A column the block reads and the query omits yields a null that looks
                 # like an unlabelled position rather than a missing SELECT.
-                """SELECT position_id, ticker, structure, account
+                # `status` is SELECTed although the WHERE clause already fixes it: the
+                # open-quantity rule reads it, and a figure that silently depends on a
+                # column being absent is the shape this function's own comment warns about.
+                """SELECT position_id, ticker, structure, account, status
                      FROM unified_positions
                     WHERE status = 'OPEN' AND ticker IS NOT NULL""")
-        for r in rows:
-            out.setdefault((r["ticker"] or "").upper(), []).append(dict(r))
+            positions = [dict(r) for r in rows]
+            # R-IV.660(b)2: stamped on the same connection, one lot query for the whole feed.
+            from services.open_quantity import stamp_open_quantity
+
+            await stamp_open_quantity(conn, positions)
+        for p in positions:
+            out.setdefault((p.get("ticker") or "").upper(), []).append(p)
     except Exception as exc:  # noqa: BLE001
         # Fail OPEN: a feed that cannot read the book shows no touches, rather than no feed.
         logger.warning("touches: open positions unreadable (%s) — serving the feed without them",
