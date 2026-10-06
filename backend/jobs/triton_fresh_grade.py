@@ -42,7 +42,8 @@ from jobs.triton_shadow_grader import (
     _gap_text,
     _bounded_lookback, _split_ex_dates, spans_corporate_action,
 )
-from jobs.triton_shadow_common import (
+from jobs.triton_shadow_common import (  # noqa: I001
+    cumulative_split_ratio, split_adjusted_entry,
     PROVIDER_NONE, cohort_bounds, cohort_of, close_on_session,
     fetch_r_close_index, horizon_is_session, horizon_reached, nth_trading_day,
     triton_row_pinned, _f,
@@ -188,20 +189,40 @@ async def fresh_grade(*, row_ids: Optional[List[int]] = None,
             _skip("no_regular_session_bars")
             continue
 
+        # Amendment 5(a): the split calendar for this ticker over the whole graded window.
+        # One vendor call per ticker, not per row; yfinance only, so no governor spend.
+        from integrations.uw_api import get_splits_yfinance
+
+        _splits_iso = await get_splits_yfinance(
+            ticker, min(wanted).isoformat(), max(wanted).isoformat()) if wanted else {}
+        splits = {}
+        for _d, _r in (_splits_iso or {}).items():
+            try:
+                splits[date.fromisoformat(_d)] = float(_r)
+            except (TypeError, ValueError):
+                continue
+
         for r, fd in keep:
             direction = r["direction"] or "BULL"
+            # Amendment 5(a): THE ENTRY IS THE RAW PRICE AT FIRE, FULL STOP.
+            #
+            # This fell back to `close_on_session(idx, fd)` -- the VENDOR's series -- when
+            # `spot_at_fire` was missing. That entry would be split-adjusted and, before this
+            # change, dividend-adjusted too, so the row would be graded against a close on its
+            # own basis and read as clean while every other row's basis differed. Measured
+            # 2026-10-05: all 9,859 shadow rows carry a positive `spot_at_fire`, so the
+            # fallback has never fired -- which is exactly when to remove it, rather than
+            # after the first row that needs it.
             entry = _f(r["spot_at_fire"])
             entry_session = fd if (entry and entry > 0) else None
             if not entry or entry <= 0:
-                entry = close_on_session(idx, fd)
-                entry_session = fd if entry else None
-            if not entry or entry <= 0:
-                _skip("no_entry_price")
+                _skip("no_raw_entry_price")
                 continue
 
             vals = {k: None for k in HORIZONS}
             sess = {k: None for k in HORIZONS}
             gaps: Dict[int, date] = {}
+            split_ratios: Dict[int, float] = {}
             for k in HORIZONS:
                 tgt = nth_trading_day(fd, k)
                 if not horizon_reached(tgt):
@@ -215,7 +236,19 @@ async def fresh_grade(*, row_ids: Optional[List[int]] = None,
                     gaps[k] = tgt
                     _skip(SESSION_GAP if tries >= attempts else SESSION_BAR_RETRYING)
                     continue
-                _v = _dir_adj(entry, close_k, direction)
+                # Amendment 5(a). The close is split-adjusted as of fetch; the entry is the
+                # raw pre-split price. PER HORIZON, because "between fire and grading" is a
+                # different window for each k -- a split falling between the 3d and 5d
+                # sessions must move one grade and not the other.
+                _ratio = cumulative_split_ratio(splits, fd, tgt)
+                _entry_k = split_adjusted_entry(entry, _ratio)
+                if _entry_k is None:
+                    gaps[k] = tgt
+                    _skip("entry_not_split_adjustable")
+                    continue
+                if _ratio != 1.0:
+                    split_ratios[k] = _ratio
+                _v = _dir_adj(_entry_k, close_k, direction)
                 if _v is None:
                     gaps[k] = tgt
                     _skip(NON_FINITE_RETURN)
@@ -232,6 +265,12 @@ async def fresh_grade(*, row_ids: Optional[List[int]] = None,
                 **{"session_%dd" % k: (str(sess[k]) if sess[k] else None)
                    for k in HORIZONS},
                 "session_gaps": _gap_text(gaps),
+                # Amendment 5(a) provenance: the ratio each grade's entry was divided by,
+                # so a grade carries the adjustment it used rather than leaving a reader to
+                # re-derive it from a vendor calendar that may have changed.
+                "split_ratios": ("; ".join(f"{k}d={v:g}" for k, v in sorted(split_ratios.items()))
+                                 or None),
+                "price_basis": "entry=raw spot_at_fire, closes=dividend-unadjusted (Amd 5a)",
             }
             out["rows"].append(record)
             for k, d in gaps.items():

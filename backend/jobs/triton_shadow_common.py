@@ -217,7 +217,9 @@ async def _yfinance_close_index(ticker: str) -> Tuple[Dict[date, float], str]:
     from integrations.uw_api import get_bars_yfinance, PROVIDER_YFINANCE
 
     try:
-        fb = await get_bars_yfinance(ticker.upper())
+        # R-IV.647(c) / Amendment 5(a): a grade compares like with like. The entry is
+        # the raw price at fire, so the horizon close is read DIVIDEND-UNADJUSTED.
+        fb = await get_bars_yfinance(ticker.upper(), auto_adjust=False)
     except Exception as exc:
         logger.warning("triton yfinance bars failed %s: %s", ticker, type(exc).__name__)
         return {}, PROVIDER_NONE
@@ -386,6 +388,62 @@ def cohort_bounds(name: str) -> Optional[Tuple[date, date]]:
         return TRITON_WINDOW_FIRST_SESSION, date(2026, 9, 18)
     monday = date(2026, 9, 21) + timedelta(days=7 * (k - 2))
     return monday, monday + timedelta(days=4)
+
+
+# ── Amendment 5(a): a split between fire and grading adjusts the ENTRY ──────────────────────
+#
+# With `auto_adjust=False` the vendor's closes are still SPLIT-adjusted as of fetch
+# (backtest/bars.py measured this and says so). So every close in the series, including the
+# fire session's, is on the post-split scale, while `spot_at_fire` is the raw pre-split price.
+# Comparing them across a split is the same class of mismatch the dividend caused: a 2-for-1
+# would read as an instant -50% on a BULL row.
+#
+# The entry is therefore DIVIDED by the cumulative ratio of every split with an ex-date after
+# the fire session and on or before the graded session. Dividends are NOT handled here and
+# must not be: the close is read unadjusted, so there is nothing to undo.
+
+
+def cumulative_split_ratio(splits, after, through) -> float:
+    """The product of every split ratio with `after < ex_date <= through`.
+
+    1.0 when there is none, so the caller multiplies/divides unconditionally rather than
+    branching — a branch is where "no split" and "a split of unknown size" get confused.
+
+    A ratio that is absent, non-positive or not finite is SKIPPED and does not silently
+    become 1.0 for the whole window: that would turn one unreadable action into a clean
+    grade. It is skipped individually so the others still apply, and the caller can see the
+    count it used.
+    """
+    ratio = 1.0
+    for ex_date, r in sorted((splits or {}).items()):
+        if ex_date is None or not (after < ex_date <= through):
+            continue
+        try:
+            v = float(r)
+        except (TypeError, ValueError):
+            continue
+        if v != v or v <= 0 or v in (float("inf"), float("-inf")):
+            continue
+        ratio *= v
+    return ratio
+
+
+def split_adjusted_entry(entry, ratio):
+    """The raw fire-time price expressed on the series' post-split scale.
+
+    `entry / ratio`, because a 2-for-1 halves every adjusted close: the pre-split 100 that
+    `spot_at_fire` recorded is 50 on the scale the horizon close is quoted in. None in,
+    None out — an entry nobody has is not adjustable.
+    """
+    if entry is None or ratio is None:
+        return None
+    try:
+        e, r = float(entry), float(ratio)
+    except (TypeError, ValueError):
+        return None
+    if r <= 0 or r != r:
+        return None
+    return e / r
 
 
 def cohort_of(session) -> Optional[str]:

@@ -676,3 +676,113 @@ R-IV.485(b)'s own figure — the arithmetic is the check, and a test asserts it.
 
 **Blob chain.** The id in force before this amendment was `c6203e4b`; before Amendment 3,
 `57cb26a3`.
+
+---
+
+# AMENDMENT 5 · R-IV.647 — LIKE COMPARED WITH LIKE
+
+**Filed by:** CC-BUILD, 2026-10-06, on SPINE's order R-IV.647(c)4.
+**Prior:** Amendment 1 (observational strata, R-IV.275); Amendment 2 (bar vendor as a pinned
+instrument property, R-IV.489(a)); Amendment 3 (read cadence, window of record, bar vendor,
+R-IV.485); Amendment 4 (session gaps and grade provenance, R-IV.521).
+
+**Verbatim as issued. Nothing between this line and the end of the quoted block is this lane's
+wording.**
+
+> Amendment 5 (SPINE, R-IV.647; registered before read 3, without sight of any W3 outcome)
+>
+> (a) A grade compares like with like. The entry is the raw price at fire, so the horizon close
+> is read dividend-unadjusted from the pinned vendor, and a dividend after the horizon can't
+> move a grade. A split between fire and grading adjusts the entry by its ratio.
+>
+> (b) A grade a read has consumed is never re-scored. If it moves afterwards, the next face
+> lists it with its cause and recounts the earlier verdict both ways, for disclosure only.
+>
+> (c) Nothing else changes: metric, horizons, cohorts, vendor, nulls and read schedule stand.
+> Reads 1 and 2 stand as executed.
+>
+> (d) It takes effect from read 3 if live and verified by Friday 2026-10-09 12:00 MT. Otherwise
+> it takes effect from read 4, and read 3 lists every grade that moved since its first grading,
+> with the verdict counted both ways.
+
+## A5 · AS IMPLEMENTED — this lane's note, not part of the amendment
+
+**(a)1 — the entry was already the raw price at fire, and the fallback that could have broken
+that is gone.** R-IV.647(c)1 required this be confirmed before building, and it holds: the
+grader reads `spot_at_fire` off the shadow row. Measured 2026-10-05, **all 9,859 rows in
+`triton_flow_shadow` carry a positive `spot_at_fire`** — no nulls, none non-positive — so the
+entry has never come from the vendor's series. But the grader *did* carry a fallback to
+`close_on_session(idx, fd)` when that column was missing, which would have taken the entry from
+the vendor's own (adjusted) series and graded the row against a close on its own basis, reading
+as clean while every other row's basis differed. A path that has never fired is the right moment
+to remove one, not after the first row that needs it: an absent raw entry is now refused as
+`no_raw_entry_price`.
+
+**The cause of the BTI move, located.** `backtest/bars.py` already pins `auto_adjust=False`, and
+its docstring already carries the warning — *"stated, never a library default (the default
+changed once)"*. The Triton grader does not read through it. Its chain is
+
+    triton_fresh_grade → triton_shadow_common → get_bars_yfinance
+                       → _fetch_yfinance_bars → yf.download(...)
+
+and that `yf.download` call **omitted `auto_adjust` entirely**, taking the library default —
+which yfinance 0.2.59 changed to `True` and announces at runtime: *"YF.download() has changed
+argument auto_adjust default to True."* The same trap the sibling module was written to avoid,
+one directory away.
+
+**Both figures reconcile to the cent**, which is what makes this a series mismatch rather than a
+market move — a market move would not be recoverable by changing one vendor flag:
+
+| | 2026-09-28 close | grade on entry 55.8350 |
+|---|---|---|
+| `auto_adjust=False` (price return) | **56.0500** | **+0.3851 %** |
+| `auto_adjust=True` (dividend-adjusted) | **55.1701** | **−1.1908 %** |
+
+The two closes differ by 0.8799, which is BTI's 2026-10-02 dividend of 0.8350 carried back
+through the vendor's ratio. Not a price.
+
+**(a)2 — the basis is stated, never defaulted.** `auto_adjust` is now a **required
+keyword-only** parameter on both `_fetch_yfinance_bars` and `get_bars_yfinance`: a required
+keyword cannot be inherited from a library. The grading leg passes `False`. The general
+`get_bars` fallback passes `True`, which is exactly what it was already doing on the default —
+unchanged in behaviour, now immune to the next default change. The yfinance cache key carries
+the basis (`aa=0|1`), because without it a series cached under one basis is served to a caller
+that asked for the other, and the mismatch returns through the cache instead of the default.
+
+**(a)3 — the split clause.** With `auto_adjust=False` the vendor's closes remain
+**split-adjusted as of fetch**, so every close including the fire session's is on the post-split
+scale while `spot_at_fire` is the raw pre-split price. The entry is therefore divided by the
+cumulative ratio of every split with an ex-date **after the fire session and on or before the
+graded session** — exclusive of the fire session, because a split whose ex-date is that session
+is already in the raw price. **Per horizon**, since "between fire and grading" is a different
+window for each k: a split falling between the 3d and 5d sessions must move one grade and not
+the other. An unreadable or non-positive ratio is skipped individually rather than taken as 1.0,
+because taking it as 1.0 would turn one unreadable corporate action into a clean grade. Each
+grade records the ratio it used (`split_ratios`) and its basis (`price_basis`), so a grade can be
+re-checked later without re-deriving it from a vendor calendar that may have changed — which is
+how read 2's moved grade became a mystery in the first place.
+
+**Controls, from W1 and W2 only — never W3.**
+
+1. **BTI 499789 returns to +0.3851**, through the grader's own fetch path, and the moved
+   −1.1908 is reproduced from the adjusted basis. BTI has no split in 2026, so the two clauses
+   of (a) are shown not to interfere.
+2. **A row with neither a dividend nor a split is unchanged** — ratio 1.0, entry untouched —
+   including splits falling just outside the window on either side, and both ex-date boundaries.
+3. **A split case, real rather than synthetic**: NVDA's 10-for-1, ex-date 2024-06-10, read from
+   the pinned vendor. A pre-split 1,200 becomes 120 on the closes' scale; ungraded, the row
+   would have read **−89.8333 %** where the true figure is +1.6667 %. Compounding splits
+   multiply; a horizon before the ex-date is untouched while one after is adjusted.
+
+**(b) and (c) need no code.** (b) is a disclosure rule for the next face, and (c) changes
+nothing — metric, horizons, cohorts, vendor, nulls and schedule all stand, and reads 1 and 2
+stand as executed. Nothing in this amendment re-scores a consumed grade; the fresh-grade command
+still appends to `triton_grade_versions` and writes nothing into `triton_flow_shadow`, so the
+pre-amendment grades remain for the comparison (b) requires.
+
+**(d) the deadline.** Live 2026-10-06, ahead of the Thursday 2026-10-08 requirement, so
+CC-QUERY can verify before Friday 2026-10-09 12:00 MT (R-IV.648).
+
+**Blob chain.** The id in force before this amendment was `5554719d`; before Amendment 4,
+`c6203e4b`; before Amendment 3, `57cb26a3`.
+

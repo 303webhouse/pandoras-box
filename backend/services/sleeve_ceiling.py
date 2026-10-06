@@ -41,14 +41,23 @@ CASH_FLOOR_USD = 200.00
 SLEEVE_ACCOUNT = "ROBINHOOD"
 
 
-def ceiling_from_balances(balances: Dict[str, Any]) -> Dict[str, Any]:
-    """The sleeve ceiling from `{account_key: balance}`.
+def ceiling_from_balances(balances: Dict[str, Any],
+                          understated: Optional[set] = None) -> Dict[str, Any]:
+    """The sleeve ceiling from `{account_key: value}`.
 
-    `balances` may be missing an account or carry None for it; either way that account is
-    counted as UNKNOWN, never as zero. Only keys the registry tracks contribute, so a row
-    under a retired or disputed label — `BROKERAGE_LINK_401K`, the parked 401(a)+403(b)
-    snapshot — cannot enter the base however it is spelled.
+    `balances` carries each account's value AS THE BALANCES SERVICE DERIVES IT — cash from
+    the ledger plus that account's open positions at their marks (R-IV.647(b)) — never the
+    retired stored total. A missing key or None is UNKNOWN, never zero. Only keys the
+    registry tracks contribute, so a row under a retired or disputed label —
+    `BROKERAGE_LINK_401K`, the parked 401(a)+403(b) snapshot — cannot enter the base however
+    it is spelled.
+
+    `understated` names accounts whose value is PRESENT but incomplete, which the service
+    reports as `balance_partial` when an open position has no mark. Such a value may not be
+    summed into the published ceiling as though it were whole, but it IS a valid input to the
+    lower bound, because it can only be too small.
     """
+    understated = set(understated or ())
     included: Dict[str, Optional[float]] = {}
     missing = []
     base = 0.0
@@ -75,7 +84,9 @@ def ceiling_from_balances(balances: Dict[str, Any]) -> Dict[str, Any]:
         included[key] = money(v)
         base += v
 
-    partial = bool(missing)
+    # Present-but-incomplete counts toward the lower bound and blocks the figure.
+    incomplete = sorted(a for a in understated if included.get(a) is not None)
+    partial = bool(missing) or bool(incomplete)
     return {
         "sleeve_account": SLEEVE_ACCOUNT,
         "sleeve_display": DISPLAY_NAMES.get(SLEEVE_ACCOUNT),
@@ -88,11 +99,34 @@ def ceiling_from_balances(balances: Dict[str, Any]) -> Dict[str, Any]:
         # a figure nobody checked becomes the one everybody sizes against.
         "ceiling": None if partial else money(base * CEILING_FRACTION),
         "cash_floor": money(CASH_FLOOR_USD),
+        # A CAP UNDERSTATED IS THE SAFE DIRECTION — R-IV.647(b), and this is my addition
+        # rather than the ruling's, flagged for SPINE to keep or drop.
+        #
+        # `ceiling` stays None on a partial base: no confident figure off an incomplete one.
+        # But the balances service reports PARTIAL whenever any open position lacks a mark,
+        # which is often, and a cap nobody can read is a cap nobody honours. A partial value
+        # UNDERSTATES its account, so a ceiling computed from it is a LOWER BOUND on the real
+        # ceiling — and for a cap, too low is the conservative error: it restricts more.
+        #
+        # Served under a name that cannot be mistaken for the figure, with the accounts that
+        # are merely understated counted and the ones that are UNKNOWN excluded entirely —
+        # an unknown account contributes nothing to a lower bound either.
+        "ceiling_at_least": (money(base * CEILING_FRACTION)
+                             if partial and base > 0 else None),
+        "ceiling_at_least_basis": (
+            "a LOWER BOUND, not the ceiling: computed from the accounts that returned a "
+            "value, each of which understates its account when partial. The real ceiling is "
+            "at least this. Not a licence to size to it."
+        ) if partial and base > 0 else None,
         "partial": partial,
-        "partial_reason": (
-            "no balance for " + ", ".join(missing) + " — a tracked account with no figure "
-            "is UNKNOWN, not zero, so no ceiling is published"
-        ) if partial else None,
+        "partial_reason": "; ".join(
+            ([("no value for " + ", ".join(missing) + " — a tracked account with no figure "
+               "is UNKNOWN, not zero, so no ceiling is published")] if missing else [])
+            + ([("the value for " + ", ".join(incomplete) + " is PARTIAL — an open position "
+                 "has no mark, so it understates that account and no ceiling is published")]
+               if incomplete else [])
+        ) or None,
+        "understated_accounts": incomplete or None,
     }
 
 

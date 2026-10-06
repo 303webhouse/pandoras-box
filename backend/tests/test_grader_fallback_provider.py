@@ -52,7 +52,11 @@ def patched(monkeypatch):
             raise RuntimeError("uw down")
         return Fakes.ohlc_ret
 
-    async def fake_yf(ticker, from_date=None, to_date=None):
+    async def fake_yf(ticker, from_date=None, to_date=None, *, auto_adjust):
+        # R-IV.647(c): asserted, not merely accepted. A stub that tolerates the
+        # keyword would hide whether the grading leg asked for the UNADJUSTED
+        # basis, which is the whole of Amendment 5(a).
+        assert auto_adjust is False, "the grading leg must ask for the price-return basis"
         calls["yf"] += 1
         return Fakes.yf_ret
 
@@ -185,7 +189,8 @@ async def test_never_raises_even_when_both_legs_explode(patched, monkeypatch):
     F, calls = patched
     F.ohlc_raises = True
 
-    async def boom(ticker, from_date=None, to_date=None):
+    async def boom(ticker, from_date=None, to_date=None, *, auto_adjust):
+        assert auto_adjust is False
         raise RuntimeError("yfinance down")
 
     import integrations.uw_api as uw

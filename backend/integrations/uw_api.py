@@ -19,6 +19,7 @@ Binding conditions from committee review:
 """
 
 import asyncio
+import functools
 import logging
 import os
 import time
@@ -814,10 +815,54 @@ def _tag_provider(bars, provider):
     return bars
 
 
+async def get_splits_yfinance(ticker: str, from_date: str, to_date: str) -> Dict[str, float]:
+    """The vendor's split calendar for a window — Amendment 5(a), R-IV.647(c).
+
+    `{ex_date_iso: ratio}`, ratio being new-per-old. yfinance only, no UW endpoint and so
+    no governor spend, same as the bars leg this sits beside.
+
+    SEPARATE FROM THE BARS CALL ON PURPOSE. The bars path returns a flat list with a fixed
+    key set that several consumers read positionally; widening it to carry actions would
+    change a shape those consumers rely on. An empty dict means "no split in the window",
+    which is the common case; a vendor failure also returns empty and LOGS, because a split
+    nobody could read must not quietly become "no split" -- the caller records the ratio it
+    used so a grade carries its own provenance.
+    """
+    loop = asyncio.get_event_loop()
+
+    def _fetch() -> Dict[str, float]:
+        import pandas as pd  # noqa: F401
+        import yfinance as yf
+
+        out: Dict[str, float] = {}
+        t = yf.Ticker(ticker)
+        sp = t.splits
+        if sp is None or len(sp) == 0:
+            return out
+        for idx, val in sp.items():
+            try:
+                d = idx.date().isoformat()
+                v = float(val)
+            except Exception:
+                continue
+            if from_date <= d <= to_date and v > 0:
+                out[d] = v
+        return out
+
+    try:
+        return await loop.run_in_executor(None, _fetch)
+    except Exception as e:  # noqa: BLE001
+        logger.error("yfinance splits failed for %s (%s..%s): %s — a grade must not read "
+                     "this as 'no split'", ticker, from_date, to_date, e)
+        return {}
+
+
 async def get_bars_yfinance(
     ticker: str,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    *,
+    auto_adjust: bool,
 ) -> Optional[List[Dict[str, Any]]]:
     """The yfinance leg of get_bars(), on its own — NO UW round-trip.
 
@@ -835,13 +880,20 @@ async def get_bars_yfinance(
 
     Same return shape and the same `provider` stamp as get_bars().
     """
-    cache_key = f"yf|{ticker}|{from_date}|{to_date}"
+    # THE BASIS IS PART OF THE KEY (R-IV.647(c)). Without it, an adjusted series cached by
+    # one caller is served to a caller that asked for an unadjusted one -- the same mismatch
+    # this change exists to remove, arriving through the cache instead of the default.
+    cache_key = f"yf|{ticker}|{from_date}|{to_date}|aa={int(bool(auto_adjust))}"
     cached = await cache_get("quote", cache_key)
     if cached:
         return cached
     try:
         loop = asyncio.get_event_loop()
-        bars = await loop.run_in_executor(None, _fetch_yfinance_bars, ticker, from_date, to_date)
+        # R-IV.647(c): the grading leg reads the PRICE-RETURN basis, dividend-unadjusted,
+        # because its entry is a raw fire-time price.
+        bars = await loop.run_in_executor(
+            None, functools.partial(_fetch_yfinance_bars, ticker, from_date, to_date,
+                                    auto_adjust=auto_adjust))
     except Exception as e:
         logger.error("yfinance-only bars failed for %s: %s", ticker, e)
         return None
@@ -906,7 +958,11 @@ async def get_bars(
 
     try:
         loop = asyncio.get_event_loop()
-        bars = await loop.run_in_executor(None, _fetch_yfinance_bars, ticker, from_date, to_date)
+        # auto_adjust=True preserves this path's existing behaviour exactly -- it was the
+        # library default -- but STATES it, so the next default change cannot move it.
+        bars = await loop.run_in_executor(
+            None, functools.partial(_fetch_yfinance_bars, ticker, from_date, to_date,
+                                    auto_adjust=True))
         if bars:
             bars = _tag_provider(bars, PROVIDER_YFINANCE)
             await cache_set("quote", cache_key, bars)
@@ -1880,8 +1936,27 @@ def _yf_quote_sync(ticker: str) -> dict:
     return result
 
 
-def _fetch_yfinance_bars(ticker: str, from_date: str = None, to_date: str = None) -> List[Dict]:
-    """Fetch daily bars from yfinance, return in Polygon-compatible format."""
+def _fetch_yfinance_bars(ticker: str, from_date: str = None, to_date: str = None,
+                         *, auto_adjust: bool) -> List[Dict]:
+    """Fetch daily bars from yfinance, return in Polygon-compatible format.
+
+    `auto_adjust` IS REQUIRED AND HAS NO DEFAULT — R-IV.647(c). This call omitted the
+    argument entirely and so took the LIBRARY default, which yfinance 0.2.59 changed to
+    True and announces at runtime: "YF.download() has changed argument auto_adjust default
+    to True". backtest/bars.py already carried the warning — "stated, never a library
+    default (the default changed once)" — for a different module.
+
+    WHAT IT COST. The Triton grader reads its horizon closes through here while taking its
+    entry from the raw `spot_at_fire`. With auto_adjust=True every close before an ex-date
+    is rescaled, so BTI's 10-02 dividend moved an already-graded row: id 499789, entry
+    55.8350, horizon close 2026-09-28 went 56.0500 -> 55.1701 and the grade went
+    **+0.3851 -> -1.1908**. Both figures reconcile to the cent against the two bases, so
+    this was a series mismatch and not a market move.
+
+    True keeps the dividend-adjusted basis for the general `get_bars` path, unchanged and
+    now stated. False is the price-return basis a grade needs: the entry is a raw price, so
+    the close it is compared against must be one too.
+    """
     import yfinance as yf
     import pandas as pd
 
@@ -1891,7 +1966,8 @@ def _fetch_yfinance_bars(ticker: str, from_date: str = None, to_date: str = None
     if not to_date:
         to_date = today.isoformat()
 
-    data = yf.download(ticker, start=from_date, end=to_date, interval="1d", progress=False)
+    data = yf.download(ticker, start=from_date, end=to_date, interval="1d", progress=False,
+                       auto_adjust=auto_adjust)
     if data is None or data.empty:
         return []
 

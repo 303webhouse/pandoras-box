@@ -21,8 +21,16 @@ from models.accounts import CANONICAL_ACCOUNTS, FIDELITY_401A, FIDELITY_ROTH, RO
 from services.sleeve_ceiling import (CASH_FLOOR_USD, CEILING_FRACTION, SLEEVE_ACCOUNT,
                                      ceiling_from_balances, headroom)
 
-# the live balances on 2026-10-05, before POSITIONS books the 401(a)'s funding
-LIVE = {ROBINHOOD: 835.69, FIDELITY_ROTH: 8842.09, FIDELITY_401A: 0.00}
+# THE DERIVED base, measured 2026-10-05 after POSITIONS posted the 401(a)'s cash events
+# (R-IV.646): cash from the ledger plus each account's open positions at their marks.
+LIVE = {ROBINHOOD: 1057.79, FIDELITY_ROTH: 9749.82, FIDELITY_401A: 8170.46}
+
+# What `account_balances` still stores, for contrast. R-IV.647(b): RETIRED figures, not
+# broker figures, and the only writer of `balance` is the manual POST /balances route --
+# so they had not moved since 09-24. A base of these gives 967.78, understating the real
+# cap by 930.03. The old frontend mock's 968 'matched' my first computation because both
+# read these same stale numbers; the agreement proved nothing about either.
+STORED = {ROBINHOOD: 835.69, FIDELITY_ROTH: 8842.09, FIDELITY_401A: 0.00}
 
 
 class TestTheRuledFigures:
@@ -32,14 +40,22 @@ class TestTheRuledFigures:
         assert CASH_FLOOR_USD == 200.00
         assert SLEEVE_ACCOUNT == ROBINHOOD
 
-    def test_the_live_figure(self):
-        """8842.09 + 835.69 + 0.00 = 9677.78, so the ceiling is 967.78 — which is why the
-        mock's 968 looked right. It was right by coincidence, off a two-account base."""
+    def test_the_live_figure_off_the_derived_base(self):
+        """1057.79 + 9749.82 + 8170.46 = 18,978.07, so the ceiling is 1,897.81."""
         r = ceiling_from_balances(LIVE)
-        assert r["base_total"] == 9677.78
-        assert r["ceiling"] == 967.78
+        assert r["base_total"] == 18_978.07
+        assert r["ceiling"] == 1_897.81
         assert r["cash_floor"] == 200.0
         assert not r["partial"]
+
+    def test_the_retired_stored_base_understates_the_cap_by_930(self):
+        """R-IV.647(b). The stored totals give 967.78 against the derived 1,897.81 -- the
+        cap was understated by nearly half, so the principal would have sized down
+        against a number that had not moved in eleven days."""
+        stored = ceiling_from_balances(STORED)
+        assert stored["ceiling"] == 967.78
+        assert round(ceiling_from_balances(LIVE)["ceiling"]
+                     - stored["ceiling"], 2) == 930.03
 
     def test_the_rule_names_the_registry_not_two_keys(self):
         r = ceiling_from_balances(LIVE)
@@ -55,22 +71,20 @@ class TestANewAccountCannotBeLeftOutSilently:
         r = ceiling_from_balances(LIVE)
         assert set(r["base_balances"]) == set(CANONICAL_ACCOUNTS)
 
-    def test_the_third_account_moves_the_figure_once_it_is_funded(self):
-        """It reads the same today only because the 401(a) is at 0.00. Fund it and the
-        ceiling must move — a base of named keys would not have."""
-        funded = dict(LIVE, **{FIDELITY_401A: 11_075.62})
-        r = ceiling_from_balances(funded)
-        assert r["base_total"] == 20_753.40
-        assert r["ceiling"] == 2_075.34
-        assert r["ceiling"] != ceiling_from_balances(LIVE)["ceiling"]
+    def test_the_third_account_moves_the_figure(self):
+        """A base of named keys would not have moved. POSITIONS has since funded it
+        (R-IV.646), and its 8,170.46 is 43% of the base -- so omitting it was not a
+        rounding matter."""
+        without = dict(LIVE, **{FIDELITY_401A: 0.0})
+        assert ceiling_from_balances(without)["ceiling"] == 1_080.76
+        assert ceiling_from_balances(LIVE)["ceiling"] == 1_897.81
 
-    def test_a_two_account_base_would_now_be_wrong(self):
-        """Stated as arithmetic, because this is the defect: the old prose base omits the
-        401(a), and once funded that is a ceiling understated by a tenth of its balance."""
-        two_account_base = LIVE[ROBINHOOD] + LIVE[FIDELITY_ROTH] + 11_075.62 - 11_075.62
-        assert round(two_account_base * CEILING_FRACTION, 2) == 967.78
-        funded = dict(LIVE, **{FIDELITY_401A: 11_075.62})
-        assert ceiling_from_balances(funded)["ceiling"] == 2_075.34
+    def test_a_two_account_base_is_wrong_by_the_whole_third_account(self):
+        """Stated as arithmetic, because this is the defect: the prose base names two
+        accounts, so it omits a tenth of the third account's entire value."""
+        two = (LIVE[ROBINHOOD] + LIVE[FIDELITY_ROTH]) * CEILING_FRACTION
+        three = ceiling_from_balances(LIVE)["ceiling"]
+        assert round(three - round(two, 2), 2) == round(LIVE[FIDELITY_401A] * 0.10, 2)
 
 
 class TestAnUnknownBalanceIsNotZero:
@@ -94,9 +108,9 @@ class TestAnUnknownBalanceIsNotZero:
     def test_a_genuine_zero_is_NOT_partial(self):
         """POSITIVE CONTROL for the whole partial branch: 0.00 is a real reading — the
         401(a) is registered and empty — and must not be confused with absence."""
-        r = ceiling_from_balances(LIVE)
+        r = ceiling_from_balances(dict(LIVE, **{FIDELITY_401A: 0.0}))
         assert r["base_balances"][FIDELITY_401A] == 0.0
-        assert r["partial"] is False and r["ceiling"] == 967.78
+        assert r["partial"] is False and r["ceiling"] == 1_080.76
 
 
 class TestTheRetiredLabelsCannotEnterTheBase:
@@ -107,8 +121,8 @@ class TestTheRetiredLabelsCannotEnterTheBase:
         """Only registry keys contribute, so the parked 401(a)+403(b) snapshot cannot be
         summed into a ceiling however it is spelled (R-IV.638(b)2)."""
         r = ceiling_from_balances(dict(LIVE, **{label: 11_642.35}))
-        assert r["base_total"] == 9677.78
-        assert r["ceiling"] == 967.78
+        assert r["base_total"] == 18_978.07
+        assert r["ceiling"] == 1_897.81
         assert label not in r["base_balances"]
 
 
@@ -146,8 +160,13 @@ class TestAPlaceholderZeroIsNotAReading:
         except (tokenize.TokenError, IndentationError):
             pass
         code = "".join(lines)
-        assert "holds_positions" in code
-        assert "balances[a] = None" in code
+        # The route moved to the balances SERVICE under R-IV.647(b), so the stored-zero
+        # cross-check is gone: a derived value of None is already UNKNOWN, and a derived
+        # value that is partial is already flagged. The placeholder problem solved
+        # itself by reading the right source.
+        assert "get_account_balances" in code
+        assert "understated=understated" in code
+        assert "balance_partial" in code
 
     def test_the_effect_a_nulled_placeholder_has(self):
         """Once nulled, the base is partial and NO ceiling is published — which is the point.
@@ -160,8 +179,44 @@ class TestAPlaceholderZeroIsNotAReading:
     def test_a_zero_balance_with_NO_positions_stays_a_real_zero(self):
         """POSITIVE CONTROL: an account genuinely empty reads 0.00 and the ceiling publishes.
         The cross-check must not turn every zero into an unknown."""
+        r = ceiling_from_balances(dict(LIVE, **{FIDELITY_401A: 0.0}))
+        assert r["partial"] is False
+        assert r["ceiling"] == round((1057.79 + 9749.82) * 0.10, 2)
+
+
+class TestPartialIsNotUnknown:
+    """R-IV.647(b). The balances service reports PARTIAL whenever an open position has no
+    mark, which is often. A partial value UNDERSTATES its account, so it cannot be summed
+    into the published ceiling as though whole -- but it IS a valid input to a LOWER
+    BOUND, because it can only be too small. And for a cap, too low is the conservative
+    error: it restricts more.
+    """
+
+    def test_an_understated_account_blocks_the_figure_but_feeds_the_bound(self):
+        r = ceiling_from_balances(LIVE, understated={FIDELITY_ROTH})
+        assert r["partial"] is True
+        assert r["ceiling"] is None
+        assert r["ceiling_at_least"] == 1_897.81
+        assert r["understated_accounts"] == [FIDELITY_ROTH]
+        assert "PARTIAL" in r["partial_reason"]
+
+    def test_an_unknown_account_contributes_to_neither(self):
+        """Unknown is not understated: there is no figure to be too small."""
+        r = ceiling_from_balances(dict(LIVE, **{FIDELITY_401A: None}))
+        assert r["ceiling"] is None
+        assert r["ceiling_at_least"] == round((1057.79 + 9749.82) * 0.10, 2)
+        assert "UNKNOWN, not zero" in r["partial_reason"]
+
+    def test_the_bound_is_named_so_it_cannot_be_mistaken_for_the_figure(self):
+        r = ceiling_from_balances(LIVE, understated={ROBINHOOD})
+        assert "LOWER BOUND" in r["ceiling_at_least_basis"]
+        assert "Not a licence to size to it" in r["ceiling_at_least_basis"]
+
+    def test_a_complete_base_publishes_the_figure_and_no_bound(self):
+        """POSITIVE CONTROL: the bound exists only while something is missing."""
         r = ceiling_from_balances(LIVE)
-        assert r["partial"] is False and r["ceiling"] == 967.78
+        assert r["ceiling"] == 1_897.81
+        assert r["ceiling_at_least"] is None
 
 
 class TestHeadroom:
