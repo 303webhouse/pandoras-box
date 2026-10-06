@@ -1177,3 +1177,22 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   .index-strip.fut .fut-cell { flex: 1 0 33.33%; padding: 6px 0; border-bottom: 1px solid var(--border); }
   .index-strip.fut .fut-cell:nth-child(3n) { border-right: none; }
 }
+
+/* R-IV.650 — the account label and its one control. NEUTRAL by design: lime, vermilion and
+   amber already mean gain, loss and "cannot confirm" here, so a fixed colour per account would
+   teach a second meaning for the same three. The name identifies it; teal marks only the
+   account being filtered to. */
+.pos-acct { font-family: var(--mono); font-size: 9px; letter-spacing: .4px; color: var(--text-2);
+  border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; margin-right: 5px; white-space: nowrap; }
+.pos-acct.on { color: var(--teal); border-color: var(--teal); }
+.acct-ctl { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 12px 8px; border-bottom: 1px solid var(--border); }
+.acct-seg { display: flex; flex-wrap: wrap; gap: 4px; }
+/* text-transform: none is LOAD-BEARING. `.seg button` uppercases, which turned the served name
+   "Robinhood" into "ROBINHOOD" — indistinguishable on screen from the internal key the ruling
+   says never to show. A served name is rendered exactly as served. */
+.acct-seg button, .acct-sort { text-transform: none; }
+.acct-seg button { font-family: var(--mono); font-size: 10px; background: transparent; color: var(--text-2);
+  border: 1px solid var(--border-strong); border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+.acct-seg button[aria-pressed="true"] { color: var(--teal); border-color: var(--teal); }
+.acct-sort[aria-pressed="true"] { color: var(--teal); border-color: var(--teal); }
+@media (max-width: 820px) { .acct-seg button, .acct-sort { min-height: 44px; padding: 8px 12px; } }
