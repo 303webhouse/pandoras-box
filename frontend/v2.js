@@ -1675,14 +1675,31 @@
   let _openPositions = [];
   window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o), popSide, setSide, openChart, placeChartSoon };
   const OPT_PUT = /put/i, OPT_CALL = /call/i;
+  // ── R-IV.662(c)/668(c) · WHAT IS OPEN IS `open_quantity`, NEVER `quantity` ────────────────
+  // `quantity` is the size the position was OPENED at. After a partial exit it is not what is
+  // still held, and HYG 516 is the case: its stored quantity only looks right today because it
+  // is wrong. BUILD serves `open_quantity` with an `open_quantity_basis` saying where the figure
+  // came from (`lots`, `unknown: the position has no lots`, `0: the position is not open`).
+  //
+  // A NULL open_quantity IS UNKNOWN, AND IT DOES NOT FALL BACK. Falling back to `quantity` is
+  // exactly the silent wrong number this replaces, so an unreadable size renders as unknown and
+  // says why.
+  const openQty = (p) => {
+    const v = p && p.open_quantity;
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const openQtyWhy = (p) => (p && p.open_quantity_basis) || 'the hub did not say how many are open';
+
   function structureStr(p) {
     if ((p.asset_type || '').toUpperCase() === 'EQUITY' || (p.structure || '') === 'stock') {
-      return '×' + (p.quantity != null ? p.quantity : '') + ' sh';
+      return '×' + (openQty(p) != null ? openQty(p) : '?') + ' sh';
     }
     const exp = p.expiry ? new Date(p.expiry + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }) : '';
     const strikes = [p.long_strike, p.short_strike].filter((x) => x != null).join('/');
     const type = OPT_PUT.test(p.structure || '') ? 'P' : OPT_CALL.test(p.structure || '') ? 'C' : '';
-    const qty = p.quantity != null ? ' ×' + p.quantity : '';
+    const qty = openQty(p) != null ? ' ×' + openQty(p) : '';
     return `${exp} ${strikes}${type}${qty}`.trim();
   }
   // R-IV.540 (BUILD gap 1) -- a money field is null WITH a reason (derived.basis_reason), and a dash
@@ -1788,7 +1805,10 @@
       kv('Direction', p.direction || '—') + kv('Account', p.account || '—') +
       kv('Entry', p.entry_price != null ? p.entry_price : '—') + kv('Current', p.current_price != null ? p.current_price : '—') +
       kv('Stop', p.stop_loss != null ? p.stop_loss : '—') + kv('Target', p.target_1 != null ? p.target_1 : '—') +
-      kv('Qty', p.quantity != null ? p.quantity : '—') + kv('DTE', p.dte != null ? p.dte : '—') +
+      (openQty(p) != null
+        ? kv('Open qty', openQty(p))
+        : kvh('Open qty', vintageChip({ unknownLabel: 'unknown', unknownTitle: openQtyWhy(p) }))) +
+      kv('DTE', p.dte != null ? p.dte : '—') +
       kv('Cost basis', p.cost_basis != null ? '$' + Number(p.cost_basis).toFixed(2) : '—') +
       (p.max_loss != null ? kv('Max loss', '$' + Number(p.max_loss).toFixed(2)) : kvh('Max loss', noMoney(p, 'max_loss'))) +
       `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${suspect ? '' : signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : noMoney(p, 'pnl')}${pct != null ? (suspect ? ' <span class="struck">(' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)</span> ' + basisChip(suspect) : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') : ''}</span></div>` +
@@ -2056,7 +2076,12 @@
       <div class="form-grid">
         <div class="fld"><label>Position</label><input value="${esc(p.ticker + ' · ' + structureStr(p))}" disabled></div>
         <div class="fld"><label for="c_exit">Exit price</label><input id="c_exit" type="number" step="any" placeholder="${p.current_price != null ? p.current_price : '0.00'}"></div>
-        <div class="fld"><label for="c_qty">Quantity</label><input id="c_qty" type="number" min="1" value="${p.quantity != null ? p.quantity : 1}"></div>
+        <div class="fld"><label for="c_qty">Quantity</label>
+          <input id="c_qty" type="number" min="1" value="${openQty(p) != null ? openQty(p) : ''}"
+                 placeholder="${openQty(p) != null ? '' : 'how many are you closing?'}">
+          <div class="fld-echo${openQty(p) != null ? '' : ' bad'}">${openQty(p) != null
+            ? esc(openQty(p) + ' open · from ' + openQtyWhy(p))
+            : esc('How many are open is unknown — ' + openQtyWhy(p) + '. Enter what you are closing.')}</div></div>
         ${dateFieldHtml('c_close_date', 'Close date', 'the day you closed it — today unless you say otherwise')}
         <div class="fld"><label for="c_reason">Reason</label><select id="c_reason"><option value="manual">manual</option><option value="profit">profit</option><option value="loss">loss</option></select></div>
         <div class="fld full"><label for="c_notes">Notes</label><input id="c_notes" placeholder="optional"></div>
@@ -2072,7 +2097,20 @@
   async function submitClose(p, mult) {
     const exit = $('c_exit').value !== '' ? Number($('c_exit').value) : null;
     if (exit == null) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'Exit price required'; return; }
-    const qty = parseInt($('c_qty').value, 10) || p.quantity || 1;
+    // No fallback to `quantity`: closing the size it was OPENED at, when part is already sold,
+    // is the write this whole field exists to prevent.
+    const qty = parseInt($('c_qty').value, 10);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      $('c_msg').className = 'form-msg err';
+      $('c_msg').textContent = 'Enter how many you are closing.';
+      return;
+    }
+    const oq = openQty(p);
+    if (oq != null && qty > oq) {
+      $('c_msg').className = 'form-msg err';
+      $('c_msg').textContent = 'That is more than the ' + oq + ' still open.';
+      return;
+    }
     const reason = $('c_reason').value;
     // R-IV.662(b)2 / TA-083: the day it was CLOSED, not the day it was recorded. Sent as
     // `exit_date`, which the close path takes (R-IV.660(c)2).
