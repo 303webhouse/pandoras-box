@@ -15,6 +15,7 @@ import httpx
 
 from config.crypto_symbol_matrix import get_symbol_entry, get_tier, is_tracked
 from jobs.crypto_bars import normalize_crypto_ticker
+from bias_filters.crypto_perps import snapshot_for, empty_snapshot, PERPS_BUDGET_SECONDS
 
 router = APIRouter(prefix="/crypto", tags=["crypto-market"])
 logger = logging.getLogger(__name__)
@@ -324,7 +325,17 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": okx_spot_inst}
             )
 
-        results = await asyncio.gather(*tasks.values())
+        async def _perps_budgeted():
+            try:
+                return await asyncio.wait_for(snapshot_for(base_asset), PERPS_BUDGET_SECONDS)
+            except Exception:
+                return empty_snapshot()
+
+        venue_results, perps_pack = await asyncio.gather(
+            asyncio.gather(*tasks.values()),
+            _perps_budgeted(),
+        )
+        results = venue_results
         data_map = dict(zip(tasks.keys(), results))
         for key in _VENUE_KEYS:
             data_map.setdefault(key, dict(_VENUE_SKIPPED))
@@ -426,6 +437,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     else:
         _note_venue_error(errors, "binance_funding", data_map["binance_funding"])
     if funding_binance is None:
+        pred_b = ((perps_pack.get("predicted_by_venue") or {}).get("binance") or {})
+        if pred_b.get("value") is not None:
+            funding_binance = pred_b["value"]
+            funding_binance_time = pred_b.get("as_of")
+    if funding_binance is None:
         held = _recall(last_good, "funding_binance", "funding", "binance_funding", now, errors)
         if held:
             funding_binance, funding_binance_time = held["rate"], held["time"]
@@ -471,6 +487,11 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             _bybit_runtime_disabled = True
         else:
             _note_venue_error(errors, "bybit_funding", data_map["bybit_funding"])
+    if funding_bybit is None:
+        pred_y = ((perps_pack.get("predicted_by_venue") or {}).get("bybit") or {})
+        if pred_y.get("value") is not None:
+            funding_bybit = pred_y["value"]
+            funding_bybit_time = pred_y.get("as_of")
     if funding_bybit is None:
         held = _recall(last_good, "funding_bybit", "funding", "bybit_funding", now, errors)
         if held:
@@ -637,6 +658,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                 "binance": perp_price if perp_source == "binance" else None,
                 "okx": perp_price if perp_source == "okx" else None,
                 "bybit": perp_price if perp_source == "bybit" else None,
+                "hyperliquid": (perps_pack.get("mark") or {}).get("value"),
                 "spread": perp_spread,
                 "source": perp_source,
                 "source_detail": perp_source_detail,
@@ -644,7 +666,12 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                     "binance_perp_api_root": BINANCE_PERP_API_ROOT,
                     "binance_perp_proxy_enabled": bool(BINANCE_PERP_HTTP_PROXY),
                 },
-                "note": "OKX swap is the live perp path from Railway. Binance perps and Bybit are not asked. Spread = perp - Binance spot."
+                "note": (
+                    "OKX swap is a third perp path while it answers, labelled as okx "
+                    "(R-IV.663(c)). Binance perps and Bybit are not asked. Hyperliquid "
+                    "mark and predicted Binance/Bybit funding are US-serving. "
+                    "Spread = perp - Binance spot."
+                )
             },
             "basis": basis,
             "basis_pct": basis_pct,
@@ -658,6 +685,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         },
         "cvd": cvd_out,
         "order_flow": trade_tape,
+        "derivatives": perps_pack,
         "errors": errors
     }
 
@@ -783,9 +811,20 @@ async def get_crypto_state(symbol: str):
     # S-3 Phase 1.5 (FA-7): vendor clients are now per-symbol parametrized;
     # funding/OI/basis data available for all six tracked symbols.
     from bias_filters import coinalyze_client, binance_client
+    from jobs.crypto_bars import CALLER_STATE_API, fetch_crypto_ohlc
+
+    funding_data, oi_data, basis_data, bars, liq_data = await asyncio.gather(
+        coinalyze_client.get_funding_rate(base_symbol),
+        coinalyze_client.get_open_interest(base_symbol),
+        binance_client.get_quarterly_basis(base_symbol),
+        fetch_crypto_ohlc(base_symbol, use_daily=False, caller=CALLER_STATE_API),
+        coinalyze_client.get_liquidations(base_symbol),
+        return_exceptions=True,
+    )
 
     try:
-        funding_data = await coinalyze_client.get_funding_rate(base_symbol)
+        if isinstance(funding_data, Exception):
+            raise funding_data
         is_na = funding_data.get("state") == "NA"
         funding_degraded = is_na or bool(funding_data.get("error")) or funding_data.get("health_status") != "LIVE"
         funding_signal = funding_data.get("signal")
@@ -807,7 +846,8 @@ async def get_crypto_state(symbol: str):
         logger.warning("crypto state: funding fetch failed for %s: %s", base_symbol, exc)
 
     try:
-        oi_data = await coinalyze_client.get_open_interest(base_symbol)
+        if isinstance(oi_data, Exception):
+            raise oi_data
         is_na = oi_data.get("state") == "NA"
         oi_field = _field_envelope(
             oi_data.get("timestamp"),
@@ -819,7 +859,8 @@ async def get_crypto_state(symbol: str):
         logger.warning("crypto state: OI fetch failed for %s: %s", base_symbol, exc)
 
     try:
-        basis_data = await binance_client.get_quarterly_basis(base_symbol)
+        if isinstance(basis_data, Exception):
+            raise basis_data
         is_na = basis_data.get("state") == "NA"
         basis_field = _field_envelope(
             basis_data.get("timestamp"),
@@ -841,8 +882,8 @@ async def get_crypto_state(symbol: str):
     liquidations_field = _field_envelope(None, True, total_usd=None, long_pct=None, composition=None, signal=None)
 
     try:
-        from jobs.crypto_bars import CALLER_STATE_API, fetch_crypto_ohlc
-        bars = await fetch_crypto_ohlc(base_symbol, use_daily=False, caller=CALLER_STATE_API)
+        if isinstance(bars, Exception):
+            raise bars
         if bars and len(bars) >= 15:
             from indicators.atr import latest_atr
             highs = [b[2] for b in bars]
@@ -860,7 +901,8 @@ async def get_crypto_state(symbol: str):
         atr_field = _field_envelope(None, True, atr=None, error=str(exc))
 
     try:
-        liq_data = await coinalyze_client.get_liquidations(base_symbol)
+        if isinstance(liq_data, Exception):
+            raise liq_data
         is_na = liq_data.get("state") == "NA"
         liquidations_field = _field_envelope(
             liq_data.get("timestamp"),

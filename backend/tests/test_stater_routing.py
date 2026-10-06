@@ -90,6 +90,15 @@ def _reset():
     Venues.seen = []
 
 
+@pytest.fixture(autouse=True)
+def _quiet_perps():
+    async def _empty(*a, **k):
+        from bias_filters.crypto_perps import empty_snapshot
+        return empty_snapshot()
+    with patch.object(cm, "snapshot_for", _empty):
+        yield
+
+
 def _snap(sym):
     with patch.object(cm.httpx, "AsyncClient", Venues):
         return asyncio.run(cm.get_market_snapshot(symbol=sym, limit=200))

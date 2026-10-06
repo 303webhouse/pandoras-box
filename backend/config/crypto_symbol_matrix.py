@@ -83,6 +83,14 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "fallback": "okx_candles",
             "verified": "2026-10-01: Coinbase Exchange /products/BTC-USD/candles HTTP 200, 350 rows at 900s and 86400s. (Was uw_crypto_ohlc, verified 2026-07-13.)",
         },
+        "hyperliquid_perp": {
+            "status": "LIVE",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+        },
+        "okx_perp_third_source": {
+            "status": "LIVE_WHILE_IT_ANSWERS",
+            "verified": "2026-10-06 16:12 UTC Railway GET /crypto/market: OKX swap served perp, funding, CVD. May be the live reading when it is the only source answering, labelled (R-IV.663(c)).",
+        },
         "binance_fail_fallback": "okx",
     },
     "ETH": {
@@ -123,6 +131,14 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "fallback": "okx_candles",
             "verified": "2026-10-01: Coinbase Exchange /products/ETH-USD/candles HTTP 200, 350 rows at 900s and 86400s. (Was uw_crypto_ohlc, verified 2026-07-13.)",
         },
+        "hyperliquid_perp": {
+            "status": "LIVE",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+        },
+        "okx_perp_third_source": {
+            "status": "LIVE_WHILE_IT_ANSWERS",
+            "verified": "2026-10-06 16:12 UTC Railway GET /crypto/market: OKX swap served perp, funding, CVD. May be the live reading when it is the only source answering, labelled (R-IV.663(c)).",
+        },
         "binance_fail_fallback": "okx",
     },
     "SOL": {
@@ -162,6 +178,14 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "status": "LIVE",
             "fallback": "okx_candles",
             "verified": "2026-10-01: Coinbase Exchange /products/SOL-USD/candles HTTP 200, 350 rows at 900s and 86400s. (Was uw_crypto_ohlc, verified 2026-07-13.)",
+        },
+        "hyperliquid_perp": {
+            "status": "LIVE",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+        },
+        "okx_perp_third_source": {
+            "status": "LIVE_WHILE_IT_ANSWERS",
+            "verified": "2026-10-06 16:12 UTC Railway GET /crypto/market: OKX swap served perp, funding, CVD. May be the live reading when it is the only source answering, labelled (R-IV.663(c)).",
         },
         "binance_fail_fallback": "okx",
     },
@@ -204,6 +228,14 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "status": "LIVE",
             "verified": "2026-07-13: OKX /market/candles HYPE-USDT-SWAP HTTP 200, 5 real daily candles returned",
         },
+        "hyperliquid_perp": {
+            "status": "LIVE",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+        },
+        "okx_perp_third_source": {
+            "status": "LIVE_WHILE_IT_ANSWERS",
+            "verified": "2026-10-06 16:12 UTC Railway GET /crypto/market: OKX swap served perp, funding, CVD. May be the live reading when it is the only source answering, labelled (R-IV.663(c)).",
+        },
         "binance_fail_fallback": "okx",
     },
     "ZEC": {
@@ -242,6 +274,14 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "vendor": "binance_spot_klines",
             "status": "LIVE",
             "verified": "2026-07-13: ZEC confirmed listed on Binance spot (data-api.binance.vision) and OKX SWAP. 2026-07-13 Phase 2 pre-wiring check confirmed candle-history live at the actual 15m granularity the resolver uses (5 real candles, ZECUSDT) -- see s1-phase2-findings.md. NOTE: UW crypto OHLC does NOT work for ZEC despite /state working — /api/crypto/ZEC-USD/ohlc/1d returned an empty array (verified 2026-07-13). Do not use UW as ZEC's bar-walk source.",
+        },
+        "hyperliquid_perp": {
+            "status": "LIVE",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+        },
+        "okx_perp_third_source": {
+            "status": "LIVE_WHILE_IT_ANSWERS",
+            "verified": "2026-10-06 16:12 UTC Railway GET /crypto/market: OKX swap served perp, funding, CVD. May be the live reading when it is the only source answering, labelled (R-IV.663(c)).",
         },
         "binance_fail_fallback": "okx",
     },
@@ -284,6 +324,14 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
             "status": "LIVE",
             "verified": "2026-07-13: OKX /market/candles FARTCOIN-USDT-SWAP HTTP 200, 5 real daily candles returned",
         },
+        "hyperliquid_perp": {
+            "status": "LIVE",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+        },
+        "okx_perp_third_source": {
+            "status": "LIVE_WHILE_IT_ANSWERS",
+            "verified": "2026-10-06 16:12 UTC Railway GET /crypto/market: OKX swap served perp, funding, CVD. May be the live reading when it is the only source answering, labelled (R-IV.663(c)).",
+        },
         "binance_fail_fallback": "okx",
     },
 }
@@ -301,19 +349,44 @@ DEFILLAMA_STATUS = {
     "verified": "2026-07-13: /pools HTTP 200, 15410 pools",
 }
 
-# Hyperliquid public API (api.hyperliquid.xyz/info, POST {"type": "meta"}) was
-# live-tested as the A-1 conditional sanction candidate. NOT sanctioned as a
-# new vendor: Coinalyze already covers all six symbols (see per-symbol cells
-# above), so the brief's trigger condition ("if Coinalyze lacks
-# Hyperliquid-native pairs") was not met. Recorded here as a verified,
-# ready-to-activate backup if Coinalyze's thin HYPE/FARTCOIN aggregation
-# (only 1 discovered symbol vs 2-3 for majors) ever proves unreliable.
-HYPERLIQUID_BACKUP_CANDIDATE = {
-    "status": "LIVE_VERIFIED_NOT_SANCTIONED",
-    "verified": "2026-07-13: POST /info {type: meta} HTTP 200, 232-asset universe, all 6 target symbols present (BTC, ETH, SOL, HYPE, ZEC, FARTCOIN)",
+# Hyperliquid public info API. Sanctioned R-IV.658 (2026-10-06) as a US-serving
+# perps source: own mark/funding/OI, plus predicted funding for Binance and
+# Bybit. No key. The 2026-07-13 Railway meta check stands; predictedFundings
+# from Railway is re-verified after this branch is live. The Binance VPN/proxy
+# is gone and is not rebuilt.
+HYPERLIQUID_INFO = {
+    "status": "LIVE",
+    "sanctioned": True,
+    "ruling": "R-IV.658",
     "auth": "none (public, keyless)",
-    "sanctioned": False,
-    "reason_not_sanctioned": "Coinalyze already covers all 6 symbols; no gap to fill",
+    "weight": "1200/min/IP; metaAndAssetCtxs and predictedFundings cost 20 each",
+    "verified_meta_railway": "2026-07-13: POST api.hyperliquid.xyz/info {type: meta} HTTP 200, 232-asset universe, all 6 symbols present (BTC, ETH, SOL, HYPE, ZEC, FARTCOIN)",
+    "verified_predicted_railway": "UNVERIFIED from Railway as of 2026-10-06 (no caller on prod yet)",
+}
+
+# Coinalyze collects Binance/Bybit/OKX perps; the hub never requests Binance.
+COINALYZE_PERPS = {
+    "status": "LIVE",
+    "ruling": "R-IV.658",
+    "auth": "COINALYZE_API_KEY in Railway",
+    "fields": "funding, predicted funding, open interest, liquidations, long/short",
+    "limit": "40 calls/min/key, shared by every hub caller; 300s cache; refuse on 429, never sleep 60s",
+    "verified_railway": "2026-07-13: /funding-rate HTTP 200 all 6 symbols. 2026-10-06 16:53 UTC: GET /crypto/state/BTC from the hub (Railway egress) HTTP 200 in 11.79 s; funding, open_interest and liquidations envelopes present, not degraded, with as_of. Values not recorded here.",
+}
+
+# OKX is a third source while it answers. It does not serve US customers.
+OKX_PERP_THIRD = {
+    "status": "LIVE_WHILE_IT_ANSWERS",
+    "ruling": "R-IV.658(c)3",
+    "note": "OKX may be the live reading when it is the only source answering, labelled venue=okx (R-IV.663(c)). What is ruled out is a field with no other source configured.",
+    "verified_railway": "2026-10-06 16:12 UTC: GET /crypto/market from the hub, OKX swap served perp price, funding and CVD for all six coins.",
+}
+
+# Kept under the old name so existing imports do not break. Sanctioned now.
+HYPERLIQUID_BACKUP_CANDIDATE = {
+    **HYPERLIQUID_INFO,
+    "verified": HYPERLIQUID_INFO["verified_meta_railway"],
+    "reason_not_sanctioned": "superseded: sanctioned R-IV.658 2026-10-06",
 }
 
 
