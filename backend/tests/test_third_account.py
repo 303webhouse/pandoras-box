@@ -258,6 +258,36 @@ class TestServed:
 
         assert "account_display" not in _row_to_dict({"position_id": "Z", "ticker": "SPY"})
 
+    def test_a_balance_row_carries_the_display_name_too(self):
+        """R-IV.649(b) / R-IV.651(c)3. ABACUS's add form builds its account list from the
+        positions AND balances payloads, and renders an account it has no label for as a
+        DISABLED option. Positions were the only surface serving a label, so an account with
+        no open positions was unselectable — the case of opening the FIRST position in a new
+        account, which is what had just happened with the 401(a)."""
+        import ast
+        import io as _io
+        import os as _os
+        import tokenize
+
+        src = _io.open(_os.path.join(BACKEND, "services/read_only/balances.py"),
+                       encoding="utf-8-sig").read()
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc:
+                    src = src.replace(doc, "")
+        lines = src.splitlines(keepends=True)
+        try:
+            for tok in tokenize.generate_tokens(_io.StringIO(src).readline):
+                if tok.type == tokenize.COMMENT:
+                    r, c0, c1 = tok.start[0] - 1, tok.start[1], tok.end[1]
+                    lines[r] = lines[r][:c0] + " " * (c1 - c0) + lines[r][c1:]
+        except (tokenize.TokenError, IndentationError):
+            pass
+        code = "".join(lines)
+        assert 'd["account_display"] = _account_display(d.get("account_name"))' in code
+
     def test_the_touches_block_carries_the_account(self):
         from models.position_direction import touches_block
 

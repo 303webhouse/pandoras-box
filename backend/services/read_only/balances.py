@@ -80,10 +80,19 @@ async def _attach_derived_cash(pool, rows: List[Dict[str, Any]]) -> None:
     from services.cash_ledger import balance_from_events, reconcile
     from services.position_economics import account_value
 
+    from models.accounts import display_name as _account_display
+
     for d in rows:
         d["cash_stored"] = d.get("cash")
         d["cash_source"] = "stored"
         d["balance_stored"] = d.get("balance")
+        # R-IV.649(b) / R-IV.651(c)3: the display name travels with a BALANCE row too, not
+        # only with positions. ABACUS's add form builds its account list from both payloads
+        # and renders an account it has no label for as a DISABLED option -- honest, but it
+        # means an account with NO open positions would be unselectable, because positions
+        # were the only surface serving a label. That is exactly the case of opening the
+        # first position in a new account, which is what just happened with the 401(a).
+        d["account_display"] = _account_display(d.get("account_name"))
 
     # ONE ROUND TRIP FOR EVERY ACCOUNT, not one per account (R-IV.559(c)1).
     #
