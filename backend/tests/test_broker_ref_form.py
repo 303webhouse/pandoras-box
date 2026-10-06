@@ -23,9 +23,14 @@ import re
 
 import pytest
 
-# The regex the constraint carries, verbatim.
-EXPORT = re.compile(r'^[0-9a-f]{12}:L[0-9]+(-L[0-9]+|(,L[0-9]+)*)(#[0-9]+-[0-9]+)?$')
-FIDELITY = re.compile(r'^[0-9]{5}-[A-Z0-9]{6}$')
+# IMPORTED, not copied (R-IV.644(e)). This said "the regex the constraint carries, verbatim"
+# and carried its own transcription, so the test could pass against a stale copy of the very
+# thing it exists to pin. The constraint is generated from these same two constants.
+from models.position_lots import (BROKER_REF_EXPORT_REGEX,  # noqa: E402
+                                  BROKER_REF_FIDELITY_REGEX)
+
+EXPORT = re.compile(BROKER_REF_EXPORT_REGEX)
+FIDELITY = re.compile(BROKER_REF_FIDELITY_REGEX)
 
 
 def accepted(ref: str) -> bool:
@@ -38,6 +43,11 @@ def accepted(ref: str) -> bool:
     ("b7fce7073c1d:L38,L39,L41", "record list — non-contiguous, the roll case"),
     ("1f84bb337019:L5,L7", "two-record list"),
     ("b7fce7073c1d:L38-L41#1-3", "contract slice, FIFO ordinals"),
+    # R-IV.644(e): FRACTIONAL slices. A contract cannot be split; shares can, and
+    # CC-POSITIONS needs these three for the Roth rebuild (R-IV.642(c)).
+    ("b7fce7073c1d:L38-L41#0-50.891", "GDXY's 100-share buy, first slice"),
+    ("b7fce7073c1d:L38-L41#50.891-100", "GDXY's second slice, after the reinvestment"),
+    ("1f84bb337019:L5#0-1.519", "WRTH's 1.519 shares"),
     ("339ab550832d:L100-L100#2-2", "single-contract slice"),
 ])
 def test_export_record_forms_are_accepted(ref, label):
@@ -67,9 +77,29 @@ def test_the_seven_live_fidelity_confirmations_are_accepted(ref):
     ("262611-MP7GJ7", "confirmation prefix is five digits"),
     ("", "empty is not a reference"),
     ("b7fce7073c1d:L38-L41,L44", "span and list are not mixed"),
+    # R-IV.644(e) NEGATIVE CONTROLS for the fractional widening. A fraction needs a digit
+    # on BOTH sides of the point: a ref that parses loosely is a ref that can be written
+    # two ways and matched by neither, which breaks the uniqueness the form exists for.
+    ("b7fce7073c1d:L38-L41#.5-1", "a fraction needs a leading digit"),
+    ("b7fce7073c1d:L38-L41#1.-2", "a fraction needs a trailing digit"),
+    ("b7fce7073c1d:L38-L41#1-", "both bounds are still required"),
+    ("b7fce7073c1d:L38-L41#1.2.3-4", "one decimal point, not two"),
+    ("b7fce7073c1d:L38-L41#1-2-3", "two bounds, not three"),
+    ("b7fce7073c1d:L38-L41#1,5-2", "a comma is not a decimal separator"),
+    ("b7fce7073c1d:L38-L41#-1-2", "a bound is unsigned"),
 ])
 def test_malformed_references_are_rejected(ref, why):
     assert not accepted(ref), why
+
+
+def test_the_constraint_is_generated_from_this_same_pattern():
+    """One author. The constraint SQL is built from models.position_lots, and this test
+    imports the same constants — so a widening cannot land in one and not the other."""
+    import database.postgres_client as pc
+    from models import position_lots as pl
+
+    assert pc._BROKER_REF_EXPORT_REGEX == pl.BROKER_REF_EXPORT_REGEX
+    assert pc._BROKER_REF_FIDELITY_REGEX == pl.BROKER_REF_FIDELITY_REGEX
 
 
 def test_a_null_ref_is_not_a_malformed_ref():

@@ -80,6 +80,31 @@ PRINCIPAL_ENTRY_PREFIX = "principal-entry@"
 LOT_SOURCES = ("MANUAL", "IMPORT", "LEGACY-SINGLE-LOT")
 PRINCIPAL_ENTRY_SOURCE_REGEX = r"^principal-entry@[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+$"
 
+# ── broker_ref: the two accepted forms, declared ONCE (R-IV.644(e)) ────────────────────────
+#
+#   <sha12>:L<a>-L<b>              span — only when every record in it is the lot's
+#   <sha12>:L<a>,L<b>,…            record list (R-IV.504(b)) — the normal roll case
+#   <sha12>:L<a>-L<b>#<i>-<j>      slice of that order (R-IV.507(c))
+#   NNNNN-XXXXXX                   Fidelity confirmation number
+#
+# THE SLICE TAKES A FRACTIONAL BOUND. It was `#[0-9]+-[0-9]+`, whole numbers only, because
+# it was introduced for CONTRACT ordinals and a contract cannot be split. Shares can:
+# CC-POSITIONS needs three in the Roth rebuild — GDXY's 100-share buy split at **50.891** by
+# a reinvestment, and WRTH's **1.519** (R-IV.642(c)). A whole-number-only slice refused them,
+# so those lots would have had to carry NULL refs for ever, and a lot with no ref cannot be
+# BROKER_VERIFIED (`position_lots_verified_needs_evidence`) — the form was quietly capping
+# the provenance those lots could ever reach.
+#
+# Widened on both bounds, and only there. A fraction needs a digit on each side of the point:
+# `#.5-1` and `#1.-2` stay refused, because a ref that parses loosely is a ref that can be
+# written two ways and matched by neither.
+_BROKER_REF_QTY = r"[0-9]+(\.[0-9]+)?"
+BROKER_REF_EXPORT_REGEX = (
+    r"^[0-9a-f]{12}:L[0-9]+(-L[0-9]+|(,L[0-9]+)*)"
+    r"(#" + _BROKER_REF_QTY + r"-" + _BROKER_REF_QTY + r")?$"
+)
+BROKER_REF_FIDELITY_REGEX = r"^[0-9]{5}-[A-Z0-9]{6}$"
+
 
 def principal_entry_source(instant) -> str:
     """`principal-entry@<ISO instant>` for a lot the live form wrote."""

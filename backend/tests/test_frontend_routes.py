@@ -7,6 +7,46 @@ it means a route was removed or renamed without updating the UI.
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_live_venues(monkeypatch):
+    """No unit test waits on a live exchange — R-IV.644(g)1.
+
+    This file asks whether each route EXISTS, and it answered by really calling them. For
+    `/api/crypto/market` that meant real HTTP to Binance, Coinbase, OKX and Bybit from inside
+    the suite. Two things followed, and Cursor found both:
+
+      * the file HANGS when it runs after the crypto tests — a unit test's duration became a
+        function of someone else's network;
+      * it left module state behind. `test_cvd_trend_state_is_per_symbol` expects BTC's
+        `ema_ratio` to be None and got -0.93, because this file had driven a real computation
+        through it first (fixed from the other side in a3e088c; this is the cause).
+
+    The venues are stubbed to fail fast. A route that returns 200 with honest nulls and a
+    route that returns 200 with real prices both answer the only question this file asks,
+    and the endpoint is built to degrade rather than raise when a venue is down.
+    """
+    import httpx
+
+    class _DeadVenue:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, *a, **k):
+            raise httpx.ConnectError("venue stubbed out: no live network in a unit test")
+
+        async def post(self, *a, **k):
+            raise httpx.ConnectError("venue stubbed out: no live network in a unit test")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _DeadVenue)
+    yield
+
+
 class TestFrontendEndpointsExist:
     """Every GET endpoint called by app.js must exist."""
 

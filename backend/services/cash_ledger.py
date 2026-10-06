@@ -68,6 +68,38 @@ INCOME_TYPES = frozenset({DIVIDEND, INTEREST})
 
 TRADE_TYPES = frozenset({TRADE_DEBIT, TRADE_CREDIT})
 
+# ── What moves a balance without the account having PERFORMED (R-IV.644(c)) ─────
+#
+# EXTERNAL_TYPES above keeps deposits and transfers out of a RETURN. A period P&L
+# needs a slightly wider set, because two more things move a balance without being
+# this period's performance:
+#
+#   ANCHOR      — an audited restatement. The balance changes because the figure was
+#                 wrong, not because the market moved.
+#   ADJUSTMENT  — a correction to PAST entries. Even when it corrects a mis-recorded
+#                 trade result (which was performance once), it did not happen today,
+#                 so crediting it to today is wrong either way.
+#
+# INCOME_TYPES are deliberately NOT here: a dividend is real return, earned by holding,
+# and excluding it would under-report the day. TRADE_TYPES are not here either — they
+# move cash and securities in opposite directions and net to zero in a balance, so
+# subtracting them would double-count the trade.
+NOT_PERFORMANCE_TYPES = EXTERNAL_TYPES | frozenset({ANCHOR, ADJUSTMENT})
+
+
+def moves_balance_without_performing(event: Dict[str, Any]) -> bool:
+    """True when this event changed the balance but is not this period's performance.
+
+    An UNRECOGNISED type returns True — deliberately. `normalise_type` returns None for
+    a word this vocabulary does not know, and in a P&L the safe direction is to treat an
+    unknown mover as NOT performance: under-reporting a gain is a visible disappointment,
+    while crediting an unknown balance movement as profit is an invisible lie.
+    """
+    t = normalise_type(event.get("flow_type"), event.get("amount"))
+    if t is None:
+        return True
+    return t in NOT_PERFORMANCE_TYPES
+
 # A real movement of cash the principal could not classify (R-IV.546(a)1's "other").
 # It counts toward the balance and belongs to NONE of the three buckets above -- not
 # external, not income, not a trade. That is the point: we do not know what it is, so

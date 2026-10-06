@@ -238,7 +238,11 @@ def test_adding_an_account_does_not_read_as_one_days_profit():
     now summed over the SAME account set."""
     code = _code("api/portfolio.py")
     assert "comparable = sum(v for k, v in current.items() if k in prev_names)" in code
-    assert "def calc_pnl(prev_total, prev_names):" in code
+    # The signature gained `after` under R-IV.644(c), when the same function also started
+    # subtracting the window's non-performance flows. Pinned on the NAME and the two
+    # parameters this ruling is about, so the next widening does not read as a regression.
+    assert "def calc_pnl(prev_total, prev_names" in code
+    assert "prev_names" in code and "funding_since(after, prev_names)" in code
 
 
 # ─────────────────────── (b)4 the tools describe themselves from the registry
