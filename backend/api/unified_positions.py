@@ -2283,18 +2283,23 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
 
                 # UPDATE unified_positions (partial or full close)
                 if is_partial:
-                    remaining_qty = total_qty - close_qty
-                    old_cost_basis = pos.get("cost_basis") or 0
-                    new_cost_basis = round(old_cost_basis * remaining_qty / total_qty, 2) if total_qty > 0 else 0
+                    # CONVENTION #29: `quantity` is the size OPENED and `SUM(lots.qty)` is the
+                    # open remainder. This cut both `quantity` and `cost_basis` on every
+                    # partial, so after three closes NVDA 702's row claimed to be a smaller
+                    # position than the one the principal took -- and the basis every
+                    # percentage is divided by shrank with it. The remainder lives in the
+                    # lots, where the disposal above has just recorded it.
+                    #
+                    # Realized ACCUMULATES, as the sum of this position's closure rows.
+                    # Realized is NOT written here: the closure rows it is summed from are
+                    # written below, with the disposal lot. One statement after them owns it.
                     updated = await conn.fetchrow("""
                         UPDATE unified_positions SET
-                            quantity = $1,
-                            cost_basis = $2,
-                            notes = COALESCE(notes || ' | ', '') || $3,
+                            notes = COALESCE(notes || ' | ', '') || $1,
                             updated_at = NOW()
-                        WHERE position_id = $4
+                        WHERE position_id = $2
                         RETURNING *
-                    """, remaining_qty, new_cost_basis,
+                    """,
                         f"Partial close {close_qty}/{total_qty} @ {req.exit_price} ({trade_outcome} ${realized_pnl:+.2f})",
                         position_id)
                 else:
@@ -2310,7 +2315,12 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                             updated_at = NOW()
                         WHERE position_id = $7
                         RETURNING *
-                    """, req.exit_price, now, realized_pnl, trade_outcome,
+                    """, req.exit_price, now,
+                        # Written as this close's own figure and then CORRECTED below from the
+                        # closure ledger, because the allocations do not exist yet at this
+                        # point in the route. The statement after them is what owns realized.
+                        realized_pnl,
+                        trade_outcome,
                         trade_id, req.notes, position_id)
 
                 # R-IV.566(c): THE CLOSE WRITES ITS DISPOSAL LOT, partial or full.
@@ -2337,19 +2347,72 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                                                       principal_entry_source)
 
                     try:
-                        await conn.execute(
+                        # R-IV.657(c): the allocations are planned BEFORE the disposal is
+                        # written, against the fills as they stand, and under the same
+                        # FOR UPDATE lock. fifo_plan is the reduce path's own planner --
+                        # the allocation arithmetic has one author, not a second copy here.
+                        _fills = await conn.fetch(
+                            "SELECT id, fill_time, qty, price, fees FROM position_lots "
+                            "WHERE position_id = $1 ORDER BY fill_time, id FOR UPDATE",
+                            position_id)
+                        _plan = fifo_plan([dict(l) for l in _fills], float(close_qty),
+                                          float(req.exit_price or 0), pos["asset_type"], 0)
+
+                        _disposal_id = await conn.fetchval(
                             """INSERT INTO position_lots
                                    (position_id, fill_time, qty, price, fees, source,
                                     provenance)
-                               VALUES ($1, $2, $3, $4, 0, $5, $6)""",
+                               VALUES ($1, $2, $3, $4, 0, $5, $6)
+                               RETURNING id""",
                             position_id, now, -abs(float(close_qty)),
                             abs(float(req.exit_price or 0)),
                             principal_entry_source(datetime.now(timezone.utc)),
                             PRINCIPAL_REPORTED)
+
+                        # THE CLOSURE ROWS. /close never wrote these; only /reduce did. So a
+                        # close had no record of WHICH fills it consumed or at what cost, and
+                        # realized had nothing to be derived from -- which is why each close
+                        # could only report itself.
+                        for _a in _plan["allocations"]:
+                            await conn.execute(
+                                """INSERT INTO position_lot_closures
+                                       (position_id, disposal_lot_id, acquired_lot_id, qty,
+                                        cost_per_unit, proceeds_per_unit, realized,
+                                        multiplier)
+                                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                                position_id, _disposal_id, _a["lot_id"], _a["qty"],
+                                _a["cost_per_unit"], _a["proceeds_per_unit"],
+                                _a["realized"], _plan["multiplier"])
+                    except HTTPException:
+                        raise
                     except Exception as exc:  # noqa: BLE001
                         logger.error("position %s: disposal lot could not be written "
                                      "(%s)", position_id, type(exc).__name__)
                         raise
+
+                    # REALIZED IS DERIVED FROM THE LEDGER, NOT ACCUMULATED INTO A FIELD.
+                    #
+                    # The regression was `realized_pnl = <this close>`: NVDA 702 was closed in
+                    # three parts (2 @ 0.18, 1 @ 0.33, 2 @ 0.10 against 5 opened at 0.03) and
+                    # the row read 14.00 -- the LAST close alone -- where its lots say 74.00.
+                    #
+                    # `+=` would fix the symptom and keep the shape that caused it: a running
+                    # total has no author, and a retried or replayed close double-counts
+                    # silently. A SUM over the closure rows is idempotent, re-derivable, and
+                    # cannot drift from the allocations it is made of. Checked against 702:
+                    # 30.00 + 30.00 + 14.00 = 74.00, which is what the repaired row holds.
+                    #
+                    # ONE STATEMENT, AFTER THE CLOSURES, and it subqueries them -- so there is
+                    # no local to be read before it is assigned, which is how the first
+                    # version of this fix failed: the UPDATE blocks above run BEFORE this
+                    # point in the route.
+                    await conn.execute(
+                        """UPDATE unified_positions
+                              SET realized_pnl = COALESCE(
+                                      (SELECT SUM(realized) FROM position_lot_closures
+                                        WHERE position_id = $1), realized_pnl),
+                                  updated_at = NOW()
+                            WHERE position_id = $1""", position_id)
 
                 if is_partial:
                     # The legs must say what is still open, or R-IV.517(c) refuses the
