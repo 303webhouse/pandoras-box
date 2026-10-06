@@ -135,6 +135,42 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+# Venues the snapshot waits on. A skipped key is present so the rest of the
+# function keeps its shape, but it is never fetched and never logged as an error.
+_VENUE_SKIPPED = {"ok": False, "error": "skipped"}
+_VENUE_KEYS = (
+    "binance_spot_price", "coinbase_spot", "okx_spot_price",
+    "binance_perp_price", "binance_funding", "binance_trades",
+    "okx_perp_price", "okx_funding", "okx_trades",
+    "bybit_funding", "bybit_perp_price",
+)
+_SILENT_VENUE_ERRORS = frozenset({"skipped", "disabled"})
+
+
+def _asks_binance_spot(base: str) -> bool:
+    """Ask Binance spot only when the matrix cell is LIVE (HYPE is; FARTCOIN is not)."""
+    cell = ((get_symbol_entry(base) or {}).get("binance_spot_orderbook") or {})
+    return cell.get("status") == "LIVE"
+
+
+def _asks_okx_spot(base: str) -> bool:
+    """Ask OKX spot unless the matrix recorded it as not listed.
+
+    Untracked coins keep the old try-anyway behaviour. FARTCOIN's cell is
+    UNAVAILABLE on both Binance spot and OKX spot (code 51001, 2026-10-01).
+    """
+    cell = ((get_symbol_entry(base) or {}).get("binance_spot_orderbook") or {})
+    if not cell:
+        return True
+    return cell.get("fallback_status") != "UNAVAILABLE"
+
+
+def _note_venue_error(errors: List[str], label: str, entry: Dict[str, Any]) -> None:
+    err = entry.get("error")
+    if err and err not in _SILENT_VENUE_ERRORS:
+        errors.append(f"{label}: {err}")
+
+
 def _classify_cvd_direction(net_usd: float, gross_usd: float,
                             _cvd_trend_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Return smoothed CVD direction using EMA + hysteresis deadband.
@@ -261,47 +297,43 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     okx_swap_inst = f"{base_asset}-USDT-SWAP"     # BTC-USDT-SWAP
     coinbase_pair = f"{base_asset}-USD"            # BTC-USD
 
+    # R-IV.645(d) / R-IV.637(d): do not wait on venues that cannot answer.
+    # The 8 s /market stall was Binance perps. The matrix cell is GEO_BLOCKED
+    # (fapi.binance.com 451 from Railway). Production still sets a perp proxy
+    # (`prices.perps.routing.binance_perp_proxy_enabled` was true at the
+    # 2026-10-06 16:12 UTC after-reading); three proxied calls then wait out
+    # the 8.0 s client timeout on every coin, and Agora polls this every 5 s.
+    # OKX swap already serves perp price, funding and CVD. Bybit is also not
+    # asked: the same reading had bybit null, and the 2026-10-01 check from
+    # the principal's PC was HTTP 403.
     market_client_kwargs: Dict[str, Any] = {"timeout": 8.0, "follow_redirects": True}
-    binance_client_kwargs: Dict[str, Any] = {"timeout": 8.0, "follow_redirects": True}
-    if BINANCE_PERP_HTTP_PROXY:
-        binance_client_kwargs["proxy"] = BINANCE_PERP_HTTP_PROXY
 
-    async with httpx.AsyncClient(**market_client_kwargs) as client, httpx.AsyncClient(**binance_client_kwargs) as binance_client:
-        use_bybit = BYBIT_ENABLED and not _bybit_runtime_disabled
-        tasks = {
-            # Spot prices
-            "binance_spot_price": _fetch_json(client, f"{BINANCE_SPOT_BASE}/api/v3/ticker/price", {"symbol": symbol}),
+    async with httpx.AsyncClient(**market_client_kwargs) as client:
+        tasks: Dict[str, Any] = {
             "coinbase_spot": _fetch_json(client, f"{COINBASE_BASE}/v2/prices/{coinbase_pair}/spot"),
-            "okx_spot_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": okx_spot_inst}),
-
-            # Binance perp (PRIMARY): price, funding, and tape
-            "binance_perp_price": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/ticker/price", {"symbol": symbol}),
-            "binance_funding": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/premiumIndex", {"symbol": symbol}),
-            "binance_trades": _fetch_json(binance_client, f"{BINANCE_PERP_API_ROOT}/trades", {"symbol": symbol, "limit": limit}),
-
-            # Perp prices & funding via OKX (not geo-blocked)
             "okx_perp_price": _fetch_json(client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": okx_swap_inst}),
             "okx_funding": _fetch_json(client, f"{OKX_BASE}/api/v5/public/funding-rate", {"instId": okx_swap_inst}),
-
-            # Order flow / trades from OKX swap
             "okx_trades": _fetch_json(client, f"{OKX_BASE}/api/v5/market/trades", {"instId": okx_swap_inst, "limit": limit}),
         }
-        if use_bybit:
-            tasks.update({
-                # Bybit funding + perp price retained; tolerate failures
-                "bybit_funding": _fetch_json(client, f"{BYBIT_BASE}/v5/market/funding/history", {"category": "linear", "symbol": symbol, "limit": 1}),
-                "bybit_perp_price": _fetch_json(client, f"{BYBIT_BASE}/v5/market/tickers", {"category": "linear", "symbol": symbol}),
-            })
+        if _asks_binance_spot(base_asset):
+            tasks["binance_spot_price"] = _fetch_json(
+                client, f"{BINANCE_SPOT_BASE}/api/v3/ticker/price", {"symbol": symbol}
+            )
+        if _asks_okx_spot(base_asset):
+            tasks["okx_spot_price"] = _fetch_json(
+                client, f"{OKX_BASE}/api/v5/market/ticker", {"instId": okx_spot_inst}
+            )
 
         results = await asyncio.gather(*tasks.values())
         data_map = dict(zip(tasks.keys(), results))
-        if not use_bybit:
-            data_map["bybit_funding"] = {"ok": False, "error": "disabled"}
-            data_map["bybit_perp_price"] = {"ok": False, "error": "disabled"}
+        for key in _VENUE_KEYS:
+            data_map.setdefault(key, dict(_VENUE_SKIPPED))
 
     errors: List[str] = []
 
-    # Perp price preference: Binance futures first, then Bybit, then OKX.
+    # Perp price preference: Binance futures (not asked from Railway), then Bybit
+    # (not asked), then OKX — the live path. Kept so a test-injected success still
+    # parses; production data_map entries for the first two are skipped.
     perp_price = None
     perp_source = None
     perp_source_detail = None
@@ -320,9 +352,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         except Exception:
             perp_price = None
     else:
-        binance_perp_error = data_map["binance_perp_price"].get("error")
-        if binance_perp_error:
-            errors.append(f"binance_perp_price: {binance_perp_error}")
+        _note_venue_error(errors, "binance_perp_price", data_map["binance_perp_price"])
 
     if perp_price is None and data_map["bybit_perp_price"]["ok"]:
         try:
@@ -338,8 +368,8 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         bybit_price_error = data_map["bybit_perp_price"].get("error")
         if _is_geo_restriction(bybit_price_error):
             _bybit_runtime_disabled = True
-        elif BYBIT_ENABLED and bybit_price_error != "disabled":
-            errors.append(f"bybit_perp_price: {bybit_price_error}")
+        else:
+            _note_venue_error(errors, "bybit_perp_price", data_map["bybit_perp_price"])
 
     if perp_price is None and data_map["okx_perp_price"]["ok"]:
         try:
@@ -351,7 +381,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         except Exception:
             perp_price = None
     elif perp_price is None and not data_map["okx_perp_price"]["ok"]:
-        errors.append(f"okx_perp_price: {data_map['okx_perp_price'].get('error')}")
+        _note_venue_error(errors, "okx_perp_price", data_map["okx_perp_price"])
 
     if perp_price is None:
         held = _recall(last_good, "perp_price", "price", "perp_price", now, errors)
@@ -366,7 +396,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     if data_map["binance_spot_price"]["ok"]:
         binance_spot = _safe_float(data_map["binance_spot_price"]["data"].get("price"))
     else:
-        errors.append(f"binance_spot_price: {data_map['binance_spot_price'].get('error')}")
+        _note_venue_error(errors, "binance_spot_price", data_map["binance_spot_price"])
     if binance_spot is None and data_map["okx_spot_price"]["ok"]:
         try:
             row = data_map["okx_spot_price"]["data"].get("data", [])[0]
@@ -394,9 +424,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             except Exception:
                 funding_binance_time = None
     else:
-        binance_funding_error = data_map["binance_funding"].get("error")
-        if binance_funding_error:
-            errors.append(f"binance_funding: {binance_funding_error}")
+        _note_venue_error(errors, "binance_funding", data_map["binance_funding"])
     if funding_binance is None:
         held = _recall(last_good, "funding_binance", "funding", "binance_funding", now, errors)
         if held:
@@ -417,7 +445,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             except Exception:
                 funding_okx_time = None
     else:
-        errors.append(f"okx_funding: {data_map['okx_funding'].get('error')}")
+        _note_venue_error(errors, "okx_funding", data_map["okx_funding"])
     if funding_okx is None:
         held = _recall(last_good, "funding_okx", "funding", "okx_funding", now, errors)
         if held:
@@ -441,8 +469,8 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         bybit_funding_error = data_map["bybit_funding"].get("error")
         if _is_geo_restriction(bybit_funding_error):
             _bybit_runtime_disabled = True
-        elif BYBIT_ENABLED and bybit_funding_error != "disabled":
-            errors.append(f"bybit_funding: {bybit_funding_error}")
+        else:
+            _note_venue_error(errors, "bybit_funding", data_map["bybit_funding"])
     if funding_bybit is None:
         held = _recall(last_good, "funding_bybit", "funding", "bybit_funding", now, errors)
         if held:
@@ -461,7 +489,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
         except Exception:
             coinbase_spot = None
     else:
-        errors.append(f"coinbase_spot: {data_map['coinbase_spot'].get('error')}")
+        _note_venue_error(errors, "coinbase_spot", data_map["coinbase_spot"])
     if coinbase_spot is None:
         held = _recall(last_good, "coinbase_spot", "price", "coinbase_spot", now, errors)
         if held:
@@ -487,9 +515,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             trades = trade_rows
             cvd_source = "binance"
     else:
-        binance_trades_error = data_map["binance_trades"].get("error")
-        if binance_trades_error:
-            errors.append(f"binance_trades: {binance_trades_error}")
+        _note_venue_error(errors, "binance_trades", data_map["binance_trades"])
 
     if not trades and data_map["okx_trades"]["ok"]:
         trades_data = data_map["okx_trades"].get("data")
@@ -498,7 +524,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
             trades = okx_rows
             cvd_source = "okx"
     elif not trades:
-        errors.append(f"okx_trades: {data_map['okx_trades'].get('error')}")
+        _note_venue_error(errors, "okx_trades", data_map["okx_trades"])
 
     if trades:
         cumulative = 0.0
@@ -618,7 +644,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
                     "binance_perp_api_root": BINANCE_PERP_API_ROOT,
                     "binance_perp_proxy_enabled": bool(BINANCE_PERP_HTTP_PROXY),
                 },
-                "note": "Binance perps prioritized, then Bybit, then OKX. Spread = perp - Binance spot."
+                "note": "OKX swap is the live perp path from Railway. Binance perps and Bybit are not asked. Spread = perp - Binance spot."
             },
             "basis": basis,
             "basis_pct": basis_pct,

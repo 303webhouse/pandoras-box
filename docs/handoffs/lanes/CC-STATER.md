@@ -1,10 +1,9 @@
-# CC-STATER lane â€” status
+# CC-STATER lane — status
 
-**Written:** 2026-10-01 11:51 MDT (17:51 UTC); first written 10:45 MDT for R-IV.628, updated for R-IV.637
-**Worked against:** `origin/main` = `a338cce` (fix(positions): an option expired at the close now ends that eveningâ€¦)
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-*` branches
-only (R-IV.628). It inherited the lane from the Claude Code cloud session, which ran out of credits.
-**Hub at read time:** prod runs `a338cce`, which includes BUILD's caller tags, since 15:31 UTC.
+**Written:** 2026-10-06 10:18 MDT (16:18 UTC)
+**Worked against:** `origin/main` = `0a2a4cb` (fix(accounts): a balance row carries its display name…)
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-*` branches only (R-IV.628).
+**Hub at read time:** prod runs `0a2a4cb`, `status: healthy`. Phase 0 is live (`df328e8` is an ancestor).
 
 ## Why this lane exists
 SPINE chartered CC-STATER (R-IV.618) to own Stater Swap, the hub's crypto surface.
@@ -22,91 +21,62 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## Branches
+## Login (R-IV.645(b))
+Postgres tool logs in as `stater_ro` (`current_user` / `session_user`). SELECT works
+(`crypto_cycle_log` SELECT privilege true). INSERT is refused: table INSERT privilege is false,
+and `INSERT INTO crypto_cycle_log` returned a read-only-transaction error. Not the superuser.
+
+## After reading (R-IV.645(c))
+Same endpoints as the before probe, no session, hard stop at 5 UW calls counted on `crypto_bars_*`
+tags only. Probe window **16:10:27–16:11:32 UTC** (10:10–10:11 MDT).
+
+| | UW `crypto_bars_*` | GET writes |
+|---|---|---|
+| baseline | absent (0) | `crypto_cycle_log` max id 12842; `crypto_tape_health_log` max id 45526 |
+| after the GETs | **0** (tags still absent) | **0** new rows in either log |
+
+| Endpoint | HTTP | UW | elapsed |
+|---|---|---|---|
+| `/crypto/regime`, `/crypto/clock` | 200 | 0 | 0.22 s / 0.06 s |
+| `/analytics/risk-budget`, `/trade-ideas?limit=50` | 401 | 0 | ~0.1 s |
+| `/crypto/market` × 6 coins | 200 | 0 | **8.08 s each** |
+| `/crypto/cycle-extremes` | 200 | 0 | 0.17 s |
+| `/crypto/state/BTC` | 200 | 0 | 12.04 s (not UW) |
+| `/crypto/tape-health` | 401 | 0 | 0.08 s |
+
+Passive, same day: no `crypto_bars_*` tag appears in `/api/uw/health/by_caller` at all (total ~6k
+on other callers). BUILD's claim holds: no tracked symbol uses UW for bars.
+
+`/crypto/market` still waited 8.08 s per coin. Live payload (BTC, 16:12:33 UTC):
+`prices.perps.binance` null, `bybit` null, `okx` served; `funding.binance`/`bybit` null,
+`funding.okx` live; `routing.binance_perp_proxy_enabled` **true**. Errors empty. HYPE
+`binance_spot` returned a price from Railway. FARTCOIN Binance spot 400.
+
+## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-p0-market` | New. Cut from `main` `a338cce`. `df7ce28` (P0.3 cherry-pick) + `5b45daa` (fallback TTLs). | **Yes, merge first.** |
-| `claude/stater-phase0` | All six Phase 0 items, plus `7c3295e` (the same TTL commit) and `0ecdb0d` (main merged in, caller-tag conflict resolved). 42 tests. | **Yes, after p0-market.** It still waits on SPINE's Phase 0 ruling. |
-| `claude/stater-scope` | Scope doc + Phase 1 mockup (docs only). Contained in phase0. | It merges along with phase0. |
-| `s6-stater-build` | Older S-6 cockpit work, from another session. Not touched. | Not this lane's to merge. |
+| `claude/stater-routing` | Cut from `origin/main` `0a2a4cb`. Two commits: `27d4a04` (routing), `794056d` (CVD label). Lane file on top. | **Yes. Merge this.** |
+| `claude/stater-phase0` / `claude/stater-p0-market` | Merged (`df328e8` / `087ce2b`). | Done. |
+| `s6-stater-build` | Older S-6 cockpit work. Not touched. | Not this lane's to merge. |
 
-## What was done for R-IV.623 (executed under R-IV.628)
-1. **Done: the per-symbol fallback store with TTLs** (`5b45daa`): 120 s for prices, CVD and order
-   flow, 900 s for funding. Past the limit the value is null and `errors` says "no fresh value". The shape is unchanged.
-   Also done: the vendor-format audit (in the commit message and the relay) and 7 tests with positive
-   controls. Shipped alone on `p0-market` and cherry-picked onto phase0.
-   - **Open:** I did not have BUILD's repro text, so the repro test is reconstructed from R-IV.623.
-     BUILD should compare it with theirs.
-2. **Done: the relay** `docs/handoffs/RELAY_CC-STATER_to_CC-ABACUS_CC-BUILD_2026-10-01_market-ttl.md`.
-   - The shape is unchanged. The bot and Stater handle null.
-   - **Agora does not crash, but its client-side last-good copy keeps showing an expired price.** That is ABACUS's decision.
-3. **Before: done. After: waits for BUILD's deploy of phase0.** The caller tag is on `main` and deployed.
-   - **Before, passive (no Stater tab open):** since the 15:31 UTC deploy, about 68 min, the counts are
-     `crypto_bars_tape_health` 15 (about 13/h), `crypto_bars_regime` 3, `crypto_bars_state_api` 0, and
-     `crypto_bars_outcome_resolver` 0. The old `outcome_resolver` row holds 213, all from before the rename.
-   - **Before, the probe (R-IV.637(b), budget 5 UW calls, prod `478997e`, 17:46â€“17:49 UTC):** one request
-     to each endpoint a Stater tab polls on `main`, sent with no session and no key, the way a tab sends them.
-     **Spent: 1 UW call**, `crypto_bars_state_api` +1, from `GET /crypto/state/BTC`. Every other crypto tag stayed flat.
+## What this session did
+1. **Routing (`27d4a04`):** `/crypto/market` no longer asks Binance perps (the 8 s venue — proxied
+   `fapi.binance.com` waiting out the 8.0 s client timeout; matrix GEO_BLOCKED) or Bybit.
+   FARTCOIN is not asked on Binance spot or OKX spot. HYPE is routed to Binance spot
+   (`_BINANCE_SPOT_SYMBOL["HYPE"] = "HYPEUSDT"`), after the Railway check above. Response
+   shape unchanged. Test: a fake venue that sleeps 8 s on fapi/bybit cannot delay the snapshot.
+2. **CVD label (`794056d`):** `_fetch_cvd` still does not read the real `cvd` key. Missing
+   `cvd_analysis` contributes 0 as before, reason `"no data"` instead of `"CVD neutral"`.
+   Test parametrizes every existing score path; all scores unchanged. The real CVD fix stays
+   a shadow score under R-IV.637(c).
 
-     | Endpoint | HTTP | UW by caller tag | Writes |
-     |---|---|---|---|
-     | `/crypto/regime`, `/crypto/clock` | 200 | 0 | none |
-     | `/analytics/risk-budget`, `/trade-ideas?limit=50` | 401 | 0 | none |
-     | `/crypto/market` Ã— 6 coins | 200, **about 8.1 s each** | 0 | none |
-     | `/crypto/cycle-extremes` | 200 | 0 | **6 rows in `crypto_cycle_log`** (see below) |
-     | `/crypto/state/BTC` | 200 | **1** (`crypto_bars_state_api`) | none |
-     | `/crypto/tape-health` | **401** | 0 | none, because it was refused |
-
-     - **The rows written:** one per coin, at `computed_at` (from the response)
-       BTC `17:48:55.346745`, ETH `17:48:55.860674`, SOL `17:48:56.233770`, HYPE `17:48:56.614450`,
-       ZEC `17:48:56.988100`, FARTCOIN `17:48:57.357746` (UTC, 2026-10-01).
-       - **Probably 6 more, unconfirmed:** an earlier pass of the probe script timed out client-side at
-         30 s. Its 49 s run time fits two 8-second `/market` calls followed by `cycle-extremes`. So a second
-         set of 6 rows was probably written around 17:47:50â€“17:48:25 UTC.
-       - **Row ids not read:** BUILD's read-only login (R-IV.627) does not exist yet. The Postgres
-         tool on this PC logs in as `postgres` (the superuser), so under R-IV.628(b)2 it was not used.
-         The rows can be found by `(symbol, computed_at)`. Nothing was removed.
-     - **Signals written: none.** `crypto_cvd_engine` persisted 0 â†’ 0 (`/health`). Only `tape-health` fires
-       CVD events, and it returned 401.
-     - **What a real (logged-in) tab adds:** `tape-health` needs a session. A logged-in tab gets it
-       computed, which spends `crypto_bars_tape_health` for BTC/ETH/SOL. That fits BUILD's 4 calls
-       per 30 s (`51732bd`): 1 from state plus about 3 from tape-health. This was inferred, not measured, because
-       no key or session was used.
-     - **A side finding (for the routing branch):** every `/market` request takes about 8.1 s, which is the
-       8.0 s venue timeout. One venue hangs on every call from Railway.
-     - **Budget accounting:** in the first pass the script's guard counted all tags and stopped on 18
-       `option_contracts` calls, which come from an unrelated hub job. The rerun counted crypto tags only.
-       The total crypto spend for the whole probe was 1.
-   - **After:** the same probe once phase0 is deployed. Expected: `crypto_bars_state_api` 0, no
-     `crypto_cycle_log` rows from a GET, and (with a session) no `tape-health` spend from a GET.
-
-## Findings for other lanes (relayed as text; the owners insert)
-- **ABACUS:** `app.js` `cryptoMarketLastGood` has no time limit, so it masks the server's nulls. A null CVD direction shows as `NEUTRAL`.
-- **BUILD:**
-  - `test_frontend_routes.py` hangs when run after the crypto tests in one process. This happens on `main` too.
-  - The `polygon-health` route test fails on `main`.
-  - Still open from before: the README ownership row and the `data/watchlist.json` test side effect.
-## Known defects (left in place by ruling)
-- **`btc_market_structure._fetch_cvd` reads `cvd_analysis`**, a key `/crypto/market` has never
-  returned. So the CVD leg has scored 0 ("CVD neutral") since the strategy was written, and the
-  strategy's whole record is a record without CVD. **Leave it (R-IV.637(c)).** A fix comes later only as a
-  shadow score logged next to the live one. Only QUERY's comparison can promote it, because changing
-  how a signal scores makes a new signal, not a repaired one.
-
-## Vendor matrix (R-IV.637(d))
-- **Recorded on phase0** in `config/crypto_symbol_matrix.py`, with the evidence in
-  `docs/strategy-reviews/stater-swap-redesign/symbol-capability-matrix.md`:
-  - HYPE's `binance_spot_orderbook` is now LIVE but marked `not_routed`;
-  - FARTCOIN's OKX-spot fallback is now UNAVAILABLE (`51001`), and its Binance spot entry stays UNAVAILABLE (`-1121`).
-- **Nothing reads those cells**, so routing is unchanged.
-- **Routing changes come later, on their own branch, after BUILD merges both:** stop asking venues that
-  don't list a coin, use HYPE's Binance spot (after a check from Railway), and fix the 8 s `/market` stall.
-
-## State: holding for BUILD's merge (R-IV.637(e))
-Nothing more goes onto `p0-market` or phase0 unless BUILD's review asks for it.
+## Still open (not this branch)
+- Agora's client-side last-good copy (ABACUS).
+- Geo-blocked strategy engine (`crypto_setups.py` → `fapi.binance.com` 451).
+- Cycle engine double count.
+- `/crypto/state/BTC` took 12 s with zero UW (likely Coinbase candles); not investigated.
 
 ## What the next CC-STATER session should do first
-1. Check whether BUILD merged `p0-market`, then phase0, and whether it deployed.
-2. After the deploy, take the "after" probe: the same endpoints, the same method, the same 5-call cap.
-3. Then, each on its own branch from `main`: the vendor routing changes, the geo-blocked strategy
-   engine (`crypto_setups.py` â†’ `fapi.binance.com` 451), and the cycle engine's double count.
+1. Confirm BUILD merged `claude/stater-routing` and that prod serves it.
+2. Time `/crypto/market` again: it should be well under 8 s.
+3. Then the geo-blocked strategy engine and the cycle engine's double count, each on its own branch from `main`.

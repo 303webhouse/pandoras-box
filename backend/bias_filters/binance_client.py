@@ -5,9 +5,10 @@ Fetches spot orderbook depth and perp-vs-spot basis, per symbol.
 S-3 Phase 1.5 (FA-7): get_spot_orderbook_skew() and get_quarterly_basis() are
 now per-symbol parametrized with symbol="BTC" default — every existing caller
 is signature-compatible and behavior-identical. Cache keys are per-symbol.
-HYPE and FARTCOIN are not listed on Binance spot (HTTP 400, verified 2026-07-13)
-and return NA:NOT_LISTED_BINANCE_SPOT for orderbook calls. OKX spot fallback
-is available for those symbols for price/basis if needed.
+HYPE and FARTCOIN: HYPE is listed on Binance spot (verified from Railway
+2026-10-06 via GET /api/crypto/market?symbol=HYPE, binance_spot returned).
+FARTCOIN is not listed on Binance spot (HTTP 400 -1121) nor OKX spot
+(code 51001) and those maps are None / absent so nothing asks.
 """
 
 import logging
@@ -37,9 +38,9 @@ _BINANCE_SPOT_SYMBOL: Dict[str, Optional[str]] = {
     "BTC":      "BTCUSDT",
     "ETH":      "ETHUSDT",
     "SOL":      "SOLUSDT",
-    "HYPE":     None,       # HTTP 400 "Invalid symbol" (verified 2026-07-13)
+    "HYPE":     "HYPEUSDT",  # listed; Railway /crypto/market 2026-10-06 returned a spot price
     "ZEC":      "ZECUSDT",  # ZEC IS listed on Binance spot (verified 2026-07-13)
-    "FARTCOIN": None,       # HTTP 400 "Invalid symbol" (verified 2026-07-13)
+    "FARTCOIN": None,       # HTTP 400 "Invalid symbol" (verified 2026-07-13 and 2026-10-01)
 }
 
 # Per-symbol OKX swap instrument ID for perp-price/basis fallback.
@@ -59,7 +60,8 @@ _OKX_SPOT_INSTID: Dict[str, str] = {
     "SOL":      "SOL-USDT",
     "HYPE":     "HYPE-USDT",
     "ZEC":      "ZEC-USDT",
-    "FARTCOIN": "FARTCOIN-USDT",
+    # FARTCOIN is not listed on OKX spot (code 51001, 2026-10-01). Absent on
+    # purpose: tape-health and basis then take the honest NA path.
 }
 
 # Per-symbol OKX spot orderbook instrument ID (HYPE/FARTCOIN: OKX spot only).
@@ -69,7 +71,7 @@ _OKX_SPOT_BOOK_INSTID: Dict[str, str] = {
     "SOL":      "SOL-USDT",
     "HYPE":     "HYPE-USDT",
     "ZEC":      "ZEC-USDT",
-    "FARTCOIN": "FARTCOIN-USDT",
+    # FARTCOIN: not listed on OKX spot. See _OKX_SPOT_INSTID.
 }
 
 # Cache for API responses
@@ -194,7 +196,7 @@ async def get_spot_orderbook_skew(symbol: str = "BTC") -> Dict[str, Any]:
             data = None
 
     if data is None and okx_spot_book:
-        # OKX spot orderbook fallback (also primary for HYPE/FARTCOIN)
+        # OKX spot orderbook fallback (primary for coins not on Binance spot)
         okx_data = await _make_request(f"{OKX_MARKET_URL}/books", {
             "instId": okx_spot_book,
             "sz": 400
@@ -204,8 +206,7 @@ async def get_spot_orderbook_skew(symbol: str = "BTC") -> Dict[str, Any]:
             source = "okx_spot"
 
     if binance_spot_sym is None and not okx_spot_book:
-        # Structurally impossible: all six symbols have an OKX spot entry.
-        # Guard here for completeness.
+        # FARTCOIN: not on Binance spot and not on OKX spot.
         await record_observation("binance_spot", "orderbook_skew", symbol, success=False,
                                  reason=f"NA:NOT_LISTED_BINANCE_SPOT and no OKX spot entry for {symbol}")
         return _na_cell(symbol, "NA:NOT_LISTED_BINANCE_SPOT")
