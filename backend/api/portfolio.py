@@ -43,6 +43,88 @@ def _row_to_dict(row) -> dict:
 
 # ── 1. GET /balances ──
 
+async def _underlying_price(ticker: str):
+    """The underlying's current price, or None — R-IV.657(d).
+
+    TWO SOURCES, IN THIS ORDER, AND THE KEY MATTERS. `get_quote` returns the spot under
+    `spot`, not `price`; reading the wrong key returns None for every ticker and the
+    intrinsic silently never computes. Measured: XLF's quote came back
+    `{"spot": null, "status": "unavailable"}` with the market closed, so the UW leg alone
+    cannot carry this.
+
+    The fallback is the yfinance daily close on the PRICE-RETURN basis
+    (`auto_adjust=False`), for the same reason Amendment 5 requires it: a strike is a raw
+    price, so the price it is compared against must be one too — a dividend-adjusted close
+    would shift every intrinsic by the adjustment. It spends no governor budget.
+
+    None when neither answers. An unread underlying is not a worthless option, and the
+    caller keeps the row's account PARTIAL rather than publishing a figure.
+    """
+    try:
+        from services.read_only.quote import get_quote
+
+        q = await get_quote(ticker)
+        spot = (q or {}).get("spot") if isinstance(q, dict) else None
+        if spot is not None and float(spot) > 0:
+            return float(spot)
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        from integrations.uw_api import get_bars_yfinance
+
+        bars = await get_bars_yfinance(ticker, auto_adjust=False) or []
+        closes = [b.get("c") for b in bars if b.get("c") is not None]
+        if closes:
+            last = float(closes[-1])
+            return last if last > 0 else None
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+async def _intrinsic_for_unquoted_options():
+    """Every OPEN option row the hub cannot quote, with its intrinsic value — R-IV.657(d).
+
+    One row per unquoted position, each NAMED so the ceiling's face can list it: the ticker,
+    the structure, the underlying price used, the figure, and how it was read. A row whose
+    underlying is unknown carries `intrinsic: None` and its reason, and the account keeps its
+    PARTIAL mark -- an unread underlying is not a worthless option.
+    """
+    from models.option_intrinsic import intrinsic_value
+
+    pool = await get_postgres_client()
+    rows = await pool.fetch(
+        """SELECT position_id, account, ticker, structure, direction, quantity,
+                  long_strike, short_strike, expiry, legs, mark_status, mark_reason
+             FROM unified_positions
+            WHERE status = 'OPEN'
+              AND UPPER(COALESCE(asset_type, '')) = 'OPTION'
+              AND (current_price IS NULL OR current_price <= 0)""")
+
+    out, quotes = [], {}
+    for r in rows:
+        d = dict(r)
+        if d.get("legs") and isinstance(d["legs"], str):
+            try:
+                d["legs"] = json.loads(d["legs"])
+            except (ValueError, TypeError):
+                d["legs"] = None
+        tkr = (d.get("ticker") or "").upper()
+        if tkr and tkr not in quotes:
+            quotes[tkr] = await _underlying_price(tkr)
+        px = quotes.get(tkr)
+        value, basis = intrinsic_value(d, px)
+        out.append({
+            "position_id": d.get("position_id"), "account": d.get("account"),
+            "ticker": tkr, "structure": d.get("structure"),
+            "quantity": float(d["quantity"]) if d.get("quantity") is not None else None,
+            "underlying_price": px, "intrinsic": value, "basis": basis,
+            "why_unquoted": d.get("mark_reason") or d.get("mark_status"),
+        })
+    return out
+
+
 @router.get("/sleeve-ceiling", dependencies=[Depends(require_api_key)])
 async def get_sleeve_ceiling():
     """The Robinhood sleeve ceiling — R-IV.644(d) / TA-070.
@@ -71,20 +153,58 @@ async def get_sleeve_ceiling():
     # in scope has no mark.
     rows = await get_account_balances() or []
 
+    # ── R-IV.657(d): AN UNQUOTED OPTION ROW COUNTS AT ITS INTRINSIC VALUE ──────────────
+    #
+    # "A limit set slightly low is safe; one that never publishes limits nothing." The
+    # ceiling had stopped publishing because Robinhood -- the options sleeve it governs --
+    # holds rows the hub cannot quote: there is no options pricer, so `mark_status` reads
+    # UNAVAILABLE and the account stays PARTIAL indefinitely. A capability gap, not a delay.
+    #
+    # Each such row is topped up at what its legs are worth at the underlying's current
+    # price, zero out of the money, and NAMED on the face. Intrinsic is a FLOOR -- it
+    # omits all time value -- so the base understates in one direction, which is the safe
+    # one for a cap.
+    intrinsic_rows, intrinsic_by_account = [], {}
+    try:
+        unvalued = await _intrinsic_for_unquoted_options()
+        for item in unvalued:
+            intrinsic_rows.append(item)
+            if item["intrinsic"] is not None and item["account"]:
+                intrinsic_by_account[item["account"]] = (
+                    intrinsic_by_account.get(item["account"], 0.0) + item["intrinsic"])
+    except Exception as exc:  # noqa: BLE001
+        # Loud, and the ceiling falls back to publishing nothing rather than a base that
+        # silently omits the top-up it was meant to include.
+        logger.error("sleeve ceiling: intrinsic top-up unavailable (%s)", type(exc).__name__)
+        intrinsic_rows = [{"error": type(exc).__name__}]
+
     balances, understated, notes = {}, set(), []
     for r in rows:
         name = r.get("account_name")
         if not name:
             continue
-        balances[name] = r.get("balance")          # None stays None: UNKNOWN, not zero
-        if r.get("balance") is not None and r.get("balance_partial"):
+        value = r.get("balance")
+        topped = False
+        if value is not None and r.get("balance_partial") and name in intrinsic_by_account:
+            # Every unvalued row in this account had an intrinsic computed, so the value is
+            # no longer partial-with-a-hole: it is complete at a floor.
+            holes = len(r.get("balance_positions_unvalued") or [])
+            priced = sum(1 for i in intrinsic_rows
+                         if i.get("account") == name and i.get("intrinsic") is not None)
+            if priced >= holes:
+                value = round(float(value) + intrinsic_by_account[name], 2)
+                topped = True
+        balances[name] = value                     # None stays None: UNKNOWN, not zero
+        if value is not None and r.get("balance_partial") and not topped:
             understated.add(name)
-        if r.get("balance") is None or r.get("balance_partial"):
+        if value is None or (r.get("balance_partial") and not topped):
             notes.append(f"{name}: {r.get('balance_reason') or 'no derived value this cycle'}"
                          + (f" ({len(r.get('balance_positions_unvalued') or [])} unvalued)"
                             if r.get("balance_partial") else ""))
 
     out = ceiling_from_balances(balances, understated=understated)
+    out["intrinsic_rows"] = intrinsic_rows or None
+    out["intrinsic_added"] = {k: round(v, 2) for k, v in intrinsic_by_account.items()} or None
     out["base_source"] = ("derived: cash from the ledger plus open positions at their marks "
                           "(R-IV.647(b)) — not account_balances' retired stored total")
     out["base_stored_for_contrast"] = {

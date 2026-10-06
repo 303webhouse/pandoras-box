@@ -59,13 +59,25 @@ def _close_pool(row, *, has_lots, lots_sum, legs_shape):
 
     async def fetchval(sql, *args):
         s = " ".join(sql.split())
+        # R-IV.657(c): RECORDED, not merely answered. The disposal lot is written with
+        # `fetchval` now, because the close path needs its RETURNING id to attach the
+        # closure allocations to. A stub that records only `execute` makes the lot write
+        # invisible, and `test_the_legs_update_follows_the_disposal_lot` then fails on
+        # StopIteration -- looking for a statement that did happen.
+        conn.executed.append((s, args))
         if "SELECT 1 FROM position_lots" in s:
             return 1 if has_lots else None
         if "SUM(qty)" in s:
             return lots_sum
+        if "INSERT INTO position_lots" in s:
+            return 9001          # the disposal lot's id, for the closure rows
         return None
 
     async def fetch(sql, *args):
+        # The close path reads the fills under FOR UPDATE to plan its allocations.
+        if "FROM position_lots" in " ".join(sql.split()):
+            return ([{"id": 1, "fill_time": "2026-10-01", "qty": lots_sum,
+                      "price": 0.03, "fees": 0}] if has_lots else [])
         return []
 
     async def execute(sql, *args):
