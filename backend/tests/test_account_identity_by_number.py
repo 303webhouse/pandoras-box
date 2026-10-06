@@ -262,7 +262,7 @@ class TestToolsServeTheRegistry:
         d = describe_accounts()
         for key, num in ACCOUNT_NUMBERS.items():
             assert key in d and num in d
-        assert "Fidelity 401(a)" in d
+        assert "FID 401A" in d
 
     def test_neither_tool_still_says_401k_brokeragelink(self):
         """It described a "401k BrokerageLink" — a name that now sounds like the traded
@@ -271,7 +271,7 @@ class TestToolsServeTheRegistry:
         from hub_mcp.tools.positions import DESCRIPTION as pos
 
         assert "401k BrokerageLink" not in pos
-        assert "Fidelity 401(a)" in pos and "Fidelity 401(a)" in bal
+        assert "FID 401A" in pos and "FID 401A" in bal
 
     def test_both_tools_offer_the_new_account(self):
         from hub_mcp.tools.portfolio_balances import _VALID_ACCOUNTS as bal

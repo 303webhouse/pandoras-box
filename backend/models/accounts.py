@@ -37,10 +37,12 @@ CANONICAL_ACCOUNTS = (ROBINHOOD, FIDELITY_ROTH, FIDELITY_401A)
 #
 # FIDELITY_401A's name is PROVISIONAL — R-IV.632(c)1 says Trade Analysis may rename it. It is
 # one string in one dict, so a rename is one edit and no surface disagrees in the meantime.
+# R-IV.649(a): the principal's own names, approved on ABACUS's mockup. Keys do not change --
+# only what a surface shows him. One dict, so a rename is one line and no surface disagrees.
 DISPLAY_NAMES = {
     ROBINHOOD: "Robinhood",
-    FIDELITY_ROTH: "Fidelity Roth",
-    FIDELITY_401A: "Fidelity 401(a)",
+    FIDELITY_ROTH: "FID ROTH",
+    FIDELITY_401A: "FID 401A",
 }
 
 # Provisional names, declared so a rename is a known operation rather than a discovery.

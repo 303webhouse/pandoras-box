@@ -72,7 +72,7 @@ class TestRegistered:
         assert CANONICAL_ACCOUNTS == (ROBINHOOD, FIDELITY_ROTH, FIDELITY_401A)
 
     def test_the_display_name_is_as_the_ruling_names_it(self):
-        assert display_name(FIDELITY_401A) == "Fidelity 401(a)"
+        assert display_name(FIDELITY_401A) == "FID 401A"
 
     def test_the_name_is_declared_provisional(self):
         """R-IV.632(c)1 says Trade Analysis may rename it. One string in one dict, so a
@@ -81,8 +81,11 @@ class TestRegistered:
 
     def test_a_key_is_not_a_label(self):
         """`FIDELITY_401A.replace("_"," ").title()` gives "Fidelity 401A", which is not what
-        the account is called. Every surface deriving it would get it subtly differently."""
+        the account is called -- the principal calls it "FID 401A" (R-IV.649(a)). Every
+        surface deriving a label from the key would get it subtly differently, and none of
+        them would get THIS."""
         assert display_name(FIDELITY_401A) != FIDELITY_401A.replace("_", " ").title()
+        assert display_name(FIDELITY_401A) == "FID 401A"
 
     def test_only_the_exact_key_or_the_number_resolves(self):
         """AMENDED R-IV.638(b)1/2. The first pass accepted 'fidelity 401a' and
@@ -226,7 +229,7 @@ class TestServed:
 
     def test_the_envelope_carries_key_and_name_together(self):
         assert account_envelope(FIDELITY_401A) == {
-            "account": "FIDELITY_401A", "account_display": "Fidelity 401(a)"}
+            "account": "FIDELITY_401A", "account_display": "FID 401A"}
 
     def test_both_keys_are_present_even_with_no_account(self):
         """A missing key and a null read differently in JSON, and only one is honest about
@@ -245,7 +248,7 @@ class TestServed:
         from api.unified_positions import _row_to_dict
 
         assert _row_to_dict({"position_id": "X", "account": "FIDELITY_401A"})[
-            "account_display"] == "Fidelity 401(a)"
+            "account_display"] == "FID 401A"
 
     def test_a_row_with_no_account_column_gains_no_field(self):
         """Adding the field to a row that was never asked about its account would assert
@@ -261,7 +264,7 @@ class TestServed:
         t = touches_block({"position_id": "P", "structure": "long_call",
                            "account": "FIDELITY_401A"}, "LONG")
         assert t["account"] == "FIDELITY_401A"
-        assert t["account_display"] == "Fidelity 401(a)"
+        assert t["account_display"] == "FID 401A"
 
     def test_the_feed_selects_the_column_the_block_serves(self):
         """A column the block reads and the query omits yields a null that looks like an

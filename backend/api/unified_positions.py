@@ -281,7 +281,12 @@ class CreatePositionRequest(BaseModel):
     # Metadata
     source: str = "MANUAL"
     signal_id: Optional[str] = None
-    account: str = "ROBINHOOD"
+    # R-IV.654(c): NO DEFAULT. It was `"ROBINHOOD"`, which made a write that named no account
+    # a Robinhood write silently -- fine while Robinhood was the only place options went, and
+    # wrong the moment there were three accounts. A missing account is now refused with the
+    # list, the same reasoning as the keyword-only caller tags: a caller that says nothing
+    # must not inherit someone else's answer.
+    account: Optional[str] = None
     notes: Optional[str] = None
     tags: Optional[List[str]] = None
     bucket: Optional[str] = None
@@ -580,7 +585,22 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
     # `.upper()` alone accepted any string spelled in capitals, which is how rows kept being
     # written under a retired alias eleven days after the remap — the path minted them. An
     # alias normalises; anything else is refused with the vocabulary and the value.
-    account = canonical_account(req.account or "ROBINHOOD")
+    # R-IV.654(c): a write that names no account is REFUSED, not defaulted. Guessing files
+    # money in the wrong account invisibly, which with three accounts is the worst outcome
+    # available -- and the form's own hard-coded list is being fixed beside this (R-IV.651).
+    if not (req.account or "").strip():
+        from models.accounts import ACCOUNT_NUMBERS, CANONICAL_ACCOUNTS
+
+        pairs = ", ".join(
+            f"{k}" + (f" (#{ACCOUNT_NUMBERS[k]})" if k in ACCOUNT_NUMBERS else "")
+            for k in CANONICAL_ACCOUNTS)
+        raise HTTPException(
+            status_code=400,
+            detail=(f"account is required: this hub tracks {len(CANONICAL_ACCOUNTS)} accounts "
+                    f"— {pairs}. It used to default to ROBINHOOD, which was safe while that "
+                    f"was the only account options went to and is not now. Name the account, "
+                    f"or send its number."))
+    account = canonical_account(req.account)
 
     # R-IV.75(d) ETF-only invariant, enforced AT ENTRY. Refusing here is the whole
     # point: an OPTION row on the Roth is prima facie mis-attributed, and a row admitted

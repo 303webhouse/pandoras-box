@@ -167,6 +167,85 @@ class TestASplitCase:
         assert split_adjusted_entry(100.0, ratio) is None
 
 
+# ─────────── R-IV.654(d): the clause EXECUTED, not just its helpers
+#
+# CC-QUERY measured no split in any W1 or W2 ticker between 2026-09-10 and 10-06, so the clause
+# can only be shown synthetically — the ruling says so. `TestASplitCase` above covers the pure
+# helpers (with NVDA's REAL 10.0 ratio on synthetic dates); what follows runs the grader's own
+# arithmetic end to end, because `test_the_split_adjustment_is_per_horizon` only inspects the
+# source and a source check cannot catch an inverted ratio.
+
+class TestTheClauseRunsThroughTheGradersOwnArithmetic:
+    """A W2-shaped row, with a synthetic split landing BETWEEN its 3d and 5d sessions.
+
+    Fired 2026-09-23 (a real W2 session). Entry 100.00 raw. A 2-for-1 on 2026-09-29 means the
+    5d close is quoted on the post-split scale while the 3d close is not, so one horizon must
+    be adjusted and the other must not — the case a single per-row adjustment gets wrong for
+    one of them, whichever way it is written.
+    """
+
+    FIRED = date(2026, 9, 23)
+    H3 = date(2026, 9, 28)          # 3 trading days later
+    H5 = date(2026, 9, 30)          # 5 trading days later
+    SPLIT = {date(2026, 9, 29): 2.0}
+    ENTRY = 100.00
+    CLOSE_3D = 104.00               # pre-split scale
+    CLOSE_5D = 53.00                # post-split scale: ~106 pre-split
+
+    def _grade(self, horizon_session, close, direction="BULL"):
+        """Exactly what the grader does per horizon, through the real functions."""
+        from jobs.triton_shadow_grader import _dir_adj
+
+        ratio = cumulative_split_ratio(self.SPLIT, self.FIRED, horizon_session)
+        entry_k = split_adjusted_entry(self.ENTRY, ratio)
+        return _dir_adj(entry_k, close, direction), ratio
+
+    def test_the_horizon_before_the_split_is_graded_on_the_raw_entry(self):
+        grade, ratio = self._grade(self.H3, self.CLOSE_3D)
+        assert ratio == 1.0
+        assert round(grade, 4) == 4.0
+
+    def test_the_horizon_after_the_split_is_graded_on_the_adjusted_entry(self):
+        """100 pre-split is 50 post-split, so a 53.00 close is +6%, not −47%."""
+        grade, ratio = self._grade(self.H5, self.CLOSE_5D)
+        assert ratio == 2.0
+        assert round(grade, 4) == 6.0
+
+    def test_without_the_clause_the_same_row_would_read_minus_47_percent(self):
+        """The size of the error, through the same metric. A 2-for-1 is the mildest common
+        split; the NVDA case above is −89.8333%."""
+        from jobs.triton_shadow_grader import _dir_adj
+
+        assert round(_dir_adj(self.ENTRY, self.CLOSE_5D, "BULL"), 4) == -47.0
+
+    def test_the_two_horizons_disagree_which_is_the_point(self):
+        """If the adjustment were applied per ROW rather than per horizon, both would carry
+        the same ratio and one of them would be wrong by the whole split."""
+        g3, r3 = self._grade(self.H3, self.CLOSE_3D)
+        g5, r5 = self._grade(self.H5, self.CLOSE_5D)
+        assert r3 != r5
+        assert g3 > 0 and g5 > 0
+
+    def test_a_bear_row_is_graded_on_the_same_adjusted_entry(self):
+        """The direction flips the sign, not the basis — a BEAR row must not escape the
+        adjustment by being negative already."""
+        grade, ratio = self._grade(self.H5, self.CLOSE_5D, direction="BEAR")
+        assert ratio == 2.0
+        assert round(grade, 4) == -6.0
+
+    def test_with_no_split_both_horizons_grade_on_the_raw_entry(self):
+        """POSITIVE CONTROL: the clause is inert on the overwhelming majority of rows, which
+        is every W1 and W2 row CC-QUERY measured."""
+        from jobs.triton_shadow_grader import _dir_adj
+
+        for session, close in ((self.H3, 104.00), (self.H5, 106.00)):
+            ratio = cumulative_split_ratio({}, self.FIRED, session)
+            assert ratio == 1.0
+            assert split_adjusted_entry(self.ENTRY, ratio) == self.ENTRY
+            assert _dir_adj(self.ENTRY, close, "BULL") == _dir_adj(
+                split_adjusted_entry(self.ENTRY, ratio), close, "BULL")
+
+
 # ─────────────────────── the basis is stated, never defaulted
 
 class TestTheBasisIsStated:

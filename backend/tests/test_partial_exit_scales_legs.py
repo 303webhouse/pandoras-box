@@ -267,7 +267,13 @@ def _combine(monkeypatch, *, qty=2, price=0.20, has_lots=True, lots_after=None,
     monkeypatch.setattr(U, "name_actor", AsyncMock())
     monkeypatch.setattr(U, "_adjust_account_cash", AsyncMock(return_value=True))
     monkeypatch.setattr(U.manager, "broadcast_position_update", AsyncMock())
+    # R-IV.654(c): the account is STATED now. These tests relied on the create path
+    # defaulting a missing account to ROBINHOOD -- which is the defect, and which is why six
+    # of them began failing the moment it was removed. The row they add to (line 34) is
+    # ROBINHOOD, and the account is part of the create-or-add match key, so stating it
+    # preserves exactly what the tests meant and no longer depends on a guess.
     req = U.CreatePositionRequest(ticker="HYG", structure="put_debit_spread",
+                                  account="ROBINHOOD",
                                   entry_price=price, quantity=qty, long_strike=76.0,
                                   short_strike=73.0, expiry="2026-11-20",
                                   entry_date=entry_date)
