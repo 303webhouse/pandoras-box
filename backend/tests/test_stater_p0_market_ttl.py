@@ -106,6 +106,15 @@ def _reset():
         state.update(cm._new_cvd_state())
 
 
+@pytest.fixture(autouse=True)
+def _quiet_perps():
+    async def _empty(*a, **k):
+        from bias_filters.crypto_perps import empty_snapshot
+        return empty_snapshot()
+    with patch.object(cm, "snapshot_for", _empty):
+        yield
+
+
 def _snap(sym, at):
     _Clock.t = T0 + at
     cm._cache_by_symbol.clear()                 # each read is a real fetch, not the 4 s cache
@@ -190,7 +199,7 @@ def test_shape_is_the_same_fresh_held_and_expired():
     Venues.up = set()
     held, gone = _snap("BTC", 60), _snap("BTC", 1000)
     assert _keys(fresh) == _keys(held) == _keys(gone)
-    assert set(gone) == {"status", "timestamp", "prices", "funding", "cvd", "order_flow", "errors"}
+    assert set(gone) == {"status", "timestamp", "prices", "funding", "cvd", "order_flow", "derivatives", "errors"}
 
 
 def test_one_coin_expiring_leaves_another_coins_held_value_alone():

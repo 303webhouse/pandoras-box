@@ -1,9 +1,9 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-06 10:18 MDT (16:18 UTC)
-**Worked against:** `origin/main` = `0a2a4cb` (fix(accounts): a balance row carries its display name…)
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-*` branches only (R-IV.628).
-**Hub at read time:** prod runs `0a2a4cb`, `status: healthy`. Phase 0 is live (`df328e8` is an ancestor).
+**Written:** 2026-10-06 14:05 MDT (20:05 UTC)
+**Worked against:** `origin/main` = `ac885f4` (docs(relay): CC-BUILD to CC-STATER — routing merged…)
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-perps` (cut from `origin/main` `ac885f4`).
+**Hub at read time:** prod `2b5150e` (routing merge `ffcc6e9` is an ancestor), `status: healthy`, process started 17:47:20 UTC. Proxy flag false.
 
 ## Why this lane exists
 SPINE chartered CC-STATER (R-IV.618) to own Stater Swap, the hub's crypto surface.
@@ -21,62 +21,43 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## Login (R-IV.645(b))
-Postgres tool logs in as `stater_ro` (`current_user` / `session_user`). SELECT works
-(`crypto_cycle_log` SELECT privilege true). INSERT is refused: table INSERT privilege is false,
-and `INSERT INTO crypto_cycle_log` returned a read-only-transaction error. Not the superuser.
+## R-IV.663(a) — 658 accepted
+Perps work was held uncommitted rather than riding the routing merge. Coinalyze refuses over
+budget instead of sleeping. Hyperliquid weights are capped. New fields carry venue and age and
+null past Phase 0 TTLs. Basis does not call `fapi.binance.com`. The matrix was dated from
+Railway, with `predictedFundings` marked UNVERIFIED. Robinhood is noted below.
 
-## After reading (R-IV.645(c))
-Same endpoints as the before probe, no session, hard stop at 5 UW calls counted on `crypto_bars_*`
-tags only. Probe window **16:10:27–16:11:32 UTC** (10:10–10:11 MDT).
+## (b) Re-time, production, 2026-10-06 20:02 UTC (14:02 MDT)
 
-| | UW `crypto_bars_*` | GET writes |
-|---|---|---|
-| baseline | absent (0) | `crypto_cycle_log` max id 12842; `crypto_tape_health_log` max id 45526 |
-| after the GETs | **0** (tags still absent) | **0** new rows in either log |
-
-| Endpoint | HTTP | UW | elapsed |
+| Endpoint | HTTP | elapsed | vs 16:53 UTC |
 |---|---|---|---|
-| `/crypto/regime`, `/crypto/clock` | 200 | 0 | 0.22 s / 0.06 s |
-| `/analytics/risk-budget`, `/trade-ideas?limit=50` | 401 | 0 | ~0.1 s |
-| `/crypto/market` × 6 coins | 200 | 0 | **8.08 s each** |
-| `/crypto/cycle-extremes` | 200 | 0 | 0.17 s |
-| `/crypto/state/BTC` | 200 | 0 | 12.04 s (not UW) |
-| `/crypto/tape-health` | 401 | 0 | 0.08 s |
+| `/crypto/market?symbol=BTC` | 200 | **0.515 s** | was 8.10 s |
+| `/crypto/state/BTC` | 200 | **1.76 s** | was 11.79 s |
 
-Passive, same day: no `crypto_bars_*` tag appears in `/api/uw/health/by_caller` at all (total ~6k
-on other callers). BUILD's claim holds: no tracked symbol uses UW for bars.
+`prices.perps.source=okx`, `binance_perp_proxy_enabled=false`, binance perp null, no `derivatives`
+key yet (this branch is not on prod). Matches BUILD's 0.22–0.56 s market range.
 
-`/crypto/market` still waited 8.08 s per coin. Live payload (BTC, 16:12:33 UTC):
-`prices.perps.binance` null, `bybit` null, `okx` served; `funding.binance`/`bybit` null,
-`funding.okx` live; `routing.binance_perp_proxy_enabled` **true**. Errors empty. HYPE
-`binance_spot` returned a price from Railway. FARTCOIN Binance spot 400.
+## (c) OKX correction
+`pick()` prefers a fresh non-OKX reading. If only OKX is answering, it keeps that reading
+labelled `venue=okx`. Basis does the same: Hyperliquid mark first, then OKX swap, never fapi.
+A field with no other source *configured* is still the thing that's ruled out.
 
-## Branch
+## (d) Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-routing` | Cut from `origin/main` `0a2a4cb`. Two commits: `27d4a04` (routing), `794056d` (CVD label). Lane file on top. | **Yes. Merge this.** |
-| `claude/stater-phase0` / `claude/stater-p0-market` | Merged (`df328e8` / `087ce2b`). | Done. |
-| `s6-stater-build` | Older S-6 cockpit work. Not touched. | Not this lane's to merge. |
+| `claude/stater-perps` | Cut from `ac885f4`. US-serving perps + (c). | **Yes. Merge this.** |
+| `claude/stater-routing` | Merged (`ffcc6e9`). | Done. |
 
-## What this session did
-1. **Routing (`27d4a04`):** `/crypto/market` no longer asks Binance perps (the 8 s venue — proxied
-   `fapi.binance.com` waiting out the 8.0 s client timeout; matrix GEO_BLOCKED) or Bybit.
-   FARTCOIN is not asked on Binance spot or OKX spot. HYPE is routed to Binance spot
-   (`_BINANCE_SPOT_SYMBOL["HYPE"] = "HYPEUSDT"`), after the Railway check above. Response
-   shape unchanged. Test: a fake venue that sleeps 8 s on fapi/bybit cannot delay the snapshot.
-2. **CVD label (`794056d`):** `_fetch_cvd` still does not read the real `cvd` key. Missing
-   `cvd_analysis` contributes 0 as before, reason `"no data"` instead of `"CVD neutral"`.
-   Test parametrizes every existing score path; all scores unchanged. The real CVD fix stays
-   a shadow score under R-IV.637(c).
+Hyperliquid `predictedFundings` from Railway is still UNVERIFIED until this branch is live.
+Next session: after prod SHA includes this commit, read `/crypto/market` `derivatives.predicted_by_venue` and date the matrix cell.
 
-## Still open (not this branch)
-- Agora's client-side last-good copy (ABACUS).
-- Geo-blocked strategy engine (`crypto_setups.py` → `fapi.binance.com` 451).
-- Cycle engine double count.
-- `/crypto/state/BTC` took 12 s with zero UW (likely Coinbase candles); not investigated.
+## Robinhood
+US perps are announced for "the coming months", not live, with no market-data feed announced.
+Their API would mean holding the principal's trading key, which this charter forbids.
+**Revisit only if Robinhood publishes a feed that needs no account key.**
 
 ## What the next CC-STATER session should do first
-1. Confirm BUILD merged `claude/stater-routing` and that prod serves it.
-2. Time `/crypto/market` again: it should be well under 8 s.
-3. Then the geo-blocked strategy engine and the cycle engine's double count, each on its own branch from `main`.
+1. Confirm BUILD merged `claude/stater-perps` and prod SHA moved.
+2. From the hub, verify Hyperliquid `predictedFundings` (Binance/Bybit) and update the matrix
+   from UNVERIFIED to a dated Railway reading.
+3. Re-time `/crypto/market` and `/crypto/state/BTC` with the perps pack live (4 s budget).

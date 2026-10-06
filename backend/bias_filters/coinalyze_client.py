@@ -13,6 +13,7 @@ instrument IDs sourced from crypto_symbol_matrix.py.
 import os
 import logging
 import asyncio
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 
@@ -59,6 +60,22 @@ OKX_ALT_SWAP_CTVAL_USD = 1.0
 # Cache for API responses (avoid hitting rate limits). Keys are per-symbol.
 _cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SECONDS = 300  # 5 minutes
+
+# R-IV.658(c)1: 40 calls / minute / key, shared by every hub caller.
+# A 429 used to `asyncio.sleep(60)` inside the request path — that is how a
+# page poll waits out a vendor. Over budget we refuse immediately.
+COINALYZE_LIMIT_PER_MINUTE = 40
+_call_times: list[float] = []
+
+
+def _coinalyze_allow() -> bool:
+    now = time.monotonic()
+    cutoff = now - 60.0
+    _call_times[:] = [t for t in _call_times if t > cutoff]
+    if len(_call_times) >= COINALYZE_LIMIT_PER_MINUTE:
+        return False
+    _call_times.append(now)
+    return True
 
 
 def _get_api_key() -> str:
@@ -163,13 +180,16 @@ async def _make_request(endpoint: str, params: Dict[str, Any] = None) -> Optiona
     query = dict(params or {})
     query.setdefault("api_key", api_key)
 
+    if not _coinalyze_allow():
+        logger.warning("Coinalyze 40/min budget exhausted — refusing %s", endpoint)
+        return None
+
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(url, headers=headers, params=query)
 
             if response.status_code == 429:
-                logger.warning("Coinalyze rate limit hit - waiting 60s")
-                await asyncio.sleep(60)
+                logger.warning("Coinalyze HTTP 429 on %s — refusing, not sleeping", endpoint)
                 return None
 
             if response.status_code != 200:
@@ -791,6 +811,104 @@ async def get_term_structure(symbol: str = "BTC") -> Dict[str, Any]:
     return await _finalize_result(result, cache_key, check_funding_rate, "current_funding", "term_structure", symbol)
 
 
+async def get_predicted_funding_rate(symbol: str = "BTC") -> Dict[str, Any]:
+    """Current predicted funding (Coinalyze collects it from the venues; we do not call them)."""
+    symbol = (symbol or "BTC").upper()
+    perp_sym = _COINALYZE_PERP_SYMBOL.get(symbol)
+    if perp_sym is None:
+        return _na_cell(symbol, "NA:NOT_IN_COINALYZE_SYMBOL_MAP")
+
+    cache_key = f"predicted_funding_rate:{symbol}"
+    cached = _get_cached(cache_key)
+    if cached:
+        return cached
+
+    data = await _make_request("/predicted-funding-rate", {"symbols": perp_sym})
+    if not data or not isinstance(data, list) or not data:
+        await _record_failure("predicted_funding_rate", f"no predicted funding for {symbol}", symbol)
+        return {
+            "predicted_rate": None,
+            "symbol": symbol,
+            "source": "coinalyze",
+            "error": f"no predicted funding for {symbol}",
+        }
+
+    item = data[0] if isinstance(data[0], dict) else {}
+    rate = _to_float(item.get("value"))
+    updated = item.get("update")
+    as_of = datetime.now(timezone.utc)
+    if isinstance(updated, (int, float)) and updated > 0:
+        ts = updated / 1000.0 if updated > 10_000_000_000 else float(updated)
+        try:
+            as_of = datetime.fromtimestamp(ts, timezone.utc)
+        except (OSError, ValueError, OverflowError):
+            pass
+    result = {
+        "predicted_rate": round(rate, 6) if rate is not None else None,
+        "source": "coinalyze",
+        "symbol": symbol,
+        "timestamp": as_of.isoformat(),
+    }
+    if rate is None:
+        return result
+    return await _finalize_result(result, cache_key, check_funding_rate, "predicted_rate", "predicted_funding_rate", symbol)
+
+
+async def get_long_short_ratio(symbol: str = "BTC") -> Dict[str, Any]:
+    """Latest long/short ratio from Coinalyze history (no live snapshot endpoint)."""
+    symbol = (symbol or "BTC").upper()
+    perp_sym = _COINALYZE_PERP_SYMBOL.get(symbol)
+    if perp_sym is None:
+        return _na_cell(symbol, "NA:NOT_IN_COINALYZE_SYMBOL_MAP")
+
+    cache_key = f"long_short_ratio:{symbol}"
+    cached = _get_cached(cache_key)
+    if cached:
+        return cached
+
+    now = datetime.now(timezone.utc)
+    from_ts = int((now - timedelta(hours=3)).timestamp())
+    to_ts = int(now.timestamp())
+    data = await _make_request("/long-short-ratio-history", {
+        "symbols": perp_sym,
+        "interval": "1hour",
+        "from": from_ts,
+        "to": to_ts,
+    })
+    rows = []
+    if isinstance(data, list) and data:
+        hist = data[0].get("history") if isinstance(data[0], dict) else None
+        if isinstance(hist, list):
+            rows = hist
+    if not rows:
+        await _record_failure("long_short_ratio", f"no long/short ratio for {symbol}", symbol)
+        return {
+            "ratio": None,
+            "symbol": symbol,
+            "source": "coinalyze",
+            "error": f"no long/short ratio for {symbol}",
+        }
+
+    last = rows[-1] if isinstance(rows[-1], dict) else {}
+    ratio = _to_float(last.get("r"))
+    t_raw = last.get("t")
+    as_of = now
+    if isinstance(t_raw, (int, float)) and t_raw > 0:
+        ts = t_raw / 1000.0 if t_raw > 10_000_000_000 else float(t_raw)
+        try:
+            as_of = datetime.fromtimestamp(ts, timezone.utc)
+        except (OSError, ValueError, OverflowError):
+            pass
+    result = {
+        "ratio": round(ratio, 4) if ratio is not None else None,
+        "source": "coinalyze",
+        "symbol": symbol,
+        "timestamp": as_of.isoformat(),
+    }
+    _set_cache(cache_key, result)
+    return result
+
+
 async def get_all_coinalyze_data(symbol: str = "BTC") -> Dict[str, Any]:
     """Fetch all Coinalyze data in parallel for the given symbol."""
     results = await asyncio.gather(
@@ -809,3 +927,8 @@ async def get_all_coinalyze_data(symbol: str = "BTC") -> Dict[str, Any]:
         "symbol": symbol,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+
+def reset_for_tests() -> None:
+    _cache.clear()
+    _call_times.clear()
