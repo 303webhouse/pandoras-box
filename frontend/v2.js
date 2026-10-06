@@ -1862,6 +1862,54 @@
   }
   // The date it UNDERSTOOD, with its weekday, so a mis-typed date is caught before Create and
   // not after. Formatted in UTC: an expiry is a calendar date, not an instant.
+  // R-IV.662(b) — TA-083: a position logged late carried the LOGGING day, not the trading day.
+  // Both forms now ask, and both default to today so the common case is one tap.
+  //
+  // Today in Denver, because that is the day the principal means when he says "today". The
+  // positions panel has its own `todayMT` for the cash form's date — it is in a different IIFE
+  // and cannot reach this one; the duplication is scope, not drift, and both answer the same
+  // question the same way.
+  const todayMT = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
+
+  // The same shape as the expiry field: typable on any keyboard, a native picker beside it where
+  // there is one, and a read-back naming the weekday. `max` is today — a trade cannot be logged
+  // as having happened tomorrow.
+  function dateFieldHtml(id, label, hint) {
+    const today = todayMT();
+    return `<div class="fld"><label for="${id}">${esc(label)}</label>
+      <div class="fld-row">
+        <input id="${id}" type="text" inputmode="numeric" autocomplete="off" maxlength="10"
+               value="${today}" placeholder="12/18/2026" aria-describedby="${id}_echo">
+        ${DATE_INPUT_SUPPORTED ? `<input id="${id}_pick" type="date" max="${today}" aria-label="Pick ${esc(label)} from a calendar">` : ''}
+      </div>
+      <div class="fld-echo" id="${id}_echo" role="status"></div>
+      ${hint ? `<div class="fld-echo">${esc(hint)}</div>` : ''}</div>`;
+  }
+  // Returns the parsed ISO, or null when it cannot be read or is in the future. `quiet` is for
+  // the live echo; the submit path asks for the message instead.
+  function readDateField(id) {
+    const el = $(id); if (!el) return { iso: null, err: null, raw: '' };
+    const raw = (el.value || '').trim();
+    if (!raw) return { iso: null, err: null, raw };
+    const iso = parseExpiry(raw);
+    if (!iso) return { iso: null, err: 'That date could not be read. Try 12/18/2026, 12182026 or 2026-12-18.', raw };
+    if (iso > todayMT()) return { iso: null, err: 'That date is in the future. A trade is logged on the day it happened, or earlier.', raw };
+    return { iso: iso, err: null, raw };
+  }
+  function wireDateField(id) {
+    const el = $(id), pick = $(id + '_pick'), echo = $(id + '_echo');
+    if (!el || !echo) return;
+    const show = () => {
+      const r = readDateField(id);
+      if (!r.raw) { echo.textContent = ''; echo.className = 'fld-echo'; return; }
+      if (r.iso) { echo.textContent = expiryEcho(r.iso); echo.className = 'fld-echo ok'; }
+      else { echo.textContent = r.err; echo.className = 'fld-echo bad'; }
+    };
+    el.addEventListener('input', show);
+    if (pick) pick.addEventListener('change', () => { if (pick.value) { el.value = pick.value; show(); } });
+    show();
+  }
+
   function expiryEcho(iso) {
     const t = Date.parse(iso + 'T00:00:00Z');
     if (!Number.isFinite(t)) return '';
@@ -1918,6 +1966,7 @@
           ${_acctOptions.length ? '' : '<option value="" disabled>(no accounts read yet)</option>'}
         </select></div>
         <div class="fld"><label for="f_structure">Structure</label><select id="f_structure">${STRUCTURES.map((s) => `<option value="${s}">${s.replace(/_/g, ' ')}</option>`).join('')}</select></div>
+        ${dateFieldHtml('f_trade_date', 'Trade date', 'the day the trade happened — today unless you say otherwise')}
         ${fld('f_qty', 'Quantity', 'type="number" min="1" value="1"')}
         ${fld('f_entry', 'Entry price', 'type="number" step="any" placeholder="0.00"')}
         <div class="fld"><label for="f_expiry">Expiry</label>
@@ -1950,6 +1999,7 @@
     }
     xp.addEventListener('input', showEcho);
     if (pick) pick.addEventListener('change', () => { if (pick.value) { xp.value = pick.value; showEcho(); } });
+    wireDateField('f_trade_date');
   }
   async function submitAdd() {
     const val = (id) => { const e = $(id); return e && e.value !== '' ? e.value : null; };
@@ -1960,6 +2010,11 @@
     // Nothing is preselected, so an account must be CHOSEN — a trade cannot land in the wrong
     // one by default (R-IV.651(c)3).
     if (!val('f_account')) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'Choose an account.'; return; }
+    // TA-083: the trading day, not the logging day. Sent as `entry_date`, which the write path
+    // already takes (`unified_positions.py` _when/entry_date) and uses for the lot's fill time.
+    const td = readDateField('f_trade_date');
+    if (td.err) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = td.err; return; }
+    if (!td.iso) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'Enter the trade date.'; return; }
     const body = {
       ticker, asset_type: structure === 'stock' ? 'EQUITY' : 'OPTION', structure,
       entry_price: num('f_entry'), quantity: parseInt(val('f_qty'), 10) || 1, source: 'MANUAL', account: val('f_account'),
@@ -1982,6 +2037,7 @@
       return;
     }
     if (expiry) body.expiry = expiry;
+    body.entry_date = td.iso;
     if (num('f_stop') != null) body.stop_loss = num('f_stop');
     if (num('f_target') != null) body.target_1 = num('f_target');
     if (val('f_notes')) body.notes = val('f_notes');
@@ -2001,24 +2057,33 @@
         <div class="fld"><label>Position</label><input value="${esc(p.ticker + ' · ' + structureStr(p))}" disabled></div>
         <div class="fld"><label for="c_exit">Exit price</label><input id="c_exit" type="number" step="any" placeholder="${p.current_price != null ? p.current_price : '0.00'}"></div>
         <div class="fld"><label for="c_qty">Quantity</label><input id="c_qty" type="number" min="1" value="${p.quantity != null ? p.quantity : 1}"></div>
+        ${dateFieldHtml('c_close_date', 'Close date', 'the day you closed it — today unless you say otherwise')}
         <div class="fld"><label for="c_reason">Reason</label><select id="c_reason"><option value="manual">manual</option><option value="profit">profit</option><option value="loss">loss</option></select></div>
         <div class="fld full"><label for="c_notes">Notes</label><input id="c_notes" placeholder="optional"></div>
       </div>
-      <div class="form-actions"><button type="button" class="btn-danger" id="c_submit">Close position</button><button type="button" class="btn-secondary" id="c_cancel">Cancel</button></div>
-      <div class="form-msg" id="c_msg"></div>`);
+      <div class="form-foot">
+        <div class="form-msg" id="c_msg"></div>
+        <div class="form-actions"><button type="button" class="btn-danger" id="c_submit">Close position</button><button type="button" class="btn-secondary" id="c_cancel">Cancel</button></div>
+      </div>`);
     $('c_cancel').addEventListener('click', closeModal);
     $('c_submit').addEventListener('click', () => submitClose(p, mult));
+    wireDateField('c_close_date');
   }
   async function submitClose(p, mult) {
     const exit = $('c_exit').value !== '' ? Number($('c_exit').value) : null;
     if (exit == null) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'Exit price required'; return; }
     const qty = parseInt($('c_qty').value, 10) || p.quantity || 1;
     const reason = $('c_reason').value;
+    // R-IV.662(b)2 / TA-083: the day it was CLOSED, not the day it was recorded. Sent as
+    // `exit_date`, which the close path takes (R-IV.660(c)2).
+    const cd = readDateField('c_close_date');
+    if (cd.err) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = cd.err; return; }
+    if (!cd.iso) { $('c_msg').className = 'form-msg err'; $('c_msg').textContent = 'Enter the close date.'; return; }
     const pnl = p.unrealized_pnl != null ? Number(p.unrealized_pnl) : null;   // null is unknown, never a $0 breakeven
     const body = {
       exit_price: exit, quantity: qty, exit_value: exit * mult * qty,
       trade_outcome: pnl == null ? null : pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BREAKEVEN',
-      close_reason: reason, notes: $('c_notes').value || null,
+      close_reason: reason, notes: $('c_notes').value || null, exit_date: cd.iso,
     };
     $('c_msg').className = 'form-msg'; $('c_msg').textContent = 'closing…';
     try {
