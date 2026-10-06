@@ -193,7 +193,21 @@ async def _fetch_cvd(symbol: str) -> Dict:
                 return {"error": f"HTTP {resp.status_code}"}
             data = resp.json()
 
-        cvd = data.get("cvd_analysis", {})
+        if "cvd_analysis" not in data:
+            # The endpoint has never returned this key (the payload key is
+            # "cvd"). Reading it produced a confident NEUTRAL/0.5/0. Keep
+            # contributing that same score; label it "no data" (R-IV.645(d)2).
+            # Do not start reading "cvd" here — that would be a scoring change.
+            result = {
+                "direction": "NEUTRAL",
+                "buy_ratio": 0.5,
+                "net_volume_usd": 0,
+                "no_data": True,
+            }
+            _cache_set(cache_key, result)
+            return result
+
+        cvd = data.get("cvd_analysis") or {}
         result = {
             "direction": cvd.get("direction", "NEUTRAL"),
             "buy_ratio": cvd.get("buy_ratio", 0.5),
@@ -210,6 +224,8 @@ def _score_cvd(cvd: Dict, direction: str) -> Tuple[int, str]:
     """Score CVD alignment with signal direction."""
     if "error" in cvd:
         return 0, "CVD unavailable"
+    if cvd.get("no_data"):
+        return 0, "no data"
 
     cvd_dir = cvd.get("direction", "NEUTRAL")
 
