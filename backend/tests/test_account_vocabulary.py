@@ -90,12 +90,22 @@ def test_reading_a_book_names_every_label_a_write_should_not_have_stored():
 
 # --- every write path reads it --------------------------------------------------------------
 def test_the_position_create_path_takes_the_account_from_the_module():
+    """AMENDED R-IV.654(c). This pinned `canonical_account(req.account or "ROBINHOOD")` —
+    correct when written, because the point was that the account comes from the module's
+    vocabulary rather than from an uppercased free string. The `or "ROBINHOOD"` half has since
+    become the defect: with three accounts, a write that names none must be refused, not
+    assigned to the busiest one. The module-sourced half of the original assertion stands.
+    """
     from api import unified_positions as U
-    src = inspect.getsource(U.create_position) if hasattr(U, "create_position") else U.__file__
+
     whole = pathlib.Path(U.__file__).read_text(encoding="utf-8")
-    assert 'canonical_account(req.account or "ROBINHOOD")' in whole
+    assert "account = canonical_account(req.account)" in whole
+    assert 'canonical_account(req.account or "ROBINHOOD")' not in whole, (
+        "the default is the defect now, not the uppercasing")
     assert '(req.account or "ROBINHOOD").upper()' not in whole, (
         "an uppercased free string is the defect, not a smaller version of it")
+    assert 'account: str = "ROBINHOOD"' not in whole, (
+        "a model default re-creates it above the handler")
 
 
 def test_the_cash_event_path_takes_it_from_the_module_too():
