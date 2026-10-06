@@ -7,7 +7,7 @@ Coverage:
 - Symbol-map coverage: all six matrix symbols resolve to a vendor entry or NA.
 - NA cell shape: symbols without coverage return the §4.2-contract NA fields.
 - SOL instrument-count guard: deribit_client explicitly returns NA:SOL_ZERO_INSTRUMENTS.
-- HYPE/FARTCOIN binance spot NA: returns NA:NOT_LISTED_BINANCE_SPOT sentinel.
+- HYPE is listed on Binance spot; FARTCOIN is not and returns NA:NOT_LISTED_BINANCE_SPOT.
 
 BTC regression gate (FA-7 §5): the parametrized functions default to "BTC"
 and their cache keys are symbol-scoped — calling with symbol="BTC" and calling
@@ -62,8 +62,7 @@ def test_deribit_currency_map_covers_all_six():
 def test_binance_spot_symbol_map_covers_all_six():
     for sym in SIX_SYMBOLS:
         assert sym in _BINANCE_SPOT_SYMBOL, f"{sym} missing from _BINANCE_SPOT_SYMBOL"
-    # HYPE/FARTCOIN explicitly None (not listed on Binance spot)
-    assert _BINANCE_SPOT_SYMBOL["HYPE"] is None
+    assert _BINANCE_SPOT_SYMBOL["HYPE"] == "HYPEUSDT"
     assert _BINANCE_SPOT_SYMBOL["FARTCOIN"] is None
     # ZEC IS listed (verified 2026-07-13)
     assert _BINANCE_SPOT_SYMBOL["ZEC"] == "ZECUSDT"

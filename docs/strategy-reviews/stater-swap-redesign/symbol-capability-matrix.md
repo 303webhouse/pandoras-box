@@ -116,4 +116,15 @@ Free, keyless public GETs at 16:22 UTC, sent **from the principal's PC (US), not
 | all six | Binance perps | `fapi.binance.com/fapi/v1/ticker/price` | HTTP 451 (region), as recorded from Railway | unchanged |
 | all six | Bybit linear | `api.bybit.com/v5/market/tickers` | HTTP 403 (CloudFront region block) | — |
 
-Routing is unchanged. `binance_client._BINANCE_SPOT_SYMBOL["HYPE"]` is still `None`, and `_OKX_SPOT_INSTID` / `_OKX_SPOT_BOOK_INSTID` still ask OKX spot for FARTCOIN. Changing either goes on its own branch after BUILD merges `claude/stater-p0-market` and `claude/stater-phase0` (R-IV.637(d)). A check from Railway should precede routing HYPE to Binance spot.
+## Routing 2026-10-06 (CC-STATER, R-IV.645(d) / R-IV.637(d))
+
+`GET /api/crypto/market` from the hub (Railway egress), no session, 16:10–16:12 UTC:
+
+| Coin | Observation | Action |
+|---|---|---|
+| all six | each call **8.08 s**; `prices.perps.binance` null, `funding.binance` null, `routing.binance_perp_proxy_enabled` true; OKX served perp, funding and CVD | **stop asking Binance perps** (the 8 s venue: proxied `fapi.binance.com` waits out the 8.0 s client timeout). Matrix cell was already GEO_BLOCKED. |
+| all six | `prices.perps.bybit` and `funding.bybit` null | **stop asking Bybit** (403 from the US on 2026-10-01; never contributes from Railway) |
+| HYPE | `binance_spot` returned a price from Railway | **route** `_BINANCE_SPOT_SYMBOL["HYPE"] = "HYPEUSDT"` |
+| FARTCOIN | Binance spot HTTP 400 in `errors`; OKX spot not listed (51001, 2026-10-01) | **stop asking** Binance spot and OKX spot |
+
+Agora polls `/crypto/market` every 5 s, so the 8 s wait was overlapping itself. OKX swap is the live perp path.

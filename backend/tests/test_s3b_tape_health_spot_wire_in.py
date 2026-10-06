@@ -104,11 +104,14 @@ def test_fetch_spot_cvd_no_okx_coverage_returns_none():
     assert result == (None, None)
 
 
-def test_okx_spot_instid_covers_all_six_symbols():
-    """All six tracked symbols have OKX spot coverage today -- if this ever
-    regresses, compute_tape_health() silently degrades that symbol to NA."""
+def test_okx_spot_instid_covers_listed_symbols_only():
+    """FARTCOIN is not listed on OKX spot; the other five are. Absence is the
+    honest NA path for tape-health, not a missing map entry."""
     from bias_filters.binance_client import _OKX_SPOT_INSTID
     from config.crypto_symbol_matrix import CRYPTO_SYMBOL_MATRIX
 
     for sym in CRYPTO_SYMBOL_MATRIX:
-        assert sym in _OKX_SPOT_INSTID, f"{sym} missing OKX spot instrument mapping"
+        if sym == "FARTCOIN":
+            assert sym not in _OKX_SPOT_INSTID
+        else:
+            assert sym in _OKX_SPOT_INSTID, f"{sym} missing OKX spot instrument mapping"
