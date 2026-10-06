@@ -99,6 +99,15 @@ def _reset():
     _reset_cvd_state()
 
 
+@pytest.fixture(autouse=True)
+def _quiet_perps():
+    async def _empty(*a, **k):
+        from bias_filters.crypto_perps import empty_snapshot
+        return empty_snapshot()
+    with patch.object(cm, "snapshot_for", _empty):
+        yield
+
+
 def _snap(sym):
     with patch.object(cm.httpx, "AsyncClient", FakeVenues):
         return _run(cm.get_market_snapshot(symbol=sym, limit=200))
@@ -149,7 +158,8 @@ def test_bare_btc_queries_venues_with_btcusdt():
 
 def test_btc_response_shape_is_unchanged():
     snap = _snap("BTCUSDT")
-    assert set(snap) == {"status", "timestamp", "prices", "funding", "cvd", "order_flow", "errors"}
+    # R-IV.658 added `derivatives` (venue+age envelopes). Existing keys stay.
+    assert set(snap) == {"status", "timestamp", "prices", "funding", "cvd", "order_flow", "derivatives", "errors"}
     assert set(snap["prices"]) == {"coinbase_spot", "binance_spot", "binance_spot_ts", "perps", "basis", "basis_pct", "spot_spread"}
     assert set(snap["funding"]) == {"binance", "okx", "bybit", "primary"}
     assert {"net_btc", "net_usd", "direction", "direction_confidence", "gross_usd", "source", "cvd_series"} <= set(snap["cvd"])

@@ -359,22 +359,31 @@ async def get_quarterly_basis(symbol: str = "BTC") -> Dict[str, Any]:
 
     spot_price = float(spot_data["price"])
 
-    # --- Perp/futures price (Binance Futures geo-blocked → OKX swap fallback) ---
-    perp_data = await _make_request(f"{BINANCE_FUTURES_URL}/ticker/price", {
-        "symbol": binance_spot_sym or (symbol + "USDT")
-    })
-    perp_source = "binance_futures"
+    # --- Perp/futures price. R-IV.658: never call fapi.binance.com. The VPN
+    # route is gone and is not rebuilt. Hyperliquid mark first; OKX swap if
+    # that is the only source answering, labelled (R-IV.663(c)).
+    perp_data = None
+    perp_source = "unavailable"
+    try:
+        from integrations import hyperliquid_info as hl
+        ctxs = await hl.asset_ctxs()
+        row = (ctxs or {}).get(symbol) or {}
+        mark = row.get("mark")
+        if mark is not None:
+            perp_data = {"price": mark}
+            perp_source = "hyperliquid"
+    except Exception as exc:
+        logger.warning("quarterly_basis[%s] hyperliquid mark failed: %s", symbol, exc)
+
+    if (not perp_data or "price" not in perp_data) and okx_swap:
+        okx_perp_resp = await _make_request(f"{OKX_MARKET_URL}/ticker", {"instId": okx_swap})
+        if okx_perp_resp and okx_perp_resp.get("code") == "0" and okx_perp_resp.get("data"):
+            perp_data = {"price": okx_perp_resp["data"][0].get("last")}
+            perp_source = "okx_swap"
 
     if not perp_data or "price" not in perp_data:
-        if okx_swap:
-            okx_perp_resp = await _make_request(f"{OKX_MARKET_URL}/ticker", {"instId": okx_swap})
-            if okx_perp_resp and okx_perp_resp.get("code") == "0" and okx_perp_resp.get("data"):
-                perp_data = {"price": okx_perp_resp["data"][0].get("last")}
-                perp_source = "okx_swap"
-
-    if not perp_data or "price" not in perp_data:
-        await record_observation("binance_futures", "quarterly_basis", symbol, success=False,
-                                 reason=f"Failed to fetch perp/futures price for {symbol} (likely geo-block — HTTP 451 confirmed from Railway)")
+        await record_observation("hyperliquid", "quarterly_basis", symbol, success=False,
+                                 reason=f"No perp mark for {symbol} (fapi not asked; Hyperliquid and OKX both missed)")
         return {
             "spot_price": spot_price,
             "basis_annualized": None,
@@ -382,7 +391,7 @@ async def get_quarterly_basis(symbol: str = "BTC") -> Dict[str, Any]:
             "signal": "UNKNOWN",
             "source": f"{spot_source}->unavailable",
             "symbol": symbol,
-            "error": f"Failed to fetch perp/futures price for {symbol}"
+            "error": f"No perp mark for {symbol}"
         }
 
     futures_price = float(perp_data["price"])

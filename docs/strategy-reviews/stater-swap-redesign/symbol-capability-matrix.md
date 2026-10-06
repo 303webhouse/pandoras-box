@@ -128,3 +128,17 @@ Free, keyless public GETs at 16:22 UTC, sent **from the principal's PC (US), not
 | FARTCOIN | Binance spot HTTP 400 in `errors`; OKX spot not listed (51001, 2026-10-01) | **stop asking** Binance spot and OKX spot |
 
 Agora polls `/crypto/market` every 5 s, so the 8 s wait was overlapping itself. OKX swap is the live perp path.
+
+## US-serving perps 2026-10-06 (CC-STATER, R-IV.658)
+
+The Binance perps VPN/proxy is gone and is not rebuilt. Perps data comes from sources that serve the US. Every field names its venue and age and is null past Phase 0 TTLs (120 s prices/OI/flow, 900 s funding). OKX may be the live reading when it is the only source answering, labelled `venue=okx` (R-IV.663(c)); what is ruled out is a field with no other source configured.
+
+Routing re-time from the hub, 2026-10-06 20:02 UTC (14:02 MDT), prod `2b5150e` (routing is an ancestor; proxy flag false): `/crypto/market?symbol=BTC` **0.515 s**; `/crypto/state/BTC` **1.76 s** (was 8.10 s / 11.79 s before the merge).
+
+| Source | What | Limit | Railway-dated evidence |
+|---|---|---|---|
+| Coinalyze | funding, predicted funding, OI, liquidations, long/short for Binance/Bybit/OKX *collected by Coinalyze* — no request to Binance | 40 calls / min / key, shared; 300 s cache; refuse on 429 (no 60 s sleep) | 2026-07-13 container: `/funding-rate` HTTP 200 all six. 2026-10-06 16:53 UTC: `GET /crypto/state/BTC` from the hub HTTP 200 in 11.79 s; funding, open_interest and liquidations envelopes present, not degraded, with `as_of`. |
+| Hyperliquid public `/info` (no key) | own perp mark, funding, OI; predicted funding for Binance (`BinPerp`) and Bybit (`BybitPerp`) | 1,200 weight / min / IP; `metaAndAssetCtxs` and `predictedFundings` cost 20 each | 2026-07-13 container: `POST /info {type: meta}` HTTP 200, 232-asset universe, all six symbols present. `predictedFundings` from Railway is UNVERIFIED until this branch is live (no caller on prod at the 2026-10-06 read). |
+| OKX public (third) | swap ticker, funding, trades while it answers | — | 2026-10-06 16:12 UTC hub `GET /crypto/market`: OKX swap served perp price, funding and CVD for all six. It does not serve US customers and could stop any day. |
+
+Robinhood US perps are announced for "the coming months", not live, with no market-data feed announced. Their API would also mean holding the principal's trading key, which this lane's charter forbids. Revisit only if Robinhood publishes a feed that needs no account key.
