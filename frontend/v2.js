@@ -1556,6 +1556,7 @@
     try { const r = await apiFetch('/api/v2/positions/greeks'); if (r.ok) greeks = await r.json(); } catch (_) {}
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
     setBookExits(positions);
+    noteAccounts(positions, balances);
     const el = $('bookStrip'); if (!el) return;
     const bookOk = !!(balances || pnl);
     const accts = Array.isArray(balances) ? balances : [];
@@ -1835,6 +1836,38 @@
   // drift into accepting something the picker would never produce. Rejects 2026-02-31: the
   // regex alone would pass it and the Date would roll it over to March.
   const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  // R-IV.651(c)2 — a date can be TYPED with whatever keyboard appears. An iOS numeric pad has
+  // no hyphen and no slash, so YYYY-MM-DD cannot be typed on one at all; 121826 and 12182026
+  // can. Every shape below resolves to the SAME ISO string and goes through the same validator,
+  // so the fallback can never accept something the picker would not produce.
+  //   121826      MMDDYY        12182026   MMDDYYYY
+  //   12/18/2026  MM/DD/YYYY    2026-12-18 ISO (and 2026/12/18)
+  // A two-digit year is read as 20YY: these are expiries, and a 19xx option expiry is not a
+  // thing. Anything else — including a day-first date, which cannot be told from month-first —
+  // is REFUSED rather than guessed.
+  function parseExpiry(raw) {
+    const t = String(raw == null ? '' : raw).trim();
+    if (!t) return null;
+    let y, m, d;
+    let mm = t.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    if (mm) { y = +mm[1]; m = +mm[2]; d = +mm[3]; }
+    if (!mm && (mm = t.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2}|\d{4})$/))) {
+      m = +mm[1]; d = +mm[2]; y = +mm[3]; if (y < 100) y += 2000;
+    }
+    if (!mm && (mm = t.match(/^(\d{2})(\d{2})(\d{2})$/))) { m = +mm[1]; d = +mm[2]; y = 2000 + (+mm[3]); }
+    if (!mm && (mm = t.match(/^(\d{2})(\d{2})(\d{4})$/))) { m = +mm[1]; d = +mm[2]; y = +mm[3]; }
+    if (!mm) return null;
+    const iso = String(y).padStart(4, '0') + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    return isIsoDate(iso) ? iso : null;      // rejects 2026-02-31 and a month of 13
+  }
+  // The date it UNDERSTOOD, with its weekday, so a mis-typed date is caught before Create and
+  // not after. Formatted in UTC: an expiry is a calendar date, not an instant.
+  function expiryEcho(iso) {
+    const t = Date.parse(iso + 'T00:00:00Z');
+    if (!Number.isFinite(t)) return '';
+    return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', day: 'numeric',
+      month: 'long', year: 'numeric' }).format(new Date(t));
+  }
   function isIsoDate(v) {
     if (!ISO_DATE.test(v)) return false;
     const t = Date.parse(v + 'T00:00:00Z');
@@ -1846,28 +1879,77 @@
   function openModal(title, html) { closeChart(); $('modalTitle').textContent = title; $('modalBody').innerHTML = html; $('modalBackdrop').classList.add('open'); $('posModal').classList.add('open'); }
   function closeModal() { $('modalBackdrop').classList.remove('open'); $('posModal').classList.remove('open'); }
 
+  // R-IV.651(c)3 / R-IV.650(b)2 — THE ACCOUNT LIST IS SERVED, NEVER HARD-CODED. The old form
+  // offered ROBINHOOD and FIDELITY; since R-IV.638(b)3 `canonical_account` REFUSES a Fidelity
+  // name (two Fidelity accounts, so a name is not an identity), which means every Fidelity add
+  // from this form failed, and FIDELITY_401A could not be chosen at all.
+  //
+  // Each entry is {key, label}: the LABEL is the served `account_display`, the KEY is what the
+  // write sends. A key is never shown. An account the hub lists but has served no display name
+  // for is offered DISABLED with a plain reason rather than labelled with its key or dropped
+  // silently — dropping it is how an account becomes unreachable without anyone noticing.
+  let _acctOptions = [];
+  function noteAccounts(positions, balances) {
+    const seen = new Map();
+    const add = (key, label) => {
+      if (!key) return;
+      const k = String(key);
+      if (!seen.has(k)) seen.set(k, { key: k, label: null });
+      if (label && !seen.get(k).label) seen.get(k).label = String(label);
+    };
+    const rows = (positions && (positions.positions || positions.rows)) || (Array.isArray(positions) ? positions : []);
+    (rows || []).forEach((p) => add(p && p.account, p && p.account_display));
+    (Array.isArray(balances) ? balances : []).forEach((b) => {
+      if (b && b.in_scope !== false) add(b.account_name || b.account, b.account_display);
+    });
+    if (seen.size) _acctOptions = [...seen.values()];
+  }
+
   function openAddForm() {
     const fld = (id, label, attrs) => `<div class="fld"><label for="${id}">${label}</label><input id="${id}" ${attrs || ''}></div>`;
     openModal('Add position', `
       <div class="form-grid">
         ${fld('f_ticker', 'Ticker', 'placeholder="AAPL" autocomplete="off"')}
-        <div class="fld"><label for="f_account">Account</label><select id="f_account"><option>ROBINHOOD</option><option>FIDELITY</option></select></div>
+        <div class="fld"><label for="f_account">Account</label><select id="f_account">
+          <option value="" selected>Choose an account…</option>
+          ${_acctOptions.map((a) => (a.label
+            ? `<option value="${esc(a.key)}">${esc(a.label)}</option>`
+            : '<option value="" disabled>(an account the hub has not named yet)</option>')).join('')}
+          ${_acctOptions.length ? '' : '<option value="" disabled>(no accounts read yet)</option>'}
+        </select></div>
         <div class="fld"><label for="f_structure">Structure</label><select id="f_structure">${STRUCTURES.map((s) => `<option value="${s}">${s.replace(/_/g, ' ')}</option>`).join('')}</select></div>
         ${fld('f_qty', 'Quantity', 'type="number" min="1" value="1"')}
         ${fld('f_entry', 'Entry price', 'type="number" step="any" placeholder="0.00"')}
-        ${fld('f_expiry', 'Expiry' + (DATE_INPUT_SUPPORTED ? '' : ' · YYYY-MM-DD'),
-          DATE_INPUT_SUPPORTED ? 'type="date"'
-            : 'type="text" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="YYYY-MM-DD"')}
+        <div class="fld"><label for="f_expiry">Expiry</label>
+          <div class="fld-row">
+            <input id="f_expiry" type="text" inputmode="numeric" autocomplete="off" maxlength="10"
+                   placeholder="12/18/2026" aria-describedby="f_expiry_echo">
+            ${DATE_INPUT_SUPPORTED ? '<input id="f_expiry_pick" type="date" aria-label="Pick the expiry from a calendar">' : ''}
+          </div>
+          <div class="fld-echo" id="f_expiry_echo" role="status"></div></div>
         ${fld('f_long', 'Long strike', 'type="number" step="any"')}
         ${fld('f_short', 'Short strike', 'type="number" step="any"')}
         ${fld('f_stop', 'Stop', 'type="number" step="any"')}
         ${fld('f_target', 'Target', 'type="number" step="any"')}
         <div class="fld full">${'<label for="f_notes">Notes</label><input id="f_notes" placeholder="optional">'}</div>
       </div>
-      <div class="form-actions"><button type="button" class="btn-primary" id="f_submit">Create</button><button type="button" class="btn-secondary" id="f_cancel">Cancel</button></div>
-      <div class="form-msg" id="f_msg"></div>`);
+      <div class="form-foot">
+        <div class="form-msg" id="f_msg"></div>
+        <div class="form-actions"><button type="button" class="btn-primary" id="f_submit">Create</button><button type="button" class="btn-secondary" id="f_cancel">Cancel</button></div>
+      </div>`);
     $('f_cancel').addEventListener('click', closeModal);
     $('f_submit').addEventListener('click', submitAdd);
+    // The echo updates as he types, so a mis-read date is caught BEFORE Create, not after.
+    const xp = $('f_expiry'), pick = $('f_expiry_pick'), echo = $('f_expiry_echo');
+    function showEcho() {
+      const raw = (xp.value || '').trim();
+      if (!raw) { echo.textContent = ''; echo.className = 'fld-echo'; return; }
+      const iso = parseExpiry(raw);
+      if (iso) { echo.textContent = expiryEcho(iso); echo.className = 'fld-echo ok'; }
+      else { echo.textContent = 'Not a date yet — try 12/18/2026, 12182026 or 2026-12-18.'; echo.className = 'fld-echo bad'; }
+    }
+    xp.addEventListener('input', showEcho);
+    if (pick) pick.addEventListener('change', () => { if (pick.value) { xp.value = pick.value; showEcho(); } });
   }
   async function submitAdd() {
     const val = (id) => { const e = $(id); return e && e.value !== '' ? e.value : null; };
@@ -1875,6 +1957,9 @@
     const ticker = (val('f_ticker') || '').toUpperCase().trim();
     const structure = val('f_structure');
     if (!ticker) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'Ticker is required'; return; }
+    // Nothing is preselected, so an account must be CHOSEN — a trade cannot land in the wrong
+    // one by default (R-IV.651(c)3).
+    if (!val('f_account')) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'Choose an account.'; return; }
     const body = {
       ticker, asset_type: structure === 'stock' ? 'EQUITY' : 'OPTION', structure,
       entry_price: num('f_entry'), quantity: parseInt(val('f_qty'), 10) || 1, source: 'MANUAL', account: val('f_account'),
@@ -1883,7 +1968,14 @@
     if (num('f_short') != null) body.short_strike = num('f_short');
     // Validated on EVERY engine, not just the one without a picker: the endpoint drops an
     // expiry it cannot parse without telling anyone, so the page refuses before it can.
-    const expiry = val('f_expiry');
+    // Whatever was typed becomes ONE ISO string, then goes through the same validator as before.
+    const rawExpiry = val('f_expiry');
+    const expiry = rawExpiry ? parseExpiry(rawExpiry) : null;
+    if (rawExpiry && !expiry) {
+      $('f_msg').className = 'form-msg err';
+      $('f_msg').textContent = 'That expiry could not be read. Try 12/18/2026, 12182026 or 2026-12-18.';
+      return;
+    }
     if (expiry && !isIsoDate(expiry)) {
       $('f_msg').className = 'form-msg err';
       $('f_msg').textContent = 'Expiry must be a real date written YYYY-MM-DD, like 2026-12-18.';
@@ -2755,6 +2847,7 @@
     let positions = null;
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
     setBookExits(positions);
+    noteAccounts(positions, null);
     await refreshThemeMap(positions);
     loadBook(); loadKairos(); loadDeskStreams(); loadNotices();
   }
