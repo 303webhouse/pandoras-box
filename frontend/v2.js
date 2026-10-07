@@ -3496,9 +3496,19 @@ const X = (function () {
         ${p.markAt ? `<li>Mark last checked ${esc(when(p.markAt))}${p.markWhy ? ' — ' + esc(p.markWhy) : ''}.</li>` : ''}</ul>
     </div>`;
   }
+  // R-IV.726: THE SAME DAY-VERSUS-MOMENT RULE, ON THIS SIDE. `position_lots.fill_time` is a
+  // `timestamptz` holding both kinds: 1392 of the book's 1416 lots sit at exactly midnight UTC,
+  // which is a DAY someone wrote down, and 24 carry a real fill time. Formatting a day in Mountain
+  // Time printed "6:00 PM" on the PREVIOUS day — a time nobody recorded, against the wrong date.
+  // A day is therefore rendered as a day, with no time at all, and only a real moment gets a clock.
   const when = (iso) => {
     const t = Date.parse(iso);
-    return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t)) + ' MT' : String(iso || '—');
+    if (!Number.isFinite(t)) return String(iso || '—');
+    const d = new Date(t);
+    if (!d.getUTCHours() && !d.getUTCMinutes() && !d.getUTCSeconds() && !d.getUTCMilliseconds()) {
+      return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(d);
+    }
+    return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d) + ' MT';
   };
 
   function actions(p) {
