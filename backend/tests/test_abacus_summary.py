@@ -256,7 +256,12 @@ class TestAbacusSummaryScaling:
                 _get(client, test_api_key, q)
             census = [c for c in pool.calls if "unified_positions" in c[0]]
             assert census, q
-            assert "exit_date::date <= $1" in census[0][0], q
+            # R-IV.726: the window compares the DAY the close DENOTES, not a bare `::date` cast. A
+            # cast with no conversion reads a 9 PM Mountain close as the next day, which at a range
+            # boundary moves a trade into the wrong window.
+            sql = census[0][0]
+            assert "AT TIME ZONE 'America/Denver'" in sql and "<= $1" in sql, q
+            assert "exit_date::date <=" not in sql, q
 
     def test_a_range_with_no_closes_is_null_not_zero(self, client, test_api_key):
         """The sharpest case for a live page: a window the book has nothing in. Every figure is
@@ -743,6 +748,90 @@ class TestAbacusEquityCurve:
         d = _get(client, test_api_key).json()
         for a in d["equity"]["accounts"]:
             assert a["points"] == [] and a["off_reason"]
+
+
+class TestAbacusDayVsMoment:
+    """R-IV.726 — `entry_date` and `exit_date` hold BOTH a day and a moment, so the rule is per
+    value. WRTH (948) is the case that exposed it: stored `2026-10-01 00:00:00+00`, which the old
+    rule converted to 6 PM on 09-30, and I reported 09-30 while both Fidelity exports and the row's
+    own position_id said 10-01."""
+
+    def test_a_day_at_midnight_utc_keeps_its_day(self, client, test_api_key):
+        from api.abacus import _day_of
+        import datetime as dt
+        wrth = dt.datetime(2026, 10, 1, 0, 0, 0, tzinfo=dt.timezone.utc)
+        assert _day_of(wrth) == dt.date(2026, 10, 1), "converting a day moves it backwards"
+
+    def test_a_moment_is_the_principals_day_not_the_servers(self, client, test_api_key):
+        from api.abacus import _day_of
+        import datetime as dt
+        # 01:30 UTC on the 2nd is 7:30 PM Mountain on the 1st: his day, not the server's.
+        assert _day_of(dt.datetime(2026, 10, 2, 1, 30, tzinfo=dt.timezone.utc)) == dt.date(2026, 10, 1)
+        # And an ordinary afternoon fill lands on the same day either way.
+        assert _day_of(dt.datetime(2026, 10, 1, 17, 36, 47, tzinfo=dt.timezone.utc)) == dt.date(2026, 10, 1)
+
+    def test_a_day_at_mountain_midnight_also_keeps_its_day(self, client, test_api_key):
+        """`snapshot_date` and `activity_date` are stored at Mountain midnight (06:00/07:00Z). The
+        one rule has to be right for them too, which is why it replaced both earlier helpers."""
+        from api.abacus import _day_of
+        import datetime as dt
+        assert _day_of(dt.datetime(2026, 3, 20, 6, 0, tzinfo=dt.timezone.utc)) == dt.date(2026, 3, 20)
+        assert _day_of(dt.datetime(2026, 1, 15, 7, 0, tzinfo=dt.timezone.utc)) == dt.date(2026, 1, 15)
+
+    def test_the_weekday_is_the_day_the_row_denotes(self, client, test_api_key):
+        """The breakdown this corrects. A Thursday stored at midnight UTC was being reported as a
+        Wednesday, and 453 of 554 counted rows were in that shape."""
+        import datetime as dt
+        rows = [_row(10.0, entry=dt.datetime(2026, 10, 1, 0, 0, tzinfo=dt.timezone.utc),   # Thursday
+                     exit=dt.datetime(2026, 10, 1, 0, 0, tzinfo=dt.timezone.utc))]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        wd = next(b for b in d["breakdowns"] if b["key"] == "weekday")
+        assert [r[0] for r in wd["rows"]] == ["Thursday"], wd["rows"]
+        hold = next(b for b in d["breakdowns"] if b["key"] == "hold")
+        assert [r[0] for r in hold["rows"]] == ["Same day"], hold["rows"]
+
+    def test_a_day_and_a_moment_in_one_row_still_measure_one_hold(self, client, test_api_key):
+        """The mixed row is where the old rule did its worst: a day converted backwards against a
+        moment converted correctly gave a hold a day too long — or negative."""
+        import datetime as dt
+        rows = [_row(10.0,
+                     entry=dt.datetime(2026, 10, 1, 0, 0, tzinfo=dt.timezone.utc),        # a DAY
+                     exit=dt.datetime(2026, 10, 1, 19, 45, tzinfo=dt.timezone.utc))]      # a MOMENT
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        hold = next(b for b in d["breakdowns"] if b["key"] == "hold")
+        assert [r[0] for r in hold["rows"]] == ["Same day"], hold["rows"]
+
+    def test_the_bucket_cutoff_is_decided_on_the_corrected_day(self, client, test_api_key):
+        """R-IV.705(f)'s untagged count turns on which side of 2026-09-25 a row opened. A row stored
+        at `2026-09-25 00:00Z` IS on the cutoff; the old rule read it as the 24th and left it out."""
+        import datetime as dt
+        rows = [_row(1.0, entry=dt.datetime(2026, 9, 25, 0, 0, tzinfo=dt.timezone.utc), strategy_tag=None)]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        it = next(i for i in d["leaks"]["items"] if "Untagged" in i["label"])
+        assert it["of_n"] == 1, "the row opened ON the cutoff is in the population"
+        assert it["n"] == 1
+
+    def test_a_negative_hold_is_counted_rather_than_vanishing(self, client, test_api_key):
+        """Two rows did this under the old reading and nothing said so: no bucket matched, so the
+        row left the breakdown in silence."""
+        import datetime as dt
+        rows = [_row(10.0, entry=dt.datetime(2026, 10, 5, 18, 0, tzinfo=dt.timezone.utc),
+                     exit=dt.datetime(2026, 10, 1, 18, 0, tzinfo=dt.timezone.utc)),
+                _row(5.0, entry=dt.datetime(2026, 10, 1, 0, 0, tzinfo=dt.timezone.utc),
+                     exit=dt.datetime(2026, 10, 1, 0, 0, tzinfo=dt.timezone.utc))]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        hold = next(b for b in d["breakdowns"] if b["key"] == "hold")
+        assert [r[0] for r in hold["rows"]] == ["Same day"], hold["rows"]
+        assert "could not be placed" in hold["note"], hold["note"]
+        assert "1" in hold["note"]
 
 
 class TestAbacusPageServed:
