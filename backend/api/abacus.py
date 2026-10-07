@@ -272,7 +272,11 @@ INTERNAL_FLOWS = frozenset({"DIVIDEND", "INTEREST", "FEE", "TRADE_DEBIT", "TRADE
                             "OPENING_BALANCE"})
 # Anything else is UNCLASSIFIED and fails the coverage test by name. A new flow_type must not be
 # able to join a return series silently; `ADJUSTMENT` is deliberately here rather than guessed at.
-SHARPE_MIN_N = 20          # below this, the figure is served with `rough` on its face
+# R-IV.709(c): a HARD FLOOR, not a qualifier. Thirty returns is the least this page will
+# divide a mean by a deviation over; below it the figure is not served at all, because a Sharpe
+# ratio from four points is a number with the authority of a statistic and the content of noise,
+# and a "rough" label next to it does not stop it being read as one.
+SHARPE_MIN_N = 30
 
 
 def _census_where(first: Optional[date], last: date) -> tuple:
@@ -528,9 +532,14 @@ async def _load_equity(pool) -> dict:
             elif kind not in INTERNAL_FLOWS and day and first_day and day.isoformat() >= first_day:
                 unclassified.add(kind or "(blank)")
 
-        # Coverage, as R-IV.705(d) defines it: the recorded cash events must begin at or before the
-        # curve does, or the earlier days' returns cannot be told from deposits.
-        off = None
+        # R-IV.709(b): where the ledger's events begin AFTER the curve does, the figures are no
+        # longer refused -- they are measured over THE SPAN THE LEDGER COVERS, with that span and
+        # the exclusion on the card's face. Refusing outright threw away five months of the Roth's
+        # history to protect twenty-one days of it; measuring the covered part and SAYING which part
+        # is the honest version of the same caution.
+        #
+        # `off` is kept for the cases where no span is coverable at all.
+        off, covered, base = None, None, 0
         if unclassified:
             off = ("the ledger holds cash events this page cannot classify as deposits or earnings ("
                    + ", ".join(sorted(unclassified)) + "), so a return net of deposits cannot be trusted.")
@@ -538,42 +547,58 @@ async def _load_equity(pool) -> dict:
             off = ("the hub has no recorded deposit or withdrawal for this account, so a change in "
                    "balance cannot be told from money moving in or out.")
         elif first_day and ext_first.isoformat() > first_day:
-            off = ("recorded cash events begin " + ext_first.isoformat() + ", after this curve begins "
-                   + first_day + ", so the earlier days' returns cannot be told from deposits.")
+            start = ext_first.isoformat()
+            base = next((i for i, p in enumerate(points) if p["d"] >= start), len(points))
+            if base >= len(points) - 1:
+                off = ("recorded cash events begin " + start + ", and the hub holds no later balance "
+                       "snapshot to measure a return from.")
+            else:
+                # The counts go in FIELDS, not into the sentence: they change with the data.
+                covered = {"from": points[base]["d"], "to": last_day,
+                           "days": len(points) - base, "excluded_days": base,
+                           "reason": ("the earlier days are left out: recorded cash events begin "
+                                      + start + ", and before that a change in balance cannot be "
+                                      "told from a deposit.")}
 
-        rets, ret_days = [], []
+        # Absolute indices throughout, so a drawdown found inside a covered sub-span still points at
+        # the right place on the full line the card draws.
+        rets, ret_at = [], []
         if off is None:
-            for i in range(1, len(points)):
+            for i in range(base + 1, len(points)):
                 prev, cur = points[i - 1]["v"], points[i]["v"]
                 if prev <= 0:
                     continue
                 flow = ext_by_day.get(points[i]["d"], 0.0)
                 rets.append((cur - prev - flow) / prev)
-                ret_days.append(points[i]["d"])
+                ret_at.append(i)
 
         drawdown, sharpe = None, None
         if rets:
             # Drawdown on the NET-OF-CASH index, in percent. A dollar figure would need a base, and
-            # every base available here is a deposit away from being wrong.
+            # every base available here is a deposit away from being wrong. A fall is an OBSERVATION,
+            # so it is served at any length -- unlike the Sharpe ratio below.
             idx, peak, worst = 1.0, 1.0, 0.0
-            peak_i, from_i, to_i = 0, 0, 0
-            for i, r in enumerate(rets):
+            peak_i, from_i, to_i = base, base, base
+            for r, i in zip(rets, ret_at):
                 idx *= (1 + r)
                 if idx > peak:
-                    peak, peak_i = idx, i + 1
+                    peak, peak_i = idx, i
                 fall = idx / peak - 1
                 if fall < worst:
-                    worst, from_i, to_i = fall, peak_i, i + 1
+                    worst, from_i, to_i = fall, peak_i, i
             if worst < 0:
                 drawdown = {"pct": round(worst, 4), "from_index": from_i, "to_index": to_i,
                             "from": points[from_i]["d"], "to": points[to_i]["d"]}
-            if len(rets) >= 2:
+            if len(rets) < SHARPE_MIN_N:
+                # R-IV.709(c): no figure at all, and the count in its place.
+                sharpe = {"value": None, "n": len(rets), "insufficient": True}
+            else:
                 mean = sum(rets) / len(rets)
                 var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
                 sd = var ** 0.5
                 sharpe = ({"value": round(mean / sd * (252 ** 0.5), 2), "n": len(rets),
-                           "rough": len(rets) < SHARPE_MIN_N}
-                          if sd > 0 else {"value": None, "n": len(rets), "rough": True})
+                           "insufficient": False}
+                          if sd > 0 else {"value": None, "n": len(rets), "no_spread": True})
 
         out.append({
             "account": acct, "account_display": _display(acct),
@@ -584,7 +609,8 @@ async def _load_equity(pool) -> dict:
             "line_label": "balance — includes deposits/withdrawals",
             "cash": {"events": ext_count,
                      "first": ext_first.isoformat() if ext_first else None,
-                     "spans": off is None},
+                     "spans": off is None and covered is None},
+            "covered": covered,
             "drawdown": drawdown, "sharpe": sharpe, "off_reason": off,
         })
     return {"accounts": out}

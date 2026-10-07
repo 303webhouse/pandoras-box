@@ -73,6 +73,15 @@ def _snap(day, balance, name="ROBINHOOD"):
             "account_name": name}
 
 
+def _series(start_day, values, name="ROBINHOOD"):
+    """One snapshot a day from `start_day`, so a test can reach the thirty returns R-IV.709(c)
+    requires before a Sharpe ratio is served at all."""
+    import datetime as dt
+    d0 = _dt.date(*start_day)
+    return [_snap((d.year, d.month, d.day), v, name)
+            for d, v in ((d0 + dt.timedelta(days=i), v) for i, v in enumerate(values))]
+
+
 def _cash(day, amount, kind="ACH", name="ROBINHOOD"):
     return {"activity_date": _dt.datetime(*day, tzinfo=_dt.timezone.utc), "amount": amount,
             "flow_type": kind, "account_name": name}
@@ -572,28 +581,92 @@ class TestAbacusEquityCurve:
         spellings = [s.upper() for s in scope_for("FIDELITY_401A")]
         assert "FIDELITY 401A" not in spellings, "the parked money must not be reachable"
 
-    def test_a_curve_whose_cash_coverage_does_not_span_it_has_no_sharpe_or_drawdown(self, client, test_api_key):
-        """R-IV.705(d): a balance curve counts every deposit as a gain. Where the recorded cash
-        events start after the curve does, the earlier days' returns cannot be told from
-        deposits -- so the figures are left OFF with that reason on their face."""
-        snaps = [_snap((2026, 3, 20), 8000.0, "FIDELITY_ROTH"),
-                 _snap((2026, 4, 20), 9000.0, "FIDELITY_ROTH"),
-                 _snap((2026, 5, 20), 9500.0, "FIDELITY_ROTH")]
+    def test_a_partly_covered_curve_is_measured_over_the_part_the_ledger_covers(self, client, test_api_key):
+        """R-IV.709(b). Refusing the figures outright threw away five months of the Roth's history
+        to protect twenty-one days of it. The figures are now measured over the covered span, and
+        the card says WHICH span and which days are left out."""
+        snaps = [_snap((2026, 3, 20), 8000.0, "FIDELITY_ROTH"),      # before the ledger: excluded
+                 _snap((2026, 3, 25), 8100.0, "FIDELITY_ROTH"),      # before the ledger: excluded
+                 _snap((2026, 4, 20), 9000.0, "FIDELITY_ROTH"),      # the covered span starts here
+                 _snap((2026, 5, 20), 8100.0, "FIDELITY_ROTH"),
+                 _snap((2026, 6, 20), 8500.0, "FIDELITY_ROTH")]
         cash = [_cash((2026, 4, 10), 1000.0, "ACH", "FIDELITY_ROTH")]
         pool, p = _patch_book([], snapshots=snaps, cash=cash)
         with p:
             d = _get(client, test_api_key).json()
         a = next(x for x in d["equity"]["accounts"] if x["account"] == "FIDELITY_ROTH")
-        assert a["drawdown"] is None and a["sharpe"] is None
-        assert a["cash"]["spans"] is False
-        assert "2026-04-10" in a["off_reason"] and "2026-03-20" in a["off_reason"]
+        assert a["off_reason"] is None, a["off_reason"]
+        cov = a["covered"]
+        assert cov["from"] == "2026-04-20" and cov["to"] == "2026-06-20"
+        assert cov["days"] == 3 and cov["excluded_days"] == 2
+        assert "2026-04-10" in cov["reason"]
+        # The whole balance line is still drawn -- it is his money -- and the drawdown found inside
+        # the covered span points at the right place ON THAT FULL LINE.
+        assert a["days"] == 5 and len(a["points"]) == 5
+        assert a["drawdown"]["from_index"] == 2 and a["drawdown"]["to_index"] == 3
+        assert a["drawdown"]["from"] == "2026-04-20" and a["drawdown"]["to"] == "2026-05-20"
+        assert a["cash"]["spans"] is False, "the ledger does not cover the whole curve, and says so"
         assert a["line_label"] == "balance — includes deposits/withdrawals"
 
+    def test_the_excluded_days_are_never_in_a_return(self, client, test_api_key):
+        """The point of the exclusion: the 8000 -> 8100 move before the ledger begins must not
+        appear as a gain, because nothing says it was not a deposit."""
+        snaps = [_snap((2026, 3, 20), 8000.0, "FIDELITY_ROTH"),
+                 _snap((2026, 3, 25), 8100.0, "FIDELITY_ROTH"),
+                 _snap((2026, 4, 20), 8100.0, "FIDELITY_ROTH"),
+                 _snap((2026, 5, 20), 8100.0, "FIDELITY_ROTH")]
+        cash = [_cash((2026, 4, 10), 50.0, "ACH", "FIDELITY_ROTH")]
+        pool, p = _patch_book([], snapshots=snaps, cash=cash)
+        with p:
+            d = _get(client, test_api_key).json()
+        a = next(x for x in d["equity"]["accounts"] if x["account"] == "FIDELITY_ROTH")
+        assert a["drawdown"] is None, "flat across the covered span: no fall, and no pre-ledger gain"
+        assert a["sharpe"]["n"] == 1, "one return inside the covered span, not three"
+
+    def test_a_curve_with_no_snapshot_after_the_ledger_begins_still_says_so(self, client, test_api_key):
+        snaps = [_snap((2026, 3, 20), 8000.0, "FIDELITY_ROTH"),
+                 _snap((2026, 3, 25), 8100.0, "FIDELITY_ROTH")]
+        cash = [_cash((2026, 4, 10), 50.0, "ACH", "FIDELITY_ROTH")]
+        pool, p = _patch_book([], snapshots=snaps, cash=cash)
+        with p:
+            d = _get(client, test_api_key).json()
+        a = next(x for x in d["equity"]["accounts"] if x["account"] == "FIDELITY_ROTH")
+        assert a["sharpe"] is None and a["drawdown"] is None
+        assert "no later balance snapshot" in a["off_reason"], a["off_reason"]
+
+    def test_no_sharpe_under_thirty_returns(self, client, test_api_key):
+        """R-IV.709(c): a hard floor on every account and every span. A Sharpe ratio from four
+        points has the authority of a statistic and the content of noise."""
+        from api.abacus import SHARPE_MIN_N
+        assert SHARPE_MIN_N == 30
+        short = _series((2026, 1, 2), [1000 + 10 * i for i in range(10)])
+        pool, p = _patch_book([], snapshots=short, cash=[_cash((2026, 1, 1), 10.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        a = next(x for x in d["equity"]["accounts"] if x["account"] == "ROBINHOOD")
+        assert a["sharpe"]["value"] is None and a["sharpe"]["insufficient"] is True
+        assert a["sharpe"]["n"] == 9, "the count stands in the figure's place"
+        assert a["drawdown"] is None or a["drawdown"]["pct"] < 0, "a FALL is an observation, served at any length"
+
+    def test_thirty_returns_is_enough(self, client, test_api_key):
+        vals = [1000.0]
+        for i in range(30):
+            vals.append(vals[-1] * (1.002 if i % 3 else 0.999))
+        pool, p = _patch_book([], snapshots=_series((2026, 1, 2), vals),
+                              cash=[_cash((2026, 1, 1), 10.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        a = next(x for x in d["equity"]["accounts"] if x["account"] == "ROBINHOOD")
+        assert a["sharpe"]["n"] == 30 and a["sharpe"]["insufficient"] is False
+        assert isinstance(a["sharpe"]["value"], float)
+
     def test_a_deposit_is_not_a_gain(self, client, test_api_key):
-        """The whole point of (d), in one case: a flat account that receives a deposit must show
-        no return for that day, and a Sharpe of nothing rather than of the deposit."""
-        snaps = [_snap((2026, 1, 2), 1000.0), _snap((2026, 1, 3), 2000.0),
-                 _snap((2026, 1, 4), 2000.0)]
+        """The whole point of (d), in one case: a flat account that receives a deposit shows no
+        return for that day. Thirty-one snapshots, because the Sharpe floor (R-IV.709(c)) is where
+        this is now provable: if the deposit counted as a gain the returns would have a spread and
+        a positive ratio; netted out they are all zero, and there is nothing to divide by."""
+        vals = [1000.0] + [2000.0] * 30           # a flat account, doubled by a deposit on day 2
+        snaps = _series((2026, 1, 2), vals)
         cash = [_cash((2026, 1, 1), 1000.0), _cash((2026, 1, 3), 1000.0)]
         pool, p = _patch_book([], snapshots=snaps, cash=cash)
         with p:
@@ -601,11 +674,9 @@ class TestAbacusEquityCurve:
         rh = next(a for a in d["equity"]["accounts"] if a["account"] == "ROBINHOOD")
         assert rh["cash"]["spans"] is True, rh.get("off_reason")
         assert rh["drawdown"] is None, "the deposit day is not a 100% gain, and no fall followed"
-        assert rh["sharpe"]["n"] == 2
-        # Two returns of exactly zero: mean 0 over deviation 0 is not a ratio, so the figure is
-        # None rather than a flattering 0. The n is still reported.
-        assert rh["sharpe"]["value"] is None, rh["sharpe"]
-        assert rh["sharpe"]["rough"] is True, "two returns is not a Sharpe ratio worth the name"
+        assert rh["sharpe"]["n"] == 30
+        assert rh["sharpe"]["value"] is None, "every return is zero: no spread to divide a mean by"
+        assert rh["sharpe"].get("no_spread") is True, rh["sharpe"]
 
     def test_an_unclassifiable_cash_event_fails_closed(self, client, test_api_key):
         """A flow type this page cannot call a deposit or an earning must not join a return
@@ -617,6 +688,7 @@ class TestAbacusEquityCurve:
             d = _get(client, test_api_key).json()
         rh = next(a for a in d["equity"]["accounts"] if a["account"] == "ROBINHOOD")
         assert rh["sharpe"] is None and rh["drawdown"] is None
+        assert rh["covered"] is None, "a curve with no trustworthy ledger has no covered span either"
         assert "MYSTERY_TYPE" in rh["off_reason"]
 
     def test_a_dividend_is_not_netted_out(self, client, test_api_key):
@@ -624,15 +696,19 @@ class TestAbacusEquityCurve:
         deposit in overstates it. A dividend stays in, and the SIGN of the Sharpe is what proves
         it: keeping the dividend makes the mean return positive, netting it out makes it
         negative."""
-        snaps = [_snap((2026, 1, 2), 1000.0), _snap((2026, 1, 3), 1010.0), _snap((2026, 1, 4), 1005.0)]
+        # Flat but for one +10 day, which the ledger records as a DIVIDEND. Kept, the returns have a
+        # spread and a positive ratio; netted out, every return is zero and there is nothing to
+        # divide by -- so the two readings are told apart by whether a Sharpe exists at all.
+        vals = [1000.0] + [1010.0] * 30
+        snaps = _series((2026, 1, 2), vals)
         cash = [_cash((2026, 1, 1), 10.0, "ACH"), _cash((2026, 1, 3), 10.0, "DIVIDEND")]
         pool, p = _patch_book([], snapshots=snaps, cash=cash)
         with p:
             d = _get(client, test_api_key).json()
         rh = next(a for a in d["equity"]["accounts"] if a["account"] == "ROBINHOOD")
         assert rh["cash"]["spans"] is True, rh.get("off_reason")
-        assert rh["sharpe"]["n"] == 2
-        assert rh["sharpe"]["value"] > 0, "netting the dividend out would make this negative"
+        assert rh["sharpe"]["n"] == 30
+        assert rh["sharpe"]["value"] > 0, "netting the dividend out would leave no spread at all"
 
     def test_an_account_with_no_snapshots_says_so(self, client, test_api_key):
         d = _get(client, test_api_key).json()
