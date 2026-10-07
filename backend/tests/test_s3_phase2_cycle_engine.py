@@ -240,6 +240,113 @@ def test_compute_composite_degraded_below_min():
 
 
 # ---------------------------------------------------------------------------
+# Directed capitulation (R-IV.700) — vendor FIRING is bidirectional
+# ---------------------------------------------------------------------------
+
+_CAP_CFG = {
+    "capitulation": {
+        "funding_negative_threshold": -0.03,
+        "basis_backwardation_pct": -5.0,
+        "skew_put_extreme_pct": 5.0,
+        "liquidation_long_pct": 75.0,
+    },
+    "min_live_cells_btc_eth": 2,
+    "min_live_cells_others": 1,
+}
+
+
+def test_funding_blowoff_is_not_capitulation():
+    """Vendor FIRING on a +0.08 funding blow-off must not count as cap."""
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "perp_funding", {"signal": "FIRING", "funding_rate": 0.08}, _CAP_CFG
+    ) == "NEUTRAL"
+
+
+def test_negative_funding_stays_capitulation():
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "perp_funding", {"signal": "FIRING", "funding_rate": -0.04}, _CAP_CFG
+    ) == "FIRING"
+
+
+def test_basis_contango_is_not_capitulation():
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "quarterly_basis", {"signal": "FIRING", "basis_annualized": 15.0}, _CAP_CFG
+    ) == "NEUTRAL"
+    assert _directed_cap_signal(
+        "quarterly_basis", {"signal": "FIRING", "basis_annualized": -8.0}, _CAP_CFG
+    ) == "FIRING"
+
+
+def test_call_demand_skew_is_not_capitulation():
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "skew_25delta", {"signal": "FIRING", "skew_25d": -8.0}, _CAP_CFG
+    ) == "NEUTRAL"
+    assert _directed_cap_signal(
+        "skew_25delta", {"signal": "FIRING", "skew_25d": 8.0}, _CAP_CFG
+    ) == "FIRING"
+
+
+def test_oi_distribution_is_not_capitulation():
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "open_interest", {"signal": "FIRING", "divergence": "distribution"}, _CAP_CFG
+    ) == "NEUTRAL"
+    assert _directed_cap_signal(
+        "open_interest", {"signal": "FIRING", "divergence": "accumulation"}, _CAP_CFG
+    ) == "FIRING"
+
+
+def test_term_contango_rising_is_not_capitulation():
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "term_structure",
+        {"signal": "FIRING", "structure": "contango", "funding_trend": "rising"},
+        _CAP_CFG,
+    ) == "NEUTRAL"
+    assert _directed_cap_signal(
+        "term_structure",
+        {"signal": "FIRING", "structure": "backwardation", "funding_trend": "falling"},
+        _CAP_CFG,
+    ) == "FIRING"
+
+
+def test_short_heavy_liqs_are_not_capitulation():
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "liquidations", {"signal": "FIRING", "composition": "short_heavy", "long_pct": 20.0}, _CAP_CFG
+    ) == "NEUTRAL"
+    assert _directed_cap_signal(
+        "liquidations", {"signal": "FIRING", "composition": "long_heavy", "long_pct": 80.0}, _CAP_CFG
+    ) == "FIRING"
+
+
+def test_non_firing_vendor_flag_passes_through():
+    from bias_filters.crypto_cycle_engine import _directed_cap_signal
+    assert _directed_cap_signal(
+        "perp_funding", {"signal": "NEUTRAL", "funding_rate": 0.01}, _CAP_CFG
+    ) == "NEUTRAL"
+    assert _directed_cap_signal(
+        "perp_funding", {"signal": "UNKNOWN", "funding_rate": None}, _CAP_CFG
+    ) == "UNKNOWN"
+
+
+def test_funding_blowoff_composite_is_froth_only():
+    """A remapped blow-off increments froth, not both columns."""
+    from bias_filters.crypto_cycle_engine import _compute_composite
+    cap = [{"state": "LIVE", "signal_id": "perp_funding", "column": "CAPITULATION", "signal": "NEUTRAL"}]
+    froth = [{"state": "LIVE", "signal_id": "funding_blowout", "column": "FROTH", "firing": True}]
+    score, method, _degraded, _reason, count = _compute_composite(cap, froth, _CAP_CFG, "BTC")
+    assert score is not None
+    assert score > 0
+    assert method == "froth_dominant"
+    assert count == 2
+
+
+# ---------------------------------------------------------------------------
 # Coverage note builder
 # ---------------------------------------------------------------------------
 

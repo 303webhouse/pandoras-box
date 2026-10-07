@@ -139,13 +139,24 @@ async def snapshot_for(base: str) -> Dict[str, Any]:
 
     try:
         from bias_filters import coinalyze_client as cz
-        funding, oi, liq, lsr = await asyncio.gather(
-            cz.get_funding_rate(base),
-            cz.get_open_interest(base),
-            cz.get_liquidations(base),
-            cz.get_long_short_ratio(base),
-            return_exceptions=True,
-        )
+        # HYPE's Coinalyze history endpoints are thin. On a cold /crypto/market
+        # they were the 1.873 s (R-IV.684 / R-IV.700). Funding is a snapshot,
+        # not history — keep asking. OI comes from Hyperliquid above.
+        if base == "HYPE":
+            funding, lsr = await asyncio.gather(
+                cz.get_funding_rate(base),
+                cz.get_long_short_ratio(base),
+                return_exceptions=True,
+            )
+            oi = liq = None
+        else:
+            funding, oi, liq, lsr = await asyncio.gather(
+                cz.get_funding_rate(base),
+                cz.get_open_interest(base),
+                cz.get_liquidations(base),
+                cz.get_long_short_ratio(base),
+                return_exceptions=True,
+            )
         funding, oi, liq, lsr = _ok(funding), _ok(oi), _ok(liq), _ok(lsr)
     except Exception as exc:
         logger.warning("perps: coinalyze failed for %s: %s", base, exc)
