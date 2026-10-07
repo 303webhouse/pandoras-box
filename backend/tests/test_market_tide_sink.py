@@ -192,7 +192,9 @@ class TestEverySkipRecordsItsReason:
 class TestFieldLivenessIsDeclaredAndEnforced:
     def test_the_declaration_exists_with_its_measurement(self):
         assert FIELD_LIVENESS["expected_interval_s"] == 300
-        assert FIELD_LIVENESS["expected_rows_per_complete_session"] == 81
+        # A RANGE, corrected after the backfill measured a 16:15 ET tick on 19 of 66 sessions.
+        assert FIELD_LIVENESS["expected_rows_per_complete_session"] == (81, 82)
+        assert "16:15" in FIELD_LIVENESS["rows_note"]
         assert set(FIELD_LIVENESS["fields"]) == {"net_call_premium", "net_put_premium",
                                                  "net_volume"}
         assert "2026-10" in FIELD_LIVENESS["measured_on"]
