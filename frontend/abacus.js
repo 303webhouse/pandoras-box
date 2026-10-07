@@ -150,6 +150,15 @@
   }
   function renderStats(d) {
     $('abStats').innerHTML = (d.stats || []).map((s) => {
+      // R-IV.716(c): a stat the hub withholds says so IN PLACE OF THE FIGURE. An em dash would read
+      // as "nothing to report"; the reason is the report.
+      if (s.unavailable) {
+        return `<div class="ab-stat" data-key="${esc(s.key)}" data-unavailable="1">
+          <span class="ab-v ab-unavail">${esc(s.unavailable)}</span>
+          <span class="ab-l">${esc(s.label)}${esc(spanTxt(s.span))} ${chip('unknown', 'withheld', s.meaning || '')}</span>
+          ${s.meaning ? `<details><summary>why</summary>${esc(s.meaning)}</details>` : ''}
+        </div>`;
+      }
       const q = s.qualifier ? ' ' + chip(s.qualifier.state, s.qualifier.label) : '';
       const nTxt = (s.n != null ? ' · n=' + s.n : '') + (s.date ? ' · trough ' + shortDate(s.date) : '')
         + spanTxt(s.span);
