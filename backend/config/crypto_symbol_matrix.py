@@ -85,7 +85,7 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         },
         "hyperliquid_perp": {
             "status": "LIVE",
-            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. 2026-10-07 00:28 UTC Railway GET /crypto/market: predicted_by_venue.binance=hyperliquid:BinPerp and .bybit=hyperliquid:BybitPerp, values present, not stale, ttl 900s (HYPE: those two null, HlPerp present).",
         },
         "okx_perp_third_source": {
             "status": "LIVE_WHILE_IT_ANSWERS",
@@ -133,7 +133,7 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         },
         "hyperliquid_perp": {
             "status": "LIVE",
-            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. 2026-10-07 00:28 UTC Railway GET /crypto/market: predicted_by_venue.binance=hyperliquid:BinPerp and .bybit=hyperliquid:BybitPerp, values present, not stale, ttl 900s (HYPE: those two null, HlPerp present).",
         },
         "okx_perp_third_source": {
             "status": "LIVE_WHILE_IT_ANSWERS",
@@ -181,7 +181,7 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         },
         "hyperliquid_perp": {
             "status": "LIVE",
-            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. 2026-10-07 00:28 UTC Railway GET /crypto/market: predicted_by_venue.binance=hyperliquid:BinPerp and .bybit=hyperliquid:BybitPerp, values present, not stale, ttl 900s (HYPE: those two null, HlPerp present).",
         },
         "okx_perp_third_source": {
             "status": "LIVE_WHILE_IT_ANSWERS",
@@ -230,7 +230,7 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         },
         "hyperliquid_perp": {
             "status": "LIVE",
-            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. 2026-10-07 00:28 UTC Railway GET /crypto/market: predicted_by_venue.binance=hyperliquid:BinPerp and .bybit=hyperliquid:BybitPerp, values present, not stale, ttl 900s (HYPE: those two null, HlPerp present).",
         },
         "okx_perp_third_source": {
             "status": "LIVE_WHILE_IT_ANSWERS",
@@ -277,7 +277,7 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         },
         "hyperliquid_perp": {
             "status": "LIVE",
-            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. 2026-10-07 00:28 UTC Railway GET /crypto/market: predicted_by_venue.binance=hyperliquid:BinPerp and .bybit=hyperliquid:BybitPerp, values present, not stale, ttl 900s (HYPE: those two null, HlPerp present).",
         },
         "okx_perp_third_source": {
             "status": "LIVE_WHILE_IT_ANSWERS",
@@ -326,7 +326,7 @@ CRYPTO_SYMBOL_MATRIX: dict[str, dict] = {
         },
         "hyperliquid_perp": {
             "status": "LIVE",
-            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. Predicted funding from Railway UNVERIFIED until this branch is live.",
+            "verified": "2026-07-13 Railway: POST /info meta HTTP 200, symbol in 232-asset universe. Sanctioned R-IV.658 2026-10-06. 2026-10-07 00:28 UTC Railway GET /crypto/market: predicted_by_venue.binance=hyperliquid:BinPerp and .bybit=hyperliquid:BybitPerp, values present, not stale, ttl 900s (HYPE: those two null, HlPerp present).",
         },
         "okx_perp_third_source": {
             "status": "LIVE_WHILE_IT_ANSWERS",
@@ -351,9 +351,7 @@ DEFILLAMA_STATUS = {
 
 # Hyperliquid public info API. Sanctioned R-IV.658 (2026-10-06) as a US-serving
 # perps source: own mark/funding/OI, plus predicted funding for Binance and
-# Bybit. No key. The 2026-07-13 Railway meta check stands; predictedFundings
-# from Railway is re-verified after this branch is live. The Binance VPN/proxy
-# is gone and is not rebuilt.
+# Bybit. No key. The Binance VPN/proxy is gone and is not rebuilt.
 HYPERLIQUID_INFO = {
     "status": "LIVE",
     "sanctioned": True,
@@ -361,7 +359,7 @@ HYPERLIQUID_INFO = {
     "auth": "none (public, keyless)",
     "weight": "1200/min/IP; metaAndAssetCtxs and predictedFundings cost 20 each",
     "verified_meta_railway": "2026-07-13: POST api.hyperliquid.xyz/info {type: meta} HTTP 200, 232-asset universe, all 6 symbols present (BTC, ETH, SOL, HYPE, ZEC, FARTCOIN)",
-    "verified_predicted_railway": "UNVERIFIED from Railway as of 2026-10-06 (no caller on prod yet)",
+    "verified_predicted_railway": "2026-10-07 00:28 UTC: GET /crypto/market from the hub (prod bf0da4e, Railway egress). derivatives.predicted_by_venue.binance venue=hyperliquid:BinPerp and .bybit venue=hyperliquid:BybitPerp — values present, not stale, ttl_s=900, for BTC ETH SOL ZEC FARTCOIN. HYPE: Binance and Bybit predicted null (honest); HlPerp present. Ten venue+age envelopes per coin (60 across six).",
 }
 
 # Coinalyze collects Binance/Bybit/OKX perps; the hub never requests Binance.
