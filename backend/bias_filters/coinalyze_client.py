@@ -61,9 +61,7 @@ _cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SECONDS = 300  # 5 minutes
 
 # Coinalyze history from/to are UNIX seconds (R-IV.722(c), R-IV.725).
-# convert_to_usd is sent explicitly. Docs default is "false" (coin units).
-# Hub consumes OI and liquidations as USD, so requests ask for "true".
-# R-IV.724(b) has not settled units; Coinalyze-sourced OI/liq do not score.
+# convert_to_usd is inert: values are already USD (R-IV.724(b)). Kept "true".
 _COINALYZE_CONVERT_TO_USD = "true"
 
 

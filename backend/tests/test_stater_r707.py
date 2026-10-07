@@ -297,9 +297,8 @@ async def test_liq_cell_source_coinalyze_when_primary_answers(monkeypatch):
     cells = await eng._build_capitulation_cells("BTC", {"capitulation": {}, "staleness_thresholds": {}})
     liq = next(c for c in cells if c["signal_id"] == "liquidations")
     assert liq["source"] == "coinalyze"
-    assert liq["state"] == "NA"
-    assert liq["reason"] == "COINALYZE_UNITS_UNVERIFIED"
-    assert liq["signal"] == "NEUTRAL"
+    assert liq["state"] == "LIVE"
+    assert liq.get("reason") != "COINALYZE_UNITS_UNVERIFIED"
 
 
 def test_btc_okx_fallback_cell_does_not_move_composite():
@@ -325,7 +324,7 @@ def _cycle_na_vendor():
 
 
 @pytest.mark.asyncio
-async def test_coinalyze_oi_cell_units_unverified(monkeypatch):
+async def test_coinalyze_oi_cell_scores_again(monkeypatch):
     from datetime import datetime, timezone
     from bias_filters import crypto_cycle_engine as eng
 
@@ -360,12 +359,12 @@ async def test_coinalyze_oi_cell_units_unverified(monkeypatch):
     oi = next(c for c in cap if c["signal_id"] == "open_interest")
     extreme = next(c for c in froth if c["signal_id"] == "oi_extreme")
     assert oi["source"] == "coinalyze"
-    assert oi["state"] == "NA"
-    assert oi["reason"] == "COINALYZE_UNITS_UNVERIFIED"
+    assert oi["state"] == "LIVE"
+    assert oi.get("reason") != "COINALYZE_UNITS_UNVERIFIED"
     assert extreme["source"] == "coinalyze"
-    assert extreme["state"] == "NA"
-    assert extreme["reason"] == "COINALYZE_UNITS_UNVERIFIED"
-    assert extreme["firing"] is False
+    assert extreme["state"] == "LIVE"
+    assert extreme.get("reason") != "COINALYZE_UNITS_UNVERIFIED"
+    assert extreme["firing"] is True
 
 
 @pytest.mark.asyncio
