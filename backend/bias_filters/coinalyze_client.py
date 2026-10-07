@@ -51,11 +51,10 @@ _OKX_SWAP_INSTID: Dict[str, Optional[str]] = {
 }
 
 # OKX BTC-USDT-SWAP contract size is 0.01 BTC per contract.
+# BTC's OKX fallback path uses this constant (R-IV.707(f) — byte-identical).
+# Non-BTC reads ctVal from OKX /public/instruments and caches it; do not type alt sizes here.
 OKX_BTC_SWAP_CTVAL_BTC = 0.01
-# For OKX liquidation notional on non-BTC symbols we use the USD face value
-# via the oiUsd field where available. Contract sizes vary; stablecoin-margined
-# contracts are typically 1 USD per lot for most alts on OKX.
-OKX_ALT_SWAP_CTVAL_USD = 1.0
+OKX_CTVAL_CACHE_TTL = 3600
 
 # Cache for API responses (avoid hitting rate limits). Keys are per-symbol.
 _cache: Dict[str, Dict[str, Any]] = {}
@@ -488,6 +487,101 @@ async def get_open_interest(symbol: str = "BTC") -> Dict[str, Any]:
     return await _finalize_result(result, cache_key, check_open_interest, "current_oi", "open_interest", symbol)
 
 
+def _okx_ts_iso(raw: Any) -> Optional[str]:
+    """OKX liquidation detail timestamps are milliseconds."""
+    ms = _to_float(raw)
+    if not isinstance(ms, (int, float)) or ms <= 0:
+        return None
+    if ms > 10_000_000_000:
+        ms = ms / 1000.0
+    try:
+        return datetime.fromtimestamp(ms, timezone.utc).isoformat()
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+async def _okx_swap_ctval(inst_id: str) -> Optional[float]:
+    """Contract value in the base coin, from OKX instruments, cached."""
+    cache_key = f"okx_ctval:{inst_id}"
+    cached = _get_cached(cache_key)
+    if isinstance(cached, dict) and cached.get("ctVal") is not None:
+        return _to_float(cached.get("ctVal"))
+    payload = await _make_okx_request("/public/instruments", {"instType": "SWAP", "instId": inst_id})
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return None
+    ct_val = _to_float(rows[0].get("ctVal"))
+    if ct_val is None or ct_val <= 0:
+        return None
+    _set_cache(cache_key, {"ctVal": ct_val}, ttl=OKX_CTVAL_CACHE_TTL)
+    return ct_val
+
+
+async def _okx_alt_liq_display(symbol: str, inst_id: str, rows: List[Any]) -> Optional[Dict[str, Any]]:
+    """Non-BTC OKX liquidations: instFamily already fetched. Never FIRING.
+
+    USD = contracts × ctVal × bkPx. Window is first/last detail timestamp.
+    A different quantity from Coinalyze's hourly history — display only.
+    """
+    ct_val = await _okx_swap_ctval(inst_id)
+    if ct_val is None:
+        return None
+    long_usd = 0.0
+    short_usd = 0.0
+    parsed_rows = 0
+    stamps: List[float] = []
+    for row in rows:
+        details = row.get("details") or [] if isinstance(row, dict) else []
+        if not isinstance(details, list):
+            continue
+        for entry in details:
+            if not isinstance(entry, dict):
+                continue
+            size_contracts = _to_float(entry.get("sz")) or 0.0
+            price = _to_float(entry.get("bkPx")) or 0.0
+            if size_contracts <= 0 or price <= 0:
+                continue
+            notional_usd = size_contracts * ct_val * price
+            pos_side = str(entry.get("posSide", "")).lower()
+            if pos_side == "long":
+                long_usd += notional_usd
+                parsed_rows += 1
+            elif pos_side == "short":
+                short_usd += notional_usd
+                parsed_rows += 1
+            ts = _to_float(entry.get("ts") or entry.get("time"))
+            if isinstance(ts, (int, float)) and ts > 0:
+                stamps.append(float(ts))
+    if parsed_rows == 0:
+        return None
+    total_usd = long_usd + short_usd
+    long_pct = (long_usd / total_usd * 100) if total_usd > 0 else 50.0
+    composition = "balanced"
+    if total_usd > 5_000_000:
+        if long_pct > 75:
+            composition = "long_heavy"
+        elif long_pct < 25:
+            composition = "short_heavy"
+    window_start = _okx_ts_iso(min(stamps)) if stamps else None
+    window_end = _okx_ts_iso(max(stamps)) if stamps else None
+    return {
+        "long_liquidations": round(long_usd, 2),
+        "short_liquidations": round(short_usd, 2),
+        "total_liquidations": round(total_usd, 2),
+        "long_pct": round(long_pct, 1),
+        "composition": composition,
+        "signal": "NEUTRAL",
+        "parsed_rows": parsed_rows,
+        "source": "okx",
+        "symbol": symbol,
+        "ctVal": ct_val,
+        "instFamily": f"{symbol}-USDT",
+        "window_start": window_start,
+        "window_end": window_end,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
     """
     Get liquidation data (last hour) for the given symbol.
@@ -530,18 +624,25 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
 
     if not data or not isinstance(data, list) or len(data) == 0:
         if okx_swap:
-            # OKX liquidation feed: use BTC-USDT uly for BTC; alt symbols may not
-            # support uly filter — fall back to instId query.
+            # OKX liquidation feed: BTC keeps uly=BTC-USDT. Non-BTC uses
+            # instFamily=<BASE>-USDT (instId alone is OKX 50015).
             okx_params: Dict[str, Any] = {"instType": "SWAP", "state": "filled", "limit": 100}
-            # For BTC we use uly=BTC-USDT (original working param); for alts, use instId.
+            # BTC: uly=BTC-USDT (R-IV.707(f) positive control — do not change).
+            # Non-BTC: instFamily=<BASE>-USDT (instId alone is OKX 50015).
             if symbol == "BTC":
                 okx_params["uly"] = "BTC-USDT"
             else:
-                okx_params["instId"] = okx_swap
+                okx_params["instFamily"] = f"{symbol}-USDT"
 
             okx_data = await _make_okx_request("/public/liquidation-orders", okx_params)
             rows = okx_data.get("data", []) if isinstance(okx_data, dict) else []
-            if rows:
+            if rows and symbol != "BTC":
+                alt = await _okx_alt_liq_display(symbol, okx_swap, rows)
+                if alt:
+                    _set_cache(cache_key, alt)
+                    await record_observation("okx", "liquidations", symbol, success=True)
+                    return alt
+            if rows and symbol == "BTC":
                 long_usd = 0.0
                 short_usd = 0.0
                 parsed_rows = 0
@@ -557,11 +658,7 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
                         if size_contracts <= 0 or price <= 0:
                             continue
 
-                        # BTC: 0.01 BTC per contract; alts: treat sz as USD lots
-                        if symbol == "BTC":
-                            notional_usd = size_contracts * OKX_BTC_SWAP_CTVAL_BTC * price
-                        else:
-                            notional_usd = size_contracts * OKX_ALT_SWAP_CTVAL_USD
+                        notional_usd = size_contracts * OKX_BTC_SWAP_CTVAL_BTC * price
 
                         pos_side = str(entry.get("posSide", "")).lower()
                         if pos_side == "long":

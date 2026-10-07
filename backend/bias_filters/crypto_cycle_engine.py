@@ -278,18 +278,36 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     except Exception as exc:
         cells.append(_make_cell("open_interest", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
 
-    # 7. Liquidations (Coinalyze)
+    # 7. Liquidations (Coinalyze primary; OKX is display-only, R-IV.707(d))
     try:
         liq_result = await coinalyze_client.get_liquidations(symbol)
+        vendor_src = liq_result.get("source") or "coinalyze"
         state, val, as_of, stale = _result_to_state(liq_result, "coinalyze", "total_liquidations")
-        cells.append(_make_cell(
-            "liquidations", "CAPITULATION", val, state, "coinalyze", as_of, stale,
-            reason=liq_result.get("reason"),
-            composition=liq_result.get("composition"),
-            long_pct=liq_result.get("long_pct"),
-            signal=_directed_cap_signal("liquidations", liq_result, config),
-            vendor_signal=liq_result.get("signal"),
-        ))
+        # OKX fallback is a different quantity (last 100 orders, variable window).
+        # Show it with source "okx" and state NA so it cannot FIRING or enter
+        # live_cap / live_cap_all in _compute_composite (those lists are LIVE-only).
+        if vendor_src == "okx":
+            cells.append(_make_cell(
+                "liquidations", "CAPITULATION",
+                liq_result.get("total_liquidations"), "NA", "okx",
+                liq_result.get("timestamp") or as_of, False,
+                reason="OKX_FALLBACK_UNSCORED",
+                composition=liq_result.get("composition"),
+                long_pct=liq_result.get("long_pct"),
+                signal="NEUTRAL",
+                vendor_signal=liq_result.get("signal"),
+                window_start=liq_result.get("window_start"),
+                window_end=liq_result.get("window_end"),
+            ))
+        else:
+            cells.append(_make_cell(
+                "liquidations", "CAPITULATION", val, state, "coinalyze", as_of, stale,
+                reason=liq_result.get("reason"),
+                composition=liq_result.get("composition"),
+                long_pct=liq_result.get("long_pct"),
+                signal=_directed_cap_signal("liquidations", liq_result, config),
+                vendor_signal=liq_result.get("signal"),
+            ))
     except Exception as exc:
         cells.append(_make_cell("liquidations", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
 

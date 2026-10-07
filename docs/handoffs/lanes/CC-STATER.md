@@ -1,9 +1,9 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-06 22:43 MDT (2026-10-07 04:43 UTC)
-**Worked against:** `origin/main` = `81bf3ef` (PR #53 agora crypto stale)
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-r700-queue` (cut from `origin/main` `81bf3ef`).
-**Hub at read time:** not re-timed this turn. HYPE Binance spot stays (R-IV.700(a)); cache 4 s → 8 s is on `claude/stater-r692-cache` for BUILD (R-IV.699).
+**Written:** 2026-10-07 11:07 MDT (2026-10-07 17:07 UTC)
+**Worked against:** `origin/main` = `b8515f1`
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r707-liq`.
+**Hub at read time:** `/api/crypto/state` HTTP 200. BTC liquidations envelope not degraded; SOL liquidations envelope degraded. Funding/OI/term_structure LIVE on the alt symbols in the same cycle log tick.
 
 ## Why this lane exists
 SPINE chartered CC-STATER (R-IV.618) to own Stater Swap, the hub's crypto surface.
@@ -21,49 +21,47 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.700(a) — accepted
-HYPE's Binance spot stays. It answers from Railway via `data-api.binance.vision`.
-`CACHE_TTL_SECONDS` 8 s is BUILD's merge (R-IV.699), not this branch.
+## R-IV.707 — in flight, not merged
+SPINE: fix the primary first; the fallback never scores. Reports for (c) and (e) are in the
+R-IV.707 reply. Code on this branch is (d) only. Nothing merges until SPINE rules.
 
-## (b) Queue, in order
+- **(e)** Composition is size-gated, then share-gated. 90 → balanced is intended. Not changed.
+- **(c)** Coinalyze `/liquidation-history` is the primary defect for non-BTC. Sister endpoints
+  (funding, OI, term_structure) are LIVE for the same aggregate symbols on the same tick, so
+  the discriminator is that endpoint, not the `.A` format and not `from`/`to` milliseconds.
+  Local env has no Coinalyze key (charter forbids Railway CLI); live 200 bodies were not
+  captured. No primary request change. BTC's `/liquidation-history` request stays as-written.
+- **(d)** Non-BTC OKX fallback: `instFamily=<BASE>-USDT`; USD = contracts × ctVal × bkPx with
+  ctVal from `/public/instruments`, cached. Source `"okx"`. Cell state **NA**, reason
+  `OKX_FALLBACK_UNSCORED`. `_compute_composite` live lists are LIVE-only, so it cannot FIRING
+  or move the composite. BTC `uly=BTC-USDT` and source `okx_fallback` unchanged.
 
-### 1. Cycle engine double count (wrong number first)
-Vendor FIRING is bidirectional. Froth already gates on the top-side extreme;
-capitulation copied the vendor flag, so a funding blow-off scored both columns.
+**Alt cells have not gone LIVE.** When they first do (after a merge that lets the primary
+answer), record that date here so the composite's history shows the break.
 
-`_directed_cap_signal` keeps FIRING on the flush side only:
-- funding ≤ −0.03; basis ≤ −5; skew ≥ +5 (put)
-- OI only on `accumulation`; term structure only backwardation+falling
-- liquidations only `long_heavy`
+## R-IV.706 — scoped, not patched
+OKX `instId` → HTTP 400 code 50015 for every non-BTC symbol. BTC `uly=BTC-USDT` is the
+positive control. Units defect was separate. Cycle log 2026-07-17 → 10-07: every non-BTC
+liquidations cell DEGRADED on 100% of ~2,150 ticks.
 
-Vendor flag is kept as `vendor_signal`. Tests in `test_s3_phase2_cycle_engine.py`.
-
-### 2. Geo-blocked strategy engine
-`integrations/binance_futures.py` no longer calls `fapi.binance.com` (HTTP 451
-from Railway; VPN not rebuilt). Same return shapes for `crypto_setups.py`.
-Funding from Coinalyze (percent → fraction) / Hyperliquid / OKX; klines,
-ticker, trades, and books from OKX public.
-
-### 3. HYPE Coinalyze history on cold `/crypto/market`
-`snapshot_for("HYPE")` skips `get_open_interest` and `get_liquidations`
-(the two history endpoints). Funding snapshot still runs. OI can come from
-Hyperliquid. Long/short history is still asked.
+## R-IV.700 — merged
+Cycle remap + strategy engine off fapi + HYPE history skip is on `main` (`eff4077`).
+BUILD re-timed HYPE: 1.873 s → 0.701 s cold. Spot stays.
 
 ## Robinhood
 US perps announced for "the coming months", not live, no keyless feed. Charter
-forbids holding the principal's trading key. Revisit only if a keyless feed
-is published.
+forbids holding the principal's trading key.
 
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r700-queue` | Cycle remap + strategy engine off fapi + HYPE history skip. | **Yes. Merge this.** |
-| `claude/stater-r692-cache` | `/crypto/market` cache 4 s → 8 s. | BUILD already accepted (R-IV.699). |
-| `claude/stater-r684-matrix` | Pushed `0e3dca4`. Not yet on `origin/main`. | BUILD already accepted (R-IV.688(d)). |
-| `claude/stater-perps` | Merged (`30adbd3`). | Done. |
+| `claude/stater-r707-liq` | Pushed. (d) only. Wait for SPINE. | No — do not merge until SPINE rules on the report. |
+| `claude/stater-r700-queue` | Merged (`eff4077`). | Done. |
+| `claude/stater-r692-cache` | Cache 4 s → 8 s. | BUILD accepted (R-IV.699). |
 
 ## What the next CC-STATER session should do first
-Wait for BUILD to merge this branch and the cache branch, then re-time
-`/crypto/market?symbol=HYPE` from Railway. Do not skip HYPE Binance spot
-unless a later Railway read shows it dead (400 listing or 451 block).
-Do not rebuild the Binance VPN.
+Wait for SPINE's ruling on R-IV.707. Do not merge. Do not change composition. Do not change
+BTC's Coinalyze `/liquidation-history` request or BTC's OKX `uly` path. If SPINE wants the
+six Coinalyze raw bodies, that read needs a key this lane does not hold. Do not skip HYPE
+Binance spot. Do not rebuild the Binance VPN. When alt liquidations first go LIVE, date it
+in this file.
