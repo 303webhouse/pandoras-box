@@ -646,8 +646,10 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
                 long_usd = 0.0
                 short_usd = 0.0
                 parsed_rows = 0
+                stamps: List[float] = []
 
                 # OKX returns liquidation entries nested under each row["details"].
+                # uly + 0.01 BTC/contract stay; the cell is display-only (R-IV.715).
                 for row in rows:
                     details = row.get("details") or []
                     if not isinstance(details, list):
@@ -667,19 +669,18 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
                         elif pos_side == "short":
                             short_usd += notional_usd
                             parsed_rows += 1
+                        ts = _to_float(entry.get("ts") or entry.get("time"))
+                        if isinstance(ts, (int, float)) and ts > 0:
+                            stamps.append(float(ts))
 
                 total_usd = long_usd + short_usd
                 long_pct = (long_usd / total_usd * 100) if total_usd > 0 else 50.0
                 composition = "balanced"
-                signal = "NEUTRAL"
-
                 if total_usd > 5_000_000:
                     if long_pct > 75:
                         composition = "long_heavy"
-                        signal = "FIRING"
                     elif long_pct < 25:
                         composition = "short_heavy"
-                        signal = "FIRING"
 
                 result = {
                     "long_liquidations": round(long_usd, 2),
@@ -687,14 +688,16 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
                     "total_liquidations": round(total_usd, 2),
                     "long_pct": round(long_pct, 1),
                     "composition": composition,
-                    "signal": signal,
+                    "signal": "NEUTRAL",
                     "parsed_rows": parsed_rows,
-                    "source": "okx_fallback",
+                    "source": "okx",
                     "symbol": symbol,
+                    "window_start": _okx_ts_iso(min(stamps)) if stamps else None,
+                    "window_end": _okx_ts_iso(max(stamps)) if stamps else None,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 _set_cache(cache_key, result)
-                await record_observation("coinalyze", "liquidations", symbol, success=True)
+                await record_observation("okx", "liquidations", symbol, success=True)
                 return result
         await _record_failure("liquidations", f"Failed to fetch liquidation data from Coinalyze and OKX for {symbol}", symbol)
         return {

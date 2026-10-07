@@ -1,6 +1,7 @@
-"""R-IV.707 — OKX liquidations fallback: request + units, never scores.
+"""R-IV.707 / R-IV.715 — OKX liquidations fallback: request + units, never scores.
 
-BTC's Coinalyze request and BTC's uly OKX path stay byte-identical.
+BTC's Coinalyze request and output stay byte-identical. BTC's OKX uly
+request stays; the fallback cell is NA / OKX_FALLBACK_UNSCORED for every symbol.
 """
 
 import os
@@ -119,7 +120,10 @@ async def test_btc_okx_fallback_still_uly(monkeypatch):
     liq_params = [p for path, p in seen if path == "/public/liquidation-orders"]
     assert liq_params[0].get("uly") == "BTC-USDT"
     assert "instFamily" not in liq_params[0]
-    assert got["source"] == "okx_fallback"
+    assert got["source"] == "okx"
+    assert got["signal"] == "NEUTRAL"
+    assert got["window_start"] is not None
+    assert got["window_end"] is not None
     assert got["total_liquidations"] == round(0.07 * 0.01 * 83576.5, 2)
     assert not any(path == "/public/instruments" for path, _ in seen)
 
@@ -149,6 +153,30 @@ async def test_btc_coinalyze_primary_request_unchanged(monkeypatch):
     assert got["total_liquidations"] == 300.0
 
 
+@pytest.mark.asyncio
+async def test_btc_okx_fallback_never_firing_even_if_long_heavy(monkeypatch):
+    async def _cz(*a, **k):
+        return None
+
+    async def _okx(path, params=None):
+        return {"code": "0", "data": [{
+            "details": [
+                {"sz": "600000000", "bkPx": "1", "posSide": "long", "ts": "1791388803616"},
+                {"sz": "1", "bkPx": "1", "posSide": "short", "ts": "1791388803617"},
+            ]
+        }]}
+
+    monkeypatch.setattr(cz, "_make_request", _cz)
+    monkeypatch.setattr(cz, "_make_okx_request", _okx)
+    monkeypatch.setattr(cz, "record_observation", AsyncMock(return_value="LIVE"))
+
+    got = await cz.get_liquidations("BTC")
+    assert got["source"] == "okx"
+    assert got["long_pct"] > 75
+    assert got["composition"] == "long_heavy"
+    assert got["signal"] == "NEUTRAL"
+
+
 def test_okx_liq_cell_does_not_move_composite():
     """NA + source okx is excluded from live_cap / live_cap_all (LIVE-only)."""
     froth = [{"state": "LIVE", "signal_id": "funding_blowout", "column": "FROTH", "firing": True}]
@@ -159,6 +187,22 @@ def test_okx_liq_cell_does_not_move_composite():
     }]
     a = _compute_composite(cap_without, froth, _cap_cfg(), "SOL")
     b = _compute_composite(cap_with, froth, _cap_cfg(), "SOL")
+    assert a[0] == b[0]
+    assert a[1] == b[1]
+    assert a[4] == b[4]
+
+
+def test_btc_okx_fallback_cell_does_not_move_composite():
+    """R-IV.715: a BTC OKX fallback cell is NA and does not move the composite."""
+    froth = [{"state": "LIVE", "signal_id": "funding_blowout", "column": "FROTH", "firing": True}]
+    cap_without = [{"state": "LIVE", "signal_id": "perp_funding", "column": "CAPITULATION", "signal": "NEUTRAL"}]
+    cap_with = cap_without + [{
+        "state": "NA", "signal_id": "liquidations", "column": "CAPITULATION",
+        "signal": "NEUTRAL", "source": "okx", "reason": "OKX_FALLBACK_UNSCORED",
+        "value": 58.5,
+    }]
+    a = _compute_composite(cap_without, froth, _cap_cfg(), "BTC")
+    b = _compute_composite(cap_with, froth, _cap_cfg(), "BTC")
     assert a[0] == b[0]
     assert a[1] == b[1]
     assert a[4] == b[4]

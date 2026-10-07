@@ -1,9 +1,9 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-07 11:07 MDT (2026-10-07 17:07 UTC)
-**Worked against:** `origin/main` = `b8515f1`
+**Written:** 2026-10-07 12:04 MDT (2026-10-07 18:04 UTC)
+**Worked against:** `origin/main` = `2fd0f9d`
 **Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r707-liq`.
-**Hub at read time:** `/api/crypto/state` HTTP 200. BTC liquidations envelope not degraded; SOL liquidations envelope degraded. Funding/OI/term_structure LIVE on the alt symbols in the same cycle log tick.
+**Hub at read time:** not re-timed this turn.
 
 ## Why this lane exists
 SPINE chartered CC-STATER (R-IV.618) to own Stater Swap, the hub's crypto surface.
@@ -21,28 +21,27 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.707 — in flight, not merged
-SPINE: fix the primary first; the fallback never scores. Reports for (c) and (e) are in the
-R-IV.707 reply. Code on this branch is (d) only. Nothing merges until SPINE rules.
+## R-IV.715 — in flight, not merged
+Gap against R-IV.707(d): BTC's OKX path kept source `okx_fallback` and still entered the
+scoring branch. This turn: that cell goes through the same NA / `OKX_FALLBACK_UNSCORED`
+branch (`vendor_src in ("okx", "okx_fallback")`). BTC's Coinalyze `/liquidation-history`
+request and its Coinalyze output stay as-written. BTC's OKX request is still `uly=BTC-USDT`
+and `sz × 0.01 × bkPx` (no instruments call).
 
-- **(e)** Composition is size-gated, then share-gated. 90 → balanced is intended. Not changed.
-- **(c)** Coinalyze `/liquidation-history` is the primary defect for non-BTC. Sister endpoints
-  (funding, OI, term_structure) are LIVE for the same aggregate symbols on the same tick, so
-  the discriminator is that endpoint, not the `.A` format and not `from`/`to` milliseconds.
-  Local env has no Coinalyze key (charter forbids Railway CLI); live 200 bodies were not
-  captured. No primary request change. BTC's `/liquidation-history` request stays as-written.
-- **(d)** Non-BTC OKX fallback: `instFamily=<BASE>-USDT`; USD = contracts × ctVal × bkPx with
-  ctVal from `/public/instruments`, cached. Source `"okx"`. Cell state **NA**, reason
-  `OKX_FALLBACK_UNSCORED`. `_compute_composite` live lists are LIVE-only, so it cannot FIRING
-  or move the composite. BTC `uly=BTC-USDT` and source `okx_fallback` unchanged.
+`crypto_cycle_log` 2026-07-17 → 10-07: **0** of 2,153 BTC liquidations cells were
+OKX-sourced (all 2,153 source `coinalyze`, LIVE). This change does not rewrite a
+recorded cell.
 
-**Alt cells have not gone LIVE.** When they first do (after a merge that lets the primary
-answer), record that date here so the composite's history shows the break.
+Recorded, not changed: `$5M` and 75% are hardcoded in `coinalyze_client.py` while the
+seed config holds the same values. Taken up with the per-symbol threshold question.
 
-## R-IV.706 — scoped, not patched
-OKX `instId` → HTTP 400 code 50015 for every non-BTC symbol. BTC `uly=BTC-USDT` is the
-positive control. Units defect was separate. Cycle log 2026-07-17 → 10-07: every non-BTC
-liquidations cell DEGRADED on 100% of ~2,150 ticks.
+**Alt cells have not gone LIVE.** When they first do, record that date here.
+
+Coinalyze raw bodies for non-BTC `/liquidation-history` are BUILD's (R-IV.714(b)).
+
+## R-IV.707 — accepted, plus the 715 gap
+Composition is the `$5M` size gate. Primary isn't symbol format or timestamps. Non-BTC
+OKX: `instFamily`, instruments `ctVal`, source `okx`, NA, LIVE-only fence at 462–463.
 
 ## R-IV.700 — merged
 Cycle remap + strategy engine off fapi + HYPE history skip is on `main` (`eff4077`).
@@ -55,13 +54,12 @@ forbids holding the principal's trading key.
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r707-liq` | Pushed. (d) only. Wait for SPINE. | No — do not merge until SPINE rules on the report. |
+| `claude/stater-r707-liq` | Pushed. Wait for SPINE. | No — BUILD merges after SPINE rules. |
 | `claude/stater-r700-queue` | Merged (`eff4077`). | Done. |
 | `claude/stater-r692-cache` | Cache 4 s → 8 s. | BUILD accepted (R-IV.699). |
 
 ## What the next CC-STATER session should do first
-Wait for SPINE's ruling on R-IV.707. Do not merge. Do not change composition. Do not change
-BTC's Coinalyze `/liquidation-history` request or BTC's OKX `uly` path. If SPINE wants the
-six Coinalyze raw bodies, that read needs a key this lane does not hold. Do not skip HYPE
-Binance spot. Do not rebuild the Binance VPN. When alt liquidations first go LIVE, date it
-in this file.
+Wait for SPINE's ruling on R-IV.715. Do not merge. Do not change composition or the
+hardcoded `$5M`/75% (recorded). Do not change BTC's Coinalyze request. Do not skip
+HYPE Binance spot. Do not rebuild the Binance VPN. When alt liquidations first go
+LIVE, date it in this file.
