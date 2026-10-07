@@ -88,6 +88,18 @@
 .ab-eq-ddl { fill: var(--down); font: 11px var(--mono); }
 .ab-eq-line { fill: none; stroke: var(--up); stroke-width: 2; }
 
+/* R-IV.705(c): one curve per account, stacked, each with its own span on its head. Tokens only. */
+.ab-curve { margin: 0 0 var(--sp-4); }
+.ab-curve + .ab-curve { padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+.ab-curve-head { display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; margin-bottom: 4px; }
+.ab-curve-name { font-weight: 600; font-size: var(--fs-3); }
+/* Not --text-2 and not dimmed: this label is the one that stops a deposit reading as a gain, so it
+   is readable text (H-13, R8). Amber because it is a caveat the reader must carry to the line. */
+.ab-curve-label { color: var(--amber); font-family: var(--mono); font-size: var(--fs-1); }
+.ab-curve-foot, .ab-curve-off { font-size: var(--fs-2); margin-top: 4px; }
+.ab-curve-off { color: var(--amber); display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
+.ab-sub { color: var(--text-2); font-size: var(--fs-1); }
+
 .ab-leaks { padding: 0; margin: 0; list-style: none; }
 .ab-leaks li { margin: 0 0 var(--sp-3); padding-left: var(--sp-3); border-left: 2px solid var(--down); }
 .ab-leaks li.ok { border-left-color: var(--up); }
