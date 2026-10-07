@@ -85,10 +85,21 @@
   const isMock = (block) => !block || block.source !== 'live';
   // A block's own chip: mock is "unknown", never fresh. Live shows when it was computed (MT).
   const mtTime = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) + ' MT';
+  // R-IV.705(g): "sample data", in those words, on the face of every block that is still the
+  // fixture. It used to read "mock" and, worse, the renderers SUPPRESSED it and leaned on the page
+  // banner instead — which was fine while the whole page was mock and is misleading now that most
+  // of it is live. A section the reader has to infer is sample data is a section that gets read as
+  // real.
   function blockChip(block, liveLabel) {
-    if (isMock(block)) return chip('unknown', 'mock');
+    if (isMock(block)) return chip('unknown', 'sample data', 'Invented figures. This block has no live source yet.');
     return chip('fresh', block.computed_at ? (liveLabel || 'computed') + ' ' + mtTime(block.computed_at) : (liveLabel || 'live'));
   }
+  // The window a live figure was drawn over, on its face (R-IV.705(b)). A figure without its span
+  // is the other half of a figure without its n: both invite a reader to apply it to a period it
+  // was not measured over.
+  const spanTxt = (s) => (s && s.from && s.to
+    ? ' · ' + shortDate(s.from) + ' → ' + shortDate(s.to)
+    : '');
 
   // ── Range control ────────────────────────────────────────────────────────────
   const state = { range: '90d', from: null, to: null };
@@ -127,21 +138,24 @@
   }
   function renderBanner(d) {
     const blocks = allBlocks(d);
-    const mockCount = blocks.filter(isMock).length;
+    const mock = blocks.filter(isMock);
     const b = $('abBanner');
-    if (!d.mock && !mockCount) { b.hidden = true; return; }
+    if (!mock.length) { b.hidden = true; return; }
     b.hidden = false;
-    b.textContent = 'Mock data — layout and behaviour only. Each metric loses this banner as its source goes live.'
-      + (mockCount ? ' ' + mockCount + ' of ' + blocks.length + ' blocks are still mock.' : '')
-      + (d.range_applied === false ? ' The range control is wired, but the figures do not change with it yet.' : '');
+    // R-IV.705(g): COUNT them, and say which. "Mock data — layout and behaviour only" was true of
+    // the whole page and is now true of five leak lines and one breakdown; left as it was, it would
+    // have told the principal to disbelieve figures that are his own book.
+    b.textContent = 'Most of this page is live from the hub. ' + mock.length + ' of ' + blocks.length
+      + ' blocks are still sample data, and each says so on its face.';
   }
   function renderStats(d) {
     $('abStats').innerHTML = (d.stats || []).map((s) => {
       const q = s.qualifier ? ' ' + chip(s.qualifier.state, s.qualifier.label) : '';
-      const nTxt = (s.n != null ? ' · n=' + s.n : '') + (s.date ? ' · trough ' + shortDate(s.date) : '');
+      const nTxt = (s.n != null ? ' · n=' + s.n : '') + (s.date ? ' · trough ' + shortDate(s.date) : '')
+        + spanTxt(s.span);
       return `<div class="ab-stat" data-key="${esc(s.key)}">
         <span class="ab-v ${tone(s.value, s.format)}">${esc(fmt(s.value, s.format))}${q}</span>
-        <span class="ab-l">${esc(s.label)}${esc(nTxt)}${isMock(s) ? '' : ' ' + blockChip(s)}${coverageChip(s.coverage)}</span>
+        <span class="ab-l">${esc(s.label)}${esc(nTxt)} ${blockChip(s)}${coverageChip(s.coverage)}</span>
         ${s.meaning ? `<details><summary>what it means</summary>${esc(s.meaning)}</details>` : ''}
       </div>`;
     }).join('');
@@ -194,44 +208,98 @@
   const pick = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s ? s.value : null; };
   const pickN = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s && s.n != null ? s.n : 0; };
 
+  // ── R-IV.705(c)/(d) · ONE CURVE PER ACCOUNT, EACH WITH ITS OWN SPAN ─────────────────────
+  // There is no combined line, and that is the point. The accounts' snapshots begin on different
+  // days — the 401(a)'s first row is months after the Roth's — so a single summed line would step
+  // up on the day a new account joined and read as a gain. Each curve says how many days it has.
+  //
+  // And every line is labelled "balance — includes deposits/withdrawals", because that is what it
+  // is: a balance rises when money is paid in. Drawdown and Sharpe are computed from returns NET of
+  // recorded cash events, and where the ledger's events do not reach back to the curve's first day
+  // they are not shown at all, with the reason in their place.
+  const axisTick = (v) => (Math.abs(v) >= 1000 ? (v / 1000).toFixed(Math.abs(v) >= 10000 ? 0 : 1) + 'k' : String(Math.round(v)));
+  function curveSvg(a, W) {
+    const vals = a.points.map((p) => p.v);
+    const H = 170, L = 46, R = W - 10, T = 16, B = 134;
+    const min = Math.min(...vals), max = Math.max(...vals);
+    // A step that gives three or four lines whatever the account is worth: the old fixed $1,000
+    // grid drew one line for an 800-dollar sleeve and ninety for a retirement account.
+    const raw = Math.max((max - min) / 3, 1);
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw) || mag * 10;
+    const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
+    const span = Math.max(hi - lo, 1);
+    const x = (i) => L + (i * (R - L)) / Math.max(a.points.length - 1, 1);
+    const y = (v) => B - ((v - lo) * (B - T)) / span;
+    const ticks = [];
+    for (let v = lo; v <= hi + 1e-6; v += step) ticks.push(v);
+    const grid = ticks.map((v, i) => `<line class="ab-eq-grid${i > 0 && i < ticks.length - 1 ? ' mid' : ''}" x1="${L}" y1="${y(v).toFixed(1)}" x2="${R}" y2="${y(v).toFixed(1)}"/>`
+      + `<text class="ab-eq-axis" x="4" y="${(y(v) + 4).toFixed(1)}">${esc(axisTick(v))}</text>`).join('');
+    let dd = '';
+    const dr = a.drawdown;
+    if (dr && dr.from_index != null && dr.to_index != null) {
+      const x0 = x(dr.from_index), x1 = x(dr.to_index);
+      dd = `<rect class="ab-eq-dd" x="${x0.toFixed(1)}" y="${T}" width="${Math.max(x1 - x0, 1).toFixed(1)}" height="${B - T}"/>`
+        + `<text class="ab-eq-ddl" x="${(x0 + 6).toFixed(1)}" y="${T + 14}">${esc(fmt(dr.pct, 'pct'))}</text>`;
+    }
+    const line = a.points.map((p, i) => x(i).toFixed(1) + ',' + y(p.v).toFixed(1)).join(' ');
+    const label = `${a.account_display || a.account}: balance from ${fmt(vals[0], 'usd_plain')} on ${a.from}`
+      + ` to ${fmt(vals[vals.length - 1], 'usd_plain')} on ${a.to}, including deposits and withdrawals`
+      + (dr ? `. Worst fall net of deposits ${fmt(dr.pct, 'pct')}, ${dr.from} to ${dr.to}` : '');
+    return `<svg class="ab-eq" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${grid}${dd}<polyline class="ab-eq-line" points="${line}"/></svg>`;
+  }
+  function curveFoot(a) {
+    if (a.off_reason) {
+      return `<div class="ab-curve-off">${chip('unknown', 'no drawdown or Sharpe')} ${esc(a.off_reason)}</div>`;
+    }
+    const dr = a.drawdown, sh = a.sharpe;
+    const bits = [];
+    bits.push(dr
+      ? `Worst fall <b class="ab-down">${esc(fmt(dr.pct, 'pct'))}</b> <span class="ab-sub">${esc(shortDate(dr.from))} → ${esc(shortDate(dr.to))}</span>`
+      : 'No fall recorded on this curve');
+    if (sh && sh.value != null) {
+      bits.push(`Sharpe <b>${esc(Number(sh.value).toFixed(2))}</b> <span class="ab-sub">n=${esc(sh.n)}${sh.rough ? ', rough' : ''}</span>`);
+    } else if (sh) {
+      bits.push(`Sharpe — <span class="ab-sub">n=${esc(sh.n)}: no spread in the returns to divide by</span>`);
+    }
+    return `<div class="ab-curve-foot">${bits.join(' · ')}<div class="ab-sub">Both are computed from returns net of recorded deposits and withdrawals (${esc(a.cash.events)} events, first ${esc(shortDate(a.cash.first))}).</div></div>`;
+  }
   function renderEquity(d) {
     const e = d.equity;
     $('abEquityChip').innerHTML = e ? blockChip(e, 'live') : '';
-    const pts = (e && e.points) || [];
-    if (pts.length < 2) { $('abEquity').innerHTML = '<span class="ab-dash">No equity series.</span>'; return; }
-    // The viewBox takes the container's real width, so the 11px axis text stays 11px on a
-    // phone instead of scaling down with the drawing (re-rendered on resize).
+    const accts = (e && e.accounts) || [];
+    if (!accts.length) { $('abEquity').innerHTML = '<span class="ab-dash">No equity series.</span>'; return; }
     const W = Math.max(280, Math.round($('abEquity').clientWidth || 800));
-    const H = 200, L = 40, R = W - 10, T = 20, B = 160;
-    const lo = Math.floor(Math.min(...pts) / 1000) * 1000;
-    const hi = Math.ceil(Math.max(...pts) / 1000) * 1000;
-    const span = Math.max(hi - lo, 1);
-    const x = (i) => L + (i * (R - L)) / (pts.length - 1);
-    const y = (v) => B - ((v - lo) * (B - T)) / span;
-    const ticks = [];
-    for (let v = lo; v <= hi; v += 1000) ticks.push(v);
-    const grid = ticks.map((v, i) => `<line class="ab-eq-grid${i > 0 && i < ticks.length - 1 ? ' mid' : ''}" x1="${L}" y1="${y(v).toFixed(1)}" x2="${R}" y2="${y(v).toFixed(1)}"/>`
-      + `<text class="ab-eq-axis" x="4" y="${(y(v) + 4).toFixed(1)}">${Math.round(v / 1000)}k</text>`).join('');
-    let dd = '';
-    const dr = e.drawdown;
-    if (dr && dr.from_index != null && dr.to_index != null) {
-      const x0 = x(dr.from_index), x1 = x(dr.to_index);
-      dd = `<rect class="ab-eq-dd" x="${x0.toFixed(1)}" y="${T}" width="${(x1 - x0).toFixed(1)}" height="${B - T}"/>`
-        + `<text class="ab-eq-ddl" x="${(x0 + 6).toFixed(1)}" y="${T + 16}">${esc(fmt(dr.amount, 'usd'))}${dr.date ? ' · ' + esc(shortDate(dr.date)) : ''}</text>`;
-    }
-    const line = pts.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ');
-    const label = `Equity curve${isMock(e) ? ', mock' : ''}: ${fmt(pts[0], 'usd_plain')} to ${fmt(pts[pts.length - 1], 'usd_plain')}`
-      + (dr ? `, max drawdown ${fmt(dr.amount, 'usd')}${dr.date ? ' at ' + dr.date : ''}` : '');
-    $('abEquity').innerHTML = `<svg class="ab-eq" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${grid}${dd}<polyline class="ab-eq-line" points="${line}"/></svg>`;
+    $('abEquity').innerHTML = accts.map((a) => {
+      const head = `<div class="ab-curve-head"><span class="ab-curve-name">${esc(a.account_display || a.account)}</span>`
+        + (a.points.length
+          ? `<span class="ab-sub">${esc(a.days)} days · ${esc(shortDate(a.from))} → ${esc(shortDate(a.to))}</span>`
+            + `<span class="ab-curve-label">${esc(a.line_label)}</span>`
+          : '') + '</div>';
+      if (a.points.length < 2) {
+        return `<div class="ab-curve">${head}<div class="ab-curve-off">${chip('unknown', 'no curve')} ${esc(a.off_reason || 'The hub holds fewer than two balance snapshots for this account.')}</div></div>`;
+      }
+      return `<div class="ab-curve">${head}${curveSvg(a, W)}${curveFoot(a)}</div>`;
+    }).join('');
   }
+  // R-IV.705(f)/(g): the items are no longer all the same kind. One is live and the other five
+  // are sample data, so each carries its own chip rather than inheriting the block's.
   function renderLeaks(d) {
     const l = d.leaks;
     $('abLeaksChip').innerHTML = l ? blockChip(l) : '';
-    $('abLeaks').innerHTML = ((l && l.items) || []).map((it) => `<li class="${it.amount > 0 ? 'ok' : ''}">
-      <span class="ab-k">${esc(it.label)} <span class="ab-n">${esc(fmt(it.amount, 'usd'))}</span></span>
-      <span class="ab-d">${it.n != null ? 'n=' + esc(it.n) + ' · ' : ''}${esc(it.detail || '')}</span>
+    $('abLeaks').innerHTML = ((l && l.items) || []).map((it) => {
+      const live = it.source === 'live';
+      // No dollar figure where none is claimed: a dash in a money column reads as zero.
+      const amt = it.amount == null ? '' : ` <span class="ab-n">${esc(fmt(it.amount, 'usd'))}</span>`;
+      const n = it.n != null
+        ? 'n=' + esc(it.n) + (it.of_n != null ? ' of ' + esc(it.of_n) : '') + ' · '
+        : '';
+      return `<li class="${it.amount > 0 ? 'ok' : ''}">
+      <span class="ab-k">${esc(it.label)}${amt} ${live ? chip('fresh', 'live') : chip('unknown', 'sample data', 'Invented figures. This line has no live source yet.')}</span>
+      <span class="ab-d">${n}${esc(it.detail || '')}</span>
       ${it.href ? `<a href="${esc(it.href)}">see them</a>` : ''}
-    </li>`).join('');
+    </li>`;
+    }).join('');
   }
 
   function cell(v, type) {
@@ -290,7 +358,7 @@
       aria-controls="abPanel-${esc(b.key)}" aria-selected="${b.key === activeTab}" tabindex="${b.key === activeTab ? 0 : -1}"
       data-t="${esc(b.key)}">${esc(b.label)}</button>`).join('');
     panels.innerHTML = list.map((b) => `<div role="tabpanel" id="abPanel-${esc(b.key)}" aria-labelledby="abTab-${esc(b.key)}"
-      ${b.key === activeTab ? '' : 'hidden'}><div class="ab-panel-chip">${isMock(b) ? '' : blockChip(b)}</div><div class="ab-panel-body"></div></div>`).join('');
+      ${b.key === activeTab ? '' : 'hidden'}><div class="ab-panel-chip">${blockChip(b)}${b.note ? ` <span class="ab-sub">${esc(b.note)}</span>` : ''}</div><div class="ab-panel-body"></div></div>`).join('');
     list.forEach((b) => wireSort(panels.querySelector(`#abPanel-${CSS.escape(b.key)} .ab-panel-body`), b));
     const select = (key, focus) => {
       activeTab = key;
@@ -315,7 +383,7 @@
     const s = d.strategies;
     if (!s) { $('abSlot').hidden = true; return; }
     $('abSlot').hidden = false;
-    $('abSlot').innerHTML = `<h2 class="ab-h2">Strategy and filter success rates ${isMock(s) ? '' : blockChip(s)}</h2>
+    $('abSlot').innerHTML = `<h2 class="ab-h2">Strategy and filter success rates ${blockChip(s)}</h2>
       <div>${esc(s.note || '')}</div><div class="ab-slot-body"></div>`;
     wireSort($('abSlot').querySelector('.ab-slot-body'), s);
   }

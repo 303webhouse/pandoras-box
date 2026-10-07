@@ -19,26 +19,63 @@ def _get(client, test_api_key, qs=""):
     return client.get(PATH + qs, headers={"X-API-Key": test_api_key})
 
 
-LIVE_KEYS = {"net_profit", "win_rate", "expected_return"}
+# R-IV.705(b): the rest of the arithmetic went live off the same census read.
+LIVE_KEYS = {"net_profit", "win_rate", "expected_return", "expectancy", "profit_factor",
+             "avg_win_loss", "loss_vs_risk"}
+# Blocks that are still the fixture, and must keep saying so (R-IV.705(g)).
+MOCK_BLOCK_KEYS = {"discipline"}
 
 
 class _FakePool:
-    """Records every query so a test can assert the predicate/window, not just the result."""
+    """Records every query so a test can assert the predicate/window, not just the result.
 
-    def __init__(self, rows=None):
+    R-IV.705: the route now reads THREE tables -- the census, `balance_snapshots` and
+    `cash_flows` -- so the stub routes by table instead of answering every query with the same
+    rows. A pool that returned census rows to the snapshot query would have the equity curve
+    reading a P&L as a balance.
+    """
+
+    def __init__(self, rows=None, snapshots=None, cash=None):
         self.rows = list(rows or [])
+        self.snapshots = list(snapshots or [])
+        self.cash = list(cash or [])
         self.calls = []
 
     async def fetch(self, sql, *params):
         self.calls.append((sql, params))
+        if "balance_snapshots" in sql:
+            return self.snapshots
+        if "cash_flows" in sql:
+            return self.cash
         return self.rows
 
 
-def _row(pnl, basis=None, basis_incomplete_reason=None, account="ROBINHOOD"):
-    # R-IV.650(b)3: the query now selects `account` too, so a fixture row carries one. `None`
-    # is a real case -- a closed trade the book never attributed -- and is tested on its own.
+import datetime as _dt
+_ENTRY = _dt.datetime(2026, 9, 1, 15, 0, tzinfo=_dt.timezone.utc)      # a Tuesday, in MT
+_EXIT = _dt.datetime(2026, 9, 10, 20, 0, tzinfo=_dt.timezone.utc)      # 9 days held
+
+
+def _row(pnl, basis=None, basis_incomplete_reason=None, account="ROBINHOOD", *,
+         max_loss=None, structure="put_debit_spread", ticker="SPY", entry=_ENTRY, exit=_EXIT,
+         strategy_tag=None, signal_id=None):
+    # R-IV.650(b)3: the query selects `account`; R-IV.705(b) adds the columns the breakdowns and
+    # the untagged count are grouped by. `None` is a real case for several of them -- a closed
+    # trade the book never attributed, never bucketed, or never linked to a signal.
     return {"realized_pnl": pnl, "cost_basis": basis,
-            "basis_incomplete_reason": basis_incomplete_reason, "account": account}
+            "basis_incomplete_reason": basis_incomplete_reason, "account": account,
+            "max_loss": max_loss, "structure": structure, "ticker": ticker,
+            "entry_date": entry, "exit_date": exit, "strategy_tag": strategy_tag,
+            "signal_id": signal_id}
+
+
+def _snap(day, balance, name="ROBINHOOD"):
+    return {"snapshot_date": _dt.datetime(*day, tzinfo=_dt.timezone.utc), "balance": balance,
+            "account_name": name}
+
+
+def _cash(day, amount, kind="ACH", name="ROBINHOOD"):
+    return {"activity_date": _dt.datetime(*day, tzinfo=_dt.timezone.utc), "amount": amount,
+            "flow_type": kind, "account_name": name}
 
 
 @pytest.fixture(autouse=True)
@@ -51,8 +88,8 @@ def book_pool():
         yield pool
 
 
-def _patch_book(rows):
-    pool = _FakePool(rows)
+def _patch_book(rows, snapshots=None, cash=None):
+    pool = _FakePool(rows, snapshots, cash)
     return pool, patch("api.abacus.get_postgres_client", new=AsyncMock(return_value=pool))
 
 
@@ -74,17 +111,22 @@ class TestAbacusSummaryGate:
 
 
 class TestAbacusSummaryContract:
-    def test_mock_is_declared_everywhere_except_the_live_stats(self, client, test_api_key):
-        """net_profit and win_rate went live at R-IV.484(c); everything else stays mock,
-        including the discipline breakdown, which has no source columns yet."""
+    def test_mock_is_declared_on_every_block_that_is_still_the_fixture(self, client, test_api_key):
+        """R-IV.705(g): what is still fixture data says so. The boundary moved -- scope, the
+        equity curves and four of the five breakdowns went live -- and the test moved with it
+        rather than being deleted: anything NOT in the live set must still declare itself mock."""
         d = _get(client, test_api_key).json()
         assert d["mock"] is True
-        blocks = [d["scope"], d["equity"], d["leaks"], d["strategies"],
-                  *(s for s in d["stats"] if s["key"] not in LIVE_KEYS), *d["breakdowns"]]
-        assert blocks, "no blocks to check"
-        for b in blocks:
+        mock_blocks = [d["leaks"], d["strategies"],
+                       *(s for s in d["stats"] if s["key"] not in LIVE_KEYS),
+                       *(b for b in d["breakdowns"] if b["key"] in MOCK_BLOCK_KEYS)]
+        assert mock_blocks, "no blocks to check"
+        for b in mock_blocks:
             assert b["source"] == "mock", b.get("key") or b.get("label")
             assert b["computed_at"], b.get("key") or b.get("label")
+        for b in [d["scope"], d["equity"],
+                  *(b for b in d["breakdowns"] if b["key"] not in MOCK_BLOCK_KEYS)]:
+            assert b["source"] == "live", b.get("key") or b.get("label")
 
     def test_net_profit_and_win_rate_are_live(self, client, test_api_key):
         from api.abacus import FIXTURE_AUTHORED_AT
@@ -96,10 +138,14 @@ class TestAbacusSummaryContract:
             assert s["coverage"]["predicate"], key
 
     def test_computed_at_is_the_authored_instant_not_now(self, client, test_api_key):
+        """A mock stamped "now" would read as fresh. Scope and the equity curves are live since
+        R-IV.705 and are stamped with the read, so what is checked here is what is still fixture:
+        its stamp must stay the instant it was AUTHORED."""
         from api.abacus import FIXTURE_AUTHORED_AT
         d = _get(client, test_api_key).json()
-        stamps = {d["scope"]["computed_at"], d["equity"]["computed_at"],
-                  *(s["computed_at"] for s in d["stats"] if s["key"] not in LIVE_KEYS)}
+        stamps = {d["leaks"]["computed_at"], d["strategies"]["computed_at"],
+                  *(s["computed_at"] for s in d["stats"] if s["key"] not in LIVE_KEYS),
+                  *(b["computed_at"] for b in d["breakdowns"] if b["key"] in MOCK_BLOCK_KEYS)}
         assert stamps == {FIXTURE_AUTHORED_AT}
 
     def test_rates_carry_n(self, client, test_api_key):
@@ -115,13 +161,24 @@ class TestAbacusSummaryContract:
         for row in d["strategies"]["rows"]:
             assert row[1:5] == [None, None, None, None], row
 
-    def test_equity_is_self_consistent(self, client, test_api_key):
-        """The marked fall equals max drawdown. Both stay mock, so this is still an exact
-        equality; net profit went live at R-IV.484(c) and no longer ties to the mock curve."""
+    def test_equity_is_one_curve_per_account_each_with_its_own_span(self, client, test_api_key):
+        """R-IV.705(c): the single mock curve is gone. Each account carries its own points, its
+        own first and last day, and its own day count -- the 401(a)'s curve cannot start where
+        the Roth's does."""
         d = _get(client, test_api_key).json()
-        pts, dd = d["equity"]["points"], d["equity"]["drawdown"]
-        mdd = next(s for s in d["stats"] if s["key"] == "max_drawdown")["value"]
-        assert pts[dd["to_index"]] - pts[dd["from_index"]] == dd["amount"] == mdd
+        accts = d["equity"]["accounts"]
+        assert accts and "points" not in d["equity"]
+        for a in accts:
+            assert a["account"] and ("account_display" in a)
+            assert a["days"] == len(a["points"])
+            if a["points"]:
+                assert a["from"] == a["points"][0]["d"] and a["to"] == a["points"][-1]["d"]
+
+    def test_drawdown_and_sharpe_are_not_tiles(self, client, test_api_key):
+        """R-IV.705(d): they are properties of a curve, and the curves have different spans and
+        different cash coverage, so a single top-level figure has no denominator."""
+        keys = {s["key"] for s in d_stats(client, test_api_key)}
+        assert "max_drawdown" not in keys and "sharpe" not in keys, keys
 
     def test_breakdown_rows_match_columns(self, client, test_api_key):
         d = _get(client, test_api_key).json()
@@ -156,6 +213,10 @@ class TestAbacusSummaryRange:
         assert _get(client, test_api_key, "?from=2026-09-16&to=2026-06-18").status_code == 422
 
 
+def d_stats(client, test_api_key):
+    return _get(client, test_api_key).json()["stats"]
+
+
 def _stat(d, key):
     return next(s for s in d["stats"] if s["key"] == key)
 
@@ -168,51 +229,76 @@ QUERIES = ["?range=30d", "?range=90d", "?range=ytd", "?range=all",
 class TestAbacusSummaryScaling:
     """Charter D2: the range changes the figures, server-side, and every range stays coherent."""
 
-    def test_figures_change_with_the_range(self, client, test_api_key):
-        """net_profit went live at R-IV.484(c) and no longer scales with the mock window;
-        max_drawdown is still mock and still tracks the fixture's scaling rule."""
-        dd = {q: _stat(_get(client, test_api_key, q).json(), "max_drawdown")["value"] for q in QUERIES[:4]}
-        assert len(set(dd.values())) == 4, dd
-        assert dd["?range=30d"] > dd["?range=90d"] > dd["?range=ytd"] > dd["?range=all"]
+    def test_the_window_reaches_the_live_query_at_every_range(self, client, test_api_key):
+        """R-IV.705(b): the figures that used to SCALE now come from a windowed read, so what
+        this pins is that the window reaches the query -- the thing the scaling rule stood in
+        for while the page was a fixture."""
+        for q in QUERIES[:4]:
+            pool, p = _patch_book([])
+            with p:
+                _get(client, test_api_key, q)
+            census = [c for c in pool.calls if "unified_positions" in c[0]]
+            assert census, q
+            assert "exit_date::date <= $1" in census[0][0], q
 
-    def test_90d_is_the_base_fixture(self, client, test_api_key):
-        d = _get(client, test_api_key, "?range=90d").json()
-        assert _stat(d, "max_drawdown")["value"] == -1140
-        assert d["scope"]["closed_positions"] == 249
+    def test_a_range_with_no_closes_is_null_not_zero(self, client, test_api_key):
+        """The sharpest case for a live page: a window the book has nothing in. Every figure is
+        None -- "no trade here can be measured" is not "the result was nothing"."""
+        pool, p = _patch_book([])
+        with p:
+            d = _get(client, test_api_key, "?from=2020-01-01&to=2020-02-01").json()
+        for key in ("net_profit", "expectancy", "profit_factor", "avg_win_loss", "loss_vs_risk",
+                    "win_rate", "expected_return"):
+            assert _stat(d, key)["value"] is None, key
+        assert d["scope"]["closed_positions"] == 0
+        for b in d["breakdowns"]:
+            if b["key"] not in MOCK_BLOCK_KEYS:
+                assert b["rows"] == [], b["key"]
 
     @pytest.mark.parametrize("q", QUERIES)
     def test_every_range_is_self_consistent(self, client, test_api_key, q):
         d = _get(client, test_api_key, q).json()
-        pts, dd = d["equity"]["points"], d["equity"]["drawdown"]
-        assert pts[dd["to_index"]] - pts[dd["from_index"]] == dd["amount"] == _stat(d, "max_drawdown")["value"]
-        assert d["scope"]["closed_positions"] >= 1
+        assert d["scope"]["closed_positions"] >= 0
+        for a in d["equity"]["accounts"]:
+            assert a["days"] == len(a["points"])
 
     @pytest.mark.parametrize("q", QUERIES)
-    def test_rates_do_not_scale(self, client, test_api_key, q):
-        """win_rate went live at R-IV.484(c); profit_factor and expectancy stay mock and
-        still hold at every range."""
+    def test_rates_stay_rates_at_every_range(self, client, test_api_key, q):
+        """A rate is a fraction of 0..1 whatever the window, and a null rate stays null."""
         d = _get(client, test_api_key, q).json()
-        assert _stat(d, "profit_factor")["value"] == 1.4
-        assert _stat(d, "expectancy")["value"] == 6.30
-        structure = next(b for b in d["breakdowns"] if b["key"] == "structure")
-        assert [r[2] for r in structure["rows"]] == [0.58, 0.67, 0.49, 0.43, 0.42, 0.0]
+        for key in ("win_rate", "loss_vs_risk"):
+            v = _stat(d, key)["value"]
+            assert v is None or 0.0 <= v <= 1.0, (key, v)
+        for b in d["breakdowns"]:
+            if b["key"] in MOCK_BLOCK_KEYS:
+                continue
+            wins = [r[2] for r in b["rows"]] if any(c[0] == "Win" for c in b["columns"]) else []
+            assert all(w is None or 0.0 <= w <= 1.0 for w in wins), (b["key"], wins)
 
     @pytest.mark.parametrize("q", QUERIES)
     def test_counts_stay_whole_and_positive(self, client, test_api_key, q):
         d = _get(client, test_api_key, q).json()
         for it in d["leaks"]["items"]:
-            assert isinstance(it["n"], int) and it["n"] >= 1
+            # A LIVE count may legitimately be 0 -- nothing untagged since the cutoff in this
+            # window -- and forcing it to 1 would be requiring a fiction. Mock items keep the
+            # old floor, because a fixture with a zero in it is just a badly written fixture.
+            floor = 0 if it.get("source") == "live" else 1
+            assert isinstance(it["n"], int) and it["n"] >= floor, it["label"]
         for b in d["breakdowns"]:
             for i, (_, kind) in enumerate(b["columns"]):
                 if kind == "int":
                     assert all(isinstance(r[i], int) and r[i] >= 1 for r in b["rows"]), (q, b["key"])
 
     @pytest.mark.parametrize("q", QUERIES)
-    def test_drawdown_is_dated_inside_the_window(self, client, test_api_key, q):
-        d = _get(client, test_api_key, q).json()
-        eq = d["equity"]
-        assert eq["from"] <= eq["drawdown"]["date"] <= eq["to"]
-        assert _stat(d, "max_drawdown")["date"] == eq["drawdown"]["date"]
+    def test_a_drawdown_is_dated_inside_ITS_OWN_curve(self, client, test_api_key, q):
+        """R-IV.705(c): each curve carries its own span, so a drawdown is bounded by the curve it
+        was measured on -- not by the page's range, which no longer governs the snapshots."""
+        for a in _get(client, test_api_key, q).json()["equity"]["accounts"]:
+            dd = a.get("drawdown")
+            if not dd:
+                continue
+            assert a["from"] <= dd["from"] <= dd["to"] <= a["to"], (a["account"], dd)
+            assert 0 <= dd["from_index"] <= dd["to_index"] < len(a["points"]), (a["account"], dd)
 
     def test_unknown_stays_none_at_every_range(self, client, test_api_key):
         for q in QUERIES:
@@ -318,8 +404,10 @@ class TestAbacusLiveBook:
         pool, p = _patch_book([])
         with p:
             _get(client, test_api_key, "?from=2026-06-18&to=2026-09-16")
-        sql, params = pool.calls[-1]
-        assert "LOWER(status) IN ('closed', 'expired')" in sql
+        # The route reads three tables now, so the census call is found by name rather than by
+        # position. `calls[-1]` is the cash-event query.
+        sql, params = next(c for c in pool.calls if "unified_positions" in c[0])
+        assert "LOWER(status) IN ('closed', 'expired')" in sql, sql
         assert "exit_date" in sql
         from datetime import date
         assert params == (date(2026, 9, 16), date(2026, 6, 18))
@@ -330,8 +418,226 @@ class TestAbacusLiveBook:
         pool, p = _patch_book([])
         with p:
             _get(client, test_api_key, "?range=all")
-        sql, params = pool.calls[-1]
+        sql, params = next(c for c in pool.calls if "unified_positions" in c[0])
         assert len(params) == 1, "no lower-bound param when the range is open-ended"
+
+
+class TestAbacusR705:
+    """R-IV.705 — the figures that went live, and the three things that keep them honest:
+    every figure carries its n and its span, every curve carries its own span, and a return is
+    net of recorded cash before anything calls it performance."""
+
+    def test_the_new_stats_are_live_with_their_n_and_their_span(self, client, test_api_key):
+        rows = [_row(100.0, basis=200.0), _row(-40.0, basis=100.0), _row(60.0, basis=150.0)]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        for key in ("expectancy", "profit_factor", "avg_win_loss", "loss_vs_risk"):
+            st = _stat(d, key)
+            assert st["source"] == "live", key
+            assert st["n"] is not None, key
+            assert "span" in st, key
+        assert _stat(d, "expectancy")["value"] == 40.0          # (100 - 40 + 60) / 3
+        assert _stat(d, "profit_factor")["value"] == 4.0        # 160 won / 40 lost
+        assert _stat(d, "avg_win_loss")["value"] == [80.0, -40.0]
+        assert _stat(d, "expectancy")["span"] == {"from": "2026-09-10", "to": "2026-09-10"}
+
+    def test_profit_factor_is_null_not_huge_when_nothing_lost(self, client, test_api_key):
+        pool, p = _patch_book([_row(10.0), _row(5.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        assert _stat(d, "profit_factor")["value"] is None
+        assert _stat(d, "profit_factor")["n"] == 2
+
+    def test_loss_vs_risk_is_drawn_from_the_losers_that_carry_a_max_loss(self, client, test_api_key):
+        """R-IV.705(g): live ONLY with its n. `max_loss` sits on a minority of the losers, and a
+        rate over that minority must not be read as a rate over all of them."""
+        rows = [_row(-50.0, max_loss=100.0), _row(-30.0, max_loss=None), _row(20.0)]
+        pool, p = _patch_book(rows)
+        with p:
+            st = _stat(_get(client, test_api_key).json(), "loss_vs_risk")
+        assert st["value"] == 0.5                      # 50 given back of a 100 defined
+        assert st["n"] == 1, "the loser with no max loss is not in the rate"
+        assert st["coverage"]["total"] == 2 and st["coverage"]["counted"] == 1
+        assert st["coverage"]["excluded"]["no_max_loss_recorded"] == 1
+
+    def test_the_four_breakdowns_are_live_and_discipline_still_says_sample(self, client, test_api_key):
+        import datetime as dt
+        rows = [_row(10.0, structure="put_debit_spread", ticker="SPY",
+                     entry=dt.datetime(2026, 9, 1, 15, tzinfo=dt.timezone.utc),
+                     exit=dt.datetime(2026, 9, 1, 20, tzinfo=dt.timezone.utc)),
+                _row(-5.0, structure="stock", ticker="XLE",
+                     entry=dt.datetime(2026, 8, 3, 15, tzinfo=dt.timezone.utc),
+                     exit=dt.datetime(2026, 9, 25, 20, tzinfo=dt.timezone.utc))]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        keys = [b["key"] for b in d["breakdowns"]]
+        assert keys == ["structure", "ticker", "hold", "weekday", "discipline"], keys
+        bd = {b["key"]: b for b in d["breakdowns"]}
+        for k in ("structure", "ticker", "hold", "weekday"):
+            assert bd[k]["source"] == "live", k
+            assert bd[k]["rows"], k
+        assert [r[0] for r in bd["ticker"]["rows"]] == ["SPY", "XLE"]
+        # A same-day close and a 53-day hold land in their own buckets, in the declared order.
+        held = {r[0]: r[1] for r in bd["hold"]["rows"]}
+        assert held == {"Same day": 1, "Over 45 days": 1}, held
+        # Opened Tuesday (2026-09-01) and Monday (2026-08-03), in Mountain Time.
+        assert {r[0] for r in bd["weekday"]["rows"]} == {"Tuesday", "Monday"}
+        assert bd["discipline"]["source"] == "mock"
+        assert "Sample data" in bd["discipline"]["note"]
+
+    def test_the_scope_line_names_the_accounts_and_never_a_key(self, client, test_api_key):
+        from models.accounts import CANONICAL_ACCOUNTS
+        d = _get(client, test_api_key).json()
+        label = d["scope"]["label"]
+        assert d["scope"]["accounts"] == len(CANONICAL_ACCOUNTS) == 3
+        assert "Both accounts" not in label
+        for key in CANONICAL_ACCOUNTS:
+            assert key not in label, label
+
+    def test_the_untagged_leak_counts_only_rows_opened_since_the_cutoff(self, client, test_api_key):
+        """R-IV.705(f). Buckets began at TA-058's cutoff, so a row closed before it is untagged
+        BY DESIGN -- counting it would indict the principal for a field that did not exist."""
+        import datetime as dt
+        from api.abacus import BUCKET_CUTOFF
+        before = dt.datetime(2026, 9, 1, 15, tzinfo=dt.timezone.utc)
+        after = dt.datetime(2026, 9, 26, 15, tzinfo=dt.timezone.utc)
+        rows = [_row(1.0, entry=before, strategy_tag=None),      # pre-cutoff, untagged by design
+                _row(1.0, entry=before, strategy_tag=None),
+                _row(1.0, entry=after, strategy_tag=None),       # the only one that owes a bucket
+                _row(1.0, entry=after, strategy_tag="B2")]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        it = next(i for i in d["leaks"]["items"] if "Untagged" in i["label"])
+        assert it["n"] == 1, "only the post-cutoff untagged row counts"
+        assert it["of_n"] == 2, "and it is counted against the post-cutoff population"
+        assert it["source"] == "live"
+        assert it["amount"] is None, "a missing tag has no dollar cost of its own"
+        assert BUCKET_CUTOFF.isoformat() in it["detail"]
+        assert "POSITIONS.md" in it["detail"], "the cutoff is cited, not asserted"
+
+    def test_the_other_leaks_say_sample_data_on_their_face(self, client, test_api_key):
+        d = _get(client, test_api_key).json()
+        others = [i for i in d["leaks"]["items"] if "Untagged" not in i["label"]]
+        assert len(others) == 5
+        for it in others:
+            assert it["source"] == "mock", it["label"]
+            assert it["detail"].startswith("Sample data"), it["label"]
+
+    def test_no_signal_outcome_figure_reaches_the_page(self, client, test_api_key):
+        """R-IV.705(e): that table holds sealed-holdout and blind-window Triton rows, so no hit
+        rate and no n from it appears here. The note names the real gap instead."""
+        rows = [_row(1.0, signal_id="sig-1"), _row(1.0), _row(1.0)]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        note = d["strategies"]["note"]
+        assert "not linked" in note and "signal id is recorded on 1 of the 3" in note, note
+        assert "hit rate" not in note.lower()
+        for row in d["strategies"]["rows"]:
+            assert row[1:5] == [None, None, None, None], row
+        assert not any("signal_outcomes" in c[0] for c in pool.calls), "this page never reads it"
+
+
+class TestAbacusEquityCurve:
+    """R-IV.705(c)/(d) — the spelling trap, and the deposit trap."""
+
+    def test_the_roths_curve_reads_every_spelling_it_was_stored_under(self, client, test_api_key):
+        """CONTROL (R-IV.705(c)1): `balance_snapshots.account_name` changed vocabulary on
+        2026-08-27. Read on the canonical key alone, the Roth's curve is cut to its last weeks
+        while looking complete. `scope_sql` matches every spelling it was stored under."""
+        snaps = [_snap((2026, 3, 20), 8000.0, "Fidelity Roth"),
+                 _snap((2026, 6, 15), 8500.0, "Fidelity Roth"),
+                 _snap((2026, 8, 27), 8800.0, "FIDELITY_ROTH"),
+                 _snap((2026, 9, 30), 9000.0, "FIDELITY_ROTH")]
+        pool, p = _patch_book([], snapshots=snaps, cash=[_cash((2026, 3, 1), 500.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        roth = next(a for a in d["equity"]["accounts"] if a["account"] == "FIDELITY_ROTH")
+        assert roth["days"] == 4, "all four days, not the two under the new spelling"
+        assert roth["from"] == "2026-03-20"
+        assert set(roth["spellings_read"]) == {"Fidelity Roth", "FIDELITY_ROTH"}
+        sql = next(c[0] for c in pool.calls if "balance_snapshots" in c[0])
+        assert "UPPER(account_name) = ANY" in sql, sql
+
+    def test_the_401a_reads_no_historical_spelling_at_all(self, client, test_api_key):
+        """CONTROL (R-IV.705(c)2): 'Fidelity 401A' names the PARKED mutual-fund money, a
+        different pot. FIDELITY_401A has no historical spellings by design, so those rows join
+        no curve -- which is why `normalize_account` must not be used here: its key folding
+        would resolve them into this account."""
+        from models.accounts import scope_for
+        assert scope_for("FIDELITY_401A") == ["FIDELITY_401A"]
+        spellings = [s.upper() for s in scope_for("FIDELITY_401A")]
+        assert "FIDELITY 401A" not in spellings, "the parked money must not be reachable"
+
+    def test_a_curve_whose_cash_coverage_does_not_span_it_has_no_sharpe_or_drawdown(self, client, test_api_key):
+        """R-IV.705(d): a balance curve counts every deposit as a gain. Where the recorded cash
+        events start after the curve does, the earlier days' returns cannot be told from
+        deposits -- so the figures are left OFF with that reason on their face."""
+        snaps = [_snap((2026, 3, 20), 8000.0, "FIDELITY_ROTH"),
+                 _snap((2026, 4, 20), 9000.0, "FIDELITY_ROTH"),
+                 _snap((2026, 5, 20), 9500.0, "FIDELITY_ROTH")]
+        cash = [_cash((2026, 4, 10), 1000.0, "ACH", "FIDELITY_ROTH")]
+        pool, p = _patch_book([], snapshots=snaps, cash=cash)
+        with p:
+            d = _get(client, test_api_key).json()
+        a = next(x for x in d["equity"]["accounts"] if x["account"] == "FIDELITY_ROTH")
+        assert a["drawdown"] is None and a["sharpe"] is None
+        assert a["cash"]["spans"] is False
+        assert "2026-04-10" in a["off_reason"] and "2026-03-20" in a["off_reason"]
+        assert a["line_label"] == "balance — includes deposits/withdrawals"
+
+    def test_a_deposit_is_not_a_gain(self, client, test_api_key):
+        """The whole point of (d), in one case: a flat account that receives a deposit must show
+        no return for that day, and a Sharpe of nothing rather than of the deposit."""
+        snaps = [_snap((2026, 1, 2), 1000.0), _snap((2026, 1, 3), 2000.0),
+                 _snap((2026, 1, 4), 2000.0)]
+        cash = [_cash((2026, 1, 1), 1000.0), _cash((2026, 1, 3), 1000.0)]
+        pool, p = _patch_book([], snapshots=snaps, cash=cash)
+        with p:
+            d = _get(client, test_api_key).json()
+        rh = next(a for a in d["equity"]["accounts"] if a["account"] == "ROBINHOOD")
+        assert rh["cash"]["spans"] is True, rh.get("off_reason")
+        assert rh["drawdown"] is None, "the deposit day is not a 100% gain, and no fall followed"
+        assert rh["sharpe"]["n"] == 2
+        # Two returns of exactly zero: mean 0 over deviation 0 is not a ratio, so the figure is
+        # None rather than a flattering 0. The n is still reported.
+        assert rh["sharpe"]["value"] is None, rh["sharpe"]
+        assert rh["sharpe"]["rough"] is True, "two returns is not a Sharpe ratio worth the name"
+
+    def test_an_unclassifiable_cash_event_fails_closed(self, client, test_api_key):
+        """A flow type this page cannot call a deposit or an earning must not join a return
+        series silently. It fails the coverage test BY NAME."""
+        snaps = [_snap((2026, 1, 2), 1000.0), _snap((2026, 1, 3), 1100.0)]
+        cash = [_cash((2026, 1, 1), 50.0, "ACH"), _cash((2026, 1, 3), 50.0, "MYSTERY_TYPE")]
+        pool, p = _patch_book([], snapshots=snaps, cash=cash)
+        with p:
+            d = _get(client, test_api_key).json()
+        rh = next(a for a in d["equity"]["accounts"] if a["account"] == "ROBINHOOD")
+        assert rh["sharpe"] is None and rh["drawdown"] is None
+        assert "MYSTERY_TYPE" in rh["off_reason"]
+
+    def test_a_dividend_is_not_netted_out(self, client, test_api_key):
+        """Subtracting what the account EARNED would understate the return as surely as leaving a
+        deposit in overstates it. A dividend stays in, and the SIGN of the Sharpe is what proves
+        it: keeping the dividend makes the mean return positive, netting it out makes it
+        negative."""
+        snaps = [_snap((2026, 1, 2), 1000.0), _snap((2026, 1, 3), 1010.0), _snap((2026, 1, 4), 1005.0)]
+        cash = [_cash((2026, 1, 1), 10.0, "ACH"), _cash((2026, 1, 3), 10.0, "DIVIDEND")]
+        pool, p = _patch_book([], snapshots=snaps, cash=cash)
+        with p:
+            d = _get(client, test_api_key).json()
+        rh = next(a for a in d["equity"]["accounts"] if a["account"] == "ROBINHOOD")
+        assert rh["cash"]["spans"] is True, rh.get("off_reason")
+        assert rh["sharpe"]["n"] == 2
+        assert rh["sharpe"]["value"] > 0, "netting the dividend out would make this negative"
+
+    def test_an_account_with_no_snapshots_says_so(self, client, test_api_key):
+        d = _get(client, test_api_key).json()
+        for a in d["equity"]["accounts"]:
+            assert a["points"] == [] and a["off_reason"]
 
 
 class TestAbacusPageServed:
