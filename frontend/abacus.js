@@ -252,17 +252,28 @@
     if (a.off_reason) {
       return `<div class="ab-curve-off">${chip('unknown', 'no drawdown or Sharpe')} ${esc(a.off_reason)}</div>`;
     }
-    const dr = a.drawdown, sh = a.sharpe;
+    const dr = a.drawdown, sh = a.sharpe, cov = a.covered;
     const bits = [];
     bits.push(dr
       ? `Worst fall <b class="ab-down">${esc(fmt(dr.pct, 'pct'))}</b> <span class="ab-sub">${esc(shortDate(dr.from))} → ${esc(shortDate(dr.to))}</span>`
       : 'No fall recorded on this curve');
+    // R-IV.709(c): under thirty returns there is no Sharpe ratio here, and the COUNT stands in its
+    // place. A number with the authority of a statistic and the content of noise is worse than a
+    // blank, and a "rough" label beside it does not stop it being read as one.
     if (sh && sh.value != null) {
-      bits.push(`Sharpe <b>${esc(Number(sh.value).toFixed(2))}</b> <span class="ab-sub">n=${esc(sh.n)}${sh.rough ? ', rough' : ''}</span>`);
+      bits.push(`Sharpe <b>${esc(Number(sh.value).toFixed(2))}</b> <span class="ab-sub">n=${esc(sh.n)}</span>`);
+    } else if (sh && sh.insufficient) {
+      bits.push(`Sharpe <span class="ab-amber">not enough history (n = ${esc(sh.n)})</span>`);
     } else if (sh) {
       bits.push(`Sharpe — <span class="ab-sub">n=${esc(sh.n)}: no spread in the returns to divide by</span>`);
     }
-    return `<div class="ab-curve-foot">${bits.join(' · ')}<div class="ab-sub">Both are computed from returns net of recorded deposits and withdrawals (${esc(a.cash.events)} events, first ${esc(shortDate(a.cash.first))}).</div></div>`;
+    // R-IV.709(b): when the cash ledger covers only part of the curve, the figures are measured over
+    // the part it covers — and the card says which part, on its face, beside the figures themselves.
+    const measured = cov
+      ? `<div class="ab-curve-measured">${chip('stale', 'measured ' + shortDate(cov.from) + ' → ' + shortDate(cov.to))} `
+        + `<span class="ab-sub">${esc(cov.days)} of ${esc(cov.days + cov.excluded_days)} days · ${esc(cov.reason)}</span></div>`
+      : '';
+    return `<div class="ab-curve-foot">${bits.join(' · ')}${measured}<div class="ab-sub">Computed from returns net of recorded deposits and withdrawals (${esc(a.cash.events)} events, first ${esc(shortDate(a.cash.first))}).</div></div>`;
   }
   function renderEquity(d) {
     const e = d.equity;

@@ -99,6 +99,10 @@
 .ab-curve-foot, .ab-curve-off { font-size: var(--fs-2); margin-top: 4px; }
 .ab-curve-off { color: var(--amber); display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
 .ab-sub { color: var(--text-2); font-size: var(--fs-1); }
+/* The measured span sits with the figures it qualifies, not in a footnote below them. */
+.ab-curve-measured { margin-top: 3px; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
+/* Readable amber, not dimmed: "not enough history" is the figure's replacement, not a whisper. */
+.ab-amber { color: var(--amber); font-family: var(--mono); }
 
 .ab-leaks { padding: 0; margin: 0; list-style: none; }
 .ab-leaks li { margin: 0 0 var(--sp-3); padding-left: var(--sp-3); border-left: 2px solid var(--down); }
