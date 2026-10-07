@@ -81,7 +81,16 @@ function Package-Skill {
         [System.IO.Compression.ZipArchiveMode]::Create
     )
     try {
-        $Files = Get-ChildItem -Path $SkillRoot -Recurse -File
+        # Skip the agent's OWN _shared/ folder. Those files are generated copies of
+        # skills/_shared/ (R-IV.735(c)), and this script injects skills/_shared/ itself a few
+        # lines down -- so sweeping them in here wrote TWO entries at the same archive path,
+        # e.g. two `toro/_shared/COMMITTEE_RULES.md`. Measured 2026-10-07: all seven archives
+        # carried the duplicate. It was invisible because both entries held identical bytes,
+        # but which one an extractor keeps is undefined, so the moment a per-skill copy drifted
+        # the uploaded skill could silently run on the drifted text. One author, one entry.
+        $AgentShared = (Join-Path $SkillRoot "_shared") + [System.IO.Path]::DirectorySeparatorChar
+        $Files = Get-ChildItem -Path $SkillRoot -Recurse -File |
+                 Where-Object { -not $_.FullName.StartsWith($AgentShared, [System.StringComparison]::OrdinalIgnoreCase) }
         foreach ($File in $Files) {
             # Compute path relative to skills/ (the parent), normalize to
             # forward slashes. Result: "toro/SKILL.md", "toro/references/...".
