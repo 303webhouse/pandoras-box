@@ -264,7 +264,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     except Exception as exc:
         cells.append(_make_cell("term_structure", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
 
-    # 6. Open interest (Coinalyze primary; units unverified R-IV.725)
+    # 6. Open interest (Coinalyze primary; OKX display-only, R-IV.707(d) / R-IV.727)
     try:
         oi_result = await coinalyze_client.get_open_interest(symbol)
         oi_src = oi_result.get("source") or "coinalyze"
@@ -273,14 +273,6 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             cells.append(_make_cell(
                 "open_interest", "CAPITULATION", val, "NA", oi_src, as_of, False,
                 reason="OKX_FALLBACK_UNSCORED",
-                divergence=oi_result.get("divergence"),
-                signal="NEUTRAL",
-                vendor_signal=oi_result.get("signal"),
-            ))
-        elif oi_src == "coinalyze":
-            cells.append(_make_cell(
-                "open_interest", "CAPITULATION", val, "NA", oi_src, as_of, False,
-                reason="COINALYZE_UNITS_UNVERIFIED",
                 divergence=oi_result.get("divergence"),
                 signal="NEUTRAL",
                 vendor_signal=oi_result.get("signal"),
@@ -317,15 +309,6 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
                 vendor_signal=liq_result.get("signal"),
                 window_start=liq_result.get("window_start"),
                 window_end=liq_result.get("window_end"),
-            ))
-        elif vendor_src == "coinalyze":
-            cells.append(_make_cell(
-                "liquidations", "CAPITULATION", val, "NA", vendor_src, as_of, False,
-                reason="COINALYZE_UNITS_UNVERIFIED",
-                composition=liq_result.get("composition"),
-                long_pct=liq_result.get("long_pct"),
-                signal="NEUTRAL",
-                vendor_signal=liq_result.get("signal"),
             ))
         else:
             cells.append(_make_cell(
@@ -461,14 +444,6 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
             cells.append(_make_cell(
                 "oi_extreme", "FROTH", val, "NA", oi_src, as_of, False,
                 reason="OKX_FALLBACK_UNSCORED",
-                threshold=threshold,
-                firing=False,
-                signal="NEUTRAL",
-            ))
-        elif oi_src == "coinalyze":
-            cells.append(_make_cell(
-                "oi_extreme", "FROTH", val, "NA", oi_src, as_of, False,
-                reason="COINALYZE_UNITS_UNVERIFIED",
                 threshold=threshold,
                 firing=False,
                 signal="NEUTRAL",
