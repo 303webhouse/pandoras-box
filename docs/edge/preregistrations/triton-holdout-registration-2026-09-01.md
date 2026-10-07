@@ -11,6 +11,20 @@ CC-QUERY's PIN text verbatim; no PIN value is re-derived.
 
 ---
 
+## EXPOSURE OF RECORD — THE SEAL HAS BEEN BREACHED TWICE
+
+**Filed by:** CC-BUILD, 2026-10-06, on SPINE's order R-IV.678(a); statement supplied verbatim by
+R-IV.680(a). It sits HERE, above §1, because it governs every use of this set and a reader who
+stops before the PIN must still have read it.
+
+**Verbatim as issued. Nothing between the rules below is this lane's wording.**
+
+> EXPOSURE OF RECORD — 2026-10-06 (SPINE, R-IV.677). The 843 sealed rows (id ≤ 377783, fired ≥ 2026-08-17) entered the pooled figures of CC-QUERY's R-IV.664 side-quest report (36 slices; history n = 7,911) through a date-only wall, fired_at < 2026-09-26, which the seal's two-predicate definition does not survive. Those figures reached SPINE and the principal on 2026-10-06. No figure computed on sealed rows alone was published. Causes: SPINE's R-IV.664(b)1 wording ("graded history from before 2026-09-15"), and CC-QUERY's not applying the standing exclusion in its own lane state. It is the second breach of this shape, after 2026-09-02. Consequences: the set is spent as confirmation for the sweep premise and for every hypothesis that report examined. Criterion (v)'s text is unchanged; if it ever executes, its face carries this statement in place of the firewall attestation. The set stays sealed for hypotheses that report did not examine: market tide, dark pool, and side-measure 5 taken whole. No statistic is computed on sealed rows outside a registered read.
+
+---
+
+---
+
 ## §1 · PIN
 
 **Registration instant (in-DB UTC): `2026-09-01 03:28:12.361091+00`**
@@ -197,3 +211,4 @@ with spine/EDGE, not with this lane; recorded here so the gap is visible at the 
 - → R-IV.146 — §6 authored fresh by successor spine (R-IV.140 wording lost with
   context 1)
 - → R-IV.162 — Amendment 1 ratified as applied — §5 k captured (k=15, effective n=828), §8 gate ADDED, §5 cross-reference appended
+- → R-IV.677(b) / R-IV.678(a) / R-IV.680(a) — EXPOSURE OF RECORD filed on the face (second breach, 2026-10-06); cross-referenced from the forward-window registration §5

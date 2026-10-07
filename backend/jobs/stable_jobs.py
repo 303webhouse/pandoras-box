@@ -338,7 +338,26 @@ async def _warm_tide() -> None:
     from database.redis_client import get_redis_client
     raw = await get_market_tide()
     if not raw:
-        return
+        return {"rows_touched": 0, "skip_reason": "no payload: the vendor returned nothing"}
+
+    # R-IV.675(b): PERSIST THE WHOLE SERIES BEFORE TAKING THE LAST ROW. This function has
+    # fetched the full session series every five minutes for months and kept `series[-1]`,
+    # cached three scalars in Redis under a 1,800 s TTL, and dropped the rest -- so the tide leg
+    # of the principal's confluence gate had never persisted a row to test against. The Redis
+    # warming below is unchanged; this only stops throwing the series away on the way past.
+    persisted = {"rows_touched": 0, "skip_reason": "not attempted"}
+    try:
+        from database.postgres_client import get_postgres_client
+        from jobs.market_tide_sink import persist_series
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            persisted = await persist_series(conn, raw, source="warmer")
+    except Exception as exc:  # noqa: BLE001
+        # The sink must never take the warmed cell down with it: the v2 tide cell is what the
+        # principal reads, and a failed WRITE is not a reason to withhold a good READING.
+        logger.warning("[stable_jobs] market_tide_history write failed: %s", exc)
+        persisted = {"rows_touched": 0, "skip_reason": "write failed: %s" % type(exc).__name__}
+
     td = raw.get("data", raw) if isinstance(raw, dict) else raw
     if isinstance(td, list) and td:
         td = td[-1]
@@ -354,6 +373,7 @@ async def _warm_tide() -> None:
         "warmed_at": datetime.now(timezone.utc).isoformat(),
     }
     await client.setex("board:tide:latest", 1800, json.dumps(payload))
+    return persisted
 
 
 async def stable_tide_warmer_loop():
@@ -365,8 +385,14 @@ async def stable_tide_warmer_loop():
         try:
             # R-IV.273(c) spend pause. Checked BEFORE the RTH gate so the paused
             # state is observable off-hours, not only during a session.
-            if not check_paused("tide") and is_rth(now_et()):
-                await _warm_tide()
+            if check_paused("tide"):
+                # §5.4: an enumerated skip, not a silent pass.
+                logger.debug("[stable_jobs] tide: %s",
+                             "paused: R-IV.273(c) tide spend pause is on")
+            elif is_rth(now_et()):
+                # R-IV.675(b) §5.1: through _run_job, so a tide collector that goes dark shows
+                # as a flatlined job in /health instead of as a table nobody thought to query.
+                await _run_job("market_tide", _warm_tide)
         except Exception as e:
             logger.warning("[stable_jobs] tide warmer error: %s", e)
         await asyncio.sleep(300)  # 5 minutes
