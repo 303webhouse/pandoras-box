@@ -103,6 +103,10 @@
 .ab-curve-measured { margin-top: 3px; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
 /* Readable amber, not dimmed: "not enough history" is the figure's replacement, not a whisper. */
 .ab-amber { color: var(--amber); font-family: var(--mono); }
+/* A withheld figure's reason stands where the figure would: smaller than a number, because it is a
+   sentence, and amber because "we cannot confirm this" is exactly what it says. Readable, never
+   dimmed — it is the content now, not a footnote. */
+.ab-unavail { color: var(--amber); font-family: var(--mono); font-size: var(--fs-2); line-height: 1.3; }
 
 .ab-leaks { padding: 0; margin: 0; list-style: none; }
 .ab-leaks li { margin: 0 0 var(--sp-3); padding-left: var(--sp-3); border-left: 2px solid var(--down); }

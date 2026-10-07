@@ -24,6 +24,9 @@ LIVE_KEYS = {"net_profit", "win_rate", "expected_return", "expectancy", "profit_
              "avg_win_loss", "loss_vs_risk"}
 # Blocks that are still the fixture, and must keep saying so (R-IV.705(g)).
 MOCK_BLOCK_KEYS = {"discipline"}
+# R-IV.716(c): a live READ that found its own source untrustworthy. Not mock — nothing here is
+# invented — and not a figure either: the reason stands where the number would.
+WITHHELD_KEYS = {"loss_vs_risk"}
 
 
 class _FakePool:
@@ -144,6 +147,11 @@ class TestAbacusSummaryContract:
             s = _stat(d, key)
             assert s["source"] == "live", key
             assert s["computed_at"] and s["computed_at"] != FIXTURE_AUTHORED_AT, key
+            if key in WITHHELD_KEYS:
+                # A withheld figure carries its reason instead of a coverage block: there is no
+                # sample to describe, because the field it would be drawn from is wrong.
+                assert s["value"] is None and s["unavailable"], key
+                continue
             assert s["coverage"]["predicate"], key
 
     def test_computed_at_is_the_authored_instant_not_now(self, client, test_api_key):
@@ -441,7 +449,7 @@ class TestAbacusR705:
         pool, p = _patch_book(rows)
         with p:
             d = _get(client, test_api_key).json()
-        for key in ("expectancy", "profit_factor", "avg_win_loss", "loss_vs_risk"):
+        for key in ("expectancy", "profit_factor", "avg_win_loss"):
             st = _stat(d, key)
             assert st["source"] == "live", key
             assert st["n"] is not None, key
@@ -458,17 +466,38 @@ class TestAbacusR705:
         assert _stat(d, "profit_factor")["value"] is None
         assert _stat(d, "profit_factor")["n"] == 2
 
-    def test_loss_vs_risk_is_drawn_from_the_losers_that_carry_a_max_loss(self, client, test_api_key):
-        """R-IV.705(g): live ONLY with its n. `max_loss` sits on a minority of the losers, and a
-        rate over that minority must not be read as a rate over all of them."""
+    def test_loss_vs_risk_is_withheld_while_max_loss_is_unreliable(self, client, test_api_key):
+        """R-IV.716(c). The strong form: rows that WOULD produce a clean 0.5 still yield no figure.
+
+        It was served under R-IV.705(g) with its own n, which answered how MANY rows carry a max
+        loss and not whether the values are right. They are not: on the closed side this page reads,
+        31 losing trades are recorded as having lost MORE than their own defined maximum, which
+        cannot happen to a defined-risk trade. A rate whose denominator is wrong is not improved by
+        publishing its n."""
         rows = [_row(-50.0, max_loss=100.0), _row(-30.0, max_loss=None), _row(20.0)]
         pool, p = _patch_book(rows)
         with p:
             st = _stat(_get(client, test_api_key).json(), "loss_vs_risk")
-        assert st["value"] == 0.5                      # 50 given back of a 100 defined
-        assert st["n"] == 1, "the loser with no max loss is not in the rate"
-        assert st["coverage"]["total"] == 2 and st["coverage"]["counted"] == 1
-        assert st["coverage"]["excluded"]["no_max_loss_recorded"] == 1
+        assert st["value"] is None, "no figure from max_loss reaches the page"
+        assert st["n"] is None, "and no n either: an n beside no figure invites one to be inferred"
+        assert st["unavailable"] == "max loss not reliable yet"
+        assert "R-IV.714(d)" in st["meaning"], "it says what has to land before it returns"
+        assert "coverage" not in st, "there is no sample to describe"
+
+    def test_no_other_stat_is_drawn_from_max_loss(self, client, test_api_key):
+        """The field is quarantined, not just hidden on one tile."""
+        # One distinctive max_loss, and nothing else in the payload that could produce it. The first
+        # version of this check also forbade 0.5, which a two-trade win rate legitimately IS -- a
+        # sentinel has to be a value no honest computation can reach.
+        rows = [_row(-50.0, max_loss=31337.0), _row(20.0, max_loss=31337.0)]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        import json as _json
+        for st in d["stats"]:
+            if st["key"] == "loss_vs_risk":
+                continue
+            assert "31337" not in _json.dumps(st.get("value")), st["key"]
 
     def test_the_four_breakdowns_are_live_and_discipline_still_says_sample(self, client, test_api_key):
         import datetime as dt
