@@ -286,7 +286,8 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
         # OKX fallback is a different quantity (last 100 orders, variable window).
         # Show it with source "okx" and state NA so it cannot FIRING or enter
         # live_cap / live_cap_all in _compute_composite (those lists are LIVE-only).
-        if vendor_src == "okx":
+        # R-IV.715: BTC's OKX path (source okx_fallback) uses this branch too.
+        if vendor_src in ("okx", "okx_fallback"):
             cells.append(_make_cell(
                 "liquidations", "CAPITULATION",
                 liq_result.get("total_liquidations"), "NA", "okx",
