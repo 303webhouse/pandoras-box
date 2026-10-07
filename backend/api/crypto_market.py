@@ -46,7 +46,9 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.8",
 }
 
-CACHE_TTL_SECONDS = 4
+# Longer than legacy Agora's 5 s poll (`frontend/app.js` CRYPTO_MARKET_POLL_MS)
+# so that poll hits this cache instead of doing a full venue+perps fetch every tick.
+CACHE_TTL_SECONDS = 8
 _bybit_runtime_disabled = False
 # Keyed by canonical pair ("BTCUSDT"): see get_market_snapshot.
 _cache_by_symbol: Dict[str, Dict[str, Any]] = {}
@@ -282,7 +284,7 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     # Stater Phase 0 (R-IV.619): every piece of remembered state is PER SYMBOL. The
     # response cache, the last-good fallbacks and the CVD trend state used to be
     # one global each, so a Stater poll for HYPE could serve BTC's snapshot to the
-    # next caller within 4 s, and a failed HYPE feed was "filled" with BTC's last
+    # next caller within the response-cache window, and a failed HYPE feed was "filled" with BTC's last
     # price. Agora (app.js) and the Discord bot read this endpoint for BTC; the
     # response shape is unchanged.
     symbol = _canonical_pair(symbol)
