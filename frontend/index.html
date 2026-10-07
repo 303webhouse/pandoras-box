@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=151">
+    <link rel="stylesheet" href="/styles.css?v=152">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1044,6 +1044,9 @@
                         </div>
                         <span class="price-divider">|</span>
                         <div class="crypto-price-extra" id="cryptoCvdInline">CVD: --</div>
+                        <!-- R-IV.650(d): says WHICH figures the hub has stopped serving and how
+                             old each absence is. Hidden while everything is being served. -->
+                        <div class="crypto-price-stale" id="cryptoPriceStale" role="status" hidden></div>
                     </div>
                     <div class="crypto-bias-meta">
                         <div class="crypto-session-status compact" id="cryptoSessionStatus">
@@ -1870,7 +1873,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=175"></script>
+    <script src="/app.js?v=176"></script>
     <!-- cockpit.js + laboratory.js are lazy-loaded on first Abacus (analytics) mode open (P0 4c) -->
 </body>
 </html>

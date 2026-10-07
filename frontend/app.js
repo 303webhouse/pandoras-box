@@ -479,7 +479,18 @@ let _dailyBiasPrimaryData = null;
 
 let cryptoMarketData = null;
 let cryptoMarketTimer = null;
-let cryptoMarketLastGood = {};
+// R-IV.650(d) — THE PAGE SHOWS WHAT THE SERVER SERVES. `cryptoMarketLastGood` used to be a
+// display fallback with NO time limit: when a field came back null the page printed the last
+// number it had ever seen, and `updateCryptoPriceStrip` preferred that copy OVER the live field.
+// A price the hub had stopped serving stayed on screen looking current, indefinitely.
+//
+// What is kept now is only WHEN each field was last real, so an absence can say how old it is.
+// Nothing here is ever rendered as a value.
+let cryptoLastSeen = {};
+// R-IV.650(d) — one request at a time. /crypto/market takes about 8 seconds and the poll is 5,
+// so every tick used to start a request while the last was still out; the responses then landed
+// out of order and the strip flickered between two vintages.
+let cryptoMarketInFlight = false;
 let cryptoWma9 = null;
 let cryptoWmaUpdated = null;
 let cryptoWmaTimer = null;
@@ -5053,6 +5064,10 @@ async function loadCryptoKeyLevels() {
 async function loadCryptoMarketData() {
     const spotEl = document.getElementById('cryptoCoinbaseSpotInline');
     if (!spotEl) return;
+    // Skip this tick rather than queue behind the last one: a backlog of 8-second requests on a
+    // 5-second timer never drains, and the newest answer is the only one worth rendering.
+    if (cryptoMarketInFlight) return;
+    cryptoMarketInFlight = true;
 
     let data = null;
     try {
@@ -5064,12 +5079,12 @@ async function loadCryptoMarketData() {
         data = await response.json();
     } catch (error) {
         console.error('Error loading crypto market data:', error);
-        // Keep the last good snapshot visible on transient API failures.
-        if (cryptoMarketData) {
-            renderCryptoMarketData();
-        } else {
-            renderCryptoMarketError();
-        }
+        // A failed fetch does NOT re-render the last snapshot as though it were current. The
+        // figures already on screen are left where they are and the strip says they are stale,
+        // with the age of the newest one — "the read failed" and "the price is this" are
+        // different claims and the page used to make the second one.
+        renderCryptoMarketStale('the last read failed');
+        cryptoMarketInFlight = false;
         return;
     }
 
@@ -5078,9 +5093,32 @@ async function loadCryptoMarketData() {
     try {
         renderCryptoMarketData();
     } catch (error) {
-        // Keep last good values on screen if a render-only issue occurs.
         console.error('Error rendering crypto market data:', error);
+    } finally {
+        cryptoMarketInFlight = false;
     }
+}
+
+// Says WHICH fields the server is no longer serving and when each was last real. Never a value.
+function renderCryptoMarketStale(reason) {
+    const el = document.getElementById('cryptoPriceStale');
+    if (!el) return;
+    const now = Date.now();
+    const age = (t) => {
+        if (!t) return 'never served this session';
+        const s = Math.max(0, Math.round((now - t) / 1000));
+        if (s < 90) return s + 's ago';
+        const m = Math.round(s / 60);
+        return m < 90 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
+    };
+    const missing = (window.__cryptoMissing || []).map((k) => {
+        const t = cryptoLastSeen[k.key];
+        return k.label + (t ? ' (last ' + age(t) + ')' : ' (' + age(null) + ')');
+    });
+    if (!missing.length && !reason) { el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    el.textContent = (reason ? reason + ' — ' : 'not being served — ')
+        + (missing.length ? missing.join(' · ') : 'the figures on screen are the last the hub sent');
 }
 
 function renderCryptoMarketError() {
@@ -5103,21 +5141,28 @@ function renderCryptoMarketData() {
     const funding = cryptoMarketData.funding || {};
     const cvd = cryptoMarketData.cvd || {};
 
-    const rememberNumber = (key, value) => {
+    // R-IV.650(d): these RETURN WHAT THE SERVER SERVED. A null is a null. What they remember is
+    // the INSTANT a field was last real, so the strip can say how old an absence is — and the
+    // missing list is rebuilt each render rather than accumulating.
+    // Only the figures the STRIP ITSELF PRINTS are reported, which is why a label is passed at
+    // those call sites and nowhere else. An always-on amber line about a timestamp the hub has
+    // simply never sent is a false alarm, and a false alarm is as dishonest as a stale price.
+    const missing = [];
+    const seen = (key, label, real) => {
+        if (real) cryptoLastSeen[key] = Date.now();
+        else if (label) missing.push({ key: key, label: label });
+    };
+    const rememberNumber = (key, value, label) => {
         const num = Number(value);
-        if (value !== null && value !== undefined && !Number.isNaN(num)) {
-            cryptoMarketLastGood[key] = num;
-            return num;
-        }
-        return cryptoMarketLastGood[key] ?? null;
+        const real = value !== null && value !== undefined && !Number.isNaN(num);
+        seen(key, label, real);
+        return real ? num : null;
     };
 
-    const rememberString = (key, value) => {
-        if (value !== null && value !== undefined && `${value}`.trim() !== '') {
-            cryptoMarketLastGood[key] = value;
-            return value;
-        }
-        return cryptoMarketLastGood[key] ?? null;
+    const rememberString = (key, value, label) => {
+        const real = value !== null && value !== undefined && `${value}`.trim() !== '';
+        seen(key, label, real);
+        return real ? value : null;
     };
 
     const perps = prices.perps || {};
@@ -5125,11 +5170,10 @@ function renderCryptoMarketData() {
     const binanceSpotRaw = prices.binance_spot ?? prices.binance ?? prices.spot_binance ?? prices.spot ?? null;
     const perpRaw = perps.binance ?? perps.bybit ?? perps.okx ?? perps.binance_perp ?? perps.perp ?? prices.perp_price ?? prices.perp ?? null;
 
-    rememberNumber('coinbase_spot', spotRaw ?? binanceSpotRaw);
-    rememberNumber('binance_spot', binanceSpotRaw);
-    rememberNumber('perp_price', perpRaw);
-    rememberString('binance_spot_ts', prices.binance_spot_ts);
-    rememberString('perp_source', perps.source);
+    rememberNumber('coinbase_spot', spotRaw ?? binanceSpotRaw, 'Coinbase spot');
+    rememberNumber('binance_spot', binanceSpotRaw, 'Binance spot');
+    rememberNumber('perp_price', perpRaw, 'perp');
+    rememberString('perp_source', perps.source, 'perp source');
 
     const fundingInlineEl = document.getElementById('cryptoFundingInline');
     const cvdInlineEl = document.getElementById('cryptoCvdInline');
@@ -5163,7 +5207,9 @@ function renderCryptoMarketData() {
     }
 
     renderOrderflow(cvd, cryptoMarketData.order_flow || []);
+    window.__cryptoMissing = missing;
     updateCryptoPriceStrip();
+    renderCryptoMarketStale(null);
 }
 
 function updateCryptoPriceStrip() {
@@ -5176,10 +5222,12 @@ function updateCryptoPriceStrip() {
 
     const prices = cryptoMarketData?.prices || {};
     const perps = prices.perps || {};
-    const coinbaseSpot = cryptoMarketLastGood.coinbase_spot ?? prices.coinbase_spot ?? null;
-    const binanceSpot = cryptoMarketLastGood.binance_spot ?? prices.binance_spot ?? null;
-    const perpPrice = cryptoMarketLastGood.perp_price ?? perps.binance ?? perps.bybit ?? perps.okx ?? prices.perp_price ?? null;
-    const perpSource = (cryptoMarketLastGood.perp_source ?? perps.source ?? '').toString().toUpperCase();
+    // R-IV.650(d): LIVE FIRST, and no cached copy behind it. This block used to read the copy
+    // BEFORE the served field, so a stale number outranked a fresh one on every render.
+    const coinbaseSpot = prices.coinbase_spot ?? prices.coinbase ?? prices.spot_coinbase ?? null;
+    const binanceSpot = prices.binance_spot ?? prices.binance ?? prices.spot_binance ?? null;
+    const perpPrice = perps.binance ?? perps.bybit ?? perps.okx ?? prices.perp_price ?? null;
+    const perpSource = (perps.source ?? '').toString().toUpperCase();
     const perpSourceMap = {
         BINANCE: 'BINANCE PERPS',
         BYBIT: 'BYBIT PERPS',

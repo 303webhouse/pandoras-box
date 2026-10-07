@@ -13849,3 +13849,23 @@ body[data-mode="analytics"] .analytics-shell {
      of body and position:fixed, so it ignores this padding itself. */
   body { max-width: 100%; padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* R-IV.650(d) — the crypto strip's staleness line. Amber: "we cannot confirm this" is exactly
+   what a field the hub has stopped serving is. Hidden entirely while everything is served, so
+   it is never decoration. */
+/* R-IV.650(d) - .crypto-price-row is a NOWRAP flex row, so a full-width child does not get its
+   own line: it gets squeezed in beside the price cluster. The wrap is scoped with :has() to the
+   case where the line is actually showing, so the row's normal layout is untouched while
+   everything is being served - which is nearly always. Declared here, after BOTH earlier copies
+   of the .crypto-price-row rule (7539 and 10110), so it wins. */
+.crypto-price-row:has(#cryptoPriceStale:not([hidden])) { flex-wrap: wrap; }
+.crypto-price-stale {
+    flex-basis: 100%;
+    width: 100%;
+    text-align: center;
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #f5a524;
+}
+.crypto-price-stale[hidden] { display: none; }
