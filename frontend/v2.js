@@ -3577,7 +3577,7 @@ const X = (function () {
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
-  const st = { cb: { status: 'idle', accounts: {}, scope: [], error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
+  const st = { cb: { status: 'idle', accounts: {}, scope: [], names: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
@@ -3636,7 +3636,13 @@ const X = (function () {
       if (!rb.ok) throw new Error(rb.status === 401 ? 'sign in to see your accounts' : 'accounts: HTTP ' + rb.status);
       const d = await rc.json(), bal = await rb.json();
       st.cb.accounts = (d && d.accounts) || {};
-      st.cb.scope = (Array.isArray(bal) ? bal : []).filter((a) => a && a.in_scope === true).map((a) => a.account_name);
+      const rows = Array.isArray(bal) ? bal : [];
+      st.cb.scope = rows.filter((a) => a && a.in_scope === true).map((a) => a.account_name);
+      // R-IV.704(b): the NAME comes from the balances row, joined on `account_name`. /cash-balance
+      // is keyed by the name and carries no label, so the join is what names a cash card — and it
+      // is the only source that can name an account with CASH BUT NO OPEN POSITIONS.
+      st.cb.names = {};
+      rows.forEach((a) => { if (a && a.account_name && a.account_display) st.cb.names[a.account_name] = a.account_display; });
       st.cb.status = 'ok';
     } catch (e) { st.cb.status = 'error'; st.cb.error = String(e && e.message || e); }
     if (st.open) render();
@@ -3695,8 +3701,13 @@ const X = (function () {
   // result of "Set cash".
   const acctName = (n) => {
     const key = String(n || '');
+    // 1. the balances row's own `account_display` (R-IV.704(b)) — the right source for a cash card,
+    //    and the only one that can name an account with no open positions.
+    if (st.cb.names && st.cb.names[key]) return st.cb.names[key];
+    // 2. the same name as served on a position, so the two cards cannot disagree.
     const served = BK.open.rows.find((p) => p.account === key && p.acct);
     if (served) return served.acct;
+    // 3. last resort: derived from the key. A guess, so it is never dressed up as a served name.
     return key.toLowerCase().split('_').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
   };
   const TYPE_WORD = { TRADE_DEBIT: 'trades', TRADE_CREDIT: 'trades', TRANSFER_IN: 'deposits', TRANSFER_OUT: 'withdrawals', DIVIDEND: 'dividends', INTEREST: 'interest', FEE: 'fees', ADJUSTMENT: 'adjustments', OTHER: 'other movements' };
