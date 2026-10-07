@@ -36,12 +36,13 @@ from __future__ import annotations
 
 import copy
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Dict, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from database.postgres_client import get_postgres_client
+from models.accounts import display_name          # R-IV.650(a): the name is served, never inferred
 from utils.pivot_auth import require_api_key
 
 router = APIRouter(prefix="/abacus", tags=["abacus"])
@@ -262,44 +263,88 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
         conditions.append("exit_date::date >= $2")
         params.append(first)
     rows = await pool.fetch(
-        f"SELECT realized_pnl, cost_basis, basis_incomplete_reason FROM unified_positions "
+        f"SELECT realized_pnl, cost_basis, basis_incomplete_reason, account FROM unified_positions "
         f"WHERE {' AND '.join(conditions)}",
         *params,
     )
 
-    excl_basis = excl_return = excl_unrecorded = 0
-    counted_pnls: list = []
+    # R-IV.650(b)3 — the same census, kept PER ACCOUNT and pooled. Every exclusion is counted
+    # against the account whose row it was, so a per-account coverage line is answerable and a
+    # reader can see which book the excluded rows came from.
+    def _blank():
+        return {"pnls": [], "returns": [], "total": 0,
+                "basis_incomplete": 0, "return_below_neg100pct": 0, "no_realized_pnl": 0}
+    by: Dict[Optional[str], dict] = {}
+
     for r in rows:
+        # `.get`, not `r["account"]`: a row from a source that does not carry the column is an
+        # UNATTRIBUTED trade, not a crash. It lands in its own bucket and says so.
+        key = (r.get("account") if hasattr(r, "get") else r["account"]) or None
+        acct = by.setdefault(key, _blank())
+        acct["total"] += 1
         if r["basis_incomplete_reason"]:
-            excl_basis += 1
+            acct["basis_incomplete"] += 1
             continue
         pnl = r["realized_pnl"]
         basis = r["cost_basis"]
+        ret = None
         if pnl is not None and basis and float(basis) != 0:
-            if (float(pnl) / abs(float(basis))) < -1:
-                excl_return += 1
+            ret = float(pnl) / abs(float(basis))
+            if ret < -1:
+                acct["return_below_neg100pct"] += 1
                 continue
         if pnl is None:
-            excl_unrecorded += 1
+            acct["no_realized_pnl"] += 1
             continue
-        counted_pnls.append(float(pnl))
+        acct["pnls"].append(float(pnl))
+        # The expected return carries its OWN n: a trade whose basis is unknown has a P&L but
+        # no return, so averaging it in at zero would quietly drag the mean toward nothing.
+        if ret is not None:
+            acct["returns"].append(ret)
 
-    counted = len(counted_pnls)
-    wins = sum(1 for p in counted_pnls if p > 0)
-    return {
-        "net_profit": round(sum(counted_pnls), 2) if counted else None,
-        "win_rate": round(wins / counted, 4) if counted else None,
-        "coverage": {
-            "predicate": "LOWER(status) IN ('closed','expired'), windowed on exit_date",
-            "total": len(rows),
-            "counted": counted,
-            "excluded": {
-                "basis_incomplete": excl_basis,
-                "return_below_neg100pct": excl_return,
-                "no_realized_pnl": excl_unrecorded,
+    def _block(acc: dict, account: Optional[str]) -> dict:
+        counted = len(acc["pnls"])
+        wins = sum(1 for p in acc["pnls"] if p > 0)
+        rets = acc["returns"]
+        return {
+            "account": account,
+            # A key is not a label: the display name is served, never inferred by a reader.
+            "account_display": display_name(account) if account else None,
+            "net_profit": round(sum(acc["pnls"]), 2) if counted else None,
+            "win_rate": round(wins / counted, 4) if counted else None,
+            "win_rate_n": counted,
+            # Mean realised return per trade. NULL, never 0, when nothing in this book has a
+            # usable basis -- "no trade here can be measured" is not "the average is nothing".
+            "expected_return": round(sum(rets) / len(rets), 4) if rets else None,
+            "expected_return_n": len(rets),
+            "coverage": {
+                "predicate": "LOWER(status) IN ('closed','expired'), windowed on exit_date",
+                "total": acc["total"],
+                "counted": counted,
+                "excluded": {
+                    "basis_incomplete": acc["basis_incomplete"],
+                    "return_below_neg100pct": acc["return_below_neg100pct"],
+                    "no_realized_pnl": acc["no_realized_pnl"],
+                },
             },
-        },
-    }
+        }
+
+    # COMBINED IS POOLED, NOT AVERAGED. Pooling every counted trade IS the figure weighted by
+    # trade count; averaging the three per-account rates would weight a six-trade book the same
+    # as a forty-trade one and quietly answer a different question.
+    pooled = _blank()
+    for acc in by.values():
+        pooled["pnls"].extend(acc["pnls"])
+        pooled["returns"].extend(acc["returns"])
+        for k in ("total", "basis_incomplete", "return_below_neg100pct", "no_realized_pnl"):
+            pooled[k] += acc[k]
+
+    combined = _block(pooled, None)
+    accounts = [_block(by[k], k) for k in sorted(by, key=lambda x: (x is None, x or ""))]
+    out = dict(combined)
+    out["accounts"] = accounts
+    out["combined_is_pooled"] = True
+    return out
 
 
 @router.get("/summary")
@@ -345,9 +390,28 @@ async def abacus_summary(
             st.update(live_stamp)
         elif st["key"] == "win_rate":
             st["value"] = book["win_rate"]
-            st["n"] = book["coverage"]["counted"]
+            st["n"] = book["win_rate_n"]
             st["coverage"] = book["coverage"]
             st.update(live_stamp)
+
+    # R-IV.650(b)3: expected return per trade, LIVE, with its own n -- which is not the win
+    # rate's n. A trade whose basis is unknown has a P&L but no return, so the two counts differ
+    # and a rate that borrowed the other's n would be quoting a sample it was not drawn from.
+    out["stats"].append({
+        "key": "expected_return", "label": "Expected return per trade", "format": "pct",
+        "value": book["expected_return"], "n": book["expected_return_n"],
+        "coverage": book["coverage"],
+        "meaning": ("The mean realised return of the closed trades in this window, as a share of "
+                    "each trade's own cost basis. Trades whose basis the book never recorded have "
+                    "no return and are left out, which is why this count can be lower than the "
+                    "win rate's."),
+        **live_stamp,
+    })
+
+    # Per account, beside the combined figures. The combined row is POOLED over every counted
+    # trade, so it is weighted by trade count rather than being an average of the three rates.
+    out["accounts"] = book["accounts"]
+    out["combined_is_pooled"] = book["combined_is_pooled"]
 
     out["range"] = rng
     out["range_applied"] = True
