@@ -40,28 +40,79 @@ NONE = "none"
 
 STOP_TYPES = (BROKER_ORDER, DAILY_CLOSE, NONE)
 
-# The line Trade Analysis writes. Anchored on `EXIT: invalidation` because that is the only part
-# every row shares.
+# The line Trade Analysis writes. Anchored on `EXIT: invalidation` and NOT on a bare `EXIT:`.
+# Measured 2026-10-07: 36 rows contain "EXIT:" and only 34 contain "EXIT: invalidation" -- the two
+# extra are PROSE ("EXIT: open in the book for three days after the sale...", ids 404 and 406), so
+# the shorter marker would admit two sentences as structured lines.
 EXIT_LINE_MARKER = "EXIT: invalidation"
 
-_INVALIDATION = re.compile(r"EXIT:\s*invalidation\s+(.*?)(?=\s+·\s*time stop\b)", re.I | re.S)
-_TIME_STOP = re.compile(r"·\s*time stop\s+([^·—\n]+)", re.I)
-# `stop` ANYWHERE after the marker, but not the words `time stop`, which the negative lookbehind
-# excludes -- without it every row's `time stop` would be read as its stop type.
-_STOP = re.compile(r"(?<!time )\bstop\s+([^·;—\n]+)", re.I)
+# R-IV.695 (TA-089): Trade Analysis standardises field text on ASCII with U+00B7 as the SEPARATOR.
+# Existing rows keep their en dashes, em dashes and multiplication signs, so the parser splits on
+# the separator and treats each field's text as OPAQUE: it never matches a literal harvest string
+# to find a field, and never normalises a character inside one.
+FIELD_SEPARATOR = "\u00b7"
+
+# A notes column holds several blocks. The EXIT line ends at the next block break, and bounding it
+# is not optional: measured on the 34 live lines, 23 have a " || " tail and 1 has a " | " tail, so
+# an unbounded segment drags the following prose into the last field. (It did: the old parser's
+# `stop` capture ran on past "stop none" into "|| R-IV.600(a) context displaced out of the fixed
+# EXIT line: D5 sleeve position" and only survived because the vocabulary mapping read the first
+# word.) 10 lines run to the end of the notes, so an absent tail is normal, not an error.
+_BLOCK_SEPARATORS = (" || ", " | ")
+
+# Each field opens with its own label. Removing a KNOWN LEADING LABEL from a field already
+# identified by position is not the same act as searching the whole line for "time stop" to find
+# out where a field is -- the first reads a format, the second guesses at content. The old parser
+# did the second, which is why the phrase "time stop" occurring inside an invalidation would have
+# broken it.
+_FIELD_LABELS = (
+    ("invalidation", EXIT_LINE_MARKER),      # field 0: "EXIT: invalidation <text>"
+    ("time_stop", "time stop"),              # field 1: "time stop <text>"
+    ("stop_type", "stop"),                   # field 2: "stop <text>"
+)
 
 _ISO_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 
 
 def has_exit_line(notes: Optional[str]) -> bool:
+    """CONTAINMENT, not position. Measured: 30 of the 34 live lines do NOT begin the notes --
+    437's reads `... || TA-052 EXIT: invalidation ...` at offset 751 of 2,649 -- so a startswith
+    test, or a test on the start of a `||` block, misses almost all of them."""
     return EXIT_LINE_MARKER.lower() in (notes or "").lower()
 
 
-def _clean(value: Optional[str]) -> Optional[str]:
-    if value is None:
+def find_exit_segment(notes: Optional[str]) -> Optional[str]:
+    """The EXIT line's own text: found by containment, bounded at the next block break.
+
+    Returns None when there is no line. The segment still carries its field labels; nothing is
+    stripped here, because stripping before the split is what lets a separator inside prose move
+    a field.
+    """
+    text = notes or ""
+    k = text.lower().find(EXIT_LINE_MARKER.lower())
+    if k < 0:
         return None
-    out = value.strip().strip("·—-").strip()
-    return out or None
+    seg = text[k:]
+    for sep in _BLOCK_SEPARATORS:
+        cut = seg.find(sep)
+        if cut >= 0:
+            seg = seg[:cut]
+    return seg
+
+
+def _strip_label(field: str, label: str) -> Optional[str]:
+    """Remove a known LEADING label. The remainder is returned untouched -- no character is
+    stripped from it, so an em dash, an en dash or a multiplication sign inside the text survives
+    exactly as Trade Analysis wrote it (R-IV.695)."""
+    if field is None:
+        return None
+    f = field.strip()
+    if f.lower().startswith(label.lower()):
+        f = f[len(label):]
+    # Only whitespace comes off, and only at the edges. NOT `.strip("\u00b7\u2014-")`, which the
+    # old parser did and which silently deleted a trailing em dash from a field's own text.
+    f = f.strip()
+    return f or None
 
 
 def _stop_type_from(token: Optional[str]) -> Optional[str]:
@@ -69,8 +120,7 @@ def _stop_type_from(token: Optional[str]) -> Optional[str]:
 
     None is a real answer: a row whose line omits the stop has NOT declared one, and defaulting
     that to `none` would state that the principal chose to have no stop when nobody wrote it
-    down. The loss alert already treats an unknown broker stop as unknown rather than absent
-    (R-IV.526), and this keeps the two consistent.
+    down. Read from WITHIN an already-identified field, never used to find one.
     """
     if not token:
         return None
@@ -87,29 +137,30 @@ def _stop_type_from(token: Optional[str]) -> Optional[str]:
 def parse_exit_line(notes: Optional[str]) -> Dict[str, Any]:
     """The three fields, plus what could not be read. Never raises.
 
-    `unparsed` lists the parts the line did not yield, so a partial migration reports which rows
-    need a human rather than writing a confident NULL.
+    SPLIT ON U+00B7, FIELDS BY POSITION (R-IV.695, R-IV.696(b)). Measured on the 34 live lines:
+    every one carries exactly two separators in its bounded segment, so position 0 is the
+    invalidation, 1 the time stop and 2 the stop. A field the line does not carry is left EMPTY
+    and named in `unparsed` -- never guessed.
     """
     out: Dict[str, Any] = {"invalidation": None, "time_stop": None, "stop_type": None,
                            "unparsed": []}
-    text = notes or ""
-    if not has_exit_line(text):
+    seg = find_exit_segment(notes)
+    if seg is None:
         out["unparsed"].append("no EXIT line")
         return out
 
-    # The line runs from the marker to the end of that note segment.
-    start = text.lower().index(EXIT_LINE_MARKER.lower())
-    line = text[start:].split(" | ")[0]
+    fields = seg.split(FIELD_SEPARATOR)
 
-    m = _INVALIDATION.search(line)
-    if m:
-        out["invalidation"] = _clean(m.group(1))
+    # field 0 -- invalidation, opaque
+    inval = _strip_label(fields[0], EXIT_LINE_MARKER) if len(fields) > 0 else None
+    if inval:
+        out["invalidation"] = inval
     else:
         out["unparsed"].append("invalidation")
 
-    m = _TIME_STOP.search(line)
-    if m:
-        token = _clean(m.group(1))
+    # field 1 -- time stop. The ISO date is read from INSIDE the field.
+    if len(fields) > 1:
+        token = _strip_label(fields[1], "time stop")
         if token and token.lower().startswith("none"):
             out["time_stop"] = None
         else:
@@ -121,12 +172,13 @@ def parse_exit_line(notes: Optional[str]) -> Dict[str, Any]:
     else:
         out["unparsed"].append("time stop")
 
-    m = _STOP.search(line)
-    if m:
-        stop_type = _stop_type_from(m.group(1))
+    # field 2 -- stop type, from the declared vocabulary, read inside the field
+    if len(fields) > 2:
+        token = _strip_label(fields[2], "stop")
+        stop_type = _stop_type_from(token)
         out["stop_type"] = stop_type
         if stop_type is None:
-            out["unparsed"].append("stop=%r" % _clean(m.group(1)))
+            out["unparsed"].append("stop=%r" % token)
     else:
         out["unparsed"].append("stop")
 
