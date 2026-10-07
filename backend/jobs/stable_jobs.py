@@ -597,6 +597,62 @@ def _postclose_time_et():
     return (t.hour, t.minute)
 
 
+SPY_MINUTE_JOB = "spy_minute"
+_spy_minute_attempted_on: set = set()
+
+
+async def _maybe_capture_spy_minute(et) -> None:
+    """Persist today's 1-minute SPY once the session has closed (R-IV.680(b)). Never raises.
+
+    WHY POST-CLOSE AND ONCE. The bars are final after the close, so one capture a day is the whole
+    session; capturing during RTH would store a partial session that a later run would have to
+    know to replace. The vendor serves 1m for the trailing 30 days only, so a session missed here
+    is recoverable for about a month and then gone -- which is exactly why this exists rather than
+    relying on a read at analysis time.
+
+    Runs under `_run_job(..., session_date=day)`, so it carries the §5.1 liveness sentinel AND the
+    durable `job_runs` row that makes "did today's capture happen?" survive a restart. The
+    in-process `_spy_minute_attempted_on` set cannot do that on its own -- it is only here to stop
+    a second attempt inside one process life.
+    """
+    from jobs.job_runs import has_completed
+
+    day = et.date()
+    if day in _spy_minute_attempted_on:
+        return
+    try:
+        done = await has_completed(SPY_MINUTE_JOB, day)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[spy_minute] completion check failed: %s", exc)
+        done = None
+    if done is True:
+        _spy_minute_attempted_on.add(day)
+        return
+    _spy_minute_attempted_on.add(day)
+
+    async def _run():
+        from datetime import timedelta as _td
+
+        from database.postgres_client import get_postgres_client
+        from jobs.spy_minute_sink import PROV_YFINANCE, fetch_1m, persist_bars
+
+        # `end` is EXCLUSIVE at the vendor, so today needs tomorrow as the bound.
+        bars, skip = await fetch_1m("SPY", day, day + _td(days=1), auto_adjust=False)
+        if skip:
+            raise OutputCheckFailed("spy_minute: %s" % skip)
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            res = await persist_bars(conn, bars, provenance=PROV_YFINANCE)
+        if res.get("skipped"):
+            # A skip is a COMPLETED PASS THAT PRODUCED NOTHING, which R-IV.426(b) records as a
+            # defective completion rather than as either a success or a crash.
+            raise OutputCheckFailed("spy_minute: %s" % res["skip_reason"])
+        logger.info("[spy_minute] %s: %d bars stored", day, res["written"])
+        return res
+
+    await _run_job(SPY_MINUTE_JOB, _run, session_date=day)
+
+
 async def _maybe_run_expiry_sweep_postclose(et) -> None:
     """Never raises. Ends today's expiries, now that today's session has closed."""
     from jobs.job_runs import has_completed
@@ -787,6 +843,11 @@ async def stable_engine_loop():
                     _traded = _traded_day(et.date())
                     if _traded is True:
                         await _maybe_run_expiry_sweep_postclose(et)
+                        # R-IV.680(b): the day's 1-minute SPY, on the same post-close gate and
+                        # the same trading-day test. Ordered after the sweep deliberately -- the
+                        # sweep moves the book, this only records a vendor series, so if one of
+                        # the two has to be late it is this one.
+                        await _maybe_capture_spy_minute(et)
                     elif _traded is None and et.date() not in _postclose_attempted_on:
                         _postclose_attempted_on.add(et.date())
                         logger.error("[expiry_sweep_postclose] market calendar cannot answer "

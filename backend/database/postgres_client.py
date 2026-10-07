@@ -2037,6 +2037,33 @@ async def init_database():
 
         # Balance snapshots — daily EOD photo of each account for PnL tracking
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS spy_minute_bars (
+                -- R-IV.680(b). Side-measure 3 prices SPY at the finest bar at or before each
+                -- fire minute, and the vendor serves 1m for the TRAILING 30 DAYS ONLY -- so the
+                -- lens's own inputs expire. This is the system of record; a capture file in one
+                -- lane's working directory is evidence, not a record the grader can read.
+                bar_at TIMESTAMPTZ PRIMARY KEY,
+                -- the ET session the bar belongs to, from zoneinfo and never a fixed offset.
+                session_date DATE NOT NULL,
+                -- NUMERIC(18,8), wide enough to hold the vendor's value FAITHFULLY. A
+                -- NUMERIC(12,4) would silently truncate 770.0900268554688, which is changing a
+                -- recorded price to make it fit a column.
+                open NUMERIC(18,8),
+                high NUMERIC(18,8),
+                low NUMERIC(18,8),
+                close NUMERIC(18,8),
+                volume BIGINT,
+                -- ON EVERY ROW, not only the ones needing an excuse: which vendor and basis
+                -- produced it, or `ferry:<sha256>` naming the capture it was verified against.
+                provenance TEXT NOT NULL,
+                fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_spy_minute_bars_session
+            ON spy_minute_bars(session_date, bar_at)
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS market_tide_history (
                 -- R-IV.675(b). KEYED BY UW'S OWN TICK TIMESTAMP, not the hub's fetch time:
                 -- each call returns the session's series so far, so the whole series is
