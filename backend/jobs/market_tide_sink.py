@@ -62,9 +62,18 @@ SKIP = (SKIP_PAUSED, SKIP_NO_PAYLOAD, SKIP_MALFORMED, SKIP_NO_ROWS,
 # ── §5.3 · field liveness, DECLARED ────────────────────────────────────────────────────────
 # Measured on 2026-10-05 and 2026-10-06: 81 readings per complete session at a 300 s interval,
 # every one carrying all three fields. A full session below the floor is a defect, not noise.
+#
+# CORRECTED after the 66-session backfill, because the first declaration was not quite true.
+# 09:30 -> 16:10 ET is 81 ticks and is the usual shape, but the vendor also emits a **16:15 ET
+# tick on some sessions** -- 19 of the 66 backfilled, so 82 rows there. The row count is
+# therefore a RANGE, declared as one. It changed no behaviour (the HALT is on field rates, and
+# `min_rows_for_a_complete_session` already admitted both), but a declaration that quietly
+# disagrees with the data is the defect §5.3 exists to prevent, so it is fixed rather than left
+# to be rediscovered. 5,365 rows over 66 sessions: zero nulls in any declared field.
 FIELD_LIVENESS: Dict[str, Any] = {
     "expected_interval_s": 300,
-    "expected_rows_per_complete_session": 81,
+    "expected_rows_per_complete_session": (81, 82),
+    "rows_note": "09:30-16:10 ET is 81 ticks; a 16:15 ET tick appears on some sessions (19/66)",
     "min_rows_for_a_complete_session": 70,
     "fields": {
         # field -> the satisfaction rate a complete session must clear
