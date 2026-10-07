@@ -229,7 +229,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
         funding_result = await coinalyze_client.get_funding_rate(symbol)
         state, val, as_of, stale = _result_to_state(funding_result, "coinalyze", "funding_rate")
         cells.append(_make_cell(
-            "perp_funding", "CAPITULATION", val, state, "coinalyze", as_of, stale,
+            "perp_funding", "CAPITULATION", val, state, funding_result.get("source") or "coinalyze", as_of, stale,
             reason=funding_result.get("reason"),
             sentiment=funding_result.get("sentiment"),
             signal=_directed_cap_signal("perp_funding", funding_result, config),
@@ -255,7 +255,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
         term_result = await coinalyze_client.get_term_structure(symbol)
         state, val, as_of, stale = _result_to_state(term_result, "coinalyze", "current_funding")
         cells.append(_make_cell(
-            "term_structure", "CAPITULATION", term_result.get("structure"), state, "coinalyze", as_of, stale,
+            "term_structure", "CAPITULATION", term_result.get("structure"), state, term_result.get("source") or "coinalyze", as_of, stale,
             reason=term_result.get("reason"),
             funding_trend=term_result.get("funding_trend"),
             signal=_directed_cap_signal("term_structure", term_result, config),
@@ -264,17 +264,35 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     except Exception as exc:
         cells.append(_make_cell("term_structure", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
 
-    # 6. Open interest (Coinalyze)
+    # 6. Open interest (Coinalyze primary; units unverified R-IV.725)
     try:
         oi_result = await coinalyze_client.get_open_interest(symbol)
+        oi_src = oi_result.get("source") or "coinalyze"
         state, val, as_of, stale = _result_to_state(oi_result, "coinalyze", "current_oi")
-        cells.append(_make_cell(
-            "open_interest", "CAPITULATION", val, state, "coinalyze", as_of, stale,
-            reason=oi_result.get("reason"),
-            divergence=oi_result.get("divergence"),
-            signal=_directed_cap_signal("open_interest", oi_result, config),
-            vendor_signal=oi_result.get("signal"),
-        ))
+        if oi_src in ("okx", "okx_fallback"):
+            cells.append(_make_cell(
+                "open_interest", "CAPITULATION", val, "NA", oi_src, as_of, False,
+                reason="OKX_FALLBACK_UNSCORED",
+                divergence=oi_result.get("divergence"),
+                signal="NEUTRAL",
+                vendor_signal=oi_result.get("signal"),
+            ))
+        elif oi_src == "coinalyze":
+            cells.append(_make_cell(
+                "open_interest", "CAPITULATION", val, "NA", oi_src, as_of, False,
+                reason="COINALYZE_UNITS_UNVERIFIED",
+                divergence=oi_result.get("divergence"),
+                signal="NEUTRAL",
+                vendor_signal=oi_result.get("signal"),
+            ))
+        else:
+            cells.append(_make_cell(
+                "open_interest", "CAPITULATION", val, state, oi_src, as_of, stale,
+                reason=oi_result.get("reason"),
+                divergence=oi_result.get("divergence"),
+                signal=_directed_cap_signal("open_interest", oi_result, config),
+                vendor_signal=oi_result.get("signal"),
+            ))
     except Exception as exc:
         cells.append(_make_cell("open_interest", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
 
@@ -299,6 +317,15 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
                 vendor_signal=liq_result.get("signal"),
                 window_start=liq_result.get("window_start"),
                 window_end=liq_result.get("window_end"),
+            ))
+        elif vendor_src == "coinalyze":
+            cells.append(_make_cell(
+                "liquidations", "CAPITULATION", val, "NA", vendor_src, as_of, False,
+                reason="COINALYZE_UNITS_UNVERIFIED",
+                composition=liq_result.get("composition"),
+                long_pct=liq_result.get("long_pct"),
+                signal="NEUTRAL",
+                vendor_signal=liq_result.get("signal"),
             ))
         else:
             cells.append(_make_cell(
@@ -414,7 +441,7 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
         threshold = froth_cfg.get("funding_blowout_pct", 0.05)
         is_froth = (isinstance(val, (int, float)) and val > threshold)
         cells.append(_make_cell(
-            "funding_blowout", "FROTH", val, state, "coinalyze", as_of, stale,
+            "funding_blowout", "FROTH", val, state, funding_result.get("source") or "coinalyze", as_of, stale,
             reason=funding_result.get("reason"),
             threshold=threshold,
             firing=is_froth,
@@ -426,16 +453,34 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
     # F4. OI extreme (large OI increase = crowding = FROTH)
     try:
         oi_result = await coinalyze_client.get_open_interest(symbol)
+        oi_src = oi_result.get("source") or "coinalyze"
         state, val, as_of, stale = _result_to_state(oi_result, "coinalyze", "oi_change_4h")
         threshold = froth_cfg.get("oi_extreme_change_pct", 5.0)
         is_froth = (isinstance(val, (int, float)) and val > threshold)
-        cells.append(_make_cell(
-            "oi_extreme", "FROTH", val, state, "coinalyze", as_of, stale,
-            reason=oi_result.get("reason"),
-            threshold=threshold,
-            firing=is_froth,
-            signal="FIRING" if (is_froth and state == "LIVE") else ("NA" if state == "NA" else "NEUTRAL"),
-        ))
+        if oi_src in ("okx", "okx_fallback"):
+            cells.append(_make_cell(
+                "oi_extreme", "FROTH", val, "NA", oi_src, as_of, False,
+                reason="OKX_FALLBACK_UNSCORED",
+                threshold=threshold,
+                firing=False,
+                signal="NEUTRAL",
+            ))
+        elif oi_src == "coinalyze":
+            cells.append(_make_cell(
+                "oi_extreme", "FROTH", val, "NA", oi_src, as_of, False,
+                reason="COINALYZE_UNITS_UNVERIFIED",
+                threshold=threshold,
+                firing=False,
+                signal="NEUTRAL",
+            ))
+        else:
+            cells.append(_make_cell(
+                "oi_extreme", "FROTH", val, state, oi_src, as_of, stale,
+                reason=oi_result.get("reason"),
+                threshold=threshold,
+                firing=is_froth,
+                signal="FIRING" if (is_froth and state == "LIVE") else ("NA" if state == "NA" else "NEUTRAL"),
+            ))
     except Exception as exc:
         cells.append(_make_cell("oi_extreme", "FROTH", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
 

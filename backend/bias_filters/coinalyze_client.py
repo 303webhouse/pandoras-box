@@ -60,6 +60,21 @@ OKX_CTVAL_CACHE_TTL = 3600
 _cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SECONDS = 300  # 5 minutes
 
+# Coinalyze history from/to are UNIX seconds (R-IV.722(c), R-IV.725).
+# convert_to_usd is sent explicitly. Docs default is "false" (coin units).
+# Hub consumes OI and liquidations as USD, so requests ask for "true".
+# R-IV.724(b) has not settled units; Coinalyze-sourced OI/liq do not score.
+_COINALYZE_CONVERT_TO_USD = "true"
+
+
+def _unix_seconds(dt: datetime) -> int:
+    return int(dt.timestamp())
+
+
+def _history_range_seconds(hours: int) -> tuple[int, int]:
+    now = datetime.now(timezone.utc)
+    return _unix_seconds(now - timedelta(hours=hours)), _unix_seconds(now)
+
 # R-IV.658(c)1: 40 calls / minute / key, shared by every hub caller.
 # A 429 used to `asyncio.sleep(60)` inside the request path — that is how a
 # page poll waits out a vendor. Over budget we refuse immediately.
@@ -359,15 +374,14 @@ async def get_open_interest(symbol: str = "BTC") -> Dict[str, Any]:
     # OI snapshot key is per-symbol to prevent cross-symbol cache poisoning
     okx_snapshot_key = f"okx_oi_snapshot:{symbol}"
 
-    now = datetime.now(timezone.utc)
-    from_ts = int((now - timedelta(hours=6)).timestamp() * 1000)
-    to_ts = int(now.timestamp() * 1000)
+    from_ts, to_ts = _history_range_seconds(6)
 
     data = await _make_request("/open-interest-history", {
         "symbols": perp_sym,
         "interval": "1hour",
         "from": from_ts,
         "to": to_ts,
+        "convert_to_usd": _COINALYZE_CONVERT_TO_USD,
     })
 
     if not data or not isinstance(data, list) or len(data) == 0:
@@ -611,15 +625,14 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
 
     okx_swap = _OKX_SWAP_INSTID.get(symbol)
 
-    now = datetime.now(timezone.utc)
-    from_ts = int((now - timedelta(hours=2)).timestamp() * 1000)
-    to_ts = int(now.timestamp() * 1000)
+    from_ts, to_ts = _history_range_seconds(2)
 
     data = await _make_request("/liquidation-history", {
         "symbols": perp_sym,
         "interval": "1hour",
         "from": from_ts,
         "to": to_ts,
+        "convert_to_usd": _COINALYZE_CONVERT_TO_USD,
     })
 
     if not data or not isinstance(data, list) or len(data) == 0:
@@ -786,15 +799,14 @@ async def get_term_structure(symbol: str = "BTC") -> Dict[str, Any]:
 
     okx_swap = _OKX_SWAP_INSTID.get(symbol)
 
-    now = datetime.now(timezone.utc)
-    from_ts = int((now - timedelta(hours=24)).timestamp() * 1000)
-    to_ts = int(now.timestamp() * 1000)
+    from_ts, to_ts = _history_range_seconds(24)
 
     data = await _make_request("/funding-rate-history", {
         "symbols": perp_sym,
         "interval": "6hour",
         "from": from_ts,
         "to": to_ts,
+        "convert_to_usd": _COINALYZE_CONVERT_TO_USD,
     })
 
     if not data or not isinstance(data, list) or len(data) == 0:
@@ -966,9 +978,7 @@ async def get_long_short_ratio(symbol: str = "BTC") -> Dict[str, Any]:
     if cached:
         return cached
 
-    now = datetime.now(timezone.utc)
-    from_ts = int((now - timedelta(hours=3)).timestamp())
-    to_ts = int(now.timestamp())
+    from_ts, to_ts = _history_range_seconds(3)
     data = await _make_request("/long-short-ratio-history", {
         "symbols": perp_sym,
         "interval": "1hour",
@@ -992,7 +1002,7 @@ async def get_long_short_ratio(symbol: str = "BTC") -> Dict[str, Any]:
     last = rows[-1] if isinstance(rows[-1], dict) else {}
     ratio = _to_float(last.get("r"))
     t_raw = last.get("t")
-    as_of = now
+    as_of = datetime.now(timezone.utc)
     if isinstance(t_raw, (int, float)) and t_raw > 0:
         ts = t_raw / 1000.0 if t_raw > 10_000_000_000 else float(t_raw)
         try:
