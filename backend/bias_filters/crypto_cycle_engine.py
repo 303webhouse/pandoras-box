@@ -290,7 +290,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
         if vendor_src in ("okx", "okx_fallback"):
             cells.append(_make_cell(
                 "liquidations", "CAPITULATION",
-                liq_result.get("total_liquidations"), "NA", "okx",
+                liq_result.get("total_liquidations"), "NA", vendor_src,
                 liq_result.get("timestamp") or as_of, False,
                 reason="OKX_FALLBACK_UNSCORED",
                 composition=liq_result.get("composition"),
@@ -302,7 +302,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             ))
         else:
             cells.append(_make_cell(
-                "liquidations", "CAPITULATION", val, state, "coinalyze", as_of, stale,
+                "liquidations", "CAPITULATION", val, state, vendor_src, as_of, stale,
                 reason=liq_result.get("reason"),
                 composition=liq_result.get("composition"),
                 long_pct=liq_result.get("long_pct"),

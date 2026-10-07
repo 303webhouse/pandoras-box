@@ -192,6 +192,84 @@ def test_okx_liq_cell_does_not_move_composite():
     assert a[4] == b[4]
 
 
+@pytest.mark.asyncio
+async def test_liq_cell_source_follows_vendor_result(monkeypatch):
+    """R-IV.718: the cell source is get_liquidations' source, not a literal."""
+    from datetime import datetime, timezone, timedelta
+    from bias_filters import crypto_cycle_engine as eng
+
+    now = datetime.now(timezone.utc).isoformat()
+    na = {"state": "NA", "reason": "t", "signal": "UNKNOWN", "timestamp": now}
+
+    async def _liq(*a, **k):
+        return {
+            "total_liquidations": 1.0,
+            "long_pct": 50.0,
+            "composition": "balanced",
+            "signal": "NEUTRAL",
+            "source": "okx_fallback",
+            "timestamp": now,
+            "window_start": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
+            "window_end": now,
+        }
+
+    async def _na(*a, **k):
+        return dict(na)
+
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_liquidations", _liq)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_funding_rate", _na)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_term_structure", _na)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_open_interest", _na)
+    monkeypatch.setattr("bias_filters.deribit_client.get_25_delta_skew", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_quarterly_basis", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_spot_orderbook_skew", _na)
+    monkeypatch.setattr("bias_filters.defillama_client.get_stablecoin_aprs", _na)
+    monkeypatch.setattr("bias_filters.btc_bottom_signals._fetch_vix_signal", _na)
+
+    cells = await eng._build_capitulation_cells("BTC", {"capitulation": {}, "staleness_thresholds": {}})
+    liq = next(c for c in cells if c["signal_id"] == "liquidations")
+    assert liq["source"] == "okx_fallback"
+    assert liq["state"] == "NA"
+    assert liq["reason"] == "OKX_FALLBACK_UNSCORED"
+
+
+@pytest.mark.asyncio
+async def test_liq_cell_source_coinalyze_when_primary_answers(monkeypatch):
+    from datetime import datetime, timezone
+    from bias_filters import crypto_cycle_engine as eng
+
+    now = datetime.now(timezone.utc).isoformat()
+    na = {"state": "NA", "reason": "t", "signal": "UNKNOWN", "timestamp": now}
+
+    async def _liq(*a, **k):
+        return {
+            "total_liquidations": 300.0,
+            "long_pct": 50.0,
+            "composition": "balanced",
+            "signal": "NEUTRAL",
+            "source": "coinalyze",
+            "timestamp": now,
+        }
+
+    async def _na(*a, **k):
+        return dict(na)
+
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_liquidations", _liq)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_funding_rate", _na)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_term_structure", _na)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_open_interest", _na)
+    monkeypatch.setattr("bias_filters.deribit_client.get_25_delta_skew", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_quarterly_basis", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_spot_orderbook_skew", _na)
+    monkeypatch.setattr("bias_filters.defillama_client.get_stablecoin_aprs", _na)
+    monkeypatch.setattr("bias_filters.btc_bottom_signals._fetch_vix_signal", _na)
+
+    cells = await eng._build_capitulation_cells("BTC", {"capitulation": {}, "staleness_thresholds": {}})
+    liq = next(c for c in cells if c["signal_id"] == "liquidations")
+    assert liq["source"] == "coinalyze"
+    assert liq["state"] == "LIVE"
+
+
 def test_btc_okx_fallback_cell_does_not_move_composite():
     """R-IV.715: a BTC OKX fallback cell is NA and does not move the composite."""
     froth = [{"state": "LIVE", "signal_id": "funding_blowout", "column": "FROTH", "firing": True}]

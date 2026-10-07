@@ -1,7 +1,7 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-07 12:04 MDT (2026-10-07 18:04 UTC)
-**Worked against:** `origin/main` = `2fd0f9d`
+**Written:** 2026-10-07 12:52 MDT (2026-10-07 18:52 UTC)
+**Worked against:** `origin/main` = `a16e697`
 **Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r707-liq`.
 **Hub at read time:** not re-timed this turn.
 
@@ -21,31 +21,30 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.715 — in flight, not merged
-Gap against R-IV.707(d): BTC's OKX path kept source `okx_fallback` and still entered the
-scoring branch. This turn: that cell goes through the same NA / `OKX_FALLBACK_UNSCORED`
-branch (`vendor_src in ("okx", "okx_fallback")`). BTC's Coinalyze `/liquidation-history`
-request and its Coinalyze output stay as-written. BTC's OKX request is still `uly=BTC-USDT`
-and `sz × 0.01 × bkPx` (no instruments call).
+## R-IV.718 — in flight, merge held
+The liquidations cell source is now `vendor_src` from `get_liquidations()`, not a
+`"coinalyze"` / `"okx"` literal. Funding, OI, and term-structure cells still pass a
+literal `"coinalyze"` while those results carry their own source; listed in the
+R-IV.718 reply, not changed.
 
-`crypto_cycle_log` 2026-07-17 → 10-07: **0** of 2,153 BTC liquidations cells were
-OKX-sourced (all 2,153 source `coinalyze`, LIVE). This change does not rewrite a
-recorded cell.
+`crypto_cycle_log` stores no field that distinguishes OKX-served liquidations from
+Coinalyze ones (`parsed_rows` / windows were never copied onto the cell). No recount.
 
-Recorded, not changed: `$5M` and 75% are hardcoded in `coinalyze_client.py` while the
-seed config holds the same values. Taken up with the per-symbol threshold question.
+Timestamps not touched. Waiting on BUILD's seconds probe (R-IV.717(c)).
+
+**2edd801 stays unmerged.** Taking BTC's OKX fallback out of scoring would change
+BTC's dial while Coinalyze `/liquidation-history` still returns `[]`.
 
 **Alt cells have not gone LIVE.** When they first do, record that date here.
 
-Coinalyze raw bodies for non-BTC `/liquidation-history` are BUILD's (R-IV.714(b)).
-
-## R-IV.707 — accepted, plus the 715 gap
-Composition is the `$5M` size gate. Primary isn't symbol format or timestamps. Non-BTC
-OKX: `instFamily`, instruments `ctVal`, source `okx`, NA, LIVE-only fence at 462–463.
+## R-IV.715 / R-IV.707
+715's "0 of 2,153 OKX-sourced" counted the literal. BUILD's R-IV.714(b) calls got
+HTTP 200 `[]` from Coinalyze for BTC too. Composition `$5M` gate stands. Non-BTC
+OKX request+units stand. Seed vs hardcoded `$5M`/75% recorded, not changed.
 
 ## R-IV.700 — merged
 Cycle remap + strategy engine off fapi + HYPE history skip is on `main` (`eff4077`).
-BUILD re-timed HYPE: 1.873 s → 0.701 s cold. Spot stays.
+Spot stays.
 
 ## Robinhood
 US perps announced for "the coming months", not live, no keyless feed. Charter
@@ -54,12 +53,11 @@ forbids holding the principal's trading key.
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r707-liq` | Pushed. Wait for SPINE. | No — BUILD merges after SPINE rules. |
+| `claude/stater-r707-liq` | Pushed. Merge held. | No — nothing merges until SPINE rules after BUILD's probe. |
 | `claude/stater-r700-queue` | Merged (`eff4077`). | Done. |
 | `claude/stater-r692-cache` | Cache 4 s → 8 s. | BUILD accepted (R-IV.699). |
 
 ## What the next CC-STATER session should do first
-Wait for SPINE's ruling on R-IV.715. Do not merge. Do not change composition or the
-hardcoded `$5M`/75% (recorded). Do not change BTC's Coinalyze request. Do not skip
-HYPE Binance spot. Do not rebuild the Binance VPN. When alt liquidations first go
-LIVE, date it in this file.
+Hold the merge. Do not touch timestamps. Wait for BUILD's seconds probe and SPINE's
+ruling. Do not skip HYPE Binance spot. Do not rebuild the Binance VPN. When alt
+liquidations first go LIVE, date it in this file.
