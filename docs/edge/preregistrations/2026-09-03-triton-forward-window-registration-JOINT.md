@@ -50,6 +50,15 @@
 
 **Executes only on a passing window (C3 AND C4 pass, P1/P2 unbreached).** On RETIRE, the holdout stays sealed — it retains option value for any future re-founding and is worth nothing spent on a dead premise. **One read, ever:** CC-QUERY executes the registered text verbatim; no exploratory cuts on holdout rows before, during, or after. Reading governed by the holdout registration §6 — single-regime caveat on the artifact face; not-a-kill, not-a-rescue.
 
+**EXPOSURE OF RECORD — READ THIS BEFORE (v) IS EVER EXECUTED (R-IV.678(a), R-IV.680(a)).** The
+sealed set has been breached **twice**, on 2026-09-02 by a `graded_at`-only sweep and on
+2026-10-06 by a date-only wall in CC-QUERY's R-IV.664 side quest. The statement of record is
+filed on the face of `docs/edge/preregistrations/triton-holdout-registration-2026-09-01.md`,
+above its §1. **Its operative consequence for this criterion: (v)'s text is unchanged, but if it
+ever executes, its face carries that statement IN PLACE OF the firewall attestation** — the
+attestation can no longer be made truthfully. The set remains sealed for the hypotheses that
+report did not examine: market tide, dark pool, and side-measure 5 taken whole.
+
 **Final clauses and numbers: §8.6, authored blind by EDGE.** The base draft's proposed shape (51% point threshold) is **superseded** — at n = 828 it could not distinguish itself from 50% and did not deliver its own stated intent. §8.6's refutation form does, and its mandatory face statement rides every (v) result verbatim.
 
 ## §6 · VERDICT SEMANTICS — declared now

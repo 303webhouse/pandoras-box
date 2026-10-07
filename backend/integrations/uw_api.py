@@ -1240,6 +1240,18 @@ async def get_market_tide() -> Optional[Dict[str, Any]]:
     return data
 
 
+async def get_market_tide_for_date(session: str) -> Optional[Dict[str, Any]]:
+    """The whole market-tide series for ONE past session (R-IV.675(c)).
+
+    Measured 2026-10-06: `?date=YYYY-MM-DD` serves past sessions, 81 rows at a 300 s interval,
+    so a backfill costs ONE CALL PER SESSION. Deliberately NOT cached: the live reader's cache is
+    keyed on "market" alone, and writing a dated series into it would serve yesterday's tide as
+    today's -- the wrong-asset fault in a different costume.
+    """
+    return await _uw_request("/api/market/market-tide", params={"date": session},
+                             caller="market_tide_backfill")
+
+
 async def get_darkpool_recent() -> Optional[List[Dict[str, Any]]]:
     """Fetch recent dark pool prints."""
     cached = await cache_get("darkpool", "recent")

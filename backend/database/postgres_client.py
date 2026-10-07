@@ -2037,6 +2037,30 @@ async def init_database():
 
         # Balance snapshots — daily EOD photo of each account for PnL tracking
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS market_tide_history (
+                -- R-IV.675(b). KEYED BY UW'S OWN TICK TIMESTAMP, not the hub's fetch time:
+                -- each call returns the session's series so far, so the whole series is
+                -- upserted every poll and a re-read of a session converges on the same rows.
+                -- A key built from `fetched_at` would mint 81 duplicates an hour instead.
+                tick_at TIMESTAMPTZ PRIMARY KEY,
+                -- UW's own `date`, kept as sent rather than derived from `tick_at`: a 16:10 ET
+                -- tick derived in UTC lands on the following day.
+                session_date DATE,
+                -- NUMERIC, NOT float. The vendor sends these as STRINGS ("20650902.0000") and
+                -- this is the only point the exact value still exists to cast from.
+                net_call_premium NUMERIC(20,4),
+                net_put_premium NUMERIC(20,4),
+                net_volume BIGINT,
+                fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                -- which instrument wrote it: the live 5-minute warmer or a dated backfill.
+                source TEXT NOT NULL
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_market_tide_history_session
+            ON market_tide_history(session_date, tick_at)
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS balance_snapshots (
                 id SERIAL PRIMARY KEY,
                 snapshot_date DATE NOT NULL,
