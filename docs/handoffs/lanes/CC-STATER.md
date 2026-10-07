@@ -1,9 +1,9 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-06 14:05 MDT (20:05 UTC)
-**Worked against:** `origin/main` = `ac885f4` (docs(relay): CC-BUILD to CC-STATER — routing merged…)
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-perps` (cut from `origin/main` `ac885f4`).
-**Hub at read time:** prod `2b5150e` (routing merge `ffcc6e9` is an ancestor), `status: healthy`, process started 17:47:20 UTC. Proxy flag false.
+**Written:** 2026-10-06 18:30 MDT (2026-10-07 00:30 UTC)
+**Worked against:** `origin/main` = `bf0da4e` (Merge pull request #51 … accounts-live)
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-r684-matrix` (cut from `origin/main` `bf0da4e`).
+**Hub at read time:** prod `bf0da4e` (perps merge `30adbd3` is an ancestor), `status: healthy`, process started 23:03:36 UTC. Proxy flag false.
 
 ## Why this lane exists
 SPINE chartered CC-STATER (R-IV.618) to own Stater Swap, the hub's crypto surface.
@@ -21,43 +21,54 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.663(a) — 658 accepted
-Perps work was held uncommitted rather than riding the routing merge. Coinalyze refuses over
-budget instead of sleeping. Hyperliquid weights are capped. New fields carry venue and age and
-null past Phase 0 TTLs. Basis does not call `fapi.binance.com`. The matrix was dated from
-Railway, with `predictedFundings` marked UNVERIFIED. Robinhood is noted below.
+## R-IV.684 — perps live; matrix dated
+BUILD merged `claude/stater-perps` as `30adbd3`. This session verified `predictedFundings`
+from the hub and replaced UNVERIFIED in the vendor matrix.
 
-## (b) Re-time, production, 2026-10-06 20:02 UTC (14:02 MDT)
+Hub `GET /crypto/market` 2026-10-07 00:28 UTC (18:28 MDT), all six coins:
 
-| Endpoint | HTTP | elapsed | vs 16:53 UTC |
-|---|---|---|---|
-| `/crypto/market?symbol=BTC` | 200 | **0.515 s** | was 8.10 s |
-| `/crypto/state/BTC` | 200 | **1.76 s** | was 11.79 s |
+| Coin | BinPerp | BybitPerp | HlPerp | envelopes | cold s | warm s |
+|---|---|---|---|---|---|---|
+| BTC ETH SOL ZEC FARTCOIN | present, `hyperliquid:BinPerp` | present, `hyperliquid:BybitPerp` | present | 10 each | 0.57–0.66 | 0.06–0.08 |
+| HYPE | **null** | **null** | present | 10 | 0.62 | 0.08 |
 
-`prices.perps.source=okx`, `binance_perp_proxy_enabled=false`, binance perp null, no `derivatives`
-key yet (this branch is not on prod). Matches BUILD's 0.22–0.56 s market range.
+Ten venue+age envelopes per coin (60 across six). `ttl_s=900`, not stale. Proxy false.
 
-## (c) OKX correction
-`pick()` prefers a fresh non-OKX reading. If only OKX is answering, it keeps that reading
-labelled `venue=okx`. Basis does the same: Hyperliquid mark first, then OKX swap, never fapi.
-A field with no other source *configured* is still the thing that's ruled out.
+## Cold `/crypto/market` (HYPE 1.873 s in BUILD's read)
+The new pack runs on every 4 s cache miss: two Hyperliquid POSTs (shared 120 s) plus four
+Coinalyze GETs per coin (funding, OI, liquidation-history, long/short-history; 300 s cache),
+gathered under a 4 s budget, in parallel with the venue fan-out. HYPE is the thin Coinalyze
+aggregate (`HYPEUSDT_PERP.A` only); those two history endpoints are the extra wait.
+HYPE also still asks Binance spot. Warm reads after those caches hit are ~0.06–0.08 s.
 
-## (d) Branch
-| Branch | State | Ready for BUILD? |
-|---|---|---|
-| `claude/stater-perps` | Cut from `ac885f4`. US-serving perps + (c). | **Yes. Merge this.** |
-| `claude/stater-routing` | Merged (`ffcc6e9`). | Done. |
+Legacy Agora polls one symbol every **5 s** (`frontend/app.js` `CRYPTO_MARKET_POLL_MS`),
+which is longer than the 4 s response cache, so that poll almost always misses it. Stater
+fans out all six every 30 s (`frontend/stater.js` `POLL_MS`). 1.873 s is under 5 s.
 
-Hyperliquid `predictedFundings` from Railway is still UNVERIFIED until this branch is live.
-Next session: after prod SHA includes this commit, read `/crypto/market` `derivatives.predicted_by_venue` and date the matrix cell.
+## Agora last-good crypto price — file and lines
+Not `v2.js` (no crypto price poll; the "last good map" at `v2.js:2135` is book exits).
+Not a last-good *price* map on Stater (`stater.js` polls `/crypto/market` × 6 and keeps
+`_last` for the drawer only).
+
+**Legacy Agora `frontend/app.js`:**
+- `480–482` — `cryptoMarketData`, `cryptoMarketLastGood`
+- `487` — `CRYPTO_MARKET_POLL_MS = 5 * 1000`
+- `1473–1481` — start the 5 s poll when the crypto view is visible
+- `5053–5083` — `loadCryptoMarketData`; on fetch fail, re-render the last snapshot
+- `5106–5120` — `rememberNumber` / remember into `cryptoMarketLastGood`
+- `5177–5182` — render from `cryptoMarketLastGood` when the live field is missing
 
 ## Robinhood
-US perps are announced for "the coming months", not live, with no market-data feed announced.
-Their API would mean holding the principal's trading key, which this charter forbids.
-**Revisit only if Robinhood publishes a feed that needs no account key.**
+US perps announced for "the coming months", not live, no keyless feed. Charter forbids
+holding the principal's trading key. Revisit only if Robinhood publishes a feed that
+needs no account key.
+
+## Branch
+| Branch | State | Ready for BUILD? |
+|---|---|---|
+| `claude/stater-r684-matrix` | Matrix + this file. `predictedFundings` dated from Railway. | **Yes. Merge this** (docs/config only). |
+| `claude/stater-perps` | Merged (`30adbd3`). | Done. |
 
 ## What the next CC-STATER session should do first
-1. Confirm BUILD merged `claude/stater-perps` and prod SHA moved.
-2. From the hub, verify Hyperliquid `predictedFundings` (Binance/Bybit) and update the matrix
-   from UNVERIFIED to a dated Railway reading.
-3. Re-time `/crypto/market` and `/crypto/state/BTC` with the perps pack live (4 s budget).
+Nothing blocking. If asked: the 4 s `/market` cache vs the 5 s legacy poll, or HYPE's
+thin Coinalyze history calls.
