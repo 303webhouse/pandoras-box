@@ -1,14 +1,15 @@
 """Stater Phase 0, item 3 (R-IV.619) — /api/crypto/market keeps each coin's state separate.
 
 The response cache, the last-good fallbacks and the CVD trend state were one
-global each. Stater polls six coins in parallel, so within 4 s a caller asking
-for BTC could be handed HYPE's snapshot, and a failed HYPE feed was "filled" with
-BTC's last price. The page also sent bare "BTC", which every venue rejects.
+global each. Stater polls six coins in parallel, so within the response-cache
+window a caller asking for BTC could be handed HYPE's snapshot, and a failed
+HYPE feed was "filled" with BTC's last price. The page also sent bare "BTC",
+which every venue rejects.
 
 Load-bearing assertions (positive controls in the same run, #30):
   * a coin whose feeds fail gets NO price -- never another coin's -- while the
     same coin's own last-good fallback still works;
-  * the 4 s cache serves a coin only its own snapshot;
+  * the response cache serves a coin only its own snapshot;
   * 'BTC', 'BTC-USD', 'BTCUSDT' and 'btc' all reach the venues as BTCUSDT;
   * BTC's response keeps the exact key shape Agora and the Discord bot read.
 """
@@ -143,7 +144,7 @@ def test_failed_coin_never_borrows_another_coins_price_but_keeps_its_own_fallbac
 
 def test_cache_serves_each_coin_only_its_own_snapshot():
     btc = _snap("BTC")
-    hype = _snap("HYPE")                                      # within the 4 s window
+    hype = _snap("HYPE")                                      # within the response-cache window
     assert hype is not btc and hype["prices"]["coinbase_spot"] == 31.5
     # Positive control: a repeat BTC call inside the window IS the cached object.
     assert _snap("BTC") is btc
@@ -154,6 +155,11 @@ def test_bare_btc_queries_venues_with_btcusdt():
     binance = [p for u, p in FakeVenues.seen if "ticker/price" in u]
     assert binance and all(p.get("symbol") == "BTCUSDT" for p in binance)
     assert any("/v2/prices/BTC-USD/spot" in u for u, _ in FakeVenues.seen)
+
+
+def test_response_cache_outlasts_legacy_agora_poll():
+    # frontend/app.js CRYPTO_MARKET_POLL_MS = 5 s. A shorter cache made every tick a miss.
+    assert cm.CACHE_TTL_SECONDS > 5
 
 
 def test_btc_response_shape_is_unchanged():
