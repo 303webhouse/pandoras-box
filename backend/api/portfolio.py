@@ -1275,6 +1275,153 @@ class CashReanchorCreate(BaseModel):
     note: Optional[str] = None
 
 
+
+# ── R-IV.667(b) · ONE correction route for a cash event ────────────────────────────────────
+class CashFlowCorrection(BaseModel):
+    """A cash event corrected to its export line, and nothing else.
+
+    THE PROBLEM IT CLOSES. A UI-entered trade writes its cash BEFORE fees are known -- the fee
+    only arrives with the broker export -- and until R-IV.660(c)2 it also dated the movement on
+    the day it was typed. CC-POSITIONS holds the confirmed case: event 144, BX, reads -38.00 on
+    10-06 where the export says -38.18 on 09-30. Weekly cleanups will find more, because the fee
+    is never knowable at entry time.
+
+    ONLY `amount` AND `activity_date` ARE ACCEPTABLE. The model carries no other mutable field,
+    so "refuses any other change" is enforced by what a caller can even express, not by a check
+    it might forget. The account, the type, the source_ref and the occurrence are the event's
+    IDENTITY -- correcting those would not be a correction, it would be a different event wearing
+    this one's id.
+    """
+    amount: Optional[float] = None
+    activity_date: Optional[str] = None
+    # Required. An unevidenced correction to money is indistinguishable from a typo with a
+    # confident tone, and this route exists precisely because the first figure was wrong.
+    evidence_ref: str
+    reason: str
+    ruling: str
+    actor: str
+
+
+@router.post("/cash-flows/{event_id}/correct", dependencies=[Depends(require_api_key)])
+async def correct_cash_flow(event_id: int, body: CashFlowCorrection):
+    """Correct one cash event's amount and/or date to its export line. R-IV.667(b).
+
+    Writes the before-state to `cash_flow_corrections`, one row per column changed, in the SAME
+    transaction as the update -- a correction whose audit row could be lost separately is not an
+    audited correction. R-IV.552(b) stands: this is the route so that nobody needs direct SQL.
+    """
+    from datetime import date as _date
+
+    from services.cash_ledger import dedup_key
+
+    for field in ("evidence_ref", "reason", "ruling", "actor"):
+        if not (getattr(body, field) or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="%s is required: a correction to money that cannot say what it was read "
+                       "out of, why, under which ruling, and by whom is not auditable" % field)
+    if body.amount is None and body.activity_date is None:
+        raise HTTPException(status_code=400,
+                            detail="give amount, activity_date, or both - there is nothing to "
+                                   "correct otherwise")
+    if body.amount is not None and body.amount == 0:
+        raise HTTPException(status_code=400,
+                            detail="amount must be non-zero; a movement of zero is not a "
+                                   "correction, it is a deletion wearing one")
+
+    new_date = None
+    if body.activity_date is not None:
+        try:
+            new_date = _date.fromisoformat(body.activity_date[:10])
+        except (TypeError, ValueError, IndexError):
+            raise HTTPException(status_code=400,
+                                detail="activity_date must be an ISO date, e.g. 2026-09-30")
+        if new_date > _date.today():
+            raise HTTPException(status_code=400,
+                                detail="activity_date %s is in the future; an export line "
+                                       "describes something that already happened"
+                                       % new_date.isoformat())
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            "SELECT id, account_name, flow_type, amount, description, activity_date, "
+            "imported_from, occurrence, source_ref, dedup_key FROM cash_flows "
+            "WHERE id = $1 FOR UPDATE", event_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="cash event %s not found" % event_id)
+
+        before = dict(row)
+        amount = Decimal(str(body.amount)) if body.amount is not None else before["amount"]
+        when = new_date or before["activity_date"]
+
+        changes = []
+        if amount != before["amount"]:
+            changes.append(("amount", str(before["amount"]), str(amount)))
+        if when != before["activity_date"]:
+            changes.append(("activity_date", before["activity_date"].isoformat(),
+                            when.isoformat()))
+        if not changes:
+            # NOT an error, and NOT an audit row either: re-sending the values a row already
+            # holds is idempotent, and recording it as a correction would put a change in the
+            # ledger that never happened.
+            return {"status": "unchanged", "event_id": event_id,
+                    "amount": float(before["amount"]),
+                    "activity_date": before["activity_date"].isoformat(),
+                    "note": "the event already holds these values; nothing written"}
+
+        # THE DEDUP KEY IS DERIVED, SO IT IS RECOMPUTED. It is built from the account, type,
+        # AMOUNT, DATE, source_ref and occurrence. Leaving it alone would leave a row whose key
+        # describes values the row no longer holds -- so a genuinely new movement with the
+        # corrected amount and date would dedup against this row and be silently dropped, and a
+        # re-import of the original would not. Same shape as a stored total that no longer
+        # matches its ledger, and as the cached age fixed under R-IV.699.
+        new_key = dedup_key(before["account_name"], before["flow_type"], amount, when,
+                            before["source_ref"], before["occurrence"]) if before["dedup_key"] \
+            else None
+        if new_key and new_key != before["dedup_key"]:
+            clash = await conn.fetchrow(
+                "SELECT id FROM cash_flows WHERE account_name = $1 AND dedup_key = $2 "
+                "AND id <> $3", before["account_name"], new_key, event_id)
+            if clash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=("the corrected values already exist as event %s. Correcting this one "
+                            "would make two rows for one movement; reconcile them instead."
+                            % clash["id"]))
+            changes.append(("dedup_key", before["dedup_key"], new_key))
+
+        for column, old, new in changes:
+            await conn.execute(
+                "INSERT INTO cash_flow_corrections (cash_flow_id, column_name, old_value, "
+                "new_value, reason, ruling, actor) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                event_id, column, old, new,
+                "%s | evidence %s" % (body.reason.strip(), body.evidence_ref.strip()),
+                body.ruling.strip(), body.actor.strip())
+
+        try:
+            await conn.execute(
+                "UPDATE cash_flows SET amount = $2, activity_date = $3, dedup_key = $4 "
+                "WHERE id = $1", event_id, amount, when, new_key or before["dedup_key"])
+        except Exception as exc:
+            # The natural-key index (account, type, amount, description, date, imported_from,
+            # occurrence) can also collide, and NULLS NOT DISTINCT means a null description does
+            # not excuse it. Named rather than surfaced as a 500.
+            raise HTTPException(
+                status_code=409,
+                detail=("the corrected row collides with an existing cash event on the natural "
+                        "key (%s). Reconcile the two rather than correcting into a duplicate."
+                        % type(exc).__name__))
+
+    return {"status": "corrected", "event_id": event_id,
+            "before": {"amount": float(before["amount"]),
+                       "activity_date": before["activity_date"].isoformat()},
+            "after": {"amount": float(amount), "activity_date": when.isoformat()},
+            "columns_changed": [c[0] for c in changes],
+            "audit_rows_written": len(changes),
+            "evidence_ref": body.evidence_ref.strip(),
+            "ruling": body.ruling.strip()}
+
 @router.post("/cash-reanchor")
 async def principal_reanchor(body: CashReanchorCreate, _=Depends(require_api_key)):
     """"Set cash to what my broker shows now." Returns the difference it revealed.
