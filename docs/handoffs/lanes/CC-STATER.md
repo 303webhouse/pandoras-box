@@ -1,9 +1,9 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-06 18:30 MDT (2026-10-07 00:30 UTC)
-**Worked against:** `origin/main` = `bf0da4e` (Merge pull request #51 … accounts-live)
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-r684-matrix` (cut from `origin/main` `bf0da4e`).
-**Hub at read time:** prod `bf0da4e` (perps merge `30adbd3` is an ancestor), `status: healthy`, process started 23:03:36 UTC. Proxy flag false.
+**Written:** 2026-10-06 20:45 MDT (2026-10-07 02:45 UTC)
+**Worked against:** `origin/main` = `a146cd4` (feat(tide): the 66-session backfill is in…)
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`, on `claude/stater-r692-cache` (cut from `origin/main` `a146cd4`).
+**Hub at read time:** prod `a146cd4`, `status: healthy`, process started 02:42:07 UTC. Proxy flag false.
 
 ## Why this lane exists
 SPINE chartered CC-STATER (R-IV.618) to own Stater Swap, the hub's crypto surface.
@@ -21,54 +21,43 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.684 — perps live; matrix dated
-BUILD merged `claude/stater-perps` as `30adbd3`. This session verified `predictedFundings`
-from the hub and replaced UNVERIFIED in the vendor matrix.
+## R-IV.692(a) — 684 accepted
+`predictedFundings` stands for five coins; HYPE's two nulls stay honest. Matrix branch
+`claude/stater-r684-matrix` is still not on `origin/main` (BUILD said they merge it,
+R-IV.688(d)). Last-good crypto copy is in legacy `app.js` (relayed to CC-ABACUS).
 
-Hub `GET /crypto/market` 2026-10-07 00:28 UTC (18:28 MDT), all six coins:
+## (b) HYPE Binance spot — keep asking
+Hub `GET /crypto/market?symbol=HYPE` 2026-10-07 02:42 UTC (20:42 MDT): `binance_spot`
+present, `errors` empty. Same payload for BTC. FARTCOIN `binance_spot` still null
+(already not asked).
 
-| Coin | BinPerp | BybitPerp | HlPerp | envelopes | cold s | warm s |
-|---|---|---|---|---|---|---|
-| BTC ETH SOL ZEC FARTCOIN | present, `hyperliquid:BinPerp` | present, `hyperliquid:BybitPerp` | present | 10 each | 0.57–0.66 | 0.06–0.08 |
-| HYPE | **null** | **null** | present | 10 | 0.62 | 0.08 |
+It is **neither** no-listing **nor** a US block. HYPE is listed; `data-api.binance.vision`
+answers from Railway (same finding as 2026-10-06 16:10 UTC). R-IV.645's skip applies
+to venues that cannot answer. This one can.
 
-Ten venue+age envelopes per coin (60 across six). `ttl_s=900`, not stale. Proxy false.
+## (c) Queue — response cache vs the 5 s poll
+`CACHE_TTL_SECONDS` was 4. Legacy Agora polls `/crypto/market` every 5 s, so every
+tick missed the cache. Raised to **8** so that poll hits. Test:
+`test_response_cache_outlasts_legacy_agora_poll`.
 
-## Cold `/crypto/market` (HYPE 1.873 s in BUILD's read)
-The new pack runs on every 4 s cache miss: two Hyperliquid POSTs (shared 120 s) plus four
-Coinalyze GETs per coin (funding, OI, liquidation-history, long/short-history; 300 s cache),
-gathered under a 4 s budget, in parallel with the venue fan-out. HYPE is the thin Coinalyze
-aggregate (`HYPEUSDT_PERP.A` only); those two history endpoints are the extra wait.
-HYPE also still asks Binance spot. Warm reads after those caches hit are ~0.06–0.08 s.
-
-Legacy Agora polls one symbol every **5 s** (`frontend/app.js` `CRYPTO_MARKET_POLL_MS`),
-which is longer than the 4 s response cache, so that poll almost always misses it. Stater
-fans out all six every 30 s (`frontend/stater.js` `POLL_MS`). 1.873 s is under 5 s.
-
-## Agora last-good crypto price — file and lines
-Not `v2.js` (no crypto price poll; the "last good map" at `v2.js:2135` is book exits).
-Not a last-good *price* map on Stater (`stater.js` polls `/crypto/market` × 6 and keeps
-`_last` for the drawer only).
-
-**Legacy Agora `frontend/app.js`:**
-- `480–482` — `cryptoMarketData`, `cryptoMarketLastGood`
-- `487` — `CRYPTO_MARKET_POLL_MS = 5 * 1000`
-- `1473–1481` — start the 5 s poll when the crypto view is visible
-- `5053–5083` — `loadCryptoMarketData`; on fetch fail, re-render the last snapshot
-- `5106–5120` — `rememberNumber` / remember into `cryptoMarketLastGood`
-- `5177–5182` — render from `cryptoMarketLastGood` when the live field is missing
+Still open, not this branch:
+- HYPE's thin Coinalyze history endpoints (the cold 1.873 s)
+- geo-blocked strategy engine (`crypto_setups.py` → fapi)
+- cycle engine double count
+- Robinhood: revisit only if a keyless feed is published
 
 ## Robinhood
 US perps announced for "the coming months", not live, no keyless feed. Charter forbids
-holding the principal's trading key. Revisit only if Robinhood publishes a feed that
-needs no account key.
+holding the principal's trading key.
 
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r684-matrix` | Matrix + this file. `predictedFundings` dated from Railway. | **Yes. Merge this** (docs/config only). |
+| `claude/stater-r692-cache` | `/crypto/market` response cache 4 s → 8 s. | **Yes. Merge this.** |
+| `claude/stater-r684-matrix` | Pushed `0e3dca4`. Not yet on `origin/main`. | BUILD already accepted (R-IV.688(d)). |
 | `claude/stater-perps` | Merged (`30adbd3`). | Done. |
 
 ## What the next CC-STATER session should do first
-Nothing blocking. If asked: the 4 s `/market` cache vs the 5 s legacy poll, or HYPE's
-thin Coinalyze history calls.
+HYPE's two Coinalyze history calls on the cold `/market` path, if SPINE wants that
+1.873 s down. Do not skip HYPE Binance spot unless a later Railway read shows it
+dead (400 listing or 451 block).

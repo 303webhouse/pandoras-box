@@ -117,7 +117,7 @@ def _quiet_perps():
 
 def _snap(sym, at):
     _Clock.t = T0 + at
-    cm._cache_by_symbol.clear()                 # each read is a real fetch, not the 4 s cache
+    cm._cache_by_symbol.clear()                 # each read is a real fetch, not the response cache
     with patch.object(cm.httpx, "AsyncClient", Venues), patch.object(cm, "time", _Clock):
         return asyncio.run(cm.get_market_snapshot(symbol=sym, limit=200))
 

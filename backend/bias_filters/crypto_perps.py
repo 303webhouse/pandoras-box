@@ -240,3 +240,58 @@ def _parse_ts(raw: Any) -> Optional[datetime]:
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
+
+
+def reage(obj: Any, now: Optional[datetime] = None) -> Any:
+    """Recompute every envelope's age and staleness from its `as_of`, in place. Returns `obj`.
+
+    WHY THIS EXISTS (R-IV.699). `envelope()` computes `age_s` and `stale` once, when the dict is
+    built. `/crypto/market` then caches the whole response, so a body served from that cache
+    reported the age it had WHEN CACHED, not the age it had when served. Measured on production
+    at a 4 s TTL: two reads 1.28 s apart returned the identical body with `mark.age_s` frozen at
+    0.611 both times. Raising the TTL to 8 s doubles the understatement, and ABACUS's staleness
+    line reads exactly this field.
+
+    `as_of` is the FACT -- the instant the venue's reading belongs to -- and it never changes.
+    `age_s` and `stale` are DERIVED from it against now. A derived value that travels inside a
+    cache stops being derived and becomes a stale copy, which is the same shape as a stored
+    total that no longer matches its ledger. So the fix is not to shorten the cache or to stamp a
+    second timestamp: it is to re-derive the two computed fields at serve time from the one
+    immutable field they come from.
+
+    Walks nested envelopes too (`funding.predicted`, `predicted_by_venue.*`), because a reader
+    that trusts the top-level age and not the nested one would be worse off than one that
+    trusted neither.
+    """
+    now = now or _now()
+    if isinstance(obj, dict):
+        if "as_of" in obj and "ttl_s" in obj:
+            raw = obj.get("as_of")
+            as_of = None
+            if isinstance(raw, datetime):
+                as_of = raw
+            elif isinstance(raw, str):
+                try:
+                    as_of = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except ValueError:
+                    as_of = None
+            if as_of is not None:
+                if as_of.tzinfo is None:
+                    as_of = as_of.replace(tzinfo=timezone.utc)
+                age = max(0.0, (now - as_of).total_seconds())
+                ttl = obj.get("ttl_s")
+                obj["age_s"] = round(age, 3)
+                if isinstance(ttl, (int, float)):
+                    stale = age > ttl
+                    obj["stale"] = bool(stale)
+                    # A value that has aged PAST its ttl inside the cache must stop being
+                    # served, exactly as it would have on a fresh build. Otherwise the cache
+                    # becomes a way to serve a reading the TTL already rejected.
+                    if stale:
+                        obj["value"] = None
+        for v in obj.values():
+            reage(v, now)
+    elif isinstance(obj, list):
+        for v in obj:
+            reage(v, now)
+    return obj

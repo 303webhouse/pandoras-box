@@ -46,7 +46,9 @@ DEFAULT_HEADERS = {
     "Accept-Language": "en-US,en;q=0.8",
 }
 
-CACHE_TTL_SECONDS = 4
+# Longer than legacy Agora's 5 s poll (`frontend/app.js` CRYPTO_MARKET_POLL_MS)
+# so that poll hits this cache instead of doing a full venue+perps fetch every tick.
+CACHE_TTL_SECONDS = 8
 _bybit_runtime_disabled = False
 # Keyed by canonical pair ("BTCUSDT"): see get_market_snapshot.
 _cache_by_symbol: Dict[str, Dict[str, Any]] = {}
@@ -282,14 +284,21 @@ async def get_market_snapshot(symbol: str = Query("BTCUSDT"), limit: int = Query
     # Stater Phase 0 (R-IV.619): every piece of remembered state is PER SYMBOL. The
     # response cache, the last-good fallbacks and the CVD trend state used to be
     # one global each, so a Stater poll for HYPE could serve BTC's snapshot to the
-    # next caller within 4 s, and a failed HYPE feed was "filled" with BTC's last
+    # next caller within the response-cache window, and a failed HYPE feed was "filled" with BTC's last
     # price. Agora (app.js) and the Discord bot read this endpoint for BTC; the
     # response shape is unchanged.
     symbol = _canonical_pair(symbol)
     cache = _cache_by_symbol.setdefault(symbol, {"timestamp": 0.0, "data": None})
     last_good = _last_good_by_symbol.setdefault(symbol, {})
     if cache["data"] and (now - cache["timestamp"]) < CACHE_TTL_SECONDS:
-        return cache["data"]
+        # R-IV.699. The body is cached; the AGES inside it are not facts, they are derived from
+        # each field's `as_of` against now. Served straight from the cache they reported the age
+        # they had when cached -- measured on prod at a 4 s TTL, two reads 1.28 s apart both said
+        # `mark.age_s` 0.611. This TTL is now 8 s, so the understatement would be up to 8 s on
+        # the field ABACUS's staleness line reads. Re-derived here, from the one immutable field.
+        from bias_filters.crypto_perps import reage
+
+        return reage(cache["data"])
 
     # Derive exchange-specific symbol formats from input (e.g. BTCUSDT)
     # Strip "USDT" suffix to get base asset, then build per-exchange pairs
