@@ -136,17 +136,176 @@ Each agent's `SKILL.md` retains a short "what it owns vs what belongs to other a
 
 ## § Account Context Framework
 
-NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it came from a source named below within this conversation.
+NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
+came from a source named below within this conversation.
 
-**Where balances come from, until further notice (principal's decision, 2026-09-23):** read the balance **from the broker apps**, not from `hub_get_portfolio_balances()`. The hub's balance aggregate is under repair; until that fix lands and this line is changed, a hub balance is not a sizing input. An agent that cannot get a broker-app figure sizes by percentage and says the dollar figure is unavailable — it does not substitute a hub number.
+**Where balances come from.** Read the balance **from the broker apps**. The hub's
+raw balance aggregate (`hub_get_portfolio_balances`) is NOT a sizing input while
+its repair is outstanding. A **POSITIONS figure reconciled against a broker export
+may be used for sizing only when it carries its as-of date AND the date of its
+latest passing broker tie-out**; without both dates it is not usable. [R-IV.732]
+An agent that has neither a broker-app figure nor a dated reconciled POSITIONS
+figure sizes by **percentage** of the relevant account or sleeve and says the
+dollar figure is unavailable. It does not substitute a hub number.
 
-Structural shape of Nick's accounts (role-only descriptions, no dollar amounts):
+### The three tracked accounts
 
-- **FIDELITY_ROTH** — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, …3158). **ETFs in either direction, trend-gated** per Rule 0 and Z2: long an ETF only with a confirmed uptrend on its timeframe, inverse or short-side only with a confirmed downtrend, **cash when the trend is unclear**. No options on this account. Swing trades, weekly/monthly timeframe.
-- **ROBINHOOD** — the options and tail/convexity sleeve. Ceiling: **about 10% of FIDELITY_ROTH + ROBINHOOD combined**. **At least $200 stays in cash at all times.** No per-trade dollar cap. **Never the whole sleeve on one trade.**
-- **Breakout Prop** — crypto-only. Trailing drawdown floor — losing the eval = losing access. Sizing is extra conservative because of this.
+There are **three** tracked accounts, by number. They are distinct. Any text
+treating BrokerageLink as part of the Roth is superseded.
 
-**Retired 2026-09-23, do not reinstate:** the separate "401k BrokerageLink" entry (it is part of FIDELITY_ROTH, not a second account); "Fidelity Roth IRA — inverse ETFs only"; ROBINHOOD's "5% max risk per trade"; and "max 3 contracts". The sleeve ceiling above replaces the per-trade dollar caps.
+**FIDELITY_401A — BrokerageLink, account 653641836.** Carries the long-term core
+in full. One plan with FIDELITY_ROTH (see § One plan, two tax locations).
+- Strategic holdings sit **outside** the 20% risk cap, governed instead by the
+  **per-position limit** below and a **15% total real-asset** limit. [TA-098 §1a;
+  real-asset figure adopted by the principal 2026-10-07, R-IV.729(a)]
+- **Per-position limit — 15%, and its scope.** The limit applies to any holding
+  whose exposure is concentrated in **one sector, one commodity, one issuer, or
+  one theme**: sector ETFs, commodity funds, single names, satellite and thematic
+  holdings. It does **NOT** apply to **broad-market multi-sector index funds** or
+  to **short-duration US Treasuries** — a broad index failing is the market
+  failing, which is not the concentration risk the limit exists to bound.
+  [Scope confirmed by the principal 2026-10-07, R-IV.735]
+- Tactical positions sit **fully inside** the 20% cap at TA-034's 100% default.
+  [TA-098 §1b]
+- A **2% loss alert** on every row, strategic and tactical alike. [TA-098 §1c]
+- The cap is measured **at market on both sides of the ratio**. Cost basis remains
+  correct for P&L, basis tracking and TA-095 attribution, and is not the cap's
+  input. [TA-101 §1]
+- **Classification is the principal's**, recorded on the row, never inferred from
+  ticker, leverage or bucket tag. [TA-098 §2]
+- **Strategic exit rule:** a strategic row may carry a price stop, but it must sit
+  at a **weekly close below the 200-day SMA**, with **3× the 20-day ATR** as a
+  minimum distance — whichever is further from entry. A stop closer than that makes
+  the row **tactical**, automatically, regardless of stated intent. A stopped-out
+  strategic row closes carrying the classification it held and is flagged for
+  review, never auto-reclassified. [R-IV.729(a)]
+- **Do not consume a field named `max_loss` from either the hub or the book** for
+  any cap computation. The two stores disagree: the hub derives it from cost on
+  every row; the book stores a written value absent on 11 of 28 rows and exceeding
+  the position's maximum possible loss on at least two. Compute from current market
+  value. [TA-102 §5]
+
+**FIDELITY_ROTH — Roth Brokerage, account 652303158.** 50% core, 50% trading
+sleeve. [R-IV.730(a)]
+- **The 50% split is measured on total account value** — holdings at market plus
+  cash — **at the measurement close.**
+- **Core-half deployable cash = (50% × account value) − (market value of core
+  holdings held in the Roth).** A holding is "core" if it appears in the target mix.
+- **TSLQ sits in the sleeve half**, not the core. It is not in the target mix; the
+  deployment schedule neither buys nor sells it. It counts against the sleeve's 20%
+  tactical cap and against the household net-direction cap at its 2× leverage.
+- **The core half** holds the same target mix as the 401(a), governed by the same
+  rules above, and is the only half on the deployment schedule.
+- **The trading sleeve** is the principal's active account: a mix of whatever the
+  market dictates, higher up the risk curve, positioned in line with his bearish
+  bias where the tape allows it. Trading here is tax-sound — realised gains are
+  tax-free.
+- **The sleeve is trend-gated under Rule 0 and Z2:** long an ETF only on a confirmed
+  uptrend on its own timeframe; inverse or short-side exposure **only on a confirmed
+  downtrend**; **cash when the trend is unclear**. PYTHAGORAS's read governs what
+  "confirmed" means. No options on this account.
+- The **20% risk cap** applies to the sleeve's tactical positions, at market.
+
+**ROBINHOOD.** The options and tail/convexity sleeve: high-risk, high-reward plays,
+lottos, and portfolio hedges against a broad correction or worse.
+- **Ceiling: 10% of ALL tracked accounts combined** — FIDELITY_401A +
+  FIDELITY_ROTH + ROBINHOOD — as `backend/services/sleeve_ceiling.py` implements
+  it. [TA-070] Any text reading "10% of FIDELITY_ROTH + ROBINHOOD" understates the
+  denominator by a whole account and is superseded.
+- **At least $200 stays in cash at all times.**
+- No per-trade dollar cap. **Never the whole sleeve on one trade.**
+
+**Breakout Prop** — crypto-only, **untracked by design** (DESCOPED 2026-07-23). No
+balance row exists. The committee must NOT size against it; declining to size it is
+designed behaviour, not a data gap.
+
+### § One plan, two tax locations
+
+FIDELITY_401A and FIDELITY_ROTH are governed as **a single portfolio with a single
+set of limits**, then assets are **placed** by tax treatment: highest expected
+growth into the Roth, ballast and real assets into the 401(a). Limits, caps and the
+real-asset ceiling apply across the pair, not per account. ROBINHOOD is governed by
+its own sleeve ceiling and sits outside the one-plan boundary. [R-IV.729(a)]
+
+### § Household net-direction cap — RULED 2026-10-07 [R-IV.730(a)]
+
+Combined short-side exposure — the FIDELITY_ROTH trading sleeve plus ROBINHOOD
+hedges — is capped at **2×-equivalent leverage-adjusted** of the sleeve capital
+available to it. **Read plainly: the floor is a roughly flat household. Never net
+short.** Above 2× the sleeves stop hedging the core and begin cancelling and then
+inverting it; at 3× the household reaches net −24%.
+
+### § Deployment schedule — RULED 2026-10-07 [R-IV.730(a), R-IV.734(a)]
+
+**Six tranches, one per month.** Tranche k deploys **1/(7 − k)** of deployable cash
+— 1/6, then 1/5 of what remains, through to the remainder at tranche 6. This fully
+deploys by construction and absorbs cash arriving mid-schedule. A fixed sixth
+measured once strands new inflows; 1/6 of the current balance each time never
+completes.
+
+**Tranche dates: 2026-10-08 · 2026-11-02 · 2026-12-01 · 2027-01-04 · 2027-02-01 ·
+2027-03-01.** (2027-01-04 because 2027-01-01 is a market holiday.)
+
+**The cash** means: all deployable cash in FIDELITY_401A, and the deployable cash
+of **FIDELITY_ROTH's core half only**, per that account's definition above.
+**Measured as "cash available to trade at the open of the tranche date"** — the
+figure the broker displays, which avoids the settled-versus-unsettled trap when
+recent sale proceeds are still in T+1.
+
+**Good-faith violations.** In a cash account, buying with unsettled proceeds is
+permitted; **selling the position bought before those funds settle is not.** No
+position bought with unsettled proceeds is sold before settlement.
+
+**Accelerator — SPY weekly closes**, computed from the 52-week high of 781.62:
+below **703.46** (−10%) double the monthly tranche; below **625.30** (−20%) deploy
+25% of remaining cash at once; below **547.13** (−30%) deploy another 25% at once.
+**Weekly closes, not intraday touches.** No decelerator: buying a drawdown is
+mechanical, slowing on strength is a forecast.
+
+**Target mix** [R-IV.729(a)]: **60% broad index · 15% short Treasuries · 15% real
+assets (7 gold bullion / 5 PDBC / 3 energy) · 10% satellite cap.** Gold is held as
+**bullion, not miners** — in 2008 bullion returned +5.77% while GDX fell 69.14%
+peak-to-trough. Energy counts **inside** the 15% real-asset limit; utilities and
+other non-real-asset sectors count against the separate 10% satellite cap.
+
+### § Existing holdings during the schedule
+
+Holdings are measured against the target weights on the **fully-deployed** core,
+not on the partially-deployed core, so transitional over-weights self-correct as
+tranches land. Two holdings are handled explicitly:
+
+- **PDBC.** Was 110 shares (401A 50, ROTH 60) — ~11.9% of the fully-deployed core
+  against a 5% target, consuming ~79% of the 15% real-asset limit alone. The
+  principal elected to **trim to 5%** on 2026-10-07, and PDBC is placed **entirely
+  in FIDELITY_401A** under the one-plan placement rule. Because 5% is PDBC's
+  **final** weight rather than a sixth of it, **PDBC is bought in no tranche**;
+  each tranche buys the other five sleeves renormalised to 95%.
+- **TSLQ 80 shares** sits in the FIDELITY_ROTH trading sleeve. Not in the target
+  mix; the schedule neither buys nor sells it.
+
+### Retired, do not reinstate
+
+- **The 40% real-asset limit.** Provisional from the outset and never derived;
+  superseded by the principal's adopted **15%** on 2026-10-07. [R-IV.729(a)]
+- **An unscoped 15%-per-position limit.** The limit stands, but it does not reach
+  broad-market index funds or short-duration Treasuries — see its scope above.
+  Applied unscoped it would have vetoed the principal's own adopted 60% index core.
+- **"FIDELITY_ROTH — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, …3158)."**
+  Factually wrong on account identity. BrokerageLink is 653641836; the Roth is
+  652303158. Retired 2026-10-07.
+- **The 2026-09-23 retirement of the separate BrokerageLink entry** ("it is part of
+  FIDELITY_ROTH, not a second account") is itself **reversed**. It is a second
+  account.
+- **"20% portfolio risk cap — FIDELITY_ROTH only."** The cap now applies to
+  tactical positions in both Fidelity accounts. Retired 2026-10-07.
+- **AHRP 401A PLAN (76679) and AHRP 403B PLAN (76680) are conduits, not tracked
+  accounts** — linked to the brokerage window, holding no tradable capital. Flows
+  are carried **where they enter a tracked account, never at the conduit**.
+  [TA-105 §1, TA-106 §2]
+- Previously retired and still retired: "Fidelity Roth IRA — inverse ETFs only";
+  ROBINHOOD's "5% max risk per trade"; "max 3 contracts".
+
+---
 
 Each agent's `SKILL.md` may add a short agent-specific note about how it uses each account (e.g., URSA: "Robinhood — defined-risk only, no naked shorts"; PYTHIA: "Robinhood — PYTHIA's MP levels inform strike anchoring and timing; DAEDALUS owns the structure choice"). Those agent-specific addenda stay in each agent's file.
 
@@ -205,7 +364,12 @@ These rules apply to every committee agent:
 
 These additional rules apply only to agents that recommend specific trade entries or sizing:
 
-- **Sizing is governed by the ROBINHOOD sleeve ceiling** (§ Account Context), not by per-bucket dollar caps. The B2 $200–300 cap and the B3 $100 cap are **retired** as of 2026-09-23. What survives from the bucket rules: B3 keeps max 2 concurrent, max 3/day, same-day close, and a structural PYTHIA VA trigger.
+- **Sizing is governed by the ROBINHOOD sleeve ceiling** (§ Account Context) —
+  **10% of all three tracked accounts combined (FIDELITY_401A + FIDELITY_ROTH +
+  ROBINHOOD)**, with a $200 cash floor — not by per-bucket dollar caps. The B2
+  $200–300 cap and the B3 $100 cap are **retired** as of 2026-09-23. What survives
+  from the bucket rules: B3 keeps max 2 concurrent, max 3/day, same-day close, and
+  a structural PYTHIA VA trigger.
 - **B3 daily circuit breaker — UNCHANGED.** Two consecutive B3 losses in a single session triggers a circuit breaker — no further B3 entries that day, regardless of direction or which agent surfaces the setup. **The $300 daily max loss cap remains, regardless of trade count.** Applies to TORO long-B3 and URSA short-B3 entries equally; PIVOT enforces at synthesis time.
 - **Stops — the principal's guideline (2026-09-23).** Default: a stop order at the broker at entry on ETF and stock positions. Where volatility argues against one, a daily-close stop is written in the position's notes instead. Either way the invalidation is written on the row.
 - **No averaging down.** An add to a losing position needs either an add planned at entry, or a named change in market conditions written on the row before the add.
@@ -213,7 +377,16 @@ These additional rules apply only to agents that recommend specific trade entrie
 - **X3 — exits by structure.** Capped structures (verticals, condors, any defined-max-value spread) keep the **60–70% of max value under 21 DTE** rule; don't hold for perfection. Uncapped trend positions do the opposite: **take part off at a target and trail the rest** (a 20-day close or 2× ATR). Rule 2 cuts both ways — capped profits get taken, uncapped profits get run.
 - **X4 — reachability (DAEDALUS hard rule).** Break-even must sit within **1.5× the implied expected move to expiry**. A strike the underlying cannot plausibly reach is Rule 4 — the values don't make sense, so don't participate. **Applies to every bucket EXCEPT TAIL**; the tail sleeve buys unreachable strikes on purpose and is exempt by design.
 - **X7 — max loss for the portfolio cap (principal's ruling, 2026-09-24).** A FIDELITY_ROTH position with a live stop order at the broker counts its loss to that stop. A position without one counts **100%** of its value until the hub's loss alert is live. Once it is, the position counts to whichever alert fires first — its written daily-close stop, or a loss of **2% of the Fidelity account value**, the principal's alert level for any position without a broker stop. A stop that nothing enforces does not lower the count.
-- **20% portfolio risk cap — FIDELITY_ROTH only.** Sum of max losses across open positions must not exceed 20% of the **FIDELITY_ROTH** balance (read from the broker app, per § Account Context). ROBINHOOD is governed by its sleeve ceiling instead, not by this cap. DAEDALUS enforces at structure proposal; URSA surfaces in portfolio coherence check; PIVOT vetos via DON'T TRADE if a new position would push the book over.
+- **20% portfolio risk cap — tactical positions in BOTH Fidelity accounts.** Sum of
+  max losses across open **tactical** positions must not exceed 20% of the account
+  holding them, measured **at market on both sides** (TA-101 §1) and computed from
+  current market value rather than from any `max_loss` field (TA-102 §5).
+  **FIDELITY_401A strategic holdings sit outside this cap**, governed instead by
+  the 15% real-asset limit, the scoped per-position limit, and the strategic-exit
+  rule (TA-098 §§1–4, R-IV.729(a), R-IV.733(b)1). ROBINHOOD is governed by its
+  sleeve ceiling instead, not by this cap. DAEDALUS enforces at structure proposal;
+  URSA surfaces in portfolio coherence check; PIVOT vetoes via DON'T TRADE if a new
+  position would push the book over.
 - **X10 — flow confirms, it does not originate.** On B1 and B2 trades, an options-flow read may only *confirm* a thesis that already stands on trend and structure. A trade whose entire reason is "there was flow" is Rule 16 — short-term information flow mistaken for an edge — and does not pass.
 
 Agents that do not recommend trades (PYTHIA, PYTHAGORAS, THALES) do not need to enforce the trade-sizing rules — but their structural / trend / macro reads may inform whether a trade meets these gates when other agents evaluate.
