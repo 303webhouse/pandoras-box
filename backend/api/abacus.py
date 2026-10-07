@@ -287,43 +287,63 @@ def _census_where(first: Optional[date], last: date) -> tuple:
     its own predicate, which then drifts from the first and is believed because it looks the same.
     """
     conditions = ["LOWER(status) IN ('closed', 'expired')", "exit_date IS NOT NULL",
-                  "exit_date::date <= $1"]
+                  _day_sql("exit_date") + " <= $1"]
     params: list = [last]
     if first is not None:
-        conditions.append("exit_date::date >= $2")
+        conditions.append(_day_sql("exit_date") + " >= $2")
         params.append(first)
     return " AND ".join(conditions), params
 
 
-def _cal_date(value) -> Optional[date]:
-    """The calendar day a DAY-SEMANTIC column already denotes, with no zone conversion.
+def _day_of(value) -> Optional[date]:
+    """The calendar day a timestamp DENOTES — the one rule for every date this page reads.
 
-    `snapshot_date` and `activity_date` are days, not instants: the hub stores each as that day's
-    midnight in Mountain Time. Running them through a timezone conversion is the bug this exists
-    to avoid -- a value written as UTC midnight instead would shift back a day, and a curve would
-    begin on a date the hub never recorded. Use `_mt_date` for a real instant (a fill), and this
-    for a day.
+    R-IV.726. `entry_date` and `exit_date` are `timestamptz`, and they hold BOTH KINDS OF THING.
+    Measured over the 557 census rows: 454 entry values sit at exactly midnight UTC, which is a DAY
+    written down, and 103 carry a real time of day, which is a MOMENT. No single rule is right for
+    both, and the one I shipped under R-IV.705 -- convert everything to Mountain Time -- was wrong
+    for the 454:
+
+        WRTH (948) is stored `2026-10-01 00:00:00+00`. Converted, that is 6 PM on 2026-09-30, and I
+        reported 09-30. Both Fidelity exports date its fills 10-01, and its own position_id reads
+        POS_WRTH_20261001_R635_7. The day was never ambiguous; my reading of it was.
+
+    So the kind is decided PER VALUE, by the only discriminator the data offers:
+
+      * exactly midnight UTC  -> a DAY. Take it as written. Converting it moves it backwards.
+      * anything else         -> a MOMENT. Convert to Mountain Time, because the principal's
+                                calendar day is the one that decides which side of a cutoff a
+                                9 PM fill falls on.
+
+    This is correct for all three conventions in the database, which is why it replaces both of the
+    helpers it came from: a day at midnight UTC (taken as written), a day at Mountain midnight --
+    `snapshot_date`, `activity_date`, stored 06:00/07:00Z -- (a "moment" that converts back to its
+    own midnight), and a real fill time (converted).
+
+    THE ONE CASE IT CANNOT TELL APART is a genuine fill at exactly 00:00:00.000000 UTC, which it
+    would read as a day. That is 6 PM Mountain, after the close, and no such row exists in the book.
+    If intraday crypto fills ever land in this census, this test needs a better discriminator than
+    the clock -- a column saying which kind the value is.
     """
     if value is None:
         return None
-    if isinstance(value, datetime):
-        return value.date()
-    return value
+    if not isinstance(value, datetime):
+        return value
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    utc = value.astimezone(timezone.utc)
+    if (utc.hour, utc.minute, utc.second, utc.microsecond) == (0, 0, 0, 0):
+        return utc.date()
+    return value.astimezone(MT).date()
 
 
-def _mt_date(value) -> Optional[date]:
-    """A timestamp's calendar day in the principal's timezone, not the server's.
-
-    Railway runs in UTC, which is already tomorrow for him after 6 PM MT, so a `::date` cast puts
-    an evening fill on the wrong day -- and on the wrong side of a cutoff.
-    """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(MT).date()
-    return value
+# The same rule in SQL, for the census window. A date predicate on a `timestamptz` with no
+# conversion at all reads a 9 PM Mountain close as the NEXT day, which at a range boundary silently
+# moves a trade into the wrong window.
+def _day_sql(col: str) -> str:
+    return ("(CASE WHEN ({c} AT TIME ZONE 'UTC')::time = TIME '00:00:00' "
+            "THEN ({c} AT TIME ZONE 'UTC')::date "
+            "ELSE ({c} AT TIME ZONE 'America/Denver')::date END)").format(c=col)
 
 
 HOLD_BUCKETS = (("Same day", 0, 0), ("2–7 days", 1, 7), ("8–21 days", 8, 21),
@@ -375,7 +395,7 @@ async def _load_book_live(pool, first: Optional[date], last: date) -> dict:
         # strategies slot is empty because of THIS, not because the signals are ungraded.
         if r["signal_id"]:
             linked += 1
-        opened = _mt_date(r["entry_date"])
+        opened = _day_of(r["entry_date"])
         if opened is not None and opened >= BUCKET_CUTOFF:
             opened_after_cutoff += 1
             if not r["strategy_tag"]:
@@ -387,7 +407,7 @@ async def _load_book_live(pool, first: Optional[date], last: date) -> dict:
             continue
         if pnl is None:
             continue
-        closed = _mt_date(r["exit_date"])
+        closed = _day_of(r["exit_date"])
         counted.append({
             "pnl": float(pnl),
             "max_loss": float(r["max_loss"]) if r["max_loss"] is not None else None,
@@ -418,8 +438,18 @@ async def _load_book_live(pool, first: Optional[date], last: date) -> dict:
             out.setdefault(k, []).append(r)
         return out
 
+    # R-IV.726: a NEGATIVE hold -- a close dated before its own open -- matched no bucket and the
+    # row simply vanished from this breakdown. Two rows did that under the old reading, and nothing
+    # said so. The corrected reading leaves none, and the count is now reported either way: a row
+    # that cannot be bucketed is a row the reader should know about.
+    unbucketable = {"negative_hold": 0, "no_dates": 0}
+
     def _hold_bucket(r):
         if r["held"] is None:
+            unbucketable["no_dates"] += 1
+            return None
+        if r["held"] < 0:
+            unbucketable["negative_hold"] += 1
             return None
         for name, lo, hi in HOLD_BUCKETS:
             if lo <= r["held"] <= hi:
@@ -473,6 +503,7 @@ async def _load_book_live(pool, first: Optional[date], last: date) -> dict:
         "loss_vs_risk_n": len(defined),
         "losers": len(losers),
         "linked_to_signal": linked,
+        "unbucketable_holds": dict(unbucketable),
         "untagged_after_cutoff": untagged_after_cutoff,
         "opened_after_cutoff": opened_after_cutoff,
         "breakdowns": {
@@ -513,7 +544,7 @@ async def _load_equity(pool) -> dict:
             f"SELECT activity_date, amount, flow_type FROM cash_flows WHERE {clause.replace('account_name', 'account_name')} "
             "ORDER BY activity_date", *sparams)
 
-        points = [{"d": _cal_date(r["snapshot_date"]).isoformat(), "v": float(r["balance"])}
+        points = [{"d": _day_of(r["snapshot_date"]).isoformat(), "v": float(r["balance"])}
                   for r in snaps if r["balance"] is not None]
         spellings = sorted({(r["account_name"] or "") for r in snaps})
         first_day = points[0]["d"] if points else None
@@ -523,7 +554,7 @@ async def _load_equity(pool) -> dict:
         ext_first, ext_count, unclassified = None, 0, set()
         for c in cash:
             kind = (c["flow_type"] or "").upper()
-            day = _cal_date(c["activity_date"])
+            day = _day_of(c["activity_date"])
             if kind in EXTERNAL_FLOWS:
                 ext_count += 1
                 if ext_first is None or day < ext_first:
@@ -850,6 +881,15 @@ async def abacus_summary(
              % (span["from"] + " to " + span["to"] if span else "this window"))
     live_bd = [_breakdown(k, _BD[k][0], _BD[k][1], live["breakdowns"][k], _note, live_stamp)
                for k in ("structure", "ticker", "hold", "weekday")]
+    # R-IV.726: a row whose dates cannot produce a hold is SAID, not dropped. Two rows closed before
+    # they opened under the old date reading and left this table in silence.
+    _ub = live["unbucketable_holds"]
+    _lost = _ub["negative_hold"] + _ub["no_dates"]
+    if _lost:
+        for b in live_bd:
+            if b["key"] == "hold":
+                b["note"] += (" %d row(s) could not be placed: %d closed before they opened, %d carry "
+                              "no usable pair of dates." % (_lost, _ub["negative_hold"], _ub["no_dates"]))
     out["breakdowns"] = live_bd + [b for b in out["breakdowns"] if b["key"] == "discipline"]
     for b in out["breakdowns"]:
         if b["key"] == "discipline":
