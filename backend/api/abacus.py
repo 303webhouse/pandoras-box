@@ -795,17 +795,28 @@ async def abacus_summary(
                              "losers." % (live["avg_win_n"], live["avg_loss_n"]))
             st.update(live_stamp)
         elif st["key"] == "loss_vs_risk":
-            # R-IV.705(g): live ONLY with its n, because `max_loss` is recorded on a minority of
-            # the losers and a rate over 43% of them reads as a rate over all of them.
-            st["value"] = live["loss_vs_risk"]
-            st["n"] = live["loss_vs_risk_n"]
+            # R-IV.716(c): TAKEN DOWN. It was served live under R-IV.705(g) with its own n, which
+            # answered the coverage question -- how MANY rows carry a max loss -- and not the one
+            # that matters, which is whether the values are right. POSITIONS measured `max_loss` on
+            # 2026-10-07 and it is not: of 28 open rows 11 are NULL, only 3 of the 17 values equal
+            # the trade's cost, two are at double it, and every FIDELITY_401A row is NULL.
+            #
+            # Confirmed first-hand on the closed side this page actually reads, and it is worse:
+            # of the 207 census rows carrying a max loss, 19 exceed 1.5x cost and 31 LOSING TRADES
+            # LOST MORE THAN THEIR RECORDED MAXIMUM -- which cannot happen to a defined-risk trade
+            # and so is proof the field is wrong rather than merely sparse.
+            #
+            # A rate whose denominator is wrong is not improved by publishing its n. No figure from
+            # this field reaches the page until BUILD's R-IV.714(d) fix lands.
+            st["value"] = None
+            st["n"] = None
+            st["unavailable"] = "max loss not reliable yet"
             st["span"] = span
-            st["coverage"] = {"predicate": "losing counted closes that carry a max loss",
-                              "total": live["losers"], "counted": live["loss_vs_risk_n"],
-                              "excluded": {"no_max_loss_recorded": live["losers"] - live["loss_vs_risk_n"]}}
             st["meaning"] = ("Of the maximum loss these trades had defined, the share actually given "
-                             "back. Drawn from the %d of %d losing closes that carry a max loss; the "
-                             "rest record none." % (live["loss_vs_risk_n"], live["losers"]))
+                             "back. Withheld: the book's `max_loss` is unreliable -- losing trades "
+                             "are recorded as having lost more than their own defined maximum -- so "
+                             "the denominator cannot be trusted. Returns when BUILD's fix lands "
+                             "(R-IV.714(d)).")
             st.update(live_stamp)
 
     # Drawdown and Sharpe are NOT tiles any more (R-IV.705(d)). They are properties of a CURVE, and

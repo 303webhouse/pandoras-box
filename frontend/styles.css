@@ -8342,26 +8342,16 @@ body[data-mode="analytics"] .analytics-shell {
     margin-bottom: 0;
 }
 
-@media (max-width: 1200px) {
-    .crypto-main-content {
-        grid-template-columns: 1fr;
-        grid-template-areas:
-            "chart"
-            "trades"
-            "positions"
-            "btc";
-    }
-    .crypto-bias-row {
-        grid-template-columns: 1fr;
-        row-gap: 10px;
-    }
-    .crypto-bias-inline {
-        justify-self: start;
-    }
-    .crypto-bias-meta {
-        justify-self: end;
-    }
-}
+/* R-IV.716(b): the `@media (max-width: 1200px)` block that stood here has been MOVED, unchanged,
+   to the end of this file. It was dead where it sat: a later duplicate `.crypto-bias-row` block
+   (around line 10101) re-asserted the three-column grid, and a later rule of equal specificity
+   beats an earlier one inside a media query.
+
+   THE DUPLICATE WAS NOT DELETED, because it is not a copy — it carries narrower column minimums
+   (220px/200px against this file's earlier 240px/220px) and a 12px gap against 16px. Deleting it
+   would hand the desktop grid back to the earlier block and change the layout above 1200px, which
+   the ruling excludes. Moving the query is what makes the existing rule take effect without
+   changing anything above its own breakpoint. */
 
 .min-score-label {
     color: var(--text-secondary);
@@ -13870,6 +13860,60 @@ body[data-mode="analytics"] .analytics-shell {
 }
 .crypto-price-stale[hidden] { display: none; }
 
+/* ── R-IV.716(b) · THE 1200px RULE, REVIVED ───────────────────────────────────────────────────
+   This is the file's own `@media (max-width: 1200px)` block, moved here VERBATIM from the position
+   it was written in. Nothing in it is new. It was dead only because a later duplicate
+   `.crypto-bias-row` block re-asserted the three-column grid, and the end of the file is the only
+   place that beats both copies.
+
+   Measured before the move, at 768 / 1024 / 1200px: the document was 1418px wide at every one of
+   them, the same number as on a phone — because the grid never collapsed.
+
+   Of the four rules in it, only `.crypto-bias-row` was actually being overridden. The duplicate
+   says the same thing as the other three (`justify-self` on the inline and meta blocks, and
+   `.crypto-main-content` has no later copy at all), which is why moving the block changes exactly
+   one thing: the grid collapses at and below 1200px, as it was written to. */
+@media (max-width: 1200px) {
+    .crypto-main-content {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "chart"
+            "trades"
+            "positions"
+            "btc";
+    }
+    .crypto-bias-row {
+        grid-template-columns: 1fr;
+        row-gap: 10px;
+    }
+    .crypto-bias-inline {
+        justify-self: start;
+    }
+    .crypto-bias-meta {
+        justify-self: end;
+    }
+}
+
+/* ── R-IV.716(b) · and the price row has to fit those widths too ───────────────────────────────
+   Collapsing the grid is not sufficient on its own. `#cryptoPriceRow` is a NOWRAP flex row whose
+   three price cells carry min-widths of 160px, 120px and 120px; with the funding and CVD chips
+   beside them its intrinsic width is 919px, so it still overflowed a 768px screen after the grid
+   was fixed. It fits unaided from about 960px up, which is where this breakpoint sits — measured,
+   not guessed. The phone block below adds what only a phone needs. */
+@media (max-width: 960px) {
+  /* The order-flow metrics were a 3 x 120px grid = 380px inside a body that is the viewport less
+     about 70px, and `.crypto-chart-area` clips with `overflow-x: hidden` — so those three figures
+     were CUT OFF AND UNREACHABLE at every width up to about 450px, not only on a phone. That is
+     worse than a page that scrolls: the figure is there and cannot be read, and nothing says so.
+     `minmax(0, 1fr)` lets the columns shrink and the labels wrap. It is INERT where there is room:
+     once the container clears 380px, minmax(0,1fr) and minmax(120px,1fr) lay out identically. */
+  .orderflow-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .crypto-price-row { flex-wrap: wrap; }
+  .crypto-price-cluster { flex-wrap: wrap; justify-content: center; }
+  .crypto-price-main { min-width: 0; }
+  .crypto-price-small { min-width: 0; }
+}
+
 /* ── R-IV.712(b) · THE LEGACY CRYPTO VIEW AT PHONE WIDTH ──────────────────────────────────────
    Measured before this block: the document was 1418px wide at 360, 390 AND 430px — identical at
    all three, which is the tell that nothing responsive was in force at all.
@@ -13892,22 +13936,13 @@ body[data-mode="analytics"] .analytics-shell {
         and 120px, so the price cluster alone demanded 456px of a 390px screen.
    Both are addressed below, and nothing is hidden: the figures wrap instead of being clipped. */
 @media (max-width: 430px) {
-  .crypto-bias-row { grid-template-columns: 1fr; row-gap: 10px; }
-  /* Kept as the earlier (dead) phone rule intended, rather than quietly restyling it. */
-  .crypto-bias-meta { justify-self: end; }
+  /* R-IV.716(b): the grid collapse and the price-row wrap moved UP to the queries above, which now
+     take effect from 1200px and 960px. Duplicating them here would have been a second author for
+     the same declaration. What is left is what only a phone needs. */
   .crypto-bias-inline { flex-wrap: wrap; }
-  .crypto-price-row { flex-wrap: wrap; }
-  .crypto-price-cluster { flex-wrap: wrap; justify-content: center; }
-  /* The min-widths are what made the cluster 456px wide. They exist to stop the three prices
-     jittering as digits change; on a phone the row wraps instead, which is the lesser cost. */
-  .crypto-price-main { min-width: 0; font-size: 26px; }
-  .crypto-price-small { min-width: 0; }
+  /* 32px of Orbit cannot hold a six-figure price in 360px of screen, and shrinking the type is the
+     only way to keep the figure whole rather than wrapped mid-number. */
+  .crypto-price-main { font-size: 26px; }
   /* A long CVD line is the last thing that cannot wrap, and it is prose, not a figure. */
   .crypto-price-extra { white-space: normal; }
-  /* The order-flow metrics were a 3 x 120px grid = 380px inside a 290px body, and `.crypto-chart-area`
-     clips with `overflow-x: hidden` — so those three figures were CUT OFF AND UNREACHABLE on a phone,
-     which is worse than a page that scrolls. `minmax(0, 1fr)` lets the columns shrink; the labels
-     wrap rather than being hidden. The chart and tape beside them were only wide because they are
-     grid siblings of this row and inherited its 380px column. */
-  .orderflow-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
