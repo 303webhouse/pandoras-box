@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <!-- v2.css first: the tokens and the shell. abacus.css adds only this page. -->
     <link rel="stylesheet" href="/v2.css?v=38">
-    <link rel="stylesheet" href="/abacus.css?v=2">
+    <link rel="stylesheet" href="/abacus.css?v=3">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -54,6 +54,12 @@
         <div class="ab-grid">
             <div>
                 <div class="ab-stats" id="abStats"></div>
+                <section class="ab-card" id="abAccountsCard" hidden>
+                    <h2 class="ab-h2">By account <span id="abAccountsChip"></span></h2>
+                    <div class="ab-acct-ctl" id="abAccountFilter" role="group" aria-label="Filter by account"></div>
+                    <div class="ab-acct-table" id="abAccounts"></div>
+                    <p class="ab-acct-note" id="abAccountsNote"></p>
+                </section>
                 <section class="ab-card ab-equity">
                     <h2 class="ab-h2">Equity <span id="abEquityChip"></span></h2>
                     <div id="abEquity"></div>
@@ -101,6 +107,6 @@
       })();
     </script>
 
-    <script src="/abacus.js?v=3"></script>
+    <script src="/abacus.js?v=4"></script>
 </body>
 </html>
