@@ -129,7 +129,7 @@ async def test_btc_okx_fallback_still_uly(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_btc_coinalyze_primary_request_unchanged(monkeypatch):
+async def test_btc_coinalyze_primary_request_seconds(monkeypatch):
     captured = []
 
     async def _cz(endpoint, params=None):
@@ -147,10 +147,40 @@ async def test_btc_coinalyze_primary_request_unchanged(monkeypatch):
     assert captured[0][0] == "/liquidation-history"
     assert captured[0][1]["symbols"] == "BTCUSD_PERP.A"
     assert captured[0][1]["interval"] == "1hour"
-    assert "from" in captured[0][1] and "to" in captured[0][1]
-    assert captured[0][1]["from"] > 10_000_000_000  # still milliseconds, as production sends
+    assert captured[0][1]["from"] < 10_000_000_000  # UNIX seconds
+    assert captured[0][1]["to"] < 10_000_000_000
+    assert captured[0][1]["convert_to_usd"] == "true"
     assert got["source"] == "coinalyze"
     assert got["total_liquidations"] == 300.0
+
+
+@pytest.mark.asyncio
+async def test_history_callers_send_seconds_and_convert_to_usd(monkeypatch):
+    captured = []
+
+    async def _cz(endpoint, params=None):
+        captured.append((endpoint, dict(params or {})))
+        hist = [{"t": i, "o": 10 + i, "c": 100, "l": 1.0, "s": 1.0, "v": 0.01} for i in range(6)]
+        return [{"symbol": "BTCUSD_PERP.A", "history": hist}]
+
+    monkeypatch.setattr(cz, "_make_request", _cz)
+    monkeypatch.setattr(cz, "_make_okx_request", AsyncMock(side_effect=AssertionError("no OKX")))
+    monkeypatch.setattr(cz, "record_observation", AsyncMock(return_value="LIVE"))
+
+    await cz.get_open_interest("BTC")
+    cz.reset_for_tests()
+    await cz.get_term_structure("BTC")
+    cz.reset_for_tests()
+    await cz.get_long_short_ratio("BTC")
+
+    by_ep = {ep: p for ep, p in captured}
+    for ep in ("/open-interest-history", "/funding-rate-history", "/long-short-ratio-history"):
+        assert ep in by_ep, ep
+        assert by_ep[ep]["from"] < 10_000_000_000
+        assert by_ep[ep]["to"] < 10_000_000_000
+    assert by_ep["/open-interest-history"]["convert_to_usd"] == "true"
+    assert by_ep["/funding-rate-history"]["convert_to_usd"] == "true"
+    assert "convert_to_usd" not in by_ep["/long-short-ratio-history"]
 
 
 @pytest.mark.asyncio
@@ -267,7 +297,9 @@ async def test_liq_cell_source_coinalyze_when_primary_answers(monkeypatch):
     cells = await eng._build_capitulation_cells("BTC", {"capitulation": {}, "staleness_thresholds": {}})
     liq = next(c for c in cells if c["signal_id"] == "liquidations")
     assert liq["source"] == "coinalyze"
-    assert liq["state"] == "LIVE"
+    assert liq["state"] == "NA"
+    assert liq["reason"] == "COINALYZE_UNITS_UNVERIFIED"
+    assert liq["signal"] == "NEUTRAL"
 
 
 def test_btc_okx_fallback_cell_does_not_move_composite():
@@ -284,3 +316,90 @@ def test_btc_okx_fallback_cell_does_not_move_composite():
     assert a[0] == b[0]
     assert a[1] == b[1]
     assert a[4] == b[4]
+
+
+def _cycle_na_vendor():
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    return {"state": "NA", "reason": "t", "signal": "UNKNOWN", "timestamp": now}
+
+
+@pytest.mark.asyncio
+async def test_coinalyze_oi_cell_units_unverified(monkeypatch):
+    from datetime import datetime, timezone
+    from bias_filters import crypto_cycle_engine as eng
+
+    now = datetime.now(timezone.utc).isoformat()
+    na = _cycle_na_vendor()
+
+    async def _oi(*a, **k):
+        return {
+            "current_oi": 1.0,
+            "oi_change_4h": 6.0,
+            "divergence": "none",
+            "signal": "NEUTRAL",
+            "source": "coinalyze",
+            "timestamp": now,
+        }
+
+    async def _na(*a, **k):
+        return dict(na)
+
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_open_interest", _oi)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_liquidations", _na)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_funding_rate", _na)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_term_structure", _na)
+    monkeypatch.setattr("bias_filters.deribit_client.get_25_delta_skew", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_quarterly_basis", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_spot_orderbook_skew", _na)
+    monkeypatch.setattr("bias_filters.defillama_client.get_stablecoin_aprs", _na)
+    monkeypatch.setattr("bias_filters.btc_bottom_signals._fetch_vix_signal", _na)
+
+    cap = await eng._build_capitulation_cells("BTC", {"capitulation": {}, "staleness_thresholds": {}})
+    froth = await eng._build_froth_cells("BTC", {"froth": {}, "staleness_thresholds": {}})
+    oi = next(c for c in cap if c["signal_id"] == "open_interest")
+    extreme = next(c for c in froth if c["signal_id"] == "oi_extreme")
+    assert oi["source"] == "coinalyze"
+    assert oi["state"] == "NA"
+    assert oi["reason"] == "COINALYZE_UNITS_UNVERIFIED"
+    assert extreme["source"] == "coinalyze"
+    assert extreme["state"] == "NA"
+    assert extreme["reason"] == "COINALYZE_UNITS_UNVERIFIED"
+    assert extreme["firing"] is False
+
+
+@pytest.mark.asyncio
+async def test_funding_and_term_source_follow_vendor(monkeypatch):
+    from datetime import datetime, timezone
+    from bias_filters import crypto_cycle_engine as eng
+
+    now = datetime.now(timezone.utc).isoformat()
+    na = _cycle_na_vendor()
+
+    async def _fund(*a, **k):
+        return {"funding_rate": 0.01, "signal": "NEUTRAL", "source": "okx_fallback", "timestamp": now}
+
+    async def _term(*a, **k):
+        return {
+            "structure": "flat", "funding_trend": "stable", "current_funding": 0.01,
+            "signal": "NEUTRAL", "source": "okx_fallback", "timestamp": now,
+        }
+
+    async def _na(*a, **k):
+        return dict(na)
+
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_funding_rate", _fund)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_term_structure", _term)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_open_interest", _na)
+    monkeypatch.setattr("bias_filters.coinalyze_client.get_liquidations", _na)
+    monkeypatch.setattr("bias_filters.deribit_client.get_25_delta_skew", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_quarterly_basis", _na)
+    monkeypatch.setattr("bias_filters.binance_client.get_spot_orderbook_skew", _na)
+    monkeypatch.setattr("bias_filters.defillama_client.get_stablecoin_aprs", _na)
+    monkeypatch.setattr("bias_filters.btc_bottom_signals._fetch_vix_signal", _na)
+
+    cap = await eng._build_capitulation_cells("BTC", {"capitulation": {}, "staleness_thresholds": {}})
+    froth = await eng._build_froth_cells("BTC", {"froth": {}, "staleness_thresholds": {}})
+    assert next(c for c in cap if c["signal_id"] == "perp_funding")["source"] == "okx_fallback"
+    assert next(c for c in cap if c["signal_id"] == "term_structure")["source"] == "okx_fallback"
+    assert next(c for c in froth if c["signal_id"] == "funding_blowout")["source"] == "okx_fallback"
