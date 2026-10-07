@@ -271,7 +271,10 @@ class TestTheForwardCollectorIsObservable:
         """§5.1, plus the durable `job_runs` row that makes "did today's capture happen?"
         survive a restart -- the in-process set cannot."""
         src = _code("jobs/stable_jobs.py")
-        assert '_run_job(SPY_MINUTE_JOB, _run, session_date=day)' in src
+        # Same correction as the tide site: the helper is `_record`. A string match on a name
+        # that does not exist cannot fail, and this one did not.
+        assert '_record(SPY_MINUTE_JOB, _run, session_date=day)' in src
+        assert "_run_job" not in src
 
     def test_it_is_gated_on_the_post_close_time_and_a_trading_day(self):
         src = _code("jobs/stable_jobs.py")
