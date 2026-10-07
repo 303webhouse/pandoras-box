@@ -390,9 +390,9 @@ async def stable_tide_warmer_loop():
                 logger.debug("[stable_jobs] tide: %s",
                              "paused: R-IV.273(c) tide spend pause is on")
             elif is_rth(now_et()):
-                # R-IV.675(b) §5.1: through _run_job, so a tide collector that goes dark shows
+                # R-IV.675(b) §5.1: through _record, so a tide collector that goes dark shows
                 # as a flatlined job in /health instead of as a table nobody thought to query.
-                await _run_job("market_tide", _warm_tide)
+                await _record("market_tide", _warm_tide)
         except Exception as e:
             logger.warning("[stable_jobs] tide warmer error: %s", e)
         await asyncio.sleep(300)  # 5 minutes
@@ -610,7 +610,7 @@ async def _maybe_capture_spy_minute(et) -> None:
     is recoverable for about a month and then gone -- which is exactly why this exists rather than
     relying on a read at analysis time.
 
-    Runs under `_run_job(..., session_date=day)`, so it carries the §5.1 liveness sentinel AND the
+    Runs under `_record(..., session_date=day)`, so it carries the §5.1 liveness sentinel AND the
     durable `job_runs` row that makes "did today's capture happen?" survive a restart. The
     in-process `_spy_minute_attempted_on` set cannot do that on its own -- it is only here to stop
     a second attempt inside one process life.
@@ -650,7 +650,7 @@ async def _maybe_capture_spy_minute(et) -> None:
         logger.info("[spy_minute] %s: %d bars stored", day, res["written"])
         return res
 
-    await _run_job(SPY_MINUTE_JOB, _run, session_date=day)
+    await _record(SPY_MINUTE_JOB, _run, session_date=day)
 
 
 async def _maybe_run_expiry_sweep_postclose(et) -> None:

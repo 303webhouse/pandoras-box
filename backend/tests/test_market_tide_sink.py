@@ -233,7 +233,14 @@ class TestTheCollectorIsObservable:
         """§5.1. A collector that goes dark must show as a flatlined job in /health, not as a
         table nobody thought to query -- DEF-TRITON-GRADER-DARK is exactly that failure."""
         src = _code("jobs/stable_jobs.py")
-        assert '_run_job("market_tide", _warm_tide)' in src
+        # `_record` is the helper's REAL name -- all fifteen call sites use it. This assertion
+        # said `_run_job`, a function that exists nowhere, so it matched the text I had just
+        # written and the test agreed with the bug. The Tide cell was dark from the open on
+        # 2026-10-07 because of it. The real guard is now
+        # tests/test_tide_warmer_actually_runs.py, which runs a cycle and checks the cell;
+        # this line only pins the wiring.
+        assert '_record("market_tide", _warm_tide)' in src
+        assert "_run_job" not in src, "there is no _run_job; calling one is a NameError at runtime"
 
     def test_the_warmer_persists_before_it_reduces_to_the_last_row(self):
         src = _code("jobs/stable_jobs.py")
