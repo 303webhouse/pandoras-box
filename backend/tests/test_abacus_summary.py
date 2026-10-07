@@ -19,7 +19,7 @@ def _get(client, test_api_key, qs=""):
     return client.get(PATH + qs, headers={"X-API-Key": test_api_key})
 
 
-LIVE_KEYS = {"net_profit", "win_rate"}
+LIVE_KEYS = {"net_profit", "win_rate", "expected_return"}
 
 
 class _FakePool:
@@ -34,8 +34,11 @@ class _FakePool:
         return self.rows
 
 
-def _row(pnl, basis=None, basis_incomplete_reason=None):
-    return {"realized_pnl": pnl, "cost_basis": basis, "basis_incomplete_reason": basis_incomplete_reason}
+def _row(pnl, basis=None, basis_incomplete_reason=None, account="ROBINHOOD"):
+    # R-IV.650(b)3: the query now selects `account` too, so a fixture row carries one. `None`
+    # is a real case -- a closed trade the book never attributed -- and is tested on its own.
+    return {"realized_pnl": pnl, "cost_basis": basis,
+            "basis_incomplete_reason": basis_incomplete_reason, "account": account}
 
 
 @pytest.fixture(autouse=True)
@@ -351,3 +354,83 @@ class TestAbacusPageServed:
         """R-IV.413(a): /app/analytics is not repointed until the replacement is live."""
         body = client.get("/app/analytics").content
         assert b"/app.js" in body
+
+
+
+class TestAbacusPerAccount:
+    """R-IV.650(b)3 — per account AND combined, with the combined row pooled."""
+
+    def test_each_account_gets_its_own_block_with_its_served_name(self, client, test_api_key):
+        rows = [_row(10.0, 100.0, account="ROBINHOOD"), _row(-4.0, 100.0, account="ROBINHOOD"),
+                _row(20.0, 100.0, account="FIDELITY_ROTH")]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        by = {a["account"]: a for a in d["accounts"]}
+        assert set(by) == {"ROBINHOOD", "FIDELITY_ROTH"}
+        # the NAME is served, never inferred from the key by a reader
+        assert by["FIDELITY_ROTH"]["account_display"] == "FID ROTH"
+        assert by["ROBINHOOD"]["account_display"] == "Robinhood"
+
+    def test_combined_is_pooled_not_an_average_of_the_rates(self, client, test_api_key):
+        """Robinhood wins 1 of 2; the Roth wins 2 of 2. Averaging the RATES gives 0.75.
+        Pooling the trades gives 3 of 4 = 0.75 here only by coincidence, so use counts that
+        separate them: 1-of-3 and 2-of-2 average to 0.667 but pool to 3 of 5 = 0.6."""
+        rows = [_row(10.0, 100.0, account="ROBINHOOD"), _row(-4.0, 100.0, account="ROBINHOOD"),
+                _row(-5.0, 100.0, account="ROBINHOOD"),
+                _row(20.0, 100.0, account="FIDELITY_ROTH"), _row(30.0, 100.0, account="FIDELITY_ROTH")]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        by = {a["account"]: a for a in d["accounts"]}
+        assert by["ROBINHOOD"]["win_rate"] == 0.3333
+        assert by["FIDELITY_ROTH"]["win_rate"] == 1.0
+        combined = next(s for s in d["stats"] if s["key"] == "win_rate")
+        assert combined["value"] == 0.6, "pooled over every trade, not the mean of the two rates"
+        assert d["combined_is_pooled"] is True
+
+    def test_every_rate_carries_its_own_n(self, client, test_api_key):
+        # one trade has no basis: it has a P&L but no RETURN, so the two counts differ
+        rows = [_row(10.0, 100.0), _row(-4.0, None), _row(6.0, 200.0)]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        wr = next(s for s in d["stats"] if s["key"] == "win_rate")
+        er = next(s for s in d["stats"] if s["key"] == "expected_return")
+        assert wr["n"] == 3
+        assert er["n"] == 2, "a trade with no basis has no return and is not averaged in at zero"
+        acct = d["accounts"][0]
+        assert acct["win_rate_n"] == 3 and acct["expected_return_n"] == 2
+
+    def test_expected_return_is_null_not_zero_when_nothing_has_a_basis(self, client, test_api_key):
+        rows = [_row(10.0, None), _row(-4.0, None)]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        er = next(s for s in d["stats"] if s["key"] == "expected_return")
+        assert er["value"] is None, "no trade can be measured is not an average of nothing"
+        assert er["n"] == 0
+
+    def test_a_trade_with_no_account_is_its_own_bucket_not_folded_in(self, client, test_api_key):
+        rows = [_row(10.0, 100.0, account="ROBINHOOD"), _row(-4.0, 100.0, account=None)]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        by = {a["account"]: a for a in d["accounts"]}
+        assert None in by, "an unattributed trade is not silently added to another account"
+        assert by[None]["account_display"] is None, "and it is never given a name nobody served"
+
+    def test_each_account_carries_its_own_coverage(self, client, test_api_key):
+        rows = [_row(10.0, 100.0, account="ROBINHOOD"),
+                _row(None, 100.0, account="FIDELITY_ROTH"),
+                _row(-500.0, 100.0, account="FIDELITY_ROTH")]
+        pool, p = _patch_book(rows)
+        with p:
+            d = _get(client, test_api_key).json()
+        by = {a["account"]: a for a in d["accounts"]}
+        roth = by["FIDELITY_ROTH"]["coverage"]
+        assert roth["total"] == 2 and roth["counted"] == 0
+        assert roth["excluded"]["no_realized_pnl"] == 1
+        assert roth["excluded"]["return_below_neg100pct"] == 1
+        assert by["ROBINHOOD"]["coverage"]["counted"] == 1
+

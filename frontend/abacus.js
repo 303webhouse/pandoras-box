@@ -146,6 +146,54 @@
       </div>`;
     }).join('');
   }
+  // ── R-IV.650(b)3 · per account, and combined ──────────────────────────────────────────────
+  // The combined row is POOLED over every counted trade, which is what "weighted by trade
+  // count" means; averaging the per-account rates would weight a six-trade book like a
+  // forty-trade one. Every rate prints its own n, and the two n's differ on purpose: a trade
+  // whose basis the book never recorded has a P&L but no return.
+  let acctFilter = 'all';
+  function acctLabel(a) {
+    // A key is not a label. Where the hub served no name, say so rather than printing the key.
+    return a.account_display || (a.account ? '(unnamed account)' : 'Unattributed');
+  }
+  function renderAccounts(d) {
+    const list = (d.accounts || []).filter(Boolean);
+    const card = $('abAccountsCard');
+    if (!card) return;
+    if (!list.length) { card.hidden = true; return; }
+    card.hidden = false;
+    const chipHost = $('abAccountsChip');
+    if (chipHost) chipHost.innerHTML = blockChip({ source: 'live', computed_at: new Date().toISOString() }, 'live');
+
+    const btn = (k, t) => `<button type="button" data-abacct="${esc(k)}" aria-pressed="${acctFilter === k}">${esc(t)}</button>`;
+    $('abAccountFilter').innerHTML = btn('all', 'All')
+      + list.map((a) => btn(a.account == null ? '__none__' : a.account, acctLabel(a))).join('');
+
+    const key = (a) => (a.account == null ? '__none__' : a.account);
+    const shown = acctFilter === 'all' ? list : list.filter((a) => key(a) === acctFilter);
+    const rowHtml = (a, cls) => `<tr class="${cls || ''}">
+        <td>${esc(acctLabel(a))}</td>
+        <td class="ab-num">${esc(fmt(a.net_profit, 'usd'))}</td>
+        <td class="ab-num">${esc(fmt(a.win_rate, 'pct'))}<span class="ab-n">n=${a.win_rate_n}</span></td>
+        <td class="ab-num">${esc(fmt(a.expected_return, 'pct'))}<span class="ab-n">n=${a.expected_return_n}</span></td>
+      </tr>`;
+    // Every account stays in the table even when one is filtered to, so the one he picked can
+    // be read against the others; the filter dims the rest rather than hiding them.
+    const body = list.map((a) => rowHtml(a, shown.indexOf(a) < 0 ? 'ab-dim' : '')).join('');
+    const combined = { account: null, account_display: 'All accounts',
+                       net_profit: pick(d, 'net_profit'), win_rate: pick(d, 'win_rate'),
+                       win_rate_n: pickN(d, 'win_rate'),
+                       expected_return: pick(d, 'expected_return'), expected_return_n: pickN(d, 'expected_return') };
+    $('abAccounts').innerHTML = `<table>
+        <thead><tr><th>Account</th><th class="ab-num">Net profit</th><th class="ab-num">Win rate</th><th class="ab-num">Expected return</th></tr></thead>
+        <tbody>${body}${rowHtml(combined, 'ab-total')}</tbody></table>`;
+    $('abAccountsNote').textContent = d.combined_is_pooled
+      ? 'All accounts is pooled over every counted trade, so it is weighted by trade count — not an average of the rates above it.'
+      : '';
+  }
+  const pick = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s ? s.value : null; };
+  const pickN = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s && s.n != null ? s.n : 0; };
+
   function renderEquity(d) {
     const e = d.equity;
     $('abEquityChip').innerHTML = e ? blockChip(e, 'live') : '';
@@ -286,11 +334,21 @@
     renderHead(d);
     renderBanner(d);
     renderStats(d);
+    renderAccounts(d);
     renderEquity(d);
     renderLeaks(d);
     renderBreakdowns(d);
     renderSlot(d);
   }
+
+  // One delegated handler; the filter re-renders from the data already in hand, so changing it
+  // costs no request and cannot race the range control.
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-abacct]');
+    if (!b || !lastData) return;
+    acctFilter = b.dataset.abacct;
+    renderAccounts(lastData);
+  });
 
   let seq = 0;
   async function load() {
