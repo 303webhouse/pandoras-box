@@ -13872,8 +13872,15 @@ body[data-mode="analytics"] .analytics-shell {
    Of the four rules in it, only `.crypto-bias-row` was actually being overridden. The duplicate
    says the same thing as the other three (`justify-self` on the inline and meta blocks, and
    `.crypto-main-content` has no later copy at all), which is why moving the block changes exactly
-   one thing: the grid collapses at and below 1200px, as it was written to. */
-@media (max-width: 1200px) {
+   one thing: the grid collapses where it was written to.
+
+   R-IV.719(d): THE BREAKPOINT IS NOW 1417px, NOT 1200px. 1200 was a guess and it was 218px short:
+   the three-column layout's own intrinsic width is 1418px (220px + the price row's 919px + 200px +
+   two 12px gaps + 35px of padding), so every width from 1201 to 1417 collapsed nothing and scrolled
+   sideways. 1417 is the last width at which it does not fit, so that is where the collapse ends. At
+   1418px and above the three columns fit unaided and nothing changes. The number is measured, and
+   the measurement is the comment: if the row's contents change, this breakpoint is wrong again. */
+@media (max-width: 1417px) {
     .crypto-main-content {
         grid-template-columns: 1fr;
         grid-template-areas:

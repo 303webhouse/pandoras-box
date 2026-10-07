@@ -3420,16 +3420,20 @@ const X = (function () {
   }
 
   // The sleeve line. There is NO ceiling anywhere in the schema, so there is no gauge: a bar
-  // without a limit draws a judgement the hub cannot make. What can be said is said — the sum of
-  // the max losses the hub actually holds, WITH THE COUNT IT WAS DRAWN FROM, because `max_loss`
-  // is populated on 17 of 28 rows and a bare total over that column reads as the whole book.
+  // without a limit draws a judgement the hub cannot make.
+  //
+  // R-IV.719(c): AND THERE IS NO AT-RISK TOTAL EITHER, for now. It was shown with the count it was
+  // drawn from, which answered how MANY rows carry a max loss and not whether the values are right.
+  // They are not: on the closed book 31 losing trades are recorded as having lost MORE than their
+  // own defined maximum, which cannot happen to a defined-risk trade. Summing a column like that
+  // produces a figure the principal would size positions against.
+  //
+  // The lesson, written where the next person will be tempted: PUBLISHING n DOES NOT FIX A WRONG
+  // DENOMINATOR. A coverage chip answers "how much of the sample is this", never "are these true".
   function sleeveLine(g) {
-    const withMax = g.rows.filter((p) => p.maxLoss != null);
-    const sum = withMax.reduce((s, p) => s + p.maxLoss, 0);
-    const all = withMax.length === g.rows.length;
     return `<div class="pp-sleeve">
-      <span>At risk ${withMax.length ? `<b>${usd(sum)}</b>` : '<span class="pp-amber">nothing measurable</span>'} <span class="pp-dim">sum of max loss</span>
-        ${chip(all ? 'verified' : 'reported', `n=${withMax.length} of ${g.rows.length}`, all ? 'Every open position in this account carries a max loss.' : `${g.rows.length - withMax.length} of these positions carry no max loss, so they are not in this total.`)}</span>
+      <span>At risk <span class="pp-amber" title="The hub's max_loss is unreliable: losing trades are recorded as having lost more than their own defined maximum, so a sum of that column cannot be trusted. Returns when BUILD's fix lands (R-IV.714(d)).">not reliable yet</span>
+        ${chip('unknown', 'withheld', 'No figure from max_loss is shown anywhere until BUILD’s R-IV.714(d) fix lands.')}</span>
       <span>Ceiling ${chip('unknown', 'no source', 'No sleeve ceiling or cash floor exists anywhere in the schema, so none is drawn. The playbook’s rule has never been recorded as data.')}</span>
     </div>`;
   }
@@ -3467,7 +3471,7 @@ const X = (function () {
         <div><span class="pp-k">Time stop</span>${p.timeStop ? esc(p.timeStop) : notCaptured('The time stop')}</div>
         <div class="pp-wide"><span class="pp-k">Invalidation</span>${p.invalidation ? esc(p.invalidation) : notCaptured('The invalidation')}</div>
         <div class="pp-wide"><span class="pp-k">Tags</span>${p.tags.length ? p.tags.map((t) => `<span class="pp-tag">${esc(t)}</span>`).join(' ') : notCaptured('Tags')}</div>
-        <div><span class="pp-k">Max loss</span>${p.maxLoss == null ? `<span class="pp-amber" title="${esc(p.maxLossWhy || 'the hub derived no max loss for this row')}">not derivable</span>` : usd(p.maxLoss)}</div>
+        <div><span class="pp-k">Max loss</span><span class="pp-amber" title="The hub's max_loss is unreliable (R-IV.719(c)): losing trades are recorded as having lost more than their own defined maximum, so no figure from it is shown until BUILD's R-IV.714(d) fix lands.">not reliable yet</span></div>
       </div>`;
     if (s.status !== 'ok') return `<div class="pp-detail">${head}${state(s, 'Reading this position’s lots and legs…', 'lots and legs', p.pid)}</div>`;
 
