@@ -3183,81 +3183,182 @@
    One panel: layout B on desktop, layout C on phone. */
 (function () {
   'use strict';
-const PM = {
-  label: 're-derived 09-23',
-  sleeves: [
-    // mock figures. RH ceiling ~10% of (FIDELITY_ROTH + ROBINHOOD), $200 always in cash.
-    // FIDELITY_ROTH's cap: max losses within 20% of its own balance.
-    { account: 'ROBINHOOD', kind: 'options sleeve', rule: 'ceiling ≈ 10% of combined balance', measure: 'at risk', ceiling: 968, atRisk: 412, cashFloor: 200, cash: 223.69, balance: 835.69 },
-    { account: 'FIDELITY_ROTH', kind: 'equity sleeve', rule: 'cap: max losses within 20% of its balance', measure: 'max loss', ceiling: 1768, atRisk: 1210, cashFloor: null, cash: 1980.0, balance: 8842.09 },
-  ],
-  open: [
-    { id: 517, account: 'ROBINHOOD', ticker: 'AVGO', rule: { kind: 'act', text: 'Harvest zone: 64% of max. The rule says take it.' }, bucket: 'B2 tactical', structure: 'put debit spread 300/290', qty: 2, cost: 148, mark: 171, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-10-16',
-      stop: { type: 'daily-close', level: 'close < 305' }, invalidation: 'Daily close above 312 voids the bearish read', timeStop: '09-29 (5 days, B2 window)', tags: ['semis', 'committee'],
-      lots: [{ id: 1, when: '09-22 10:41', qty: 2, price: 0.74, fees: 1.30, prov: 'BROKER_VERIFIED', ref: 'RH-…7f2a' }],
-      legs: [{ seq: 1, side: 'long', type: 'put', strike: 300, price: 3.10 }, { seq: 2, side: 'short', type: 'put', strike: 290, price: 2.36 }],
-      evidence: ['Broker fill 09-22 10:41: BUY 2 AVGO 10/16 300P @3.10, SELL 2 290P @2.36 (broker_ref RH-…7f2a)', 'Cost check: (3.10 − 2.36) × 2 × 100 = 148.00, matches recorded basis'] },
-    { id: 519, account: 'ROBINHOOD', ticker: 'TSLA', rule: { kind: 'act', text: 'No stop written: write one before the next close. Unstopped, it counts at its full max loss toward the ceiling.' }, bucket: 'B2 tactical', structure: 'put debit spread 260/250', qty: 1, cost: 96, mark: null, markState: 'unknown', prov: 'SCREEN_VERIFIED', expiry: '2026-10-16',
-      stop: { type: 'none', level: '—' }, invalidation: 'not written', timeStop: 'not set', tags: [],
-      lots: [{ id: 2, when: '09-22 11:05', qty: 1, price: 0.96, fees: 0.65, prov: 'SCREEN_VERIFIED', ref: '—' }],
-      legs: [{ seq: 1, side: 'long', type: 'put', strike: 260, price: null }, { seq: 2, side: 'short', type: 'put', strike: 250, price: null }],
-      evidence: ['Read from a broker screen (fields + capture time recorded); no fill reference yet', 'Export line will supersede this and promote it to BROKER_VERIFIED'] },
-    { id: 520, account: 'ROBINHOOD', ticker: 'NVDA', rule: { kind: 'watch', text: 'Basis under review: settle the third leg\'s fill before deciding anything.' }, bucket: 'B1 thesis', structure: '3-leg put fly 415', qty: 1, cost: 168, mark: 121, markState: 'stale', prov: 'PRINCIPAL_REPORTED', expiry: '2026-11-20', basisIncomplete: 'quantity 3, basis covers 2 structures; third has no recorded fill',
-      stop: { type: 'broker order', level: 'stop @ 60% of debit' }, invalidation: 'Thesis dead if NVDA reclaims 430 on volume', timeStop: '11-06', tags: ['thesis'],
-      lots: [{ id: 3, when: '09-15', qty: 1, price: 1.68, fees: 0, prov: 'PRINCIPAL_REPORTED', ref: '—' }],
-      legs: [{ seq: 1, side: 'long', type: 'put', strike: 425, price: null }, { seq: 2, side: 'short', type: 'put', strike: 415, price: null }, { seq: 3, side: 'long', type: 'put', strike: 405, price: null }],
-      evidence: ['Basis incomplete by ruling — counted in the census, never averaged into realized or win rate'] },
-    { id: 516, account: 'ROBINHOOD', ticker: 'HYG', rule: { kind: 'act', text: 'Time stop in 2 sessions.' }, bucket: 'HEDGE', structure: 'put debit spread 76/73', qty: 5, cost: 70, mark: 96, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: '2026-11-20', rolledFrom: 218,
-      stop: { type: 'daily-close', level: 'close < 77.2' }, invalidation: 'Credit spreads tighten below 3.1', timeStop: '11-13',
-      tags: ['credit', 'roll'],
-      lots: [{ id: 4, when: '09-22 09:58', qty: 3, price: 0.14, fees: 0.9, prov: 'BROKER_VERIFIED', ref: 'RH-…1c90' }, { id: 5, when: '09-22 10:02', qty: 2, price: 0.13, fees: 0.6, prov: 'BROKER_VERIFIED', ref: 'RH-…1c91' }],
-      legs: [{ seq: 1, side: 'long', type: 'put', strike: 76, price: 0.58 }, { seq: 2, side: 'short', type: 'put', strike: 73, price: 0.39 }],
-      evidence: ['Roll: closed #218 (−110.00) and opened #516 in one motion', 'Roll cost 30.00 recorded on lot 1 only'] },
-    { id: 601, account: 'FIDELITY_ROTH', ticker: 'PDBC', rule: { kind: 'act', text: 'No broker stop: counts 100% toward the 20% cap.' }, bucket: 'CORE', structure: 'equity', qty: 50, cost: 690, mark: 702, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
-      stop: { type: 'daily-close', level: 'close < 13.2' }, invalidation: 'Commodity sleeve breaks its 200-day', timeStop: 'none (holding)', tags: ['commodity'],
-      lots: [{ id: 6, when: '09-01', qty: 50, price: 13.80, fees: 0, prov: 'BROKER_VERIFIED', ref: 'FID-…22b0' }], legs: [],
-      evidence: ['Fidelity confirmation 09-01: BUY 50 PDBC @13.80'] },
-    { id: 602, account: 'FIDELITY_ROTH', ticker: 'SOXS', rule: { kind: 'ok', text: 'Broker stop is resting: nothing to do today.' }, bucket: 'HEDGE', structure: 'equity', qty: 25, cost: 420, mark: 391, markState: 'fresh', prov: 'BROKER_VERIFIED', expiry: null,
-      stop: { type: 'broker order', level: 'stop @ 14.40' }, invalidation: 'Semis trend resumes: SMH closes above its 20-day', timeStop: 'review when SMH resets', tags: ['semis', 'inverse'],
-      lots: [{ id: 7, when: '09-10', qty: 25, price: 16.80, fees: 0, prov: 'BROKER_VERIFIED', ref: 'FID-…31c4' }], legs: [],
-      evidence: ['Fidelity confirmation 09-10: BUY 25 SOXS @16.80'] },
-  ],
-  history: {
-    coverage: { total: 8, counted: 6, excluded: { basis_incomplete: 1, return_below_neg100pct: 1, no_realized_pnl: 0 } },
-    rows: [
-      { id: 480, ticker: 'QQQ', structure: 'call debit spread', closed: '09-19', realized: 74.0, prov: 'BROKER_VERIFIED', why: 'target' },
-      { id: 471, ticker: 'SPY', structure: 'put debit spread', closed: '09-17', realized: -52.0, prov: 'BROKER_VERIFIED', why: 'stop' },
-      { id: 465, ticker: 'XLF', structure: 'call debit spread', closed: '09-12', realized: 31.0, prov: 'SCREEN_VERIFIED', why: 'time stop' },
-      { id: 452, ticker: 'ORCL', structure: 'put debit spread', closed: '09-09', realized: -88.0, prov: 'BROKER_VERIFIED', why: 'stop' },
-      { id: 447, ticker: 'SOXS', structure: 'equity', closed: '09-08', realized: 19.0, prov: 'IMPORTED', why: 'target' },
-      { id: 440, ticker: 'UVXY', structure: 'call', closed: '09-05', realized: -40.0, prov: 'BROKER_VERIFIED', why: 'expired' },
-      { id: 433, ticker: 'NVDA', structure: '3-leg put fly', closed: '09-03', realized: null, prov: 'PRINCIPAL_REPORTED', why: 'basis under review', flag: 'basis incomplete' },
-      { id: 429, ticker: 'IBIT', structure: 'put debit spread', closed: '09-02', realized: -190.0, prov: 'IMPORTED', why: 'return past −100% of basis', flag: 'return < −100%' },
-    ],
-    chains: [
-      { label: 'HYG roll chain', legs: [{ id: 218, closed: '09-22', realized: -110.0 }, { id: 516, open: true }], net: -110.0, note: 'reads as ONE trade: roll cost 30.00 on lot 1, chain result −110.00 so far' },
-    ],
-  },
-  buckets: [['B1 thesis','multi-week'],['B2 tactical','3–5 days'],['B3 scalp','intraday'],['CORE',''],['HEDGE',''],['TAIL','']],
-  ladder: ['UNKNOWN','PRINCIPAL_REPORTED','SCREEN_VERIFIED','IMPORTED','BROKER_VERIFIED'],
-  ticket: {
-    tape: { state: 'DOWN', detail: 'SPY below 20-day, breadth 38%' },
-    fields: ['tape vs trade direction', 'bucket', 'max loss vs caps', 'stop written', 'invalidation', 'time stop', 'Zweig rule strained'],
-  },
-  missing: [
-    'roll route (R-IV.452, not landed) — Roll button shows disabled state',
-    'stop type / invalidation / time stop / bucket have no columns (bucket lives inside notes text)',
-    'pre-trade ticket has no route or storage: X8 needs fields on the position row',
-    'sleeve ceiling and cash floor have no read endpoint (figures here are mock)',
-    'evidence lines are stored as prose in notes; a structured list needs a source',
-  ],
+// ── The live book (R-IV.697) ─────────────────────────────────────────────────────────────────
+// This panel read MOCK data until now. The scope (R-IV.691(c)) found that for identity, money,
+// marks, lots, legs and the closed history the endpoints already existed and were already proven
+// by the Book lane — so what follows is a read, not a new contract. Four rules come from
+// R-IV.697(c), and each one is the fix for a trap that was MEASURED in the book, not guessed:
+//
+//   1. LEGS COME FROM `/legs` (the `position_legs` table), never from the position row's `legs`
+//      jsonb column. The jsonb is populated on 2 of 28 open rows; the table covers 19. Same
+//      name, two sources, and the nearly-empty one is the one sitting on the row you already
+//      have — which is exactly why it gets read by mistake.
+//   2. HISTORY ASKS FOR `CLOSED` AND `EXPIRED` BY NAME. `status=ALL` also returns
+//      `DUPLICATE_OF` — 78 rows that are the same trade recorded twice. Naming the two statuses
+//      excludes them structurally, rather than by remembering to filter.
+//   3. EVIDENCE COMES FROM THE LOTS. Position-level `broker_ref` is 0 of 28, while 52 of the 61
+//      lots on open rows carry one. Reading the position field would report no evidence at all
+//      for a book that is largely evidenced.
+//   4. THE BUCKET LEGEND IS GENERATED FROM THE TAGS SERVED, as the account filter is. The old
+//      hardcoded legend listed CORE, HEDGE and B3, which nothing serves, and omitted CONVEXITY,
+//      which is served.
+//
+// Two further rules about absence, because they are what keeps the seam honest:
+//
+//   * The discipline fields — stop, invalidation, time stop, tags — have columns, a CHECK
+//     constraint, a parser and a reader, and NO WRITER (BUILD gap 3). They read "not captured
+//     yet", never "none": "none" asserts there is no stop, and the truth is that nothing has ever
+//     been able to record one.
+//   * Anything with no source at all is ABSENT, not mocked. The sleeve-ceiling gauge, the roll
+//     chain and the ticket's invented headroom figures are gone. A bar needs a ceiling, and
+//     there is no ceiling anywhere in the schema.
+//
+// No money arithmetic happens on this page. The unrealized P&L is the hub's lot-derived figure,
+// not `mark − cost`, and the realized total and win rate come from the hub's own census
+// (`/api/abacus/summary`, which runs the one predicate). The single exception is the at-risk sum,
+// which has no server-side figure at all — so it is shown with its n on its face, as R-IV.697
+// requires of a total over a partly populated column.
+
+const HIST_N = 12;                       // the list shows the most recent N; the census is the hub's
+const BK = {
+  open: { status: 'idle', err: null, rows: [], age: null },
+  hist: { status: 'idle', err: null, rows: [], total: 0, stats: null, range: null },
+  sub: {},                               // position_id -> { status, err, lots, legs, agrees, storedQty, mergedInto }
 };
+const bkApi = () => (window.__v2 && window.__v2.apiFetch) || window.fetch.bind(window);
+async function bkJson(path) {
+  const r = await bkApi()(path, { credentials: 'same-origin' });
+  if (!r.ok) throw new Error(r.status === 401 ? 'your session has expired — sign in again to see your book' : 'the hub answered HTTP ' + r.status);
+  return r.json();
+}
+const bkNum = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
+// `mark_status` is the hub's own word for whether the price can be trusted. OK / STALE /
+// UNAVAILABLE are the three it serves; anything else is treated as unconfirmed rather than fresh.
+const MARK_STATE = { OK: 'fresh', STALE: 'stale', UNAVAILABLE: 'unknown' };
+
+function viewRow(r) {
+  const d = r.derived || {};
+  return {
+    id: r.id, pid: r.position_id, account: r.account || null, acct: r.account_display || null,
+    ticker: r.ticker || '', assetType: String(r.asset_type || '').toUpperCase(),
+    structure: String(r.structure || r.asset_type || '').replace(/_/g, ' '),
+    strikes: [r.long_strike, r.short_strike].filter((x) => x != null).map(bkNum).join('/'),
+    expiry: r.expiry ? String(r.expiry).slice(0, 10) : null, dte: bkNum(r.dte),
+    // R-IV.662(c)/668(c): what is OPEN is `open_quantity`, and it NEVER falls back to `quantity`
+    // (the size the position was opened at). A null reads as unknown and says why.
+    qty: bkNum(r.open_quantity),
+    qtyWhy: r.open_quantity_basis || 'this feed does not serve open_quantity yet (BUILD, R-IV.696(c))',
+    cost: bkNum(r.cost_basis),
+    mark: bkNum(r.current_price),
+    markState: MARK_STATE[String(r.mark_status || '').toUpperCase()] || 'unknown',
+    markWhy: r.mark_reason || null, markAt: r.mark_checked_at || null,
+    // The hub's lot-derived figure. `mark − cost` on the page was wrong for every spread and
+    // right by accident for single legs.
+    pnl: bkNum(r.unrealized_pnl), pnlWhy: d.basis_reason || r.basis_incomplete_reason || null,
+    maxLoss: bkNum(r.max_loss), maxLossWhy: d.basis_reason || null,
+    prov: String(r.provenance || 'UNKNOWN').toUpperCase(),
+    basisIncomplete: r.basis_incomplete_reason || null,
+    bucket: r.strategy_tag || null,
+    stopType: r.stop_type || null, stopLevel: bkNum(r.stop_loss),
+    invalidation: r.invalidation || null,
+    timeStop: r.time_stop ? String(r.time_stop).slice(0, 10) : null,
+    tags: Array.isArray(r.tags) ? r.tags.filter(Boolean) : [],
+  };
+}
+
+function histRow(r) {
+  return {
+    id: r.id, pid: r.position_id, ticker: r.ticker || '',
+    structure: String(r.structure || r.asset_type || '').replace(/_/g, ' '),
+    account: r.account || null, acct: r.account_display || null,
+    closedAt: r.exit_date ? String(r.exit_date) : '', closed: r.exit_date ? String(r.exit_date).slice(0, 10) : null,
+    realized: bkNum(r.realized_pnl), why: r.trade_outcome || null,
+    prov: String(r.provenance || 'UNKNOWN').toUpperCase(),
+    status: String(r.status || '').toUpperCase(),
+    // ONLY what the hub states on the row. The census's third exclusion — a return past −100% of
+    // basis — is a RATIO, and deciding it here would be a second implementation of the server's
+    // predicate, free to drift from it. Its COUNT comes from the hub's coverage block; no row is
+    // labelled with it by this page.
+    flag: r.basis_incomplete_reason ? 'basis incomplete' : (bkNum(r.realized_pnl) === null ? 'no realized P&L recorded' : null),
+  };
+}
+
+// One bucket per account served, in a stable order, with an unattributed row last and never
+// given a name nobody served (R-IV.650(a)).
+function accountsOf(rows) {
+  const by = new Map();
+  rows.forEach((p) => {
+    const k = p.account || null;
+    if (!by.has(k)) by.set(k, { account: k, acct: p.acct, rows: [] });
+    by.get(k).rows.push(p);
+  });
+  return [...by.values()].sort((a, b) => (a.account === null) - (b.account === null)
+    || String(a.acct || a.account || '').localeCompare(String(b.acct || b.account || '')));
+}
+
+async function loadOpen() {
+  if (BK.open.status === 'loading') return;
+  BK.open.status = 'loading'; BK.open.err = null; if (st.open) render();
+  try {
+    const d = await bkJson('/api/v2/positions?status=OPEN');
+    BK.open.rows = (d.positions || []).map(viewRow);
+    BK.open.age = bkNum(d.cache_age_seconds);
+    BK.open.status = 'ok';
+  } catch (e) { BK.open.status = 'error'; BK.open.err = String((e && e.message) || e); }
+  if (st.open) render();
+}
+
+async function loadHist() {
+  if (BK.hist.status === 'loading') return;
+  BK.hist.status = 'loading'; BK.hist.err = null; if (st.open) render();
+  try {
+    // The census comes from `/api/abacus/summary`, which runs `_load_book_realized` — the one
+    // predicate. If it cannot be read the rows still show; the panel then says it has no census
+    // rather than adding up the column itself.
+    const [closed, expired, sum] = await Promise.all([
+      bkJson('/api/v2/positions?status=CLOSED'),
+      bkJson('/api/v2/positions?status=EXPIRED'),
+      bkJson('/api/abacus/summary?range=all').catch(() => null),
+    ]);
+    const rows = [...(closed.positions || []), ...(expired.positions || [])].map(histRow)
+      .sort((a, b) => b.closedAt.localeCompare(a.closedAt));
+    BK.hist.total = rows.length;
+    BK.hist.rows = rows.slice(0, HIST_N);
+    BK.hist.stats = sum ? (sum.stats || []).filter((t) => t && t.source === 'live') : null;
+    BK.hist.range = sum ? sum.range : null;
+    BK.hist.status = 'ok';
+  } catch (e) { BK.hist.status = 'error'; BK.hist.err = String((e && e.message) || e); }
+  if (st.open) render();
+}
+
+// Lots and legs, per position, on demand — and only once per position per session unless a read
+// failed. Two requests, because they are two tables with two provenance stories.
+async function loadSub(p) {
+  if (!p || !p.pid) return;
+  const cur = BK.sub[p.pid];
+  if (cur && (cur.status === 'loading' || cur.status === 'ok')) return;
+  BK.sub[p.pid] = { status: 'loading', err: null, lots: [], legs: [] }; if (st.open) render();
+  try {
+    const path = '/api/v2/positions/' + encodeURIComponent(p.pid);
+    const [lots, legs] = await Promise.all([bkJson(path + '/lots'), bkJson(path + '/legs')]);
+    BK.sub[p.pid] = {
+      status: 'ok', err: null,
+      lots: lots.lots || [], legs: legs.legs || [],
+      // The hub says whether the lots and the stored quantity agree. Where they do not, the row
+      // is an aggregate that has drifted from its own fills, and both figures are shown.
+      agrees: lots.agrees_with_stored === true, agreesKnown: typeof lots.agrees_with_stored === 'boolean',
+      lotQty: lots.derived && bkNum(lots.derived.qty), storedQty: bkNum(lots.stored_quantity),
+      mergedInto: (legs.migration && legs.migration.merged_into) || null,
+    };
+  } catch (e) { BK.sub[p.pid] = { status: 'error', err: String((e && e.message) || e), lots: [], legs: [] }; }
+  if (st.open) render();
+}
 
 const X = (function () {
-  const P = PM;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const MINUS = '−';
   const usd = (v, signed) => v == null ? '—' : (v < 0 ? MINUS : (signed && v > 0 ? '+' : '')) + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  const pct = (v) => v == null ? '—' : (v * 100).toFixed(1) + '%';
   const tone = (v) => v == null ? '' : v > 0 ? 'pp-up' : v < 0 ? 'pp-down' : '';
 
   const PROV = {
@@ -3269,139 +3370,225 @@ const X = (function () {
   };
   const prov = (p) => { const [s, l, t] = PROV[p] || ['reported', p, '']; return `<span class="pp-chip" data-state="${s}" title="${esc(t)}">${esc(l)}</span>`; };
   const chip = (state, label, title) => `<span class="pp-chip" data-state="${state}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</span>`;
-  const ladder = () => `<div class="pp-ladder">Provenance, weakest to strongest: ${P.ladder.map((k) => prov(k)).join(' <span class="pp-dim">&lt;</span> ')}</div>`;
-  const buckets = () => `<div class="pp-ladder">Buckets: ${P.buckets.map(([n, d]) => `<span class="pp-tag">${esc(n)}${d ? ' · ' + esc(d) : ''}</span>`).join(' ')}</div>`;
-  const mockBanner = () => `<div class="pp-banner">Live: cash. Everything else on this panel is sample data.</div>${ladder()}${buckets()}`;
+  const LADDER = ['UNKNOWN', 'PRINCIPAL_REPORTED', 'SCREEN_VERIFIED', 'IMPORTED', 'BROKER_VERIFIED'];
+  const ladder = () => `<div class="pp-ladder">Provenance, weakest to strongest: ${LADDER.map((k) => prov(k)).join(' <span class="pp-dim">&lt;</span> ')}</div>`;
 
+  // Generated from what the hub serves (R-IV.697(c)), so a bucket nobody uses is not advertised
+  // and one that is used cannot be missing. The notes are the playbook's own words for the three
+  // numbered buckets; a tag this page has no words for is listed bare rather than described.
+  const BUCKET_NOTE = { B1: 'multi-week thesis', B2: 'tactical, 3–5 days', B3: 'intraday scalp' };
+  function servedBuckets() {
+    const s = new Set();
+    BK.open.rows.concat(BK.hist.rows).forEach((p) => { if (p.bucket) s.add(p.bucket); });
+    return [...s].sort();
+  }
+  const buckets = () => {
+    const b = servedBuckets();
+    return `<div class="pp-ladder">Buckets, as served on your own rows: ${b.length
+      ? b.map((n) => `<span class="pp-tag">${esc(n)}${BUCKET_NOTE[n] ? ' · ' + esc(BUCKET_NOTE[n]) : ''}</span>`).join(' ')
+      : '<span class="pp-amber">none served yet</span>'}</div>`;
+  };
+
+  // "not captured yet" is NOT "none". The column exists and nothing can write to it, so the hub
+  // has nothing to serve — which is a different fact from the principal having left it empty.
+  const GAP3 = ' has a column, a constraint and a reader, but no writer yet (BUILD gap 3) — so the hub has nothing to serve for it.';
+  const notCaptured = (what) => chip('unknown', 'not captured yet', what + GAP3);
+
+  // One shape for every "the hub has not answered yet" state, so a failure can never read as an
+  // empty book: an error says so, and offers the read again.
+  function state(s, busyText, what, retry) {
+    if (s.status === 'error') return `<div class="pp-note pp-warn" role="alert">Could not read ${esc(what)}: ${esc(s.err)}<div><button type="button" class="pp-btn" data-bk-retry="${esc(retry)}">Try again</button></div></div>`;
+    return `<div class="pp-note">${esc(busyText)}</div>`;
+  }
+
+  const acctLabel = (p) => p.acct ? p.acct : (p.account ? 'name not served' : 'Unattributed');
+
+  function qtyCell(p) {
+    if (p.qty == null) return `<span class="pp-amber" title="${esc(p.qtyWhy)}">unknown</span>`;
+    return String(p.qty);
+  }
   function markCell(p) {
-    if (p.mark == null) return `<span class="pp-amber" title="no mark: the source could not price this position">UNAVAILABLE</span>`;
+    if (p.mark == null) return `<span class="pp-amber" title="${esc(p.markWhy || 'the hub served no mark for this position')}">no mark</span>`;
     const v = usd(p.mark);
-    return p.markState === 'stale' ? `${v} ${chip('unknown', 'stale mark', 'Mark is older than its bound; cannot confirm it is current.')}` : v;
+    if (p.markState === 'stale') return `${v} ${chip('unknown', 'stale mark', 'The hub marks this price STALE' + (p.markWhy ? ': ' + p.markWhy : '') + ', so it cannot be read as current.')}`;
+    if (p.markState !== 'fresh') return `${v} ${chip('unknown', 'unconfirmed', 'The hub does not call this mark current' + (p.markWhy ? ': ' + p.markWhy : '') + '.')}`;
+    return v;
   }
   function pnlCell(p) {
-    if (p.mark == null) return `<span class="pp-amber">—</span>`;
-    if (p.basisIncomplete) return `<span class="pp-amber" title="${esc(p.basisIncomplete)}">basis under review</span>`;
-    const d = p.mark - p.cost; return `<span class="${tone(d)}">${usd(d, true)}</span>`;
+    if (p.pnl == null) return `<span class="pp-amber" title="${esc(p.pnlWhy || 'the hub derived no P&L for this row')}">no P&amp;L</span>`;
+    return `<span class="${tone(p.pnl)}">${usd(p.pnl, true)}</span>`;
   }
 
-  function gauge(s) {
-    const scale = Math.max(s.ceiling, s.atRisk) * 1.15;
-    const pct = (v) => Math.min(100, (v / scale) * 100).toFixed(1);
-    const headroom = s.ceiling - s.atRisk;
-    const floor = s.cashFloor != null;
-    const cashOk = !floor || s.cash >= s.cashFloor;
-    return `<div class="pp-gauge" role="img" aria-label="${esc(s.account)}: ${esc(s.measure)} ${usd(s.atRisk)} of ${usd(s.ceiling)}${floor ? '; cash ' + usd(s.cash) + ' against a ' + usd(s.cashFloor) + ' floor' : ''}">
-      <div class="pp-g-head"><span class="pp-g-name">${esc(s.account)} <span class="pp-dim">${esc(s.kind)}</span> ${chip('unknown', 'mock', 'Invented figures')}</span>
-        <span class="pp-g-fig">${usd(s.atRisk)} ${esc(s.measure)} of ${usd(s.ceiling)} · headroom <b class="${headroom < 0 ? 'pp-down' : ''}">${usd(headroom)}</b></span></div>
-      <div class="pp-dim">${esc(s.rule)}</div>
-      <div class="pp-g-track"><i class="pp-g-fill" style="width:${pct(s.atRisk)}%"></i><b class="pp-g-ceil" style="left:${pct(s.ceiling)}%" title="limit ${usd(s.ceiling)}"></b></div>
-      <div class="pp-g-foot"><span>${floor ? `Cash ${usd(s.cash)} (mock) vs $200 always-in-cash floor ${cashOk ? chip('verified', 'above floor') : chip('reported', 'BELOW FLOOR')}` : `Cash ${usd(s.cash)} (mock)`}</span><span class="pp-dim">balance ${usd(s.balance)}</span></div>
+  // The sleeve line. There is NO ceiling anywhere in the schema, so there is no gauge: a bar
+  // without a limit draws a judgement the hub cannot make. What can be said is said — the sum of
+  // the max losses the hub actually holds, WITH THE COUNT IT WAS DRAWN FROM, because `max_loss`
+  // is populated on 17 of 28 rows and a bare total over that column reads as the whole book.
+  function sleeveLine(g) {
+    const withMax = g.rows.filter((p) => p.maxLoss != null);
+    const sum = withMax.reduce((s, p) => s + p.maxLoss, 0);
+    const all = withMax.length === g.rows.length;
+    return `<div class="pp-sleeve">
+      <span>At risk ${withMax.length ? `<b>${usd(sum)}</b>` : '<span class="pp-amber">nothing measurable</span>'} <span class="pp-dim">sum of max loss</span>
+        ${chip(all ? 'verified' : 'reported', `n=${withMax.length} of ${g.rows.length}`, all ? 'Every open position in this account carries a max loss.' : `${g.rows.length - withMax.length} of these positions carry no max loss, so they are not in this total.`)}</span>
+      <span>Ceiling ${chip('unknown', 'no source', 'No sleeve ceiling or cash floor exists anywhere in the schema, so none is drawn. The playbook’s rule has never been recorded as data.')}</span>
     </div>`;
   }
 
-  function stopBadge(st) {
-    const map = { 'broker order': 'verified', 'daily-close': 'screen', none: 'reported' };
-    const note = { 'broker order': 'Rests at the broker; fires on its own.', 'daily-close': 'Watched at the close; fires only if someone acts.', none: 'No stop written.' };
-    return chip(map[st.type] || 'reported', st.type === 'none' ? 'no stop' : 'stop: ' + st.type, note[st.type]) + (st.level && st.level !== '—' ? ` <span class="pp-dim">${esc(st.level)}</span>` : '');
+  function stopLine(p) {
+    if (!p.stopType) return notCaptured('The stop');
+    const map = { broker_order: 'verified', 'broker order': 'verified', daily_close: 'screen', 'daily-close': 'screen', none: 'reported' };
+    const note = { broker_order: 'Rests at the broker; fires on its own.', daily_close: 'Watched at the close; fires only if someone acts.', none: 'Recorded as having no stop.' };
+    const k = String(p.stopType).toLowerCase();
+    return chip(map[k] || 'reported', 'stop: ' + String(p.stopType).replace(/_/g, ' '), note[k] || '')
+      + (p.stopLevel != null ? ` <span class="pp-dim">${esc(usd(p.stopLevel))}</span>` : '');
   }
 
   function bookRow(p, attrs) {
     return `<tr class="pp-row" ${attrs || ''} data-id="${p.id}">
-      <td><b>${esc(p.ticker)}</b><div class="pp-dim">${esc(p.bucket)}</div></td>
-      <td>${esc(p.structure)}${p.expiry ? `<div class="pp-dim">exp ${esc(p.expiry.slice(5))}</div>` : ''}</td>
-      <td class="pp-num">${p.qty}</td><td class="pp-num">${usd(p.cost)}</td><td class="pp-num">${markCell(p)}</td>
+      <td><b>${esc(p.ticker)}</b><div class="pp-dim">${p.bucket ? esc(p.bucket) : 'no bucket served'}</div></td>
+      <td>${esc(p.structure)}${p.strikes ? ' ' + esc(p.strikes) : ''}${p.expiry ? `<div class="pp-dim">exp ${esc(p.expiry.slice(5))}${p.dte != null ? ' · ' + p.dte + 'd' : ''}</div>` : ''}</td>
+      <td class="pp-num">${qtyCell(p)}</td><td class="pp-num">${usd(p.cost)}</td><td class="pp-num">${markCell(p)}</td>
       <td class="pp-num">${pnlCell(p)}</td><td>${prov(p.prov)}</td></tr>`;
   }
-  const bookHead = `<thead><tr><th>Position</th><th>Structure</th><th class="pp-num">Qty</th><th class="pp-num">Cost</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th><th>Provenance</th></tr></thead>`;
+  const bookHead = `<thead><tr><th>Position</th><th>Structure</th><th class="pp-num">Open</th><th class="pp-num">Cost</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th><th>Provenance</th></tr></thead>`;
   function bookTable(account, rowAttrs) {
-    const rows = P.open.filter((p) => p.account === account);
+    const rows = BK.open.rows.filter((p) => (p.account || null) === account);
+    if (!rows.length) return `<div class="pp-note">The hub reports no open positions in this account.</div>`;
     return `<table class="pp-table">${bookHead}<tbody>${rows.map((p) => bookRow(p, rowAttrs ? rowAttrs(p) : '')).join('')}</tbody></table>`;
   }
 
   function detail(p) {
-    const lots = p.lots.map((l) => `<tr><td>${esc(l.when)}</td><td class="pp-num">${l.qty}</td><td class="pp-num">${l.price.toFixed(2)}</td><td class="pp-num">${l.fees.toFixed(2)}</td><td>${prov(l.prov)}</td><td class="pp-dim">${esc(l.ref)}</td></tr>`).join('');
-    const legs = p.legs.length ? p.legs.map((g) => `<tr><td>${g.seq}</td><td>${esc(g.side)}</td><td>${esc(g.type)}</td><td class="pp-num">${g.strike}</td><td class="pp-num">${g.price == null ? '<span class="pp-amber">unpriced</span>' : g.price.toFixed(2)}</td></tr>`).join('') : '';
-    return `<div class="pp-detail">
-      <h3>${esc(p.ticker)} · ${esc(p.structure)} ${prov(p.prov)}</h3>
+    const s = BK.sub[p.pid] || { status: 'idle', lots: [], legs: [] };
+    const head = `<h3>${esc(p.ticker)} · ${esc(p.structure)}${p.strikes ? ' ' + esc(p.strikes) : ''} ${prov(p.prov)}</h3>
+      <div class="pp-dim">${esc(acctLabel(p))}${p.expiry ? ' · expires ' + esc(p.expiry) : ''}</div>
       ${p.basisIncomplete ? `<div class="pp-note pp-warn">Basis under review — ${esc(p.basisIncomplete)}</div>` : ''}
       <div class="pp-kv">
-        <div><span class="pp-k">Stop</span>${stopBadge(p.stop)}</div>
-        <div><span class="pp-k">Time stop</span>${esc(p.timeStop)}</div>
-        <div class="pp-wide"><span class="pp-k">Invalidation</span>${p.invalidation === 'not written' ? '<span class="pp-amber">not written</span>' : esc(p.invalidation)}</div>
-        <div class="pp-wide"><span class="pp-k">Tags</span>${p.tags.length ? p.tags.map((t) => `<span class="pp-tag">${esc(t)}</span>`).join(' ') : '<span class="pp-dim">none</span>'}</div>
-      </div>
-      <h4>Lots</h4><table class="pp-table pp-sm"><thead><tr><th>When</th><th class="pp-num">Qty</th><th class="pp-num">Price</th><th class="pp-num">Fees</th><th>Provenance</th><th>Ref</th></tr></thead><tbody>${lots}</tbody></table>
-      ${legs ? `<h4>Legs</h4><table class="pp-table pp-sm"><thead><tr><th>#</th><th>Side</th><th>Type</th><th class="pp-num">Strike</th><th class="pp-num">Price</th></tr></thead><tbody>${legs}</tbody></table>` : ''}
-      <h4>Evidence <span class="pp-dim">(beside the verdict, #23)</span></h4><ul class="pp-evid">${p.evidence.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+        <div><span class="pp-k">Stop</span>${stopLine(p)}</div>
+        <div><span class="pp-k">Time stop</span>${p.timeStop ? esc(p.timeStop) : notCaptured('The time stop')}</div>
+        <div class="pp-wide"><span class="pp-k">Invalidation</span>${p.invalidation ? esc(p.invalidation) : notCaptured('The invalidation')}</div>
+        <div class="pp-wide"><span class="pp-k">Tags</span>${p.tags.length ? p.tags.map((t) => `<span class="pp-tag">${esc(t)}</span>`).join(' ') : notCaptured('Tags')}</div>
+        <div><span class="pp-k">Max loss</span>${p.maxLoss == null ? `<span class="pp-amber" title="${esc(p.maxLossWhy || 'the hub derived no max loss for this row')}">not derivable</span>` : usd(p.maxLoss)}</div>
+      </div>`;
+    if (s.status !== 'ok') return `<div class="pp-detail">${head}${state(s, 'Reading this position’s lots and legs…', 'lots and legs', p.pid)}</div>`;
+
+    const lots = s.lots.map((l) => `<tr><td>${esc(when(l.fill_time))}</td><td class="pp-num">${esc(l.qty)}</td><td class="pp-num">${esc(l.price)}</td><td class="pp-num">${l.fees == null ? '—' : esc(l.fees)}</td><td>${prov(String(l.provenance || 'UNKNOWN').toUpperCase())}</td><td class="pp-dim">${l.broker_ref ? esc(l.broker_ref) : 'no reference'}</td></tr>`).join('');
+    const legs = s.legs.map((g) => `<tr><td>${esc(g.leg_seq)}</td><td>${esc(g.side || '')}</td><td>${esc(g.option_type || '')}</td><td class="pp-num">${g.strike == null ? '—' : esc(g.strike)}</td><td class="pp-num">${g.qty == null ? '—' : esc(g.qty)}</td><td class="pp-num">${g.price == null ? '<span class="pp-amber">unpriced</span>' : esc(g.price)}</td></tr>`).join('');
+    // The evidence IS the lots (R-IV.697(c)). A count first, so "how much of this is backed by a
+    // broker record" is answerable without reading every line.
+    const refs = s.lots.filter((l) => l.broker_ref).length;
+    const drift = s.agreesKnown && !s.agrees
+      ? `<div class="pp-note pp-warn">The lots sum to ${esc(s.lotQty)} and the row stores ${esc(s.storedQty)}: this position's stored quantity has drifted from its own fills, and the hub says so rather than reconciling it silently.</div>`
+      : '';
+    return `<div class="pp-detail">${head}${drift}
+      <h4>Lots <span class="pp-dim">${s.lots.length} · ${refs} with a broker reference</span></h4>
+      ${s.lots.length ? `<table class="pp-table pp-sm"><thead><tr><th>Filled</th><th class="pp-num">Qty</th><th class="pp-num">Price</th><th class="pp-num">Fees</th><th>Provenance</th><th>Reference</th></tr></thead><tbody>${lots}</tbody></table>`
+        : '<div class="pp-note">The hub holds no lots for this position, so its basis cannot be derived from fills.</div>'}
+      <h4>Legs</h4>
+      ${s.legs.length ? `<table class="pp-table pp-sm"><thead><tr><th>#</th><th>Side</th><th>Type</th><th class="pp-num">Strike</th><th class="pp-num">Qty</th><th class="pp-num">Price</th></tr></thead><tbody>${legs}</tbody></table>`
+        : `<div class="pp-note">${s.mergedInto ? 'The legs for this position are recorded on ' + esc(s.mergedInto) + '.' : 'The hub holds no legs for this position.'}</div>`}
+      <h4>Evidence</h4>
+      <ul class="pp-evid"><li>${refs} of ${s.lots.length} lots carry a broker reference${refs < s.lots.length ? '; the rest are backed by their own provenance rung only' : ''}.</li>
+        <li>This row's own <code>broker_ref</code> field is not read: it is empty on every open position, while the lots behind them are not. The evidence lives at the fill.</li>
+        ${p.markAt ? `<li>Mark last checked ${esc(when(p.markAt))}${p.markWhy ? ' — ' + esc(p.markWhy) : ''}.</li>` : ''}</ul>
     </div>`;
   }
+  const when = (iso) => {
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t)) + ' MT' : String(iso || '—');
+  };
 
   function actions(p) {
-    const rolled = p.rolledFrom ? ` (follows #${p.rolledFrom})` : '';
     const A = [
-      ['Edit', 'Change tags, stop, invalidation, time stop.', 'Needs: what changed and why (one line).', false],
+      ['Edit', 'Change tags, stop, invalidation, time stop.', 'Waits on the capture path: these columns have no writer yet (BUILD gap 3).', true],
       ['Add a lot', 'Record another fill into this position.', 'Needs: fill time, qty, price, fees — and a broker reference or a screen capture.', false],
-      ['Close', 'End the position and record the result.', 'Needs: exit price, close time, and the closing fill reference (or screen capture). Result recomputed from lots.', false],
-      ['Roll' + rolled, 'Close this and open the next as one linked trade.', 'Needs: both fills, linked. Waits on R-IV.452 — not landed.', true],
+      ['Close', 'End the position and record the result.', 'Use Close on the Book row: it posts to the hub today. Result is recomputed from lots.', false],
+      ['Roll', 'Close this and open the next as one linked trade.', 'Waits on R-IV.452, and on a link field: nothing in the schema records that one position followed another.', true],
     ];
     return `<div class="pp-actions"><h4>Actions on ${esc(p.ticker)} #${p.id}</h4>${A.map(([n, d, need, off]) => `<div class="pp-act${off ? ' off' : ''}"><button type="button" class="pp-btn" ${off ? 'disabled' : ''}>${esc(n)}</button><div><div>${esc(d)}</div><div class="pp-need">${esc(need)}</div></div></div>`).join('')}</div>`;
   }
 
+  // The ticket is still a SAMPLE that saves nothing — there is no ticket, checklist or discipline
+  // table in the schema at all. What has gone is every invented figure it used to show: a tape
+  // state, and two chips claiming headroom against a ceiling that does not exist.
   function ticket() {
-    const t = P.ticket;
+    const b = servedBuckets();
     return `<form class="pp-ticket" onsubmit="return false"><h4>Pre-trade ticket <span class="pp-dim">— a sample of a planned form (X8)</span></h4>
       <div class="pp-sample" role="note"><b>This is a sample form. It saves nothing, and no position you type here is recorded.</b>
         To add a real position, close this panel and use <b>+ add</b> on the Book tile.</div>
-      <div class="pp-tape">Tape: ${chip('reported', t.tape.state)} <span class="pp-dim">${esc(t.tape.detail)}</span></div>
-      <label>Trade direction<select><option>bearish (with the tape)</option><option>bullish (AGAINST the tape)</option><option>neutral</option></select></label>
-      <label>Bucket<select>${P.buckets.map(([n, d]) => `<option>${esc(n)}${d ? ' — ' + esc(d) : ''}</option>`).join('')}</select></label>
-      <label>Ticker / structure<input value="e.g. IWM put debit spread 215/210"></label>
-      <label>Max loss<input value="$120"></label>
-      <div class="pp-caps">${chip('verified', 'within sleeve ceiling: headroom $556 (mock)')} ${chip('verified', 'cash stays above $200 (mock)')}</div>
+      <label>Trade direction<select><option>bearish</option><option>bullish</option><option>neutral</option></select></label>
+      <label>Bucket<select>${b.length ? b.map((n) => `<option>${esc(n)}${BUCKET_NOTE[n] ? ' — ' + esc(BUCKET_NOTE[n]) : ''}</option>`).join('') : '<option>no bucket served yet</option>'}</select></label>
+      <label>Ticker / structure<input placeholder="e.g. IWM put debit spread 215/210"></label>
+      <label>Max loss<input placeholder="$120"></label>
       <label>Stop written<select><option>broker order</option><option>daily-close</option><option>none — say why</option></select></label>
-      <label>Invalidation<input value="what makes this wrong"></label>
-      <label>Time stop<input value="date or DTE"></label>
-      <label>Zweig rule strained<select><option>none</option><option>the tape sets direction</option><option>another rule…</option></select></label>
-      <div class="pp-need">A ticket saves onto the position row. A trade against the tape, or with no stop, shows amber above and asks for a reason before it can be submitted.</div>
+      <label>Invalidation<input placeholder="what makes this wrong"></label>
+      <label>Time stop<input placeholder="date or DTE"></label>
+      <div class="pp-need">Nothing on this form can be checked against a sleeve ceiling or a cash floor, because neither is recorded anywhere. A ticket will save onto the position row once the capture path exists (BUILD gap 3).</div>
       <button type="button" class="pp-btn primary" disabled aria-disabled="true" title="This sample form saves nothing. Use + add on the Book tile to record a position.">Save ticket — sample, saves nothing</button></form>`;
   }
 
   function history() {
-    const h = P.history, c = h.coverage;
-    const ex = c.excluded, flagged = ex.basis_incomplete + ex.return_below_neg100pct + ex.no_realized_pnl;
-    const counted = h.rows.filter((r) => !r.flag && r.realized != null);
-    const net = counted.reduce((s, r) => s + r.realized, 0);
-    const wins = counted.filter((r) => r.realized > 0).length;
-    const cov = chip(flagged ? 'reported' : 'verified', `n=${c.counted} of ${c.total}`, `${flagged} excluded, never averaged in: ${ex.basis_incomplete} basis incomplete, ${ex.return_below_neg100pct} return past −100% of basis`);
-    const rows = h.rows.map((r) => `<tr class="${r.flag ? 'pp-flagged' : ''}"><td>#${r.id}</td><td><b>${esc(r.ticker)}</b> <span class="pp-dim">${esc(r.structure)}</span></td><td>${esc(r.closed)}</td><td class="pp-num">${r.realized == null ? '<span class="pp-amber">null</span>' : `<span class="${tone(r.realized)}">${usd(r.realized, true)}</span>`}</td><td>${esc(r.why)}${r.flag ? ' ' + chip('reported', r.flag) : ''}</td><td>${prov(r.prov)}</td></tr>`).join('');
-    const chain = h.chains.map((k) => `<div class="pp-chain"><b>${esc(k.label)}</b> — ${k.legs.map((l) => l.open ? `#${l.id} <span class="pp-dim">open</span>` : `#${l.id} ${usd(l.realized, true)}`).join(' → ')} · <span class="${tone(k.net)}">${usd(k.net, true)}</span> <span class="pp-dim">${esc(k.note)}</span></div>`).join('');
-    return `<div class="pp-history"><h4>History <span class="pp-dim">closed &amp; expired, windowed on close date</span></h4>
-      <div class="pp-hstats"><span>Realized <b class="${tone(net)}">${usd(net, true)}</b> ${cov}</span><span>Win rate <b>${Math.round(wins / counted.length * 100)}%</b> <span class="pp-dim">n=${counted.length}</span> ${cov}</span></div>
-      ${chain}<table class="pp-table"><thead><tr><th>#</th><th>Position</th><th>Closed</th><th class="pp-num">Realized</th><th>Why</th><th>Provenance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    const h = BK.hist;
+    if (h.status !== 'ok') return `<div class="pp-history"><h4>History</h4>${state(h, 'Reading your closed trades…', 'your closed trades', 'hist')}</div>`;
+    const stat = (k) => (h.stats || []).find((t) => t.key === k) || null;
+    const np = stat('net_profit'), wr = stat('win_rate'), er = stat('expected_return');
+    const cov = (t) => {
+      if (!t || !t.coverage) return '';
+      const c = t.coverage, ex = c.excluded || {};
+      const out = (ex.basis_incomplete || 0) + (ex.return_below_neg100pct || 0) + (ex.no_realized_pnl || 0);
+      return chip(out ? 'reported' : 'verified', `n=${c.counted} of ${c.total}`,
+        out ? `${out} counted in the census and never averaged in: ${ex.basis_incomplete || 0} basis incomplete, ${ex.return_below_neg100pct || 0} return past −100% of basis, ${ex.no_realized_pnl || 0} with no realized P&L. Predicate: ${c.predicate}` : `Predicate: ${c.predicate}`);
+    };
+    const figures = h.stats
+      ? `<div class="pp-hstats">
+          <span>Realized <b class="${tone(np && np.value)}">${np ? usd(np.value, true) : '—'}</b> ${cov(np)}</span>
+          <span>Win rate <b>${wr ? pct(wr.value) : '—'}</b> ${cov(wr)}</span>
+          <span>Per trade <b>${er ? pct(er.value) : '—'}</b> ${er ? chip(er.n === (wr && wr.n) ? 'verified' : 'reported', `n=${er.n}`, 'A trade whose cost basis the book never recorded has a P&L but no return, which is why this count can be lower than the win rate’s.') : ''}</span>
+        </div>
+        <div class="pp-dim">Those three are the hub’s own census over ${h.range ? esc(h.range.key === 'all' ? 'the whole book' : h.range.key) : 'its own window'}${h.range && h.range.from ? ' (' + esc(h.range.from) + ' to ' + esc(h.range.to) + ')' : ''}, not a sum of the rows below.</div>`
+      : `<div class="pp-note pp-warn">The hub’s census could not be read, so no total is shown. The rows below are the most recent closes, not a result.</div>`;
+    const rows = h.rows.map((r) => `<tr class="${r.flag ? 'pp-flagged' : ''}"><td>#${r.id}</td>
+      <td><b>${esc(r.ticker)}</b> <span class="pp-dim">${esc(r.structure)}</span></td>
+      <td>${esc(r.closed || '—')}${r.status === 'EXPIRED' ? ' <span class="pp-dim">expired</span>' : ''}</td>
+      <td class="pp-num">${r.realized == null ? '<span class="pp-amber">none recorded</span>' : `<span class="${tone(r.realized)}">${usd(r.realized, true)}</span>`}</td>
+      <td>${esc(r.why || '—')}${r.flag ? ' ' + chip('reported', r.flag, 'Counted in the census and never averaged into a result.') : ''}</td>
+      <td>${prov(r.prov)}</td></tr>`).join('');
+    return `<div class="pp-history"><h4>History <span class="pp-dim">closed &amp; expired, newest first</span></h4>
+      ${figures}
+      <table class="pp-table"><thead><tr><th>#</th><th>Position</th><th>Closed</th><th class="pp-num">Realized</th><th>Why</th><th>Provenance</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="pp-dim">Showing the ${h.rows.length} most recent of ${h.total} closed and expired positions. Positions recorded twice (status DUPLICATE_OF) are not read here at all.</div></div>`;
   }
 
+  // What this panel still cannot show, measured rather than remembered (R-IV.691(c)).
+  const GAPS = [
+    'stop, invalidation, time stop and tags: the columns exist with a constraint, and nothing can write to them yet (BUILD gap 3). 2 of 28 open rows carry a stop type.',
+    'sleeve ceiling and cash floor: no table anywhere, so no gauge is drawn and no headroom is claimed.',
+    'roll chain: nothing in the schema records that one position followed another, so no chain is shown.',
+    'structured evidence: notes are prose. The evidence here is the lots, which is where the broker references are.',
+    'pre-trade ticket: no ticket, checklist or discipline table exists; the New tab is a sample that saves nothing.',
+    'open_quantity on this feed: served on /summary and on a single position, not on the list this panel reads (BUILD, R-IV.696(c)). Until it is, sizes read unknown rather than falling back to the opening quantity.',
+  ];
   function missing() {
-    return `<details class="pp-missing"><summary>Endpoints and fields found missing (${P.missing.length})</summary><ul>${P.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>
-      <div class="pp-dim">Exist today: list, summary, single, lots (list/add), legs (list/add/edit), verify / screen-verify, close, reduce, patch, correct-realized, closed-from-evidence.</div></details>`;
+    return `<details class="pp-missing"><summary>What this panel still cannot show (${GAPS.length})</summary><ul>${GAPS.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>
+      <div class="pp-dim">Live here: the open book, marks with their status, lot-derived P&amp;L and max loss, provenance, lots, legs, the closed history with the hub’s census, and cash.</div></details>`;
   }
 
-  return { ladder, buckets, esc, usd, prov, chip, mockBanner, gauge, markCell, pnlCell, stopBadge, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, sleeves: P.sleeves, open: P.open };
+  return { ladder, buckets, esc, usd, pct, prov, chip, tone, state, acctLabel, qtyCell, markCell, pnlCell, sleeveLine, stopLine, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, notCaptured };
 })();
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
-  const st = { cb: { status: 'idle', accounts: {}, scope: [], error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
+  const st = { cb: { status: 'idle', accounts: {}, scope: [], names: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
-  const byId = (id) => X.open.find((p) => p.id === Number(id)) || null;
+  const byId = (id) => BK.open.rows.find((p) => p.id === Number(id)) || null;
   const hashFor = () => '#positions' + (st.id ? '/' + st.id : '') + (st.id && st.tab !== 'Detail' ? '/' + st.tab.toLowerCase() : '');
   function readHash() {
     const m = /^#positions(?:\/(\d+))?(?:\/(detail|actions|new|history))?$/.exec(location.hash || '');
     if (!m) return null;
-    const p = m[1] ? byId(m[1]) : null;
+    const id = m[1] ? Number(m[1]) : null;
     const tab = m[2] ? m[2][0].toUpperCase() + m[2].slice(1) : 'Detail';
-    return { id: p ? p.id : null, tab };
+    return { id: Number.isFinite(id) ? id : null, tab };
   }
   function setHash(replace) {
     const h = hashFor(), url = location.pathname + location.search + h;
@@ -3449,7 +3636,13 @@ const X = (function () {
       if (!rb.ok) throw new Error(rb.status === 401 ? 'sign in to see your accounts' : 'accounts: HTTP ' + rb.status);
       const d = await rc.json(), bal = await rb.json();
       st.cb.accounts = (d && d.accounts) || {};
-      st.cb.scope = (Array.isArray(bal) ? bal : []).filter((a) => a && a.in_scope === true).map((a) => a.account_name);
+      const rows = Array.isArray(bal) ? bal : [];
+      st.cb.scope = rows.filter((a) => a && a.in_scope === true).map((a) => a.account_name);
+      // R-IV.704(b): the NAME comes from the balances row, joined on `account_name`. /cash-balance
+      // is keyed by the name and carries no label, so the join is what names a cash card — and it
+      // is the only source that can name an account with CASH BUT NO OPEN POSITIONS.
+      st.cb.names = {};
+      rows.forEach((a) => { if (a && a.account_name && a.account_display) st.cb.names[a.account_name] = a.account_display; });
       st.cb.status = 'ok';
     } catch (e) { st.cb.status = 'error'; st.cb.error = String(e && e.message || e); }
     if (st.open) render();
@@ -3506,7 +3699,17 @@ const X = (function () {
   // actions as small text buttons. Every figure is the server's; nothing here is invented. There is
   // deliberately no stored figure and no "difference" on the card: a difference appears only as the
   // result of "Set cash".
-  const acctName = (n) => String(n || '').toLowerCase().split('_').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+  const acctName = (n) => {
+    const key = String(n || '');
+    // 1. the balances row's own `account_display` (R-IV.704(b)) — the right source for a cash card,
+    //    and the only one that can name an account with no open positions.
+    if (st.cb.names && st.cb.names[key]) return st.cb.names[key];
+    // 2. the same name as served on a position, so the two cards cannot disagree.
+    const served = BK.open.rows.find((p) => p.account === key && p.acct);
+    if (served) return served.acct;
+    // 3. last resort: derived from the key. A guess, so it is never dressed up as a served name.
+    return key.toLowerCase().split('_').filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+  };
   const TYPE_WORD = { TRADE_DEBIT: 'trades', TRADE_CREDIT: 'trades', TRANSFER_IN: 'deposits', TRANSFER_OUT: 'withdrawals', DIVIDEND: 'dividends', INTEREST: 'interest', FEE: 'fees', ADJUSTMENT: 'adjustments', OTHER: 'other movements' };
   const whenMT = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(t)) + ' MT' : null; };
   const dayLabel = (ymd) => { const t = Date.parse(String(ymd || '') + 'T00:00:00Z'); return Number.isFinite(t) ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(t)) : null; };
@@ -3638,7 +3841,7 @@ const X = (function () {
     if (panel) return;
     backdrop = document.createElement('div'); backdrop.className = 'pp-backdrop';
     panel = document.createElement('aside'); panel.className = 'pp-panel';
-    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', 'Positions (mock data)');
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', 'Positions');
     document.body.appendChild(backdrop); document.body.appendChild(panel);
     backdrop.addEventListener('click', close);
     panel.addEventListener('click', onPanelClick);
@@ -3649,23 +3852,31 @@ const X = (function () {
     mq.addEventListener('change', () => { if (st.open) { render(); liftBook(); } });
   }
   function head() {
-    return `<div class="pp-head"><h2>Positions</h2>${X.chip('unknown', 'sample', 'Everything except cash is sample data')}<button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
-      <div class="pp-banner">Live: cash. Everything else on this panel is sample data.</div>
+    // R-IV.697: the banner names what is live and what has no source, because "sample data" was
+    // about to become false for most of this panel and a stale disclaimer is its own dishonesty.
+    const age = BK.open.age;
+    const asOf = BK.open.status === 'ok'
+      ? `read ${age == null ? 'just now' : age < 60 ? Math.round(age) + 's ago' : Math.round(age / 60) + 'm ago'}`
+      : BK.open.status === 'error' ? 'not read' : 'reading…';
+    return `<div class="pp-head"><h2>Positions</h2>${X.chip(BK.open.status === 'error' ? 'unknown' : 'verified', 'live · ' + asOf, 'Your book, marks, lots, legs, the closed history and cash all come from the hub.')}<button type="button" class="pp-x" aria-label="Close positions panel">✕</button></div>
+      <div class="pp-banner">Live from the hub: your open book, marks with their status, lot-derived P&amp;L, provenance, lots, legs, the closed history and cash. Stops, invalidations, time stops and tags read “not captured yet”: the columns exist and nothing can write to them. Sleeve ceilings and roll chains have no source, so nothing is drawn for them.</div>
 `;
   }
-  function legend() { return `<details class="pp-legend"><summary>Legend: provenance ladder and buckets</summary>${X.ladder()}${X.buckets()}</details>`; }
+  function legend() { return `<details class="pp-legend"><summary>Legend: provenance ladder and the buckets your rows use</summary>${X.ladder()}${X.buckets()}</details>`; }
   // Desktop arrangement (R-IV.520). Column 1, at the screen's center: the chosen position's
   // summary card, or the book list until one is chosen. Column 2: the work pane. Two columns
   // need a viewport of 1400px or more (CSS); narrower, they stack inside the same 50% panel.
   function summaryCard(p) {
     const cell = (k, v) => `<div class="pp-sc"><span class="pp-k">${k}</span><span class="pp-sv">${v}</span></div>`;
+    // The "Rule now" line is GONE. It was a computed discipline verdict with no source, and
+    // S-6 SG-0 descoped the endpoint that would have computed one. An absence is shown as an
+    // absence (the stop line below), never as a sentence telling the principal what a rule says.
     return `<div class="pp-sum pp-card">
       <div class="pp-sum-top"><span class="pp-sum-tk">${X.esc(p.ticker)}</span>${X.prov(p.prov)}</div>
-      <div class="pp-sum-sub">${X.esc(p.bucket)} · ${X.esc(p.account)}</div>
-      <div class="pp-sum-st">${X.esc(p.structure)}${p.expiry ? ' · exp ' + X.esc(p.expiry.slice(5)) : ''}</div>
-      ${p.rule ? `<div class="pp-rule" data-kind="${p.rule.kind}"><span class="pp-k">Rule now · mock</span><div class="pp-rule-t">${X.esc(p.rule.text)}</div></div>` : ''}
-      <div class="pp-sum-grid">${cell('Qty', p.qty)}${cell('Cost', X.usd(p.cost))}${cell('Mark', X.markCell(p))}${cell('P&amp;L', X.pnlCell(p))}</div>
-      <div class="pp-sum-stop">${X.stopBadge(p.stop)}</div>
+      <div class="pp-sum-sub">${p.bucket ? X.esc(p.bucket) + ' · ' : ''}${X.esc(X.acctLabel(p))}</div>
+      <div class="pp-sum-st">${X.esc(p.structure)}${p.strikes ? ' ' + X.esc(p.strikes) : ''}${p.expiry ? ' · exp ' + X.esc(p.expiry.slice(5)) : ''}</div>
+      <div class="pp-sum-grid">${cell('Open', X.qtyCell(p))}${cell('Cost', X.usd(p.cost))}${cell('Mark', X.markCell(p))}${cell('P&amp;L', X.pnlCell(p))}</div>
+      <div class="pp-sum-stop">${X.stopLine(p)}</div>
       <button type="button" class="pp-btn pp-link" data-allpos="1">← All positions</button>
     </div>${st.cb.scope.indexOf(p.account) >= 0 ? cashCard(p.account) : ''}`;
   }
@@ -3673,19 +3884,30 @@ const X = (function () {
     const sel = byId(st.id);
     const none = '<div class="pp-dim">Pick a position in the Book strip.</div>';
     const pane = st.tab === 'Detail' ? (sel ? X.detail(sel) : none) : st.tab === 'Actions' ? (sel ? X.actions(sel) : none) : st.tab === 'New' ? X.ticket() : X.history();
+    // One card per account THE HUB SERVES. The old list was hardcoded to two accounts and would
+    // have hidden the third (FIDELITY_401A, 4 open positions) entirely. Names come from
+    // `account_display`; a key is never printed as a name.
+    const pending = !sel && st.id != null && BK.open.status !== 'ok';
+    const gone = !sel && st.id != null && BK.open.status === 'ok';
     const col1 = sel ? summaryCard(sel)
-      : cashCards() + X.sleeves.map((s) => `<div class="pp-card"><h3 class="pp-h">${X.esc(acctName(s.account))} · sample positions</h3><div class="pp-scroll">${X.bookTable(s.account)}</div></div>`).join('');
+      : pending ? X.state(BK.open, 'Reading your book…', 'your book', 'open')
+      : gone ? `<div class="pp-note pp-warn">Position #${X.esc(st.id)} is not in your open book. It may have been closed, or the address may be old.<div><button type="button" class="pp-btn pp-link" data-allpos="1">← All positions</button></div></div>`
+      : cashCards() + (BK.open.status !== 'ok' ? X.state(BK.open, 'Reading your book…', 'your book', 'open')
+        : accountsOf(BK.open.rows).map((g) => `<div class="pp-card"><h3 class="pp-h"><span class="pp-name">${X.esc(X.acctLabel(g.rows[0]))}</span> <span class="pp-dim">${g.rows.length} open</span></h3>${X.sleeveLine(g)}<div class="pp-scroll">${X.bookTable(g.account)}</div></div>`).join('')
+        || '<div class="pp-note">The hub reports no open positions.</div>');
     return `<div class="pp-cols"><div class="pp-col1">${col1}</div>
       <div class="pp-col2 pp-card"><div class="pp-tabs" role="tablist">${TABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.tab}" data-tab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${pane}</div></div>${legend()}${X.missing()}`;
   }
   function card(p) {
     const on = st.card === p.id;
-    return `<div class="pp-pcard" data-card="${p.id}"><header><span><b>${X.esc(p.ticker)}</b> <span class="pp-dim">${X.esc(p.bucket)} · ${X.esc(p.structure)}</span></span>${X.prov(p.prov)}</header>
-      <div class="pp-line"><span>qty ${p.qty} · cost ${X.usd(p.cost)}</span><span>mark ${p.mark == null ? '<span class="pp-amber">UNAVAILABLE</span>' : X.usd(p.mark)}</span></div>
+    return `<div class="pp-pcard" data-card="${p.id}"><header><span><b>${X.esc(p.ticker)}</b> <span class="pp-dim">${p.bucket ? X.esc(p.bucket) + ' · ' : ''}${X.esc(p.structure)}</span></span>${X.prov(p.prov)}</header>
+      <div class="pp-line"><span>open ${X.qtyCell(p)} · cost ${X.usd(p.cost)}</span><span>mark ${X.markCell(p)}</span></div>
       ${on ? `<div class="pp-sheet">${X.detail(p)}<div style="margin-top:8px"><button type="button" class="pp-btn" data-toggle-actions="1">${st.actions ? 'Hide actions' : 'Actions'}</button></div>${st.actions ? X.actions(p) : ''}</div>` : ''}</div>`;
   }
   function phone() {
-    const v = st.mtab === 'Book' ? cashCards() + X.sleeves.map((s) => X.open.filter((p) => p.account === s.account).map(card).join('')).join('')
+    const v = st.mtab === 'Book' ? cashCards() + (BK.open.status !== 'ok' ? X.state(BK.open, 'Reading your book…', 'your book', 'open')
+        : accountsOf(BK.open.rows).map((g) => `<h3 class="pp-h"><span class="pp-name">${X.esc(X.acctLabel(g.rows[0]))}</span> <span class="pp-dim">${g.rows.length} open</span></h3>${X.sleeveLine(g)}` + g.rows.map(card).join('')).join('')
+        || '<div class="pp-note">The hub reports no open positions.</div>')
       : st.mtab === 'New' ? `<div class="pp-card">${X.ticket()}</div>` : `<div class="pp-card">${X.history()}</div>`;
     return `<div class="pp-tabs" role="tablist">${MTABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.mtab}" data-mtab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${v}${legend()}${X.missing()}`;
   }
@@ -3702,16 +3924,33 @@ const X = (function () {
     const t = e.target;
     if (t.closest('.pp-x')) return close();
     if (cashClick(t)) return;
+    const retry = t.closest('[data-bk-retry]');
+    if (retry) {
+      const k = retry.dataset.bkRetry;
+      if (k === 'open') loadOpen(); else if (k === 'hist') loadHist();
+      else { const p = BK.open.rows.find((x) => x.pid === k); if (p) { delete BK.sub[k]; loadSub(p); } }
+      return;
+    }
     if (t.closest('[data-allpos]')) { st.id = null; st.card = null; if (st.tab === 'Detail' || st.tab === 'Actions') st.tab = 'Detail'; setHash(true); return render(); }
     const tab = t.closest('[data-tab]');
-    if (tab) { st.tab = tab.dataset.tab; setHash(true); return render(); }
+    if (tab) { st.tab = tab.dataset.tab; setHash(true); wantTab(); return render(); }
     const mtab = t.closest('[data-mtab]');
-    if (mtab) { st.mtab = mtab.dataset.mtab; return render(); }
+    if (mtab) { st.mtab = mtab.dataset.mtab; wantTab(); return render(); }
     if (t.closest('[data-toggle-actions]')) { st.actions = !st.actions; return render(); }
     const tr = t.closest('tr.pp-row');
-    if (tr) { st.id = Number(tr.dataset.id); if (st.tab === 'New' || st.tab === 'History') st.tab = 'Detail'; setHash(true); return render(); }
+    if (tr) { st.id = Number(tr.dataset.id); if (st.tab === 'New' || st.tab === 'History') st.tab = 'Detail'; setHash(true); wantSub(); return render(); }
     const c = t.closest('.pp-pcard');
-    if (c && !t.closest('.pp-sheet')) { const id = Number(c.dataset.card); st.card = st.card === id ? null : id; st.id = st.card; st.actions = false; setHash(true); return render(); }
+    if (c && !t.closest('.pp-sheet')) { const id = Number(c.dataset.card); st.card = st.card === id ? null : id; st.id = st.card; st.actions = false; setHash(true); wantSub(); return render(); }
+  }
+  // Only what the open view needs. The closed history is 500-odd rows and the drawer's lots and
+  // legs are two requests per position, so neither is fetched until something asks to see it.
+  function wantTab() {
+    const onHistory = mq.matches ? st.mtab === 'History' : st.tab === 'History';
+    if (onHistory && BK.hist.status === 'idle') loadHist();
+  }
+  function wantSub() {
+    const p = byId(st.id);
+    if (p) loadSub(p);
   }
   function show(opts) {
     build();
@@ -3722,6 +3961,8 @@ const X = (function () {
     render();
     liftBook();
     loadCash();
+    loadOpen().then(() => { wantSub(); });
+    wantTab();
     const first = !panel.classList.contains('open');
     requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); document.documentElement.classList.add('pp-open'); if (first) { const x = panel.querySelector('.pp-x'); if (x) x.focus(); } });
   }
