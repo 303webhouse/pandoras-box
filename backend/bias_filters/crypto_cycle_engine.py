@@ -109,12 +109,69 @@ def _score_cap(raw_score: float) -> float:
     return max(-100.0, min(100.0, raw_score))
 
 
+# Vendor FIRING is bidirectional (funding blow-off AND flush, extreme
+# contango AND backwardation, call-demand AND put-demand). Froth already
+# gates on the top-side extreme. Capitulation used to copy the vendor
+# flag verbatim, so one blow-off scored both columns (STATER-SCOPE item 6,
+# R-IV.700). Directed remap keeps only the flush-side extreme.
+_CAP_DIRECTION = {
+    "perp_funding": ("funding_rate", "le", "funding_negative_threshold", -0.03),
+    "quarterly_basis": ("basis_annualized", "le", "basis_backwardation_pct", -5.0),
+    "skew_25delta": ("skew_25d", "ge", "skew_put_extreme_pct", 5.0),
+}
+
+
+def _directed_cap_signal(signal_id: str, result: Dict[str, Any], config: dict) -> str:
+    """Map a vendor signal onto the capitulation column only.
+
+    FIRING stays FIRING when the reading is the flush-side extreme.
+    A top-side extreme (or a missing value) becomes NEUTRAL so the
+    froth column owns it. Non-FIRING vendor flags pass through.
+    """
+    raw = result.get("signal")
+    if raw != "FIRING":
+        return raw if isinstance(raw, str) and raw else "NEUTRAL"
+
+    cap = config.get("capitulation") or {}
+
+    spec = _CAP_DIRECTION.get(signal_id)
+    if spec:
+        value_key, op, thresh_key, default = spec
+        val = result.get(value_key)
+        thresh = cap.get(thresh_key, default)
+        if not isinstance(val, (int, float)) or not isinstance(thresh, (int, float)):
+            return "NEUTRAL"
+        if op == "le" and val <= thresh:
+            return "FIRING"
+        if op == "ge" and val >= thresh:
+            return "FIRING"
+        return "NEUTRAL"
+
+    if signal_id == "open_interest":
+        return "FIRING" if result.get("divergence") == "accumulation" else "NEUTRAL"
+    if signal_id == "term_structure":
+        if result.get("structure") == "backwardation" and result.get("funding_trend") == "falling":
+            return "FIRING"
+        return "NEUTRAL"
+    if signal_id == "liquidations":
+        if result.get("composition") == "long_heavy":
+            return "FIRING"
+        long_pct = result.get("long_pct")
+        thresh = cap.get("liquidation_long_pct", 75.0)
+        if isinstance(long_pct, (int, float)) and isinstance(thresh, (int, float)) and long_pct > thresh:
+            return "FIRING"
+        return "NEUTRAL"
+
+    return raw
+
+
 async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
     """
     Build CAPITULATION cells for `symbol` by calling the parametrized vendor clients.
 
-    The 9 existing signal computations are UNCHANGED per §4.3. We simply wrap each
-    result with the §4.2 staleness contract. No retunes in S-3.
+    The 9 existing vendor computations are UNCHANGED per §4.3. We wrap each
+    result with the §4.2 staleness contract. Vendor FIRING is bidirectional;
+    this column keeps only the flush-side extreme (R-IV.700).
     """
     _assert_no_feed_writes()
 
@@ -148,7 +205,8 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
         cells.append(_make_cell(
             "skew_25delta", "CAPITULATION", val, state, "deribit", as_of, stale,
             reason=skew_result.get("reason"),
-            signal=skew_result.get("signal"),
+            signal=_directed_cap_signal("skew_25delta", skew_result, config),
+            vendor_signal=skew_result.get("signal"),
         ))
     except Exception as exc:
         cells.append(_make_cell("skew_25delta", "CAPITULATION", None, "DEGRADED", "deribit", None, True, reason=str(exc)))
@@ -160,7 +218,8 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
         cells.append(_make_cell(
             "quarterly_basis", "CAPITULATION", val, state, basis_result.get("source", "binance"), as_of, stale,
             reason=basis_result.get("reason"),
-            signal=basis_result.get("signal"),
+            signal=_directed_cap_signal("quarterly_basis", basis_result, config),
+            vendor_signal=basis_result.get("signal"),
         ))
     except Exception as exc:
         cells.append(_make_cell("quarterly_basis", "CAPITULATION", None, "DEGRADED", "binance", None, True, reason=str(exc)))
@@ -173,7 +232,8 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             "perp_funding", "CAPITULATION", val, state, "coinalyze", as_of, stale,
             reason=funding_result.get("reason"),
             sentiment=funding_result.get("sentiment"),
-            signal=funding_result.get("signal"),
+            signal=_directed_cap_signal("perp_funding", funding_result, config),
+            vendor_signal=funding_result.get("signal"),
         ))
     except Exception as exc:
         cells.append(_make_cell("perp_funding", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
@@ -198,7 +258,8 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             "term_structure", "CAPITULATION", term_result.get("structure"), state, "coinalyze", as_of, stale,
             reason=term_result.get("reason"),
             funding_trend=term_result.get("funding_trend"),
-            signal=term_result.get("signal"),
+            signal=_directed_cap_signal("term_structure", term_result, config),
+            vendor_signal=term_result.get("signal"),
         ))
     except Exception as exc:
         cells.append(_make_cell("term_structure", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
@@ -211,7 +272,8 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             "open_interest", "CAPITULATION", val, state, "coinalyze", as_of, stale,
             reason=oi_result.get("reason"),
             divergence=oi_result.get("divergence"),
-            signal=oi_result.get("signal"),
+            signal=_directed_cap_signal("open_interest", oi_result, config),
+            vendor_signal=oi_result.get("signal"),
         ))
     except Exception as exc:
         cells.append(_make_cell("open_interest", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
@@ -225,7 +287,8 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             reason=liq_result.get("reason"),
             composition=liq_result.get("composition"),
             long_pct=liq_result.get("long_pct"),
-            signal=liq_result.get("signal"),
+            signal=_directed_cap_signal("liquidations", liq_result, config),
+            vendor_signal=liq_result.get("signal"),
         ))
     except Exception as exc:
         cells.append(_make_cell("liquidations", "CAPITULATION", None, "DEGRADED", "coinalyze", None, True, reason=str(exc)))
