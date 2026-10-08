@@ -208,6 +208,27 @@ async def hermes_webhook(request: Request):
         trip_wire_status=trip_wire_status,
     )
 
+    # ── R-IV.780(d): PHASE 1 PUSH. The row is stored; now tell the principal. ──────────
+    # This is the step that was missing for six months. Ingest worked the whole time (about
+    # 1,270 rows since April); enrichment is refused by design (R-IV.498(a)1) and the only
+    # outbound was a websocket event with no consumer, so a breach reached a table nobody is
+    # shown. Equity beta only in phase 1 (SPY/QQQ/SMH) -- see hermes_push for why size-ranking
+    # would have shouted about oil through the 10-08 selloff.
+    #
+    # AFTER the store and never before it, and it cannot raise: the row is the evidence and the
+    # message is a convenience, so a Discord failure must never cost an ingest.
+    try:
+        from webhooks.hermes_push import push_breach
+        _recent = [(t, v["timestamp"], v["velocity_pct"]) for t, v in recent_breaches.items()]
+        _push = await push_breach(
+            ticker, velocity_pct, int(payload.get("timeframe_min", 30) or 30),
+            now=now, recent=_recent)
+        logger.info("HERMES push: %s -> %s (%s)", ticker,
+                    "SENT" if _push.get("pushed") else "no", _push.get("reason"))
+    except Exception as exc:          # pragma: no cover - belt and braces around a notifier
+        logger.warning("HERMES push: %s raised, event %s still recorded: %s",
+                       ticker, event_id, exc)
+
     # Trigger VPS scrape burst — only when the trigger is explicitly enabled (R-IV.442(b)).
     vps_url = config.get("vps_trigger_url")
     if vps_url and not VPS_API_KEY:
