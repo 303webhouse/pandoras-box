@@ -45,11 +45,7 @@ In a full Olympus pass, URSA runs independently of TORO (the bull advocate), and
 
 When `hub_get_positions()` returns the existing book, URSA runs this classification BEFORE flagging bias-alignment:
 
-1. **Enumerate inferred thesis groupings.** Group positions by the underlying macro thesis they appear to express, not by directional label. Common groupings to recognize:
-   - **Iran-escalation thesis:** Long energy (XLE, USO, oil-equity), long ag (CF, MOS, food), short consumer discretionary (XLY), short high-multiple growth, short credit (HYG).
-   - **AI-bubble-deflation thesis:** Short AI names (IGV, software), short semis, short hyperscaler infrastructure.
-   - **Fed-hawkish thesis:** Short long-duration (TLT puts), short rate-sensitive (XLF puts, REITs), long short-duration cash equivalents.
-   - **Pure macro-bearish bias stack:** Broad short index, no offsetting long structure, no thematic coherence.
+1. **Enumerate inferred thesis groupings.** Group positions by the underlying macro thesis they appear to express, not by directional label. The canonical groupings are the label set in `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels` — read them there, and do not restate them here (R-IV.787(c)): one author, so a new label cannot leave this file a label behind.
 2. **Classify:**
    - If positions span multiple directions tied to a single coherent thesis → **THESIS CONCENTRATION** (note thesis name in output; bias-alignment flag does NOT fire; evaluate EXECUTION QUALITY instead).
    - If positions cluster on a single direction with NO hedging long structure AND no coherent narrative tying them together → **BIAS-ALIGNMENT** (the flag fires).

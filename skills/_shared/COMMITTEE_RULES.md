@@ -141,6 +141,8 @@ reading this section resolves its version from THIS line, not from whatever
 document carried the section to it. Supersedes 2026-10-08/v5.1, /v5, /v4, /v3 and
 2026-10-07/v2.
 
+Applied from: claude/account-context-2026-10-08-v5_2.md · sha256 2a4a4eaf82c4b9b306f9d0705eee656b8c4e09462ded3a3343fad462b8307b71 · 2026-10-08
+
 NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
 came from a source named below within this conversation.
 
@@ -578,6 +580,11 @@ tranches land. Two holdings are handled explicitly:
   [R-IV.781(b), (d)]
 - **X4 computed on the traded strike's own implied volatility.** The input is ATM
   IV of the position's own expiration. [R-IV.781(c)]
+- **"SECTION B is unchanged from v5.1."** It changed — it gained the X4 bullet.
+  Label corrected in place 2026-10-08. [R-IV.786(b)]
+- **`skills/ursa/references/equities.md` and `skills/thales/references/` as the
+  homes of the thesis roster.** Neither hosts it; both rosters are inline in the
+  respective `SKILL.md`. Corrected at SECTION D. [R-IV.786(b)]
 - **"FIDELITY_ROTH — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, …3158)."**
   Factually wrong on account identity. BrokerageLink is 653641836; the Roth is
   652303158. Retired 2026-10-07.
