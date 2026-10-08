@@ -145,7 +145,7 @@ async def test_btc_coinalyze_primary_request_seconds(monkeypatch):
 
     got = await cz.get_liquidations("BTC")
     assert captured[0][0] == "/liquidation-history"
-    assert captured[0][1]["symbols"] == "BTCUSD_PERP.A"
+    assert captured[0][1]["symbols"] == "BTCUSDT_PERP.A"
     assert captured[0][1]["interval"] == "1hour"
     assert captured[0][1]["from"] < 10_000_000_000  # UNIX seconds
     assert captured[0][1]["to"] < 10_000_000_000
