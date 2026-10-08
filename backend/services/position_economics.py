@@ -344,7 +344,23 @@ def economics(
         if credit["max_loss"] is None:
             out["basis_reason"] = credit["basis"]
     else:
-        out["max_loss"] = money(cost_total)
+        # R-IV.761(c): A DEBIT STRUCTURE CANNOT LOSE LESS THAN NOTHING.
+        #
+        # This branch is long premium / stock / a debit structure, where max_loss IS what you paid.
+        # It assumes you paid something. Row 978 is a `put_debit_spread` whose basis is **-8.86**:
+        # penny-inverted fills opened a debit structure for a net CREDIT, so `cost_total` is
+        # negative and this line published a max_loss of -8.86 -- a NEGATIVE worst case, which
+        # reads as better than flat and sorts above every real risk in the book.
+        #
+        # Floored at zero, with the reason on the row. Zero is the honest figure: the position was
+        # opened for a credit, so the debit it could lose is nothing. It is NOT "no risk" in the
+        # wider sense -- a spread still carries assignment exposure -- but max_loss here means the
+        # premium at stake, and that is zero.
+        if cost_total < 0:
+            out["max_loss"] = money(Decimal("0"))
+            out["max_loss_basis"] = "opened for a net credit; cannot lose below zero"
+        else:
+            out["max_loss"] = money(cost_total)
 
     m = _d(mark)
     if m is None:
@@ -469,7 +485,20 @@ def capital_at_risk_from_derived(rows: Sequence[Dict[str, Any]]) -> Dict[str, An
             excluded.append({"position_id": pid, "ticker": r.get("ticker"),
                              "reason": e.get("basis_reason") or NO_LOTS})
             continue
-        total += Decimal(str(e["cost_at_remainder"]))
+        contribution = Decimal(str(e["cost_at_remainder"]))
+        # R-IV.761(c): the same floor as `max_loss`, and for the same reason. A DEBIT structure
+        # whose basis went negative on penny-inverted fills (row 978, -8.86) would otherwise
+        # SUBTRACT from the book's capital at risk -- one position making the whole book look
+        # less exposed than it is.
+        #
+        # Keyed on the DEBIT case only. A credit spread's `cost_at_remainder` is negative BY
+        # DESIGN (it took cash in, and `basis_direction` says so three lines up in the deriver),
+        # so flooring every negative would change the credit shape this module deliberately
+        # signs -- SOUN 234's among them. Only an unsigned structure that came out negative is
+        # the anomaly.
+        if contribution < 0 and (e.get("basis_direction") or "") != "credit":
+            contribution = Decimal("0")
+        total += contribution
         included.append(pid)
     return {
         "positions_not_open": not_open,

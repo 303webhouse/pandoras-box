@@ -32,6 +32,20 @@ STATUSES = (OPEN, CLOSED, EXPIRED, DUPLICATE_OF)
 REALIZED_STATUSES = frozenset({CLOSED, EXPIRED})
 # Rows that are neither open nor a result: retired, kept for evidence, counted nowhere.
 RETIRED_STATUSES = frozenset({DUPLICATE_OF})
+# R-IV.761(b). Rows whose realized MONEY counts. This is a DIFFERENT QUESTION from whether the
+# trade is complete, and conflating the two is what hid 107.48 of real gains:
+#
+#   "is this trade finished?"      -> REALIZED_STATUSES. Governs win rate, per-trade return,
+#                                    hold time, the equity curve. A partially-exited position is
+#                                    NOT a finished trade and must not enter those.
+#   "does this row's money count?" -> MONEY_STATUSES. Governs the realized total. A partial exit
+#                                    books real money on a row that is still OPEN, and that money
+#                                    is in the account whatever the row's status says.
+#
+# Measured 2026-10-08: three OPEN rows carried realized (HYG 516 52.00, PDBC 953 8.48, IWM 956
+# 47.00 = 107.48), and the closed-only aggregate reported 3,500.25 against a true 3,607.73.
+# DUPLICATE_OF is excluded from both, for the reason this module exists.
+MONEY_STATUSES = frozenset({OPEN, CLOSED, EXPIRED})
 
 
 def normalize(status: Optional[str]) -> str:
@@ -49,6 +63,21 @@ def counts_as_realized(status: Optional[str]) -> bool:
     as a completed trade, and it is the reason this function exists at all.
     """
     return normalize(status) in REALIZED_STATUSES
+
+
+def realized_money_counts(status: Optional[str]) -> bool:
+    """True when this row's realized MONEY belongs in the book's realized total (R-IV.761(b)).
+
+    NOT a synonym for `counts_as_realized`. That one answers "is the trade finished?" and is
+    right for win rate and per-trade return; this one answers "is this money in the account?"
+    and is right for the realized total. An OPEN row with a partial exit answers no to the first
+    and yes to the second, and treating the two as one question is the defect this pair replaces.
+
+    Also NOT `not is_retired(status)`: an unrecognised status answers no here. A value this
+    vocabulary has never seen is not evidence that its money counts, and the same reasoning that
+    rejects `!= 'OPEN'` rejects `not is_retired` -- both read an unknown as a yes.
+    """
+    return normalize(status) in MONEY_STATUSES
 
 
 def is_retired(status: Optional[str]) -> bool:

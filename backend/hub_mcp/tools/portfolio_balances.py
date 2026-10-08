@@ -16,21 +16,29 @@ from models.accounts import DISPLAY_NAMES as _ACCOUNT_DISPLAY
 from models.accounts import account_choices as _account_choices
 from models.accounts import describe_accounts as _describe_accounts
 
+SIZING_FLAG = "not a sizing input — read the broker app"
+
 DESCRIPTION = (
-    "Returns live account balances across all four trading accounts — total "
-    "balance, cash, buying power, margin. Use this whenever sizing "
-    "recommendations need real account values (replaces the prior practice of "
-    "hardcoding dollar amounts in skill files), when TORO/URSA/DAEDALUS/PIVOT "
-    "is producing a sizing recommendation, when PYTHAGORAS is computing per-"
-    "position risk parameters against account size, when PYTHIA is sizing a "
-    "B3 scalp trigger, when THALES is flagging sector concentration as a % of "
-    'account, when the user asks about "my balance," "how much cash," "buying '
-    'power," or any equivalent, when evaluating whether a proposed trade fits '
-    "within three-bucket sizing rules.\n\n"
-    "Do NOT call this for position-level data (use `hub_get_positions`). Do "
-    "NOT call this for historical balance changes (v2 candidate).\n\n"
-    "Returns per-account balance, cash, buying power, margin, last-updated "
-    "timestamp.\n\nAccounts: " + _describe_accounts() + "."
+    "Account balances as the hub last recorded them. **NOT A SIZING INPUT — READ THE BROKER "
+    "APP.** Every figure here is PRE-CONSOLIDATION and each carries its own as-of date, which "
+    "is in most cases days old (measured 2026-10-08: FIDELITY_401A as of 10-01, FIDELITY_ROTH "
+    "as of 09-24 with a ~9,077 derived-vs-stored disagreement, ROBINHOOD partial as of 09-24). "
+    "A figure days stale and a figure wrong are indistinguishable to a reader who sizes off it, "
+    "so size off the broker app and treat these as provenance, not as money.\n\n"
+    # R-IV.761(d): this paragraph used to read "Use this whenever sizing recommendations need
+    # real account values", and listed TORO/URSA/DAEDALUS/PIVOT sizing as the primary use. The
+    # payload now flags every row as not-a-sizing-input, and a description that invites what the
+    # payload forbids is worse than either alone -- the committee reads the description.
+    "Use it to see WHICH accounts exist, what was last recorded for each and WHEN, whether a "
+    "row is stale or partial, and which accounts are out of scope. Use it for provenance and "
+    "reconciliation, never as the denominator of a size.\n\n"
+    "Do NOT call this for position-level data (use `hub_get_positions`). Do NOT call this for "
+    "historical balance changes (v2 candidate). Do NOT compute a position size from any figure "
+    "it returns.\n\n"
+    "Returns per-account balance, cash, margin, last-updated timestamp and date, and the "
+    "sizing flag. Buying power is the broker's own figure and is not served.\n\n"
+    "A reconciled triple (cash available to trade / settled / pending net, with as-of and "
+    "tie-out dates) is queued to replace these figures.\n\nAccounts: " + _describe_accounts() + "."
 )
 
 
@@ -63,13 +71,31 @@ _BREAKOUT_PROP_UNTRACKED = {
     "buying_power": None,
     "margin_total": None,
     "updated_at": None,
+    "as_of_date": None,
     "is_stale": False,
+    "sizing_input": False,
+    "sizing_note": SIZING_FLAG,
     "note": (
         "breakout_prop is intentionally not balance-tracked (DESCOPED 2026-07-23); "
         "no balance row exists by design. Committee must NOT size against it — "
         "declining to size it is designed behavior, not a data gap (honest-absence)."
     ),
 }
+
+
+def _as_of_date(updated_iso: Optional[str]) -> Optional[str]:
+    """The calendar date of a last-updated timestamp, or None when there isn't one.
+
+    None, never today's date: an account nobody has recorded has no as-of, and substituting the
+    current date would make the stalest row in the book look like the freshest.
+    """
+    if not updated_iso:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(updated_iso))
+    except (TypeError, ValueError):
+        return None
+    return ts.date().isoformat()
 
 
 def _is_stale(updated_iso: Optional[str], hours: int = 24) -> bool:
@@ -113,7 +139,16 @@ def _build_account(row: Dict[str, Any]) -> Dict[str, Any]:
         "trailing_drawdown_floor": None,
         "high_water_mark": None,
         "updated_at": row.get("updated_at"),
+        # R-IV.761(d): the DATE, served beside the timestamp. A reader scanning for "how old is
+        # this" should not have to parse an ISO string to find out, and the as-of is the whole
+        # point of these rows now.
+        "as_of_date": _as_of_date(row.get("updated_at")),
         "is_stale": _is_stale(row.get("updated_at")),
+        # R-IV.761(d): on EVERY row, not once in the envelope. A per-account flag travels with
+        # the figure it qualifies; an envelope-level note is read once and then forgotten while
+        # the numbers get copied out of the rows.
+        "sizing_input": False,
+        "sizing_note": SIZING_FLAG,
     }
 
 
@@ -187,6 +222,13 @@ async def hub_get_portfolio_balances(account: Optional[Account] = None) -> dict:
         "total_buying_power": None,
         "total_buying_power_reason": (
             "buying power is the broker's own figure and the hub cannot derive it"),
+        # R-IV.761(d): on the TOTALS too. A total of pre-consolidation figures is a
+        # pre-consolidation figure, and it is the number most likely to be lifted whole.
+        "sizing_input": False,
+        "sizing_note": SIZING_FLAG,
+        "figures_are": "pre-consolidation; each account carries its own as_of_date",
+        "reconciled_triple_queued": (
+            "cash available to trade / settled / pending net, with as-of and tie-out dates"),
     }
     # Additive: list breakout_prop as explicitly untracked (never in `accounts`, never
     # in a total) when unfiltered or explicitly filtered to it. No scoring/sizing logic.
@@ -198,6 +240,7 @@ async def hub_get_portfolio_balances(account: Optional[Account] = None) -> dict:
     )
     status = "stale" if any_stale else "ok"
     summary = (
+        f"NOT A SIZING INPUT - read the broker app. "
         f"Total ${total_balance:,.0f} across {len(valued)} of {len(accounts)} accounts"
         + (f" ({len(unvalued)} not derivable: {', '.join(unvalued)})" if unvalued else "")
         + (" - PARTIAL, some positions could not be valued" if total_partial and not unvalued

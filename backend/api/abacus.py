@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import copy
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Dict, Optional
 from zoneinfo import ZoneInfo
 
@@ -43,6 +44,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from database.postgres_client import get_postgres_client
 from models.accounts import display_name          # R-IV.650(a): the name is served, never inferred
+# Convention #27's OWN rounding helper, imported rather than re-written: a second author of
+# "HALF-UP to the cent" is a second place for it to drift.
+from services.position_economics import money as _money, money_in as _money_in
 from utils.pivot_auth import require_api_key
 
 router = APIRouter(prefix="/abacus", tags=["abacus"])
@@ -647,6 +651,151 @@ async def _load_equity(pool) -> dict:
     return {"accounts": out}
 
 
+def _realized_money_sql(first: Optional[date], last: date) -> tuple:
+    """(branch-1 SQL, branch-2 SQL, params) for the realized TOTAL — R-IV.761(b).
+
+    THE FORMULA, as ruled:
+
+        realized(window) = SUM(c.realized)     over closures DATED IN THE WINDOW, on rows that
+                                               are not DUPLICATE_OF
+                         + SUM(p.realized_pnl) over rows with NO closures at all, whose exit_date
+                                               falls in the window, not DUPLICATE_OF
+
+    WHY TWO BRANCHES, and why neither alone is right. Measured 2026-10-08:
+
+      * The closed-only predicate (`status IN ('closed','expired')`) read **3,500.25** against a
+        true **3,607.73**. It drops the realized booked by a PARTIAL exit, which sits on a row
+        that is still OPEN: HYG 516 (52.00), PDBC 953 (8.48), IWM 956 (47.00) = 107.48.
+      * Summing the closures ledger ALONE reads **3,840.31** -- too high by **232.58**, because
+        EIGHT rows carry a recorded `realized_pnl` and have no closure rows at all (all ROBINHOOD;
+        IBIT -147.00, KNX -50.00, IWM +43.80, SLV -28.10, IWM -25.00, IWM -16.18, QQQ -7.10,
+        IBIT -3.00 = -232.58). Summing closures would DISCARD eight recorded losses and make the
+        book read better than it is.
+
+    WHY THE CLOSURES LEDGER IS THE RIGHT PRIMARY SOURCE rather than the row: all three OPEN rows
+    have **`exit_date IS NULL`**, so a window bounded on `exit_date` cannot place them at all --
+    relaxing the status filter alone would not have fixed it. Closures carry their own
+    `created_at`, so they are the only dateable source for a partial exit. On closure dates HYG's
+    52.00 and IWM's 47.00 fall in 10-07 and PDBC's 8.48 in 10-08, where the old figure placed
+    them in no window whatever.
+
+    The fallback is a GUARD, not a design: POSITIONS backfills closures for the eight under
+    R-IV.760(c), and `fallback.count` is expected to reach zero. It stays so that a row the
+    closures ledger does not cover can never silently vanish from the total.
+    """
+    day_closure = _day_sql("c.created_at")
+    day_exit = _day_sql("p.exit_date")
+    params: list = [last]
+    bound_c = f"{day_closure} <= $1"
+    bound_p = f"{day_exit} <= $1"
+    if first is not None:
+        params.append(first)
+        bound_c += f" AND {day_closure} >= $2"
+        bound_p += f" AND {day_exit} >= $2"
+
+    # Branch 1 -- the closures ledger, dated by the closure itself.
+    closures_sql = f"""
+        SELECT p.account AS account, SUM(c.realized) AS v, COUNT(*) AS n
+          FROM position_lot_closures c
+          JOIN unified_positions p ON p.position_id = c.position_id
+         WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF'
+           AND {bound_c}
+         GROUP BY p.account
+    """
+    # Branch 2 -- rows the ledger does not cover at all. `NOT EXISTS`, never `SUM(...) = 0`: a
+    # row whose closures genuinely net to zero IS covered, and must not be counted twice.
+    fallback_sql = f"""
+        SELECT p.account AS account, p.position_id, p.ticker, p.status,
+               p.realized_pnl AS v, {day_exit} AS exit_day
+          FROM unified_positions p
+         WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF'
+           AND p.realized_pnl IS NOT NULL
+           AND p.exit_date IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM position_lot_closures c
+                            WHERE c.position_id = p.position_id)
+           AND {bound_p}
+         ORDER BY p.position_id
+    """
+    return closures_sql, fallback_sql, params
+
+
+# Rows that BOTH branches miss: realized recorded, no closures, and no exit_date to window on.
+# Today this is empty, and it must be served rather than assumed empty -- a row in this state is
+# money the book has and the total does not, which is the exact failure this whole fix is about.
+_REALIZED_DROPPED_SQL = """
+    SELECT p.account, p.position_id, p.ticker, p.status, p.realized_pnl
+      FROM unified_positions p
+     WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF'
+       AND p.realized_pnl IS NOT NULL
+       AND p.exit_date IS NULL
+       AND NOT EXISTS (SELECT 1 FROM position_lot_closures c
+                        WHERE c.position_id = p.position_id)
+     ORDER BY p.position_id
+"""
+
+
+async def _load_realized_money(pool, first: Optional[date], last: date) -> dict:
+    """The realized TOTAL per account, by the R-IV.761(b) formula, plus what it fell back on.
+
+    Money is summed in Decimal and rounded HALF-UP (#27). Summing cents as floats is how a
+    control to the cent starts failing by a penny for no reason a reader can see.
+    """
+    closures_sql, fallback_sql, params = _realized_money_sql(first, last)
+    closure_rows = await pool.fetch(closures_sql, *params)
+    fallback_rows = await pool.fetch(fallback_sql, *params)
+    dropped_rows = await pool.fetch(_REALIZED_DROPPED_SQL)
+
+    totals: Dict[Optional[str], Decimal] = {}
+    closures_n: Dict[Optional[str], int] = {}
+    for r in closure_rows:
+        key = r["account"] or None
+        totals[key] = totals.get(key, Decimal("0")) + Decimal(str(r["v"] or 0))
+        closures_n[key] = closures_n.get(key, 0) + int(r["n"] or 0)
+
+    fallback: list = []
+    fallback_total = Decimal("0")
+    for r in fallback_rows:
+        key = r["account"] or None
+        # `money_in`, not `money`: these arrive from a row, and asyncpg hands NUMERIC back as
+        # Decimal while a test fixture hands a float. One parse step accepts both and quantizes.
+        v = Decimal(str(r["v"] or 0))
+        totals[key] = totals.get(key, Decimal("0")) + v
+        fallback_total += v
+        fallback.append({
+            "position_id": r["position_id"], "ticker": r["ticker"], "status": r["status"],
+            "account": key, "realized_pnl": _money_in(r["v"]),
+            "exit_day": r["exit_day"].isoformat() if r["exit_day"] else None,
+        })
+
+    dropped = [{
+        "position_id": r["position_id"], "ticker": r["ticker"], "status": r["status"],
+        "account": r["account"] or None, "realized_pnl": _money_in(r["realized_pnl"]),
+        "why": "realized recorded, no closures, and no exit_date to window on",
+    } for r in dropped_rows]
+
+    return {
+        "by_account": {k: _money(v) for k, v in totals.items()},
+        # NULL, NEVER ZERO, when nothing contributed. "no realized money in this window" and
+        # "the realized money nets to nothing" are different claims, and a 0.00 in place of the
+        # first reads as a flat book instead of an empty one. A genuine net of zero -- gains
+        # cancelling losses -- still returns 0.00, because rows DID contribute.
+        "combined": _money(sum(totals.values(), Decimal("0"))) if totals else None,
+        "closure_rows_counted": closures_n,
+        "fallback": {
+            "count": len(fallback),
+            "total": _money(fallback_total),
+            "rows": fallback,
+            "note": ("rows the closures ledger does not cover; POSITIONS backfills these under "
+                     "R-IV.760(c) and this count should reach zero"),
+        },
+        "excluded_no_date": {
+            "count": len(dropped),
+            "rows": dropped,
+            "note": ("counted by NEITHER branch -- served so nothing drops silently"),
+        },
+    }
+
+
 async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
     """Realized P&L and win rate, live, per R-IV.464(h).
 
@@ -667,6 +816,10 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
         f"WHERE {where}",
         *params,
     )
+    # R-IV.761(b): the realized TOTAL on its own population. Two populations, two predicates --
+    # see `_realized_money_sql` for why neither the closed-only census nor the closures ledger
+    # alone gives the right figure.
+    realized = await _load_realized_money(pool, first, last)
 
     # R-IV.650(b)3 — the same census, kept PER ACCOUNT and pooled. Every exclusion is counted
     # against the account whose row it was, so a per-account coverage line is answerable and a
@@ -706,11 +859,19 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
         counted = len(acc["pnls"])
         wins = sum(1 for p in acc["pnls"] if p > 0)
         rets = acc["returns"]
+        # R-IV.761(b): net_profit comes from the MONEY formula, not from this census. The census
+        # answers "which trades are finished?" and is right for win rate and per-trade return; it
+        # is wrong for the total, because a partial exit books real money on a row that is still
+        # OPEN. The two populations differ by design and each says which it is.
+        net = realized["by_account"].get(account) if account is not None \
+            else realized["combined"]
         return {
             "account": account,
             # A key is not a label: the display name is served, never inferred by a reader.
             "account_display": display_name(account) if account else None,
-            "net_profit": round(sum(acc["pnls"]), 2) if counted else None,
+            "net_profit": net,
+            "net_profit_basis": ("closures dated in the window, plus rows the ledger does not "
+                                 "cover, dated on exit_date; DUPLICATE_OF excluded (R-IV.761(b))"),
             "win_rate": round(wins / counted, 4) if counted else None,
             "win_rate_n": counted,
             # Mean realised return per trade. NULL, never 0, when nothing in this book has a
@@ -718,7 +879,10 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
             "expected_return": round(sum(rets) / len(rets), 4) if rets else None,
             "expected_return_n": len(rets),
             "coverage": {
+                # The predicate for win rate / expected return, which is NOT the predicate for
+                # net_profit. Named separately so a reader cannot take one as covering the other.
                 "predicate": "LOWER(status) IN ('closed','expired'), windowed on exit_date",
+                "predicate_scope": "win_rate and expected_return only; net_profit has its own",
                 "total": acc["total"],
                 "counted": counted,
                 "excluded": {
@@ -740,10 +904,19 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
             pooled[k] += acc[k]
 
     combined = _block(pooled, None)
-    accounts = [_block(by[k], k) for k in sorted(by, key=lambda x: (x is None, x or ""))]
+    # UNION the two populations' account keys. An account whose only realized sits on an OPEN row
+    # would be absent from the census and present in the money total; listing only census accounts
+    # would drop its figure from the per-account breakdown while still pooling it into the
+    # combined one, so the parts would not sum to the whole and nothing would say why.
+    keys = set(by) | set(realized["by_account"])
+    accounts = [_block(by.get(k) or _blank(), k)
+                for k in sorted(keys, key=lambda x: (x is None, x or ""))]
     out = dict(combined)
     out["accounts"] = accounts
     out["combined_is_pooled"] = True
+    # Served, never assumed: what the fallback branch carried, and what NEITHER branch could place.
+    out["realized_fallback"] = realized["fallback"]
+    out["realized_excluded_no_date"] = realized["excluded_no_date"]
     return out
 
 

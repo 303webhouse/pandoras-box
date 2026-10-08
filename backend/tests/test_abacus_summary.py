@@ -38,10 +38,17 @@ class _FakePool:
     reading a P&L as a balance.
     """
 
-    def __init__(self, rows=None, snapshots=None, cash=None):
+    def __init__(self, rows=None, snapshots=None, cash=None,
+                 closures=None, fallback=None, dropped=None):
         self.rows = list(rows or [])
         self.snapshots = list(snapshots or [])
         self.cash = list(cash or [])
+        # R-IV.761(b). `closures=None` means "derive them from the rows" (the book's norm);
+        # `closures=[]` means "this row genuinely has none", which is a different fixture and
+        # must stay expressible.
+        self.closures = None if closures is None else list(closures)
+        self.fallback = list(fallback or [])
+        self.dropped = list(dropped or [])
         self.calls = []
 
     async def fetch(self, sql, *params):
@@ -50,6 +57,29 @@ class _FakePool:
             return self.snapshots
         if "cash_flows" in sql:
             return self.cash
+        # R-IV.761(b): the realized TOTAL reads its own population -- the closures ledger, plus
+        # the rows that ledger does not cover. Routed explicitly, because the fall-through below
+        # would hand census rows to a query expecting `v`/`n` and the route would 500. That is
+        # the same hazard this stub's docstring already names for the snapshot query.
+        if "position_lot_closures" in sql:
+            if "SUM(c.realized)" in sql:
+                # Branch 1, modelled on the book's norm: 560 of 568 rows have closures that
+                # agree with their `realized_pnl` exactly (measured 2026-10-08), so a row's
+                # closures ARE its realized unless a test says otherwise.
+                if self.closures is not None:
+                    return self.closures
+                by: dict = {}
+                for r in self.rows:
+                    if r.get("realized_pnl") is None:
+                        continue
+                    k = r.get("account")
+                    agg = by.setdefault(k, {"account": k, "v": 0.0, "n": 0})
+                    agg["v"] += float(r["realized_pnl"])
+                    agg["n"] += 1
+                return list(by.values())
+            # Branch 2 (no closures, has exit_date) and the dropped read (no exit_date): empty
+            # unless a test supplies them, which is the book's norm too -- eight and one row.
+            return list(self.fallback if "p.exit_date IS NOT NULL" in sql else self.dropped)
         return self.rows
 
 
@@ -100,8 +130,8 @@ def book_pool():
         yield pool
 
 
-def _patch_book(rows, snapshots=None, cash=None):
-    pool = _FakePool(rows, snapshots, cash)
+def _patch_book(rows, snapshots=None, cash=None, closures=None, fallback=None, dropped=None):
+    pool = _FakePool(rows, snapshots, cash, closures, fallback, dropped)
     return pool, patch("api.abacus.get_postgres_client", new=AsyncMock(return_value=pool))
 
 
@@ -352,6 +382,8 @@ class TestAbacusLiveBook:
         assert win["n"] == 0
         assert net["coverage"] == win["coverage"] == {
             "predicate": "LOWER(status) IN ('closed','expired'), windowed on exit_date",
+            # R-IV.761(b): the predicate governs the RATES, not net_profit, and says so.
+            "predicate_scope": "win_rate and expected_return only; net_profit has its own",
             "total": 0, "counted": 0,
             "excluded": {"basis_incomplete": 0, "return_below_neg100pct": 0, "no_realized_pnl": 0},
         }
@@ -371,8 +403,15 @@ class TestAbacusLiveBook:
         pool, p = _patch_book(rows)
         with p:
             d = _get(client, test_api_key).json()
-        net = _stat(d, "net_profit")
-        assert net["value"] == 100.0, "the flagged 9999 must not land in the sum"
+        net, win = _stat(d, "net_profit"), _stat(d, "win_rate")
+        # R-IV.761(b) CHANGED THIS. The guard now protects the RATES, not the money.
+        # net_profit reads the closures ledger -- actual per-lot proceeds less actual cost -- and
+        # a row whose BASIS is incomplete still moved real money. Excluding it under-reported the
+        # book, which is the family of bug R-IV.761(b) exists to fix.
+        # The flagged row is still kept out of win_rate and expected_return, where an unmeasurable
+        # return genuinely cannot be averaged, and `coverage.excluded` still counts it.
+        assert net["value"] == 10099.0, "the money counts; the RATE is what excludes it"
+        assert win["n"] == 1, "the flagged row is still out of the rate"
         assert net["coverage"]["total"] == 2
         assert net["coverage"]["counted"] == 1
         assert net["coverage"]["excluded"]["basis_incomplete"] == 1
@@ -383,8 +422,14 @@ class TestAbacusLiveBook:
         pool, p = _patch_book(rows)
         with p:
             d = _get(client, test_api_key).json()
-        net = _stat(d, "net_profit")
-        assert net["value"] == 50.0
+        net, win = _stat(d, "net_profit"), _stat(d, "win_rate")
+        # R-IV.761(b) CHANGED THIS, and the live book is why: two rows return below -100% of
+        # their basis, carrying -167.78 between them (measured 2026-10-08). A return past -100%
+        # means the BASIS is understated, not that the loss is fictional -- and R-IV.761(b)'s
+        # control of 3,607.73 counts those rows. Dropping real losses to protect a ratio would
+        # make the book read better than it is.
+        assert net["value"] == -100.0, "50 + (-150): the money counts"
+        assert win["n"] == 1, "the impossible-return row is still out of the rate"
         assert net["coverage"]["excluded"]["return_below_neg100pct"] == 1
 
     def test_return_exactly_neg100pct_is_not_flagged(self, client, test_api_key):
