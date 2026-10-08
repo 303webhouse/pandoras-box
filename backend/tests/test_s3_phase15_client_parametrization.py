@@ -177,9 +177,9 @@ def test_deribit_unlisted_returns_correct_na_reason():
 
 def test_coinalyze_btc_perp_symbol_format():
     """Coinalyze aggregate symbols must end in _PERP.A and match matrix records."""
-    assert _COINALYZE_PERP_SYMBOL["BTC"] == "BTCUSD_PERP.A"
-    assert _COINALYZE_PERP_SYMBOL["ETH"] == "ETHUSD_PERP.A"
-    assert _COINALYZE_PERP_SYMBOL["SOL"] == "SOLUSD_PERP.A"
+    assert _COINALYZE_PERP_SYMBOL["BTC"] == "BTCUSDT_PERP.A"
+    assert _COINALYZE_PERP_SYMBOL["ETH"] == "ETHUSDT_PERP.A"
+    assert _COINALYZE_PERP_SYMBOL["SOL"] == "SOLUSDT_PERP.A"
     for sym, val in _COINALYZE_PERP_SYMBOL.items():
         if val is not None:
             assert val.endswith("_PERP.A"), f"{sym}: {val!r} does not end in _PERP.A"
