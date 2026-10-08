@@ -136,6 +136,11 @@ Each agent's `SKILL.md` retains a short "what it owns vs what belongs to other a
 
 ## § Account Context Framework
 
+RULES VERSION: 2026-10-08/v5.2 — AUTHORITATIVE STAMP. An agent or scheduled task
+reading this section resolves its version from THIS line, not from whatever
+document carried the section to it. Supersedes 2026-10-08/v5.1, /v5, /v4, /v3 and
+2026-10-07/v2.
+
 NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
 came from a source named below within this conversation.
 
@@ -279,6 +284,82 @@ news-catalyst momentum trading in the sleeve entirely, whenever the daily trend
 was up. Nobody ruled on that, which is why it was a drafting gap and not a rule.
 [TA-113 §3; ruled R-IV.765(d)]
 
+### § Buckets — quoted from source, 2026-10-08 [R-IV.778(b)]
+
+Every position carries a bucket. **Classification is the principal's** (TA-098 §2);
+these definitions decide what a bucket then REQUIRES. Quoted verbatim from
+`skills/ursa/references/equities.md` "Three-Bucket Fit (Bear Side)" and
+`skills/toro/references/equities.md` "Three-Bucket Fit", so this file is the one
+author.
+
+- **B1 (thesis).** "Multi-week to multi-month bear thesis. Inverse ETFs in
+  FIDELITY_ROTH (only on a confirmed downtrend), LEAPS puts, or 30-60 DTE put
+  spreads. Sizing per longer-dated thesis rules." Bull side: "Multi-week to
+  multi-month bull thesis. Equity, LEAPS, or 30-60 DTE calls/spreads."
+  **B1 is a HORIZON, not a DTE band** — LEAPS run well beyond 60 DTE and are
+  explicitly B1, so 30-60 DTE is a typical signature, not a boundary. X4 and X10
+  both apply.
+- **B2 (tactical 3-5 day momentum).** "Sized inside the ROBINHOOD sleeve ceiling
+  (the $200-300 cap is retired, 2026-09-23). Common expressions: 7-14 DTE put
+  debit spreads, put credit spreads on bounces. **Cut if not profitable in 3
+  days.**" Bull side: "7-14 DTE calls or call debit spreads." X4 and X10 both
+  apply.
+  **Where a B2 row's DTE is at or below its 3-day cut, the time stop is
+  INOPERATIVE** — the cut and the expiry are the same event. Such a row carries an
+  explicit intra-horizon stop instead (a named level, or a day-1 close), or is
+  recorded as expiry-stopped. It is never recorded as carrying a 3-day cut it
+  cannot execute. This is why B2's stated expression is 7-14 DTE: the band exists
+  so the time stop has room to work. [TA-117 §2a]
+- **B3 (intraday scalp).** "Structural Pythia VA trigger required, mechanical stop
+  at entry, target = next Pythia level. Two consecutive losers = circuit breaker,
+  done for day. $300 daily max loss." Plus, bull side: "max 2 concurrent, max
+  3/day, same-day close." The $100 cap is retired (2026-09-23).
+- **TAIL.** A long-shot ticket tagged as such **at entry**. The sleeve "buys
+  unreachable strikes on purpose and is exempt by design" from X4 (§ Shared Hard
+  Rules), so **a TAIL ticket is the one case X4 does not test.**
+- **CONVEXITY.** A long-shot ticket that is **NOT** exempt: **convexity held to
+  reachability.** It is the same kind of bet as TAIL and the opposite treatment —
+  tagging a ticket CONVEXITY rather than TAIL is a claim that its break-even is
+  reachable, and X4 then tests that claim.
+
+### § Buckets — the tag is set at entry [TA-044, quoted verbatim]
+
+From `docs/trading-theses.md`, "Standing rules -> Reachability and the TAIL tag ·
+TA-044 (R-IV.531(b))", supplied 2026-10-08 under R-IV.781(b):
+
+> "The ROBINHOOD sleeve is the budget for long shots and carries no separate cap
+> (TA-039). X4's reachability exemption follows the TICKET, not the account:
+> - a ticket tagged TAIL is exempt;
+> - a ticket tagged CONVEXITY, or carrying a thesis, must pass reachability —
+>   break-even within 1.5x the implied expected move to expiry.
+>
+> Nothing limits long shots. A far-OTM ticket is tagged TAIL when it is bought.
+>
+> **BUCKET IS SET AT ENTRY.** The tag is a claim made before the fill about what
+> the ticket is. A bucket is not changed to fit the outcome: if a CONVEXITY ticket
+> is retagged TAIL after entry, the row records who ruled it and why."
+
+**TA-045's scope:** tickets opened **on or after 2026-09-25**. Existing rows are
+not retagged.
+
+**The consequences, spelled out because they invert an earlier draft of this
+section:**
+
+1. **X4 does not assign buckets. The bucket assigns X4.** The tag is chosen at
+   entry from the ticket's intent and horizon; X4 then reports **PASS or FAIL
+   against that tag**. A FAIL on a non-TAIL ticket **is a FAIL** — recorded on the
+   row as it falls.
+2. **"TAIL if it fails X4" is forbidden.** It is exactly the retag-to-fit-the-
+   outcome TA-044 prohibits, and it would make the rule unfalsifiable: every
+   failing ticket could relabel itself into the one bucket that exempts it.
+3. **For an in-scope row carrying no bucket at entry**, the bucket is **the
+   principal's intent at entry** — never inferred from the X4 outcome. [R-IV.781(d)]
+4. **A bucket change after entry records its author and reason on the row.**
+   Example on the record: 979's B1 -> B2 change is authored by **SPINE
+   R-IV.778(b)**, on the ground that 4 DTE is not a multi-week horizon.
+5. **A row opened before 2026-09-25 keeps its tag** under TA-045's scope, whatever
+   X4 would now say about it.
+
 **ROBINHOOD.** The options and tail/convexity sleeve: high-risk, high-reward plays,
 lottos, and portfolio hedges against a broad correction or worse.
 - **Ceiling: 10% of ALL tracked accounts combined** — FIDELITY_401A +
@@ -301,6 +382,28 @@ real-asset ceiling apply across the pair, **not per account**. ROBINHOOD is gove
 by its own sleeve ceiling and sits outside the one-plan boundary. [R-IV.729(a)]
 
 ### § Household net-direction cap — TWO TESTS, REPORTED SEPARATELY
+
+**Leverage adjustment — RULED 2026-10-08 [R-IV.778(d)].** "Leverage-adjusted" means:
+- **shares at 1x;**
+- **leveraged and inverse ETFs at their stated multiple** (SOXS 3x, TSLQ 2x);
+- **options at delta-adjusted notional** — `|delta| x 100 x contracts x spot`, per
+  row, signed by direction.
+
+Delta is the measure because a net-DIRECTION cap answers exactly one question: **if
+the market moves 1%, which way does the household move and how far.** Only delta
+answers it. The competing measures keep their own jobs and are not substituted
+here: **premium at risk** governs the ROBINHOOD sleeve ceiling, **defined-risk
+width notional** governs X3's max-value exit targets, and **strike notional**
+governs assignment exposure under § Spread rows entered for a net credit.
+
+A deep-OTM row marked in pennies carries a near-zero delta and therefore provides
+**almost no directional offset today** — it is an option ON being short, not a
+short position. **A book that looks hedged on a position list can be nearly
+unhedged on a delta basis until the move starts.**
+
+**Until the hub serves aggregate book delta** (queued at BUILD, R-IV.780(e)),
+**every net-direction report states the measured subset and the count of uncounted
+rows — never a total implying the whole book was measured.**
 
 Combined short-side exposure — the FIDELITY_ROTH trading sleeve plus ROBINHOOD
 hedges — is subject to both of the following. **Neither test satisfies the other,
@@ -469,6 +572,12 @@ tranches land. Two holdings are handled explicitly:
   while its repair is outstanding. The claim in the superseded v4 §5 is withdrawn.
 - **Z2's inverse clause read without a timeframe qualifier.** Superseded by the
   § Z2 trend gate ruling above. [R-IV.765(d)]
+- **"Fails X4 -> TAIL," and any assignment order that lets X4 choose a bucket.**
+  Inverts TA-044: the bucket is set at entry and X4 tests it. Drafted in error in
+  v5.2's first pass and in TA-117 §3; retired before BUILD applied either.
+  [R-IV.781(b), (d)]
+- **X4 computed on the traded strike's own implied volatility.** The input is ATM
+  IV of the position's own expiration. [R-IV.781(c)]
 - **"FIDELITY_ROTH — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, …3158)."**
   Factually wrong on account identity. BrokerageLink is 653641836; the Roth is
   652303158. Retired 2026-10-07.
@@ -515,6 +624,19 @@ When URSA's THESIS GROUPING pre-check or THALES's THESIS WORLD-CHECK classify th
 - **Iran-escalation thesis.** Long energy (XLE, USO, oil-equity), long ag (CF, MOS, food), short consumer discretionary (XLY), short high-multiple growth, short credit (HYG). Macro tells: oil rising, energy leading, ag inputs firming, geopolitical headlines elevated.
 - **AI-bubble-deflation thesis.** Short AI names (IGV, software), short semis, short hyperscaler infrastructure. Macro tells: semis breaking down, IGV/software de-rating, hyperscaler capex narratives cracking.
 - **Fed-hawkish thesis.** Short long-duration (TLT puts), short rate-sensitive (XLF puts, REITs), long short-duration cash equivalents. Macro tells: 10y yield rising, dollar firming, rate-cut expectations pushed out.
+
+- **Credit-stress thesis.** Short regional banks (KRE), short high-yield credit
+  (HYG), short private-credit and alternative-asset managers (BX, TRIN, APO,
+  ARES), short rate-sensitive financials (XLF). Long short-duration cash
+  equivalents as the offset. Macro tells: HY spreads widening against IG,
+  regional-bank deposit flight or CRE marks in the headlines, private-credit NAVs
+  questioned or gated, KRE underperforming XLF, bank-term-funding usage rising.
+  **Distinct from Fed-hawkish, and the two can run opposite.** Fed-hawkish is
+  driven by the policy rate - long duration and rate-sensitives fall together as
+  yields rise. Credit-stress is driven by the credit cycle, and a cut *into* a
+  credit event helps duration while credit keeps widening. A book short both TLT
+  and HYG is expressing two theses, not one; label it by whichever leg carries the
+  size. Approved by the principal 2026-10-08 [R-IV.778(e)].
 - **Trend-continuation thesis.** The book is positioned *with* a confirmed trend and the thesis is the trend itself — no macro story required. Macro tells: PYTHAGORAS confirms the trend on the position's timeframe, leadership is consistent with it (Rule 5), and nothing in the book fights it. **This label exists because the previous four all required a macro narrative, which meant the most Zweig-compliant book on the list — long a confirmed uptrend — had no coherent label and read as incoherent.** Added per Z6, 2026-09-23.
 - **Pure macro-bearish bias stack.** Broad short-index exposure with no offsetting long structure and no thematic coherence tying positions together. This is the failure mode the THESIS pre-checks exist to distinguish from the coherent theses above.
 
@@ -578,6 +700,16 @@ These additional rules apply only to agents that recommend specific trade entrie
   schedule, and neither satisfies the other. A single result is not a verdict. When
   the net-short floor fails, state the further deployment that closes it.
   [§ Household net-direction cap; TA-112 §3]
+
+- **X4's implied-volatility input is the ATM implied volatility of the position's
+  own expiration — RULED 2026-10-08 [R-IV.781(c)].** Not the traded strike's own
+  IV. Under skew an OTM strike's IV is elevated, so using it is circular: the more
+  expensive the tail protection, the more "reachable" X4 would judge the strike,
+  and the rule would loosen exactly where it should bind. X4 asks whether **the
+  underlying** can plausibly travel to break-even; the market's answer is the ATM
+  term structure. The agent names the strike it read ATM from.
+  **X4 tests the bucket, it does not choose it** (§ Buckets, TA-044): a FAIL on a
+  non-TAIL ticket is recorded as a FAIL, never resolved by retagging to TAIL.
 
 - **Z2 returns one of THREE results, not two:** PASS, FAIL, or **NOT EVALUABLE**.
   NOT EVALUABLE is returned for any row whose justifying timeframe the hub cannot

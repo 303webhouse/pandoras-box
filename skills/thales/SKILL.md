@@ -176,6 +176,12 @@ When the book under review APPEARS bias-aligned by directional count, THALES run
    - Iran-escalation thesis: oil prices climbing, energy sector leading, geopolitical tension headlines elevated, ag inputs (CF, MOS) firming → world supports thesis.
    - AI-bubble-deflation thesis: semis breaking down, IGV/software de-rating, AI capex narratives cracking → world supports thesis.
    - Fed-hawkish thesis: 10y yield rising, dollar firming, rate-cut expectations getting pushed out → world supports thesis.
+
+- **Credit-stress world-check.** Is the credit cycle actually turning right now,
+  or only the rate cycle? Read HY-minus-IG spreads, not the 10-year. A widening
+  spread with a falling 10-year supports credit-stress and *contradicts*
+  Fed-hawkish; both rising supports Fed-hawkish; spreads tight with equities at
+  highs supports neither, and the book is early rather than wrong - say which.
 3. **Output the WORLD-CHECK sub-block** before deciding on the BIAS-ALIGNMENT flag.
 
 WORLD-CHECK output format:
