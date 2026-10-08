@@ -1,8 +1,8 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-07 16:33 MDT (2026-10-07 22:33 UTC)
-**Worked against:** `origin/main` = `db1d864`
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r707-liq`.
+**Written:** 2026-10-07 18:23 MDT (2026-10-08 00:23 UTC)
+**Worked against:** `origin/main` = `600694a`
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r741-lsr`.
 **Hub at read time:** not re-timed this turn.
 
 ## Why this lane exists
@@ -21,50 +21,44 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.727 — one commit after `ff25480` (R-IV.728)
-Units settled USD under R-IV.724(b). `COINALYZE_UNITS_UNVERIFIED` is gone. Coinalyze-sourced
-liquidations, open_interest, and oi_extreme score again. `convert_to_usd="true"` stays, with a
-one-line comment that it is inert because the values are already USD. OKX fallbacks stay
-`OKX_FALLBACK_UNSCORED` (R-IV.707(d)). Composition `$5M` is `$5M` of hourly liquidations.
+## R-IV.741 — in flight (BUILD merges after SPINE ruling)
+`_make_request()` no longer returns bare `None`. Budget refuse is `CoinalyzeMiss`
+with reason `COINALYZE_BUDGET_REFUSED`. Vendor fail/empty (no key, HTTP 429,
+non-200, exception, empty body) is `COINALYZE_VENDOR_FAILED`. Every getter cell
+that is still None carries that reason. Budget refuse does not use the "no data"
+error string. `bias_scheduler.py` was not touched (R-IV.740).
 
-**R-IV.725 accepted:** history callers send UNIX seconds via `_history_range_seconds`; snapshots
-untouched; five cells take source from the vendor result; NA gate as instructed; OI divergence
-and oi_extreme compare points inside one payload (never a % change across two sources);
-`.A` aggregates may carry no LSR data.
+**Hourly cycle Coinalyze count (evaluate_all_symbols, six symbols):**
+cap and froth run in parallel, so funding and OI each fire twice on a cold cache.
+Per symbol: 6 HTTP (`/funding-rate` ×2, `/funding-rate-history`,
+`/open-interest-history` ×2, `/liquidation-history`). Across six symbols,
+sequential: **36 calls**. LSR is not in this job. Against the shared 40/minute
+budget that leaves 4 slots if nothing else runs in the same window.
 
-**This is the only commit after `ff25480`.** BUILD merges on that condition.
+**Gather order does not guarantee LSR is the one refused.** The four-way gather
+is `snapshot_for` (page poll), not the hourly job: funding, OI, liq, then LSR.
+`_coinalyze_allow()` is sync and runs at first `_make_request`, so LSR is last
+among that gather's four checks — likeliest when remaining slots are 1, not
+the only refuse when remaining is 0 or 2. HYPE's gather is funding + LSR only.
 
-## Composite-break dates (R-IV.727(e)) — waiting on BUILD
-Not live yet. When BUILD reports the first hourly cycle after the deploy, record here:
+**Proposed (no code):** singleflight so cap/froth share one funding and one OI
+call (36 → 24); put LSR first in the page gather or reserve it a token; keep
+the 300s getter cache and raise the 30s snapshot cache so a Stater poll in the
+same minute as the hourly job does not spend the leftover 4 slots.
+
+## Composite-break dates (R-IV.727(e))
+Still waiting on BUILD's first hourly cycle after the r707 deploy.
 
 - Date BTC liquidations and open interest became genuinely Coinalyze-sourced:
-  **TBD (first post-deploy hourly cycle).**
-- First LIVE liquidations date per alt:
-  - ETH: **TBD**
-  - SOL: **TBD**
-  - HYPE: **TBD**
-  - ZEC: **TBD**
-  - FARTCOIN: **TBD**
+  **TBD.**
+- First LIVE liquidations date per alt: ETH / SOL / HYPE / ZEC / FARTCOIN **TBD.**
 
-That is the composite's break. Do not backfill from pre-seconds / units-gated cycles.
-
-## R-IV.727(d) — long/short, proposed, no code
-Hub currently asks `/long-short-ratio-history` with the same `.A` map as funding. Empty
-history → `ratio: None`; no OKX fallback. Scope-only proposal for BUILD:
-
-`GET /v1/future-markets`, then for each of BTC, ETH, SOL, HYPE, ZEC, FARTCOIN keep rows
-where `base_asset` matches and `has_long_short_ratio_data` is true (prefer `is_perpetual`).
-Name the Coinalyze market symbol that carries LSR for that base. Optional confirm:
-`GET /v1/long-short-ratio-history` on that symbol with a UNIX-seconds window (no
-`convert_to_usd`). STATER does not hold the Coinalyze key; BUILD makes the read on request.
-
-## R-IV.718 / R-IV.715 / R-IV.707
-Source-from-result for liquidations stands. The 715 "0 of 2,153 OKX-sourced" count
-read a literal. Composition `$5M` gate stands. Seed vs hardcoded `$5M`/75% recorded.
+## R-IV.727 — merged
+`claude/stater-r707-liq` is on `main` (`ed5491c`). Units USD; Coinalyze OI/liq
+score again; OKX stays unscored. `$5M` is hourly liquidations.
 
 ## R-IV.700 — merged
-Cycle remap + strategy engine off fapi + HYPE history skip is on `main` (`eff4077`).
-Spot stays.
+Cycle remap + strategy engine off fapi + HYPE history skip (`eff4077`). Spot stays.
 
 ## Robinhood
 US perps announced for "the coming months", not live, no keyless feed. Charter
@@ -73,12 +67,11 @@ forbids holding the principal's trading key.
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r707-liq` | One commit after `ff25480`. Pushed. | Yes — merge if that is the only commit (R-IV.728). |
+| `claude/stater-r741-lsr` | Pushed. | After SPINE's merge ruling. |
+| `claude/stater-r707-liq` | Merged (`ed5491c`). | Done. |
 | `claude/stater-r700-queue` | Merged (`eff4077`). | Done. |
-| `claude/stater-r692-cache` | Cache 4 s → 8 s. | BUILD accepted (R-IV.699). |
 
 ## What the next CC-STATER session should do first
-If BUILD merged: wait for the first hourly cycle, then fill the composite-break dates
-above (BTC Coinalyze-sourced liq+OI date; each alt's first LIVE liquidations date).
-Do not skip HYPE Binance spot. Do not rebuild the Binance VPN. Do not add a second
-commit on this branch if merge is still pending.
+Hold the r741 merge until SPINE rules. If BUILD reported the first post-r707
+hourly cycle, fill the composite-break dates above. Do not skip HYPE Binance
+spot. Do not rebuild the Binance VPN. Do not edit `bias_scheduler.py`.
