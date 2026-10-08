@@ -32,9 +32,9 @@ OKX_PUBLIC_URL = "https://www.okx.com/api/v5"
 # (live-verified 2026-07-13; see symbol-capability-matrix.md for raw HTTP evidence).
 # UNAVAILABLE symbols must return NA rather than a mislabeled BTC value.
 _COINALYZE_PERP_SYMBOL: Dict[str, Optional[str]] = {
-    "BTC":      "BTCUSD_PERP.A",
-    "ETH":      "ETHUSD_PERP.A",
-    "SOL":      "SOLUSD_PERP.A",
+    "BTC":      "BTCUSDT_PERP.A",
+    "ETH":      "ETHUSDT_PERP.A",
+    "SOL":      "SOLUSDT_PERP.A",
     "HYPE":     "HYPEUSDT_PERP.A",
     "ZEC":      "ZECUSDT_PERP.A",
     "FARTCOIN": "FARTCOINUSDT_PERP.A",
