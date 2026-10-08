@@ -108,6 +108,26 @@ def _get_cached(key: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+_inflight: Dict[str, asyncio.Task] = {}
+
+
+async def _singleflight(key: str, factory):
+    """One in-flight Coinalyze fetch per cache key. Cap and froth share funding/OI."""
+    hit = _get_cached(key)
+    if hit is not None:
+        return hit
+    existing = _inflight.get(key)
+    if existing is not None:
+        return await existing
+    task = asyncio.ensure_future(factory())
+    _inflight[key] = task
+    try:
+        return await task
+    finally:
+        if _inflight.get(key) is task:
+            _inflight.pop(key, None)
+
+
 def _set_cache(key: str, data: Any, ttl: int = CACHE_TTL_SECONDS):
     """Cache response with TTL"""
     _cache[key] = {
@@ -260,6 +280,13 @@ async def get_funding_rate(symbol: str = "BTC") -> Dict[str, Any]:
     if cached:
         return cached
 
+    async def _load():
+        return await _get_funding_rate_uncached(symbol, cache_key, perp_sym)
+
+    return await _singleflight(cache_key, _load)
+
+
+async def _get_funding_rate_uncached(symbol: str, cache_key: str, perp_sym: str) -> Dict[str, Any]:
     okx_swap = _OKX_SWAP_INSTID.get(symbol)
 
     # Get current funding rate
@@ -367,6 +394,13 @@ async def get_open_interest(symbol: str = "BTC") -> Dict[str, Any]:
     if cached:
         return cached
 
+    async def _load():
+        return await _get_open_interest_uncached(symbol, cache_key, perp_sym)
+
+    return await _singleflight(cache_key, _load)
+
+
+async def _get_open_interest_uncached(symbol: str, cache_key: str, perp_sym: str) -> Dict[str, Any]:
     okx_swap = _OKX_SWAP_INSTID.get(symbol)
 
     # OI snapshot key is per-symbol to prevent cross-symbol cache poisoning
@@ -1040,3 +1074,4 @@ async def get_all_coinalyze_data(symbol: str = "BTC") -> Dict[str, Any]:
 def reset_for_tests() -> None:
     _cache.clear()
     _call_times.clear()
+    _inflight.clear()

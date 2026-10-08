@@ -1,8 +1,8 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-07 16:33 MDT (2026-10-07 22:33 UTC)
-**Worked against:** `origin/main` = `db1d864`
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r707-liq`.
+**Written:** 2026-10-07 22:12 MDT (2026-10-08 04:12 UTC)
+**Worked against:** `origin/main` = `6e57c24`
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r742-stale`.
 **Hub at read time:** not re-timed this turn.
 
 ## Why this lane exists
@@ -21,50 +21,66 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.727 — one commit after `ff25480` (R-IV.728)
-Units settled USD under R-IV.724(b). `COINALYZE_UNITS_UNVERIFIED` is gone. Coinalyze-sourced
-liquidations, open_interest, and oi_extreme score again. `convert_to_usd="true"` stays, with a
-one-line comment that it is inert because the values are already USD. OKX fallbacks stay
-`OKX_FALLBACK_UNSCORED` (R-IV.707(d)). Composition `$5M` is `$5M` of hourly liquidations.
+## Composite-break dates (R-IV.727(e) / R-IV.742(b))
+First cycle after `ed5491c` plus the scheduler boot fix: **2026-10-08 00:41:05.72 UTC
+(2026-10-07 18:41:05 MDT)**.
 
-**R-IV.725 accepted:** history callers send UNIX seconds via `_history_range_seconds`; snapshots
-untouched; five cells take source from the vendor result; NA gate as instructed; OI divergence
-and oi_extreme compare points inside one payload (never a % change across two sources);
-`.A` aggregates may carry no LSR data.
+| Symbol | Liquidations | Open interest |
+|---|---|---|
+| BTC | still NA, okx-sourced | first LIVE, Coinalyze-sourced, this cycle |
+| ETH | still NA, okx-sourced | (not dated this cycle) |
+| SOL | still NA, okx-sourced | (not dated this cycle) |
+| HYPE | first LIVE, Coinalyze-sourced, this cycle | — |
+| ZEC | first LIVE, Coinalyze-sourced, this cycle | — |
+| FARTCOIN | first LIVE, Coinalyze-sourced, this cycle | — |
 
-**This is the only commit after `ff25480`.** BUILD merges on that condition.
+BTC liquidations are not yet genuinely Coinalyze-sourced. That date is still open.
+ETH and SOL first LIVE liquidations: still open.
 
-## Composite-break dates (R-IV.727(e)) — waiting on BUILD
-Not live yet. When BUILD reports the first hourly cycle after the deploy, record here:
+## R-IV.742 — in flight (nothing merges until SPINE rules)
+`stale` on a cycle cell is age only. Vendor health is `health_status`. Signal goes
+UNKNOWN only on stale-by-age or an explicit `error`. Cap and froth share one
+funding and one OI call per symbol (36 → 24). Page snapshot cache is 60 s.
 
-- Date BTC liquidations and open interest became genuinely Coinalyze-sourced:
-  **TBD (first post-deploy hourly cycle).**
-- First LIVE liquidations date per alt:
-  - ETH: **TBD**
-  - SOL: **TBD**
-  - HYPE: **TBD**
-  - ZEC: **TBD**
-  - FARTCOIN: **TBD**
+**Consumers of cycle-cell `stale` (listed before the change):**
+- `_make_cell` / `crypto_cycle_log.cells` (writer)
+- `services/read_only/crypto_state.py` `_classify(..., stale_flag=)` — used the
+  flag as a health failure (`degraded`). It already has `state` and
+  `row_degraded` for health, so it does not need vendor health under the name
+  `stale`. After the correction, LIVE + age-stale reads `stale`.
+- `hub_mcp` crypto_state via that `_classify`
+- `test_stater_p0_reads.py`, `test_hub_mcp_crypto_state.py`, `test_s3_phase2_cycle_engine.py`
+- `frontend/stater.js` reads tape/envelope `stale` (age from `envelope()`), not
+  cycle cells — left alone.
 
-That is the composite's break. Do not backfill from pre-seconds / units-gated cycles.
+## R-IV.741 — accepted
+`claude/stater-r741-lsr` at `8c4d31e`. BUILD merges it under R-IV.743. This
+branch does not contain that commit.
 
-## R-IV.727(d) — long/short, proposed, no code
-Hub currently asks `/long-short-ratio-history` with the same `.A` map as funding. Empty
-history → `ratio: None`; no OKX fallback. Scope-only proposal for BUILD:
+## R-IV.742(e) — USD vs USDT aggregates, proposed, no code
+From `/future-markets` (filed in `symbol-capability-matrix.md`; BUILD's
+R-IV.735(e) read). Hub maps BTC/ETH/SOL to the USD-margined `.A`; HYPE/ZEC/
+FARTCOIN already use USDT.
 
-`GET /v1/future-markets`, then for each of BTC, ETH, SOL, HYPE, ZEC, FARTCOIN keep rows
-where `base_asset` matches and `has_long_short_ratio_data` is true (prefer `is_perpetual`).
-Name the Coinalyze market symbol that carries LSR for that base. Optional confirm:
-`GET /v1/long-short-ratio-history` on that symbol with a UNIX-seconds window (no
-`convert_to_usd`). STATER does not hold the Coinalyze key; BUILD makes the read on request.
+| Base | Aggregates that exist | Current map | Proposed |
+|---|---|---|---|
+| BTC | `BTCUSD_PERP.A` (coin-margined), `BTCUSDC_PERP.A`, `BTCUSDT_PERP.A` (linear) | `BTCUSD_PERP.A` | `BTCUSDT_PERP.A` |
+| ETH | `ETHUSD_PERP.A`, `ETHBTC_PERP.A`, `ETHUSDT_PERP.A` | `ETHUSD_PERP.A` | `ETHUSDT_PERP.A` |
+| SOL | `SOLUSD_PERP.A`, `SOLUSDT_PERP.A`, `SOLUSDC_PERP.A` | `SOLUSD_PERP.A` | `SOLUSDT_PERP.A` |
 
-## R-IV.718 / R-IV.715 / R-IV.707
-Source-from-result for liquidations stands. The 715 "0 of 2,153 OKX-sourced" count
-read a literal. Composition `$5M` gate stands. Seed vs hardcoded `$5M`/75% recorded.
+A remap would move funding, OI, and liquidations onto the linear majority.
+BTC OI would leave the ~$1.31B coin-margined slice for a much larger USDT
+notional; `oi_change_4h` % would be a different market. Liquidation buckets
+in a 2-hour window would be denser, so BTC/ETH/SOL would be likelier to stay
+Coinalyze LIVE and enter the `$5M` hourly gate instead of falling to OKX NA.
+Funding and term-structure would be the USDT-perp rate, not the inverse-perp
+rate. Do not code this until SPINE rules.
+
+## R-IV.727 — merged
+`ed5491c`. Units USD; Coinalyze OI/liq score again; OKX stays unscored.
 
 ## R-IV.700 — merged
-Cycle remap + strategy engine off fapi + HYPE history skip is on `main` (`eff4077`).
-Spot stays.
+`eff4077`. Spot stays.
 
 ## Robinhood
 US perps announced for "the coming months", not live, no keyless feed. Charter
@@ -73,12 +89,11 @@ forbids holding the principal's trading key.
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r707-liq` | One commit after `ff25480`. Pushed. | Yes — merge if that is the only commit (R-IV.728). |
-| `claude/stater-r700-queue` | Merged (`eff4077`). | Done. |
-| `claude/stater-r692-cache` | Cache 4 s → 8 s. | BUILD accepted (R-IV.699). |
+| `claude/stater-r742-stale` | Pushed. (c)+(d) only. | After SPINE's merge ruling. |
+| `claude/stater-r741-lsr` | Accepted. BUILD merges under R-IV.743. | BUILD. |
+| `claude/stater-r707-liq` | Merged (`ed5491c`). | Done. |
 
 ## What the next CC-STATER session should do first
-If BUILD merged: wait for the first hourly cycle, then fill the composite-break dates
-above (BTC Coinalyze-sourced liq+OI date; each alt's first LIVE liquidations date).
-Do not skip HYPE Binance spot. Do not rebuild the Binance VPN. Do not add a second
-commit on this branch if merge is still pending.
+Hold r742 until SPINE rules. Do not add the USDT remap unless a ruling names
+it. Do not skip HYPE Binance spot. Do not rebuild the Binance VPN. Do not
+edit `bias_scheduler.py`.

@@ -83,12 +83,18 @@ def _make_cell(
     }
     if reason is not None:
         cell["reason"] = reason
+    if extra.get("health_status") is None:
+        extra.pop("health_status", None)
     cell.update(extra)
+    # R-IV.742: stale is age only. Signal goes UNKNOWN only on age-stale or
+    # an explicit failure (DEGRADED). Vendor health is health_status, not stale.
+    if "signal" in cell and state != "NA" and (stale or state == "DEGRADED"):
+        cell["signal"] = "UNKNOWN"
     return cell
 
 
 def _stale_check(as_of_iso: Optional[str], threshold_seconds: int) -> bool:
-    """Return True if data is older than threshold_seconds."""
+    """Return True if as_of is missing or older than threshold_seconds. Age only."""
     if not as_of_iso:
         return True
     try:
@@ -165,6 +171,30 @@ def _directed_cap_signal(signal_id: str, result: Dict[str, Any], config: dict) -
     return raw
 
 
+def _result_to_state(
+    result: Dict[str, Any],
+    vendor: str,
+    value_key: Optional[str],
+    stale_thresholds: Dict[str, Any],
+) -> Tuple[str, Any, Optional[str], bool]:
+    """Map a vendor result to (state, value, as_of, stale).
+
+    stale is age only (R-IV.742). Vendor health stays on health_status.
+    Explicit failure (error) is DEGRADED. Age past the vendor threshold is STALE.
+    """
+    if result.get("state") == "NA":
+        return "NA", None, None, False
+    as_of = result.get("timestamp") or result.get("updated_at")
+    thresh = stale_thresholds.get(vendor, 360)
+    is_stale = _stale_check(as_of, thresh)
+    value = result.get(value_key) if value_key else None
+    if result.get("error"):
+        return "DEGRADED", value, as_of, is_stale
+    if is_stale:
+        return "STALE", value, as_of, True
+    return "LIVE", value, as_of, False
+
+
 async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
     """
     Build CAPITULATION cells for `symbol` by calling the parametrized vendor clients.
@@ -182,29 +212,14 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     cap = config.get("capitulation", {})
     cells = []
 
-    # Helper to translate signal result → cell state
-    def _result_to_state(result: Dict[str, Any], vendor: str, value_key: str = None) -> Tuple[str, Any, str, bool]:
-        """Returns (state, value, as_of, stale)."""
-        if result.get("state") == "NA":
-            return "NA", None, None, False
-        err = result.get("error") or result.get("signal") == "UNKNOWN"
-        as_of = result.get("timestamp") or result.get("updated_at")
-        thresh = stale_thresholds.get(vendor, 360)
-        is_stale = _stale_check(as_of, thresh)
-        value = result.get(value_key) if value_key else None
-        if err:
-            return "DEGRADED", value, as_of, True
-        if is_stale:
-            return "STALE", value, as_of, True
-        return "LIVE", value, as_of, False
-
     # 1. 25-delta skew (Deribit)
     try:
         skew_result = await deribit_client.get_25_delta_skew(symbol)
-        state, val, as_of, stale = _result_to_state(skew_result, "deribit", "skew_25d")
+        state, val, as_of, stale = _result_to_state(skew_result, "deribit", "skew_25d", stale_thresholds)
         cells.append(_make_cell(
             "skew_25delta", "CAPITULATION", val, state, "deribit", as_of, stale,
             reason=skew_result.get("reason"),
+            health_status=skew_result.get("health_status"),
             signal=_directed_cap_signal("skew_25delta", skew_result, config),
             vendor_signal=skew_result.get("signal"),
         ))
@@ -214,10 +229,11 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     # 2. Quarterly basis (Binance + OKX fallback)
     try:
         basis_result = await binance_client.get_quarterly_basis(symbol)
-        state, val, as_of, stale = _result_to_state(basis_result, "binance", "basis_annualized")
+        state, val, as_of, stale = _result_to_state(basis_result, "binance", "basis_annualized", stale_thresholds)
         cells.append(_make_cell(
             "quarterly_basis", "CAPITULATION", val, state, basis_result.get("source", "binance"), as_of, stale,
             reason=basis_result.get("reason"),
+            health_status=basis_result.get("health_status"),
             signal=_directed_cap_signal("quarterly_basis", basis_result, config),
             vendor_signal=basis_result.get("signal"),
         ))
@@ -227,10 +243,11 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     # 3. Perp funding (Coinalyze + OKX fallback)
     try:
         funding_result = await coinalyze_client.get_funding_rate(symbol)
-        state, val, as_of, stale = _result_to_state(funding_result, "coinalyze", "funding_rate")
+        state, val, as_of, stale = _result_to_state(funding_result, "coinalyze", "funding_rate", stale_thresholds)
         cells.append(_make_cell(
             "perp_funding", "CAPITULATION", val, state, funding_result.get("source") or "coinalyze", as_of, stale,
             reason=funding_result.get("reason"),
+            health_status=funding_result.get("health_status"),
             sentiment=funding_result.get("sentiment"),
             signal=_directed_cap_signal("perp_funding", funding_result, config),
             vendor_signal=funding_result.get("signal"),
@@ -241,10 +258,11 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     # 4. Stablecoin APRs (DeFiLlama — market-wide, same for all symbols)
     try:
         aprs_result = await get_stablecoin_aprs()
-        state, val, as_of, stale = _result_to_state(aprs_result, "defillama", "avg_apy")
+        state, val, as_of, stale = _result_to_state(aprs_result, "defillama", "avg_apy", stale_thresholds)
         cells.append(_make_cell(
             "stablecoin_aprs", "CAPITULATION", val, state, "defillama", as_of, stale,
             reason=aprs_result.get("reason"),
+            health_status=aprs_result.get("health_status"),
             signal=aprs_result.get("signal"),
         ))
     except Exception as exc:
@@ -253,10 +271,11 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     # 5. Term structure (Coinalyze)
     try:
         term_result = await coinalyze_client.get_term_structure(symbol)
-        state, val, as_of, stale = _result_to_state(term_result, "coinalyze", "current_funding")
+        state, val, as_of, stale = _result_to_state(term_result, "coinalyze", "current_funding", stale_thresholds)
         cells.append(_make_cell(
             "term_structure", "CAPITULATION", term_result.get("structure"), state, term_result.get("source") or "coinalyze", as_of, stale,
             reason=term_result.get("reason"),
+            health_status=term_result.get("health_status"),
             funding_trend=term_result.get("funding_trend"),
             signal=_directed_cap_signal("term_structure", term_result, config),
             vendor_signal=term_result.get("signal"),
@@ -268,7 +287,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     try:
         oi_result = await coinalyze_client.get_open_interest(symbol)
         oi_src = oi_result.get("source") or "coinalyze"
-        state, val, as_of, stale = _result_to_state(oi_result, "coinalyze", "current_oi")
+        state, val, as_of, stale = _result_to_state(oi_result, "coinalyze", "current_oi", stale_thresholds)
         if oi_src in ("okx", "okx_fallback"):
             cells.append(_make_cell(
                 "open_interest", "CAPITULATION", val, "NA", oi_src, as_of, False,
@@ -281,6 +300,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             cells.append(_make_cell(
                 "open_interest", "CAPITULATION", val, state, oi_src, as_of, stale,
                 reason=oi_result.get("reason"),
+                health_status=oi_result.get("health_status"),
                 divergence=oi_result.get("divergence"),
                 signal=_directed_cap_signal("open_interest", oi_result, config),
                 vendor_signal=oi_result.get("signal"),
@@ -292,7 +312,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     try:
         liq_result = await coinalyze_client.get_liquidations(symbol)
         vendor_src = liq_result.get("source") or "coinalyze"
-        state, val, as_of, stale = _result_to_state(liq_result, "coinalyze", "total_liquidations")
+        state, val, as_of, stale = _result_to_state(liq_result, "coinalyze", "total_liquidations", stale_thresholds)
         # OKX fallback is a different quantity (last 100 orders, variable window).
         # Show it with source "okx" and state NA so it cannot FIRING or enter
         # live_cap / live_cap_all in _compute_composite (those lists are LIVE-only).
@@ -314,6 +334,7 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
             cells.append(_make_cell(
                 "liquidations", "CAPITULATION", val, state, vendor_src, as_of, stale,
                 reason=liq_result.get("reason"),
+                health_status=liq_result.get("health_status"),
                 composition=liq_result.get("composition"),
                 long_pct=liq_result.get("long_pct"),
                 signal=_directed_cap_signal("liquidations", liq_result, config),
@@ -325,9 +346,10 @@ async def _build_capitulation_cells(symbol: str, config: dict) -> List[Dict[str,
     # 8. Spot orderbook (Binance Vision + OKX fallback; HYPE/FARTCOIN → OKX)
     try:
         ob_result = await binance_client.get_spot_orderbook_skew(symbol)
-        state, val, as_of, stale = _result_to_state(ob_result, "binance", "imbalance")
+        state, val, as_of, stale = _result_to_state(ob_result, "binance", "imbalance", stale_thresholds)
         cells.append(_make_cell(
             "spot_orderbook", "CAPITULATION", val, state, ob_result.get("source", "binance"), as_of, stale,
+            health_status=ob_result.get("health_status"),
             reason=ob_result.get("reason"),
             sentiment=ob_result.get("sentiment"),
             signal=ob_result.get("signal"),
@@ -371,29 +393,16 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
     stale_thresholds = config.get("staleness_thresholds", {})
     cells = []
 
-    def _result_to_state(result, vendor, value_key=None):
-        if result.get("state") == "NA":
-            return "NA", None, None, False
-        err = result.get("error") or result.get("signal") == "UNKNOWN"
-        as_of = result.get("timestamp")
-        thresh = stale_thresholds.get(vendor, 360)
-        is_stale = _stale_check(as_of, thresh)
-        value = result.get(value_key) if value_key else None
-        if err:
-            return "DEGRADED", value, as_of, True
-        if is_stale:
-            return "STALE", value, as_of, True
-        return "LIVE", value, as_of, False
-
     # F1. Quarterly basis extreme (>10% annualized = FROTH territory)
     try:
         basis_result = await binance_client.get_quarterly_basis(symbol)
-        state, val, as_of, stale = _result_to_state(basis_result, "binance", "basis_annualized")
+        state, val, as_of, stale = _result_to_state(basis_result, "binance", "basis_annualized", stale_thresholds)
         threshold = froth_cfg.get("basis_extreme_pct", 10.0)
         is_froth = (isinstance(val, (int, float)) and val > threshold)
         cells.append(_make_cell(
             "basis_extreme", "FROTH", val, state, basis_result.get("source", "binance"), as_of, stale,
             reason=basis_result.get("reason"),
+            health_status=basis_result.get("health_status"),
             threshold=threshold,
             firing=is_froth,
             signal="FIRING" if (is_froth and state == "LIVE") else ("NA" if state == "NA" else "NEUTRAL"),
@@ -404,12 +413,13 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
     # F2. 25-delta skew extreme (< -5 = strong call demand = FROTH)
     try:
         skew_result = await deribit_client.get_25_delta_skew(symbol)
-        state, val, as_of, stale = _result_to_state(skew_result, "deribit", "skew_25d")
+        state, val, as_of, stale = _result_to_state(skew_result, "deribit", "skew_25d", stale_thresholds)
         threshold = froth_cfg.get("skew_call_extreme_pct", -5.0)
         is_froth = (isinstance(val, (int, float)) and val < threshold)
         cells.append(_make_cell(
             "skew_call_extreme", "FROTH", val, state, "deribit", as_of, stale,
             reason=skew_result.get("reason"),
+            health_status=skew_result.get("health_status"),
             threshold=threshold,
             firing=is_froth,
             signal="FIRING" if (is_froth and state == "LIVE") else ("NA" if state == "NA" else "NEUTRAL"),
@@ -420,12 +430,13 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
     # F3. Funding blowout (> threshold = overleveraged longs = FROTH)
     try:
         funding_result = await coinalyze_client.get_funding_rate(symbol)
-        state, val, as_of, stale = _result_to_state(funding_result, "coinalyze", "funding_rate")
+        state, val, as_of, stale = _result_to_state(funding_result, "coinalyze", "funding_rate", stale_thresholds)
         threshold = froth_cfg.get("funding_blowout_pct", 0.05)
         is_froth = (isinstance(val, (int, float)) and val > threshold)
         cells.append(_make_cell(
             "funding_blowout", "FROTH", val, state, funding_result.get("source") or "coinalyze", as_of, stale,
             reason=funding_result.get("reason"),
+            health_status=funding_result.get("health_status"),
             threshold=threshold,
             firing=is_froth,
             signal="FIRING" if (is_froth and state == "LIVE") else ("NA" if state == "NA" else "NEUTRAL"),
@@ -437,7 +448,7 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
     try:
         oi_result = await coinalyze_client.get_open_interest(symbol)
         oi_src = oi_result.get("source") or "coinalyze"
-        state, val, as_of, stale = _result_to_state(oi_result, "coinalyze", "oi_change_4h")
+        state, val, as_of, stale = _result_to_state(oi_result, "coinalyze", "oi_change_4h", stale_thresholds)
         threshold = froth_cfg.get("oi_extreme_change_pct", 5.0)
         is_froth = (isinstance(val, (int, float)) and val > threshold)
         if oi_src in ("okx", "okx_fallback"):
@@ -452,6 +463,7 @@ async def _build_froth_cells(symbol: str, config: dict) -> List[Dict[str, Any]]:
             cells.append(_make_cell(
                 "oi_extreme", "FROTH", val, state, oi_src, as_of, stale,
                 reason=oi_result.get("reason"),
+                health_status=oi_result.get("health_status"),
                 threshold=threshold,
                 firing=is_froth,
                 signal="FIRING" if (is_froth and state == "LIVE") else ("NA" if state == "NA" else "NEUTRAL"),
