@@ -165,6 +165,10 @@ in full. One plan with FIDELITY_ROTH (see § One plan, two tax locations).
   to **short-duration US Treasuries** — a broad index failing is the market
   failing, which is not the concentration risk the limit exists to bound.
   [Scope confirmed by the principal 2026-10-07, R-IV.735]
+- **The limit's denominator is the combined core across both Fidelity accounts,
+  never one account.** Risk is economic, not custodial: a holding that is 7% of
+  the money is 7% of the risk wherever it is custodied. This follows directly from
+  § One plan, two tax locations. [TA-112 §2]
 - Tactical positions sit **fully inside** the 20% cap at TA-034's 100% default.
   [TA-098 §1b]
 - A **2% loss alert** on every row, strategic and tactical alike. [TA-098 §1c]
@@ -173,17 +177,68 @@ in full. One plan with FIDELITY_ROTH (see § One plan, two tax locations).
   input. [TA-101 §1]
 - **Classification is the principal's**, recorded on the row, never inferred from
   ticker, leverage or bucket tag. [TA-098 §2]
-- **Strategic exit rule:** a strategic row may carry a price stop, but it must sit
-  at a **weekly close below the 200-day SMA**, with **3× the 20-day ATR** as a
-  minimum distance — whichever is further from entry. A stop closer than that makes
-  the row **tactical**, automatically, regardless of stated intent. A stopped-out
-  strategic row closes carrying the classification it held and is flagged for
-  review, never auto-reclassified. [R-IV.729(a)]
 - **Do not consume a field named `max_loss` from either the hub or the book** for
   any cap computation. The two stores disagree: the hub derives it from cost on
   every row; the book stores a written value absent on 11 of 28 rows and exceeding
   the position's maximum possible loss on at least two. Compute from current market
   value. [TA-102 §5]
+
+### § Strategic exit rule
+
+A strategic row may carry a price stop. Where it does, the stop sits at a **weekly
+close below the 200-day SMA**, with **3× the 20-day ATR** as a **minimum distance**
+— **whichever is further from entry.** A stop closer than that makes the row
+**tactical**, automatically, regardless of stated intent. A stopped-out strategic
+row closes carrying the classification it held and is flagged for review, never
+auto-reclassified. [R-IV.729(a)]
+
+**"Further from entry" is the selection, and 3×ATR is a floor on the stop's room,
+never a ceiling.** Where both candidates sit below entry, the one further from
+entry governs — which is the looser stop. Reading it as the tighter one would set a
+2.6% stop on a decades-horizon index holding. [TA-112 §1]
+
+**Four cases, tested in this order. The order is the rule, not a presentation
+choice.**
+
+**Case 0 — ballast, tested FIRST and dispositive.** **Short-duration Treasuries
+and cash equivalents held as ballast carry no price stop at all.** Invalidation is
+recorded as *allocation only*: they exit on rebalancing or a change in the target
+mix, never on a price level. A holding whose moving averages sit within cents of
+each other and whose ATR is a rounding error produces a stop that fires on
+settlement noise. **Where a row is ballast, cases 1–3 are not reached**, even when
+its entry satisfies case 3's condition — both candidates are computed and both are
+recorded as *not applicable*, so a reader can see the check was run. Cases 1–3
+apply only to rows carrying a thesis that price can invalidate. [v3 §2(a);
+precedence stated TA-115 §1]
+
+**Case 1 — entry above the 200-day SMA, gap WIDER than 3×ATR** — the **200-day
+SMA** governs, being further from entry. The 3×ATR candidate is computed, loses,
+and is recorded as checked.
+
+**Case 2 — entry above the 200-day SMA, gap at or NARROWER than 3×ATR** —
+**entry less 3×ATR** governs, being further from entry. This follows from the
+"further from entry" selection and was unenumerated in v5; it is stated here so no
+reader has to derive it. [TA-115 §1]
+
+**Case 3 — entry at or below the 200-day SMA** — the 200-SMA does not govern; a
+stop above entry is an instruction to sell immediately. **The stop is entry less
+3× the 20-day ATR until price closes above the 200-day SMA on a weekly basis**,
+after which the 200-SMA takes over permanently and cases 1–2 apply. [v3 §2(b)]
+
+**Entry-anchored levels are per-row by construction and are never shared across
+rows.** Two accounts filling the same ticker on the same day carry different
+levels. An add re-anchors that row to its new weighted average cost. [TA-109]
+
+**Every priced line is published with all candidates shown and the governing one
+named** — including candidates that lost and candidates recorded as not
+applicable. A line shown alone is indistinguishable from a line never checked.
+Where a candidate depends on a position attribute the publishing lane does not
+hold, it is published as *pending from the execution record*, never computed from
+market data. [TA-110 §7]
+
+**Entry, fill, basis and quantity come from the execution record — never from a
+market-data field.** `spot` is not a fill. TA-008 ranks *sources* for a figure and
+says nothing about taking the wrong *field* from the right source. [TA-109]
 
 **FIDELITY_ROTH — Roth Brokerage, account 652303158.** 50% core, 50% trading
 sleeve. [R-IV.730(a)]
@@ -199,12 +254,30 @@ sleeve. [R-IV.730(a)]
 - **The trading sleeve** is the principal's active account: a mix of whatever the
   market dictates, higher up the risk curve, positioned in line with his bearish
   bias where the tape allows it. Trading here is tax-sound — realised gains are
-  tax-free.
-- **The sleeve is trend-gated under Rule 0 and Z2:** long an ETF only on a confirmed
-  uptrend on its own timeframe; inverse or short-side exposure **only on a confirmed
-  downtrend**; **cash when the trend is unclear**. PYTHAGORAS's read governs what
-  "confirmed" means. No options on this account.
+  tax-free. No options on this account.
 - The **20% risk cap** applies to the sleeve's tactical positions, at market.
+
+### § Z2 trend gate — RULED by the principal 2026-10-08 ("match the clock")
+
+The sleeve is trend-gated under Rule 0 and Z2. PYTHAGORAS's read governs what
+"confirmed" means.
+
+- **The trend qualifier applies to BOTH clauses.** Long an ETF only on a confirmed
+  **uptrend**; inverse or short-side exposure only on a confirmed **downtrend** —
+  each **on the timeframe that justifies the trade.** Cash when the trend is
+  unclear.
+- **A trade justified on an intraday timeframe must be closed by the next
+  session's close.** Holding past that requires the **daily** trend to qualify on
+  its own merits.
+- **Until the hub serves intraday indicators** — `hub_get_chart_indicators` is
+  daily-only, intraday pending v1.1, and this is a logged build dependency —
+  **Z2 on a same-day row returns NOT EVALUABLE, never FAIL. The clock still
+  applies.**
+
+Reading Z2's inverse clause without a timeframe qualifier would have forbidden
+news-catalyst momentum trading in the sleeve entirely, whenever the daily trend
+was up. Nobody ruled on that, which is why it was a drafting gap and not a rule.
+[TA-113 §3; ruled R-IV.765(d)]
 
 **ROBINHOOD.** The options and tail/convexity sleeve: high-risk, high-reward plays,
 lottos, and portfolio hedges against a broad correction or worse.
@@ -224,16 +297,46 @@ designed behaviour, not a data gap.
 FIDELITY_401A and FIDELITY_ROTH are governed as **a single portfolio with a single
 set of limits**, then assets are **placed** by tax treatment: highest expected
 growth into the Roth, ballast and real assets into the 401(a). Limits, caps and the
-real-asset ceiling apply across the pair, not per account. ROBINHOOD is governed by
-its own sleeve ceiling and sits outside the one-plan boundary. [R-IV.729(a)]
+real-asset ceiling apply across the pair, **not per account**. ROBINHOOD is governed
+by its own sleeve ceiling and sits outside the one-plan boundary. [R-IV.729(a)]
 
-### § Household net-direction cap — RULED 2026-10-07 [R-IV.730(a)]
+### § Household net-direction cap — TWO TESTS, REPORTED SEPARATELY
 
 Combined short-side exposure — the FIDELITY_ROTH trading sleeve plus ROBINHOOD
-hedges — is capped at **2×-equivalent leverage-adjusted** of the sleeve capital
-available to it. **Read plainly: the floor is a roughly flat household. Never net
-short.** Above 2× the sleeves stop hedging the core and begin cancelling and then
-inverting it; at 3× the household reaches net −24%.
+hedges — is subject to both of the following. **Neither test satisfies the other,
+and both are reported with their own result.** [TA-112 §3]
+
+1. **The 2× leverage test.** Short-side exposure, leverage-adjusted, is capped at
+   **2×-equivalent of the sleeve capital available to it.**
+2. **The net-short floor.** **The household is never net short.** The floor is a
+   roughly flat household: leverage-adjusted short-side exposure does not exceed
+   long equity exposure at market.
+
+**These can disagree while the deployment schedule is incomplete, and will.** Test
+1 measures shorts against *sleeve capital*; test 2 measures them against *actual
+long exposure*. With the core partly deployed and the short sleeves at full size,
+test 1 can pass comfortably while test 2 fails. An agent reporting one result and
+calling the cap satisfied is wrong.
+
+**When test 2 fails, the report states the further deployment that closes it** —
+73% of each tranche is equity (VTI 60 + XLU 10 + XLE 3), so the gap divided by
+0.73 is the figure. The accelerator closes it faster in exactly the tape where the
+shorts would be working. Above 2× the sleeves stop hedging the core and begin
+cancelling and then inverting it; at 3× the household reaches net −24%.
+[R-IV.730(a); two-test shape TA-112 §3]
+
+### § Spread rows entered for a net credit
+
+A spread row whose net entry is a **credit** records `max_loss` at or near zero
+with a note that the figure is **correct by construction, not missing.** On a long
+higher-strike / short lower-strike put spread entered for a credit, the long leg
+fully covers the short leg and the row cannot lose. This is NOT the `max_loss`
+defect above and must not be "repaired."
+
+**The row additionally carries its short leg's assignment notional as its own
+field.** Economic max loss and settlement exposure are different quantities, and
+for a deep-OTM spread the assignment notional becomes reachable precisely in the
+scenario the position is a bet on. The book shows both. [TA-112 §6]
 
 ### § Deployment schedule — RULED 2026-10-07 [R-IV.730(a), R-IV.734(a)]
 
@@ -241,10 +344,12 @@ inverting it; at 3× the household reaches net −24%.
 — 1/6, then 1/5 of what remains, through to the remainder at tranche 6. This fully
 deploys by construction and absorbs cash arriving mid-schedule. A fixed sixth
 measured once strands new inflows; 1/6 of the current balance each time never
-completes.
+completes. Over-deploying early leaves a smaller remainder, so the schedule
+self-corrects and **the completion date does not move.**
 
-**Tranche dates: 2026-10-08 · 2026-11-02 · 2026-12-01 · 2027-01-04 · 2027-02-01 ·
-2027-03-01.** (2027-01-04 because 2027-01-01 is a market holiday.)
+**Tranche dates: 2026-10-08 (EXECUTED) · 2026-11-02 · 2026-12-01 · 2027-01-04 ·
+2027-02-01 · 2027-03-01**, at **1/5 · 1/4 · 1/3 · 1/2 · all remaining**.
+(2027-01-04 because 2027-01-01 is a market holiday.)
 
 **The cash** means: all deployable cash in FIDELITY_401A, and the deployable cash
 of **FIDELITY_ROTH's core half only**, per that account's definition above.
@@ -254,7 +359,9 @@ recent sale proceeds are still in T+1.
 
 **Good-faith violations.** In a cash account, buying with unsettled proceeds is
 permitted; **selling the position bought before those funds settle is not.** No
-position bought with unsettled proceeds is sold before settlement.
+position bought with unsettled proceeds is sold before settlement. This binds
+tactical rows too: a same-day exit on a row funded by that same day's sale
+proceeds is a good-faith violation, and the next session's open is clean.
 
 **Accelerator — SPY weekly closes**, computed from the 52-week high of 781.62:
 below **703.46** (−10%) double the monthly tranche; below **625.30** (−20%) deploy
@@ -262,11 +369,65 @@ below **703.46** (−10%) double the monthly tranche; below **625.30** (−20%) 
 **Weekly closes, not intraday touches.** No decelerator: buying a drawdown is
 mechanical, slowing on strength is a forecast.
 
-**Target mix** [R-IV.729(a)]: **60% broad index · 15% short Treasuries · 15% real
-assets (7 gold bullion / 5 PDBC / 3 energy) · 10% satellite cap.** Gold is held as
-**bullion, not miners** — in 2008 bullion returned +5.77% while GDX fell 69.14%
-peak-to-trough. Energy counts **inside** the 15% real-asset limit; utilities and
-other non-real-asset sectors count against the separate 10% satellite cap.
+### § Target mix and buy split
+
+**Target mix of the fully-deployed core:**
+
+| Sleeve | Weight |
+|---|---|
+| Broad index — VTI | 60% |
+| Short Treasuries — SHV | 24.3% |
+| Satellite — XLU | 10% |
+| Broad commodity — PDBC | 2.7% — suspended, see below |
+| Energy — XLE | 3% |
+
+**Real assets = PDBC 2.7 + XLE 3 = 5.7%**, against the 15% limit — 38% used.
+Utilities and other non-real-asset sectors count against the separate 10%
+satellite cap.
+
+**Buy split for every remaining tranche — PDBC is bought in NO tranche:**
+
+| VTI | SHV | XLU | XLE |
+|---|---|---|---|
+| **60** | **27** | **10** | **3** |
+
+Sums to 100. **SHV carries PDBC's suspended 2.7 points on top of its own 24.3.**
+**Do NOT renormalise the four sleeves proportionally.** Renormalising to 97.3%
+gives VTI 61.67 and lifts broad equity 1.67 points above its ruled weight — a
+direction change arriving as housekeeping. The residual is assigned to SHV
+specifically so the suspension stays direction-neutral and reversible by one
+trade. With PDBC fixed in shares, this split converges the core to
+60/27/10/3 as PDBC's weight decays, which is the designed outcome.
+[TA-112 §5, adopted R-IV.765(c)]
+
+### § Gold — UNAVAILABLE in both Fidelity accounts
+
+**Every mainstream gold-bullion ETF is a grantor trust**, not a '40-Act registered
+fund — GLD, IAU/IAUM, SGOL, FGDL, GLDM. That structure is *what permits direct
+physical holding*, so it is not incidental, and plan sponsors commonly exclude
+commodity grantor trusts alongside LPs. **The principal confirmed on 2026-10-08
+that both 653641836 and 652303158 block gold** (R-IV.762(a)).
+
+**There is no mainstream '40-Act bullion substitute.** A registered fund cannot
+hold physical metal directly at scale; it holds futures through a Cayman
+subsidiary, which is what PDBC already does. The '40-Act options are **miners** —
+forbidden as a gold substitute, bullion +5.77% against GDX −69.14% in 2008 — or
+**broad commodity funds**, already in the mix.
+
+**SHV is the standing substitute and absorbs gold's former 7%.** On the sourced
+record this costs almost nothing: gold wins 2008 by 2.9 points, SHV wins 2022 by
+1.7 points, and gold's +5.77% calendar year concealed a **−27% drawdown**. As
+*ballast* — the job this sleeve does — SHV is the better instrument, not the
+compromise.
+
+**If the principal wants gold exposure it goes to ROBINHOOD or a taxable account**,
+where grantor trusts trade freely — never a forced substitution inside the
+one-plan boundary. Note that 7% of the core is roughly half the entire ROBINHOOD
+sleeve ceiling, and that sleeve exists for convexity, not ballast.
+
+**The honest caveat, recorded:** gold's real case rests on monetary disorder, a
+regime none of the plan's three paths model. Its absence removes the one holding
+whose argument lives outside the framework.
 
 ### § Existing holdings during the schedule
 
@@ -274,12 +435,16 @@ Holdings are measured against the target weights on the **fully-deployed** core,
 not on the partially-deployed core, so transitional over-weights self-correct as
 tranches land. Two holdings are handled explicitly:
 
-- **PDBC.** Was 110 shares (401A 50, ROTH 60) — ~11.9% of the fully-deployed core
-  against a 5% target, consuming ~79% of the 15% real-asset limit alone. The
-  principal elected to **trim to 5%** on 2026-10-07, and PDBC is placed **entirely
-  in FIDELITY_401A** under the one-plan placement rule. Because 5% is PDBC's
-  **final** weight rather than a sixth of it, **PDBC is bought in no tranche**;
-  each tranche buys the other five sleeves renormalised to 95%.
+- **PDBC — suspended at 25 shares, by the principal's choice.** Was 110 shares
+  (401A 50, ROTH 60) at ~11.9% of the fully-deployed core against a 5% target. The
+  principal trimmed on 2026-10-07 and **sold 85 rather than the planned 64 as a
+  deliberate decision, not a slip** (confirmed 2026-10-08). **PDBC is bought in no
+  tranche. The 5% target is SUSPENDED, NOT RETIRED — it reactivates on the
+  principal's word and needs no new ruling to do so.** All 25 shares sit in
+  FIDELITY_401A under the one-plan placement rule.
+  **Its weight decays on its own.** 25 shares is a fixed count against a core that
+  grows at every tranche, so the 2.7% is a recorded weight, not a maintained one,
+  and the gap to a 5% target widens over the schedule without anything being sold.
 - **TSLQ 80 shares** sits in the FIDELITY_ROTH trading sleeve. Not in the target
   mix; the schedule neither buys nor sells it.
 
@@ -290,6 +455,20 @@ tranches land. Two holdings are handled explicitly:
 - **An unscoped 15%-per-position limit.** The limit stands, but it does not reach
   broad-market index funds or short-duration Treasuries — see its scope above.
   Applied unscoped it would have vetoed the principal's own adopted 60% index core.
+- **A per-account denominator for the per-position limit.** The denominator is the
+  combined core. [TA-112 §2]
+- **Gold at 7% of the core.** Structurally unavailable in both Fidelity accounts;
+  SHV carries the weight. Any mix listing GLDM, GLD, IAU, IAUM, SGOL or FGDL as a
+  core sleeve is void, including TA-112 §2's staged draft, which never issued.
+- **Renormalising the buy split across the remaining sleeves.** Superseded by the
+  fixed 60/27/10/3 split above. Both the "renormalised to 95%" text and the
+  "renormalised to 97.3%" figures are retired. [TA-112 §5]
+- **"The governing line is the higher of the two candidates."** A misstatement of
+  the strategic exit rule; "further from entry" governs. [TA-112 §1]
+- **Any claim that `hub_get_portfolio_balances` is a sizing input.** It is not,
+  while its repair is outstanding. The claim in the superseded v4 §5 is withdrawn.
+- **Z2's inverse clause read without a timeframe qualifier.** Superseded by the
+  § Z2 trend gate ruling above. [R-IV.765(d)]
 - **"FIDELITY_ROTH — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, …3158)."**
   Factually wrong on account identity. BrokerageLink is 653641836; the Roth is
   652303158. Retired 2026-10-07.
@@ -380,13 +559,30 @@ These additional rules apply only to agents that recommend specific trade entrie
 - **20% portfolio risk cap — tactical positions in BOTH Fidelity accounts.** Sum of
   max losses across open **tactical** positions must not exceed 20% of the account
   holding them, measured **at market on both sides** (TA-101 §1) and computed from
-  current market value rather than from any `max_loss` field (TA-102 §5).
-  **FIDELITY_401A strategic holdings sit outside this cap**, governed instead by
-  the 15% real-asset limit, the scoped per-position limit, and the strategic-exit
-  rule (TA-098 §§1–4, R-IV.729(a), R-IV.733(b)1). ROBINHOOD is governed by its
-  sleeve ceiling instead, not by this cap. DAEDALUS enforces at structure proposal;
-  URSA surfaces in portfolio coherence check; PIVOT vetoes via DON'T TRADE if a new
-  position would push the book over.
+  current market value rather than from any `max_loss` field (TA-102 §5) — except
+  a spread entered for a net credit, whose near-zero figure is correct by
+  construction (§ Spread rows entered for a net credit). **FIDELITY_401A strategic
+  holdings sit outside this cap**, governed instead by the 15% real-asset limit,
+  the scoped per-position limit on a combined-core denominator, and the strategic
+  exit rule (TA-098 §§1–4, R-IV.729(a), R-IV.735, TA-112 §2). ROBINHOOD is
+  governed by its sleeve ceiling instead, not by this cap. DAEDALUS enforces at
+  structure proposal; URSA surfaces in portfolio coherence check; PIVOT vetoes via
+  DON'T TRADE if a new position would push the book over.
+  **Where the account value is unavailable, the agent publishes the numerator at
+  market and the break-even account value that would satisfy the cap, and says the
+  denominator is pending from the broker app.** It does not substitute a hub
+  balance. [TA-112 §3]
+
+- **Household net-direction — report BOTH tests, separately.** The 2× leverage test
+  and the net-short floor are independent, can disagree during a partially-deployed
+  schedule, and neither satisfies the other. A single result is not a verdict. When
+  the net-short floor fails, state the further deployment that closes it.
+  [§ Household net-direction cap; TA-112 §3]
+
+- **Z2 returns one of THREE results, not two:** PASS, FAIL, or **NOT EVALUABLE**.
+  NOT EVALUABLE is returned for any row whose justifying timeframe the hub cannot
+  read — today, every intraday row. It is not a FAIL and not a pass. The next-
+  session's-close clock applies regardless. [§ Z2 trend gate]
 - **X10 — flow confirms, it does not originate.** On B1 and B2 trades, an options-flow read may only *confirm* a thesis that already stands on trend and structure. A trade whose entire reason is "there was flow" is Rule 16 — short-term information flow mistaken for an edge — and does not pass.
 
 Agents that do not recommend trades (PYTHIA, PYTHAGORAS, THALES) do not need to enforce the trade-sizing rules — but their structural / trend / macro reads may inform whether a trade meets these gates when other agents evaluate.

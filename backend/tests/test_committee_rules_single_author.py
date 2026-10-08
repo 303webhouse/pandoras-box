@@ -34,15 +34,26 @@ def _load_sync():
 SYNC = _load_sync()
 
 # R-IV.735(b)'s text, quoted from the applied sections. Each is unique to the new rules.
+# R-IV.775(a): re-pinned to v5.1. Six of the eight R-IV.735 markers survived verbatim; two were
+# reworded by v5.1 and are replaced by its own text, NOT loosened to keep the old test green:
+#   "FIDELITY_401A strategic holdings sit outside this cap" -> the phrase now spans a line break
+#   "Household net-direction cap - RULED 2026-10-07 [R-IV.730(a)]" -> "- TWO TESTS, REPORTED
+#    SEPARATELY", because v5.1 made it two independent tests
+# A marker must be on ONE line: these files are wrapped, and a needle that straddles a break can
+# only fail, which would read as missing rule text.
 APPLIED_MARKERS = (
     "FIDELITY_401A — BrokerageLink, account 653641836",
     "FIDELITY_ROTH — Roth Brokerage, account 652303158",
     "10% of all three tracked accounts combined (FIDELITY_401A + FIDELITY_ROTH +",
     "20% portfolio risk cap — tactical positions in BOTH Fidelity accounts.",
-    "FIDELITY_401A strategic holdings sit outside this cap",
-    "Household net-direction cap — RULED 2026-10-07 [R-IV.730(a)]",
     "Deployment schedule — RULED 2026-10-07 [R-IV.730(a), R-IV.734(a)]",
     "Breakout Prop** — crypto-only, **untracked by design** (DESCOPED 2026-07-23)",
+    # --- v5.1's own text, so these pins test the CURRENT rules and not what survived from v2 ---
+    "### § Household net-direction cap — TWO TESTS, REPORTED SEPARATELY",
+    "**FIDELITY_401A strategic",            # the line break falls after "strategic"
+    "### § Z2 trend gate",
+    "- **Z2 returns one of THREE results, not two:** PASS, FAIL, or **NOT EVALUABLE**.",
+    "- **Household net-direction — report BOTH tests, separately.**",
 )
 
 # The two bullets SECTION B replaced, quoted far enough in to be unmistakable. Two of these
