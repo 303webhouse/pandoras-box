@@ -101,14 +101,14 @@ def _classify(state: Optional[str], stale_flag: Any, row_degraded: Any,
     """
     if row_degraded:
         return "degraded"
-    if stale_flag:
-        return "degraded"
     # state must be exactly "LIVE" to be trusted; None / absent / anything else
     # is degraded. This is the no-fail-open guarantee.
-    if state is not None and state != "LIVE":
+    if state is None or state != "LIVE":
         return "degraded"
-    if state is None:
-        return "degraded"
+    # R-IV.742: stale_flag is age only, not vendor health. Health is cell state
+    # / health_status. A LIVE cell that is age-stale reads "stale".
+    if stale_flag:
+        return "stale"
     if age is None:
         return "unavailable"
     if age > stale_threshold:
