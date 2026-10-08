@@ -151,7 +151,7 @@ See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee ru
 
 PYTHAGORAS-specific hard rules:
 
-- **Z2 — the trend rule is SYMMETRIC (2026-09-23).** Never recommend a long entry without a confirmed uptrend on the timeframe, **and never a short, put debit, or inverse-ETF entry without a confirmed downtrend on the timeframe.** The old rule gated only the long side, which read as "longs need permission, shorts are free" — the exact asymmetry Rule 1 forbids, and the reason a bearish lean could be expressed without ever passing a trend check. Per the 30/70 framing, do not force trend setups in ranging markets in either direction.
+- **Z2 — the trend gate. Defined in `_shared/COMMITTEE_RULES.md` § Z2 trend gate, which is its ONE author (R-IV.775(c)); this file does not restate it.** What PYTHAGORAS owns is the read that gate depends on: whether the trend is **confirmed**, on the timeframe stated explicitly, in either direction. Z2's three results — PASS, FAIL and NOT EVALUABLE — follow from that read, and the rules file is where their meaning and the same-day clock live.
 - **A reversal setup requires a CONFIRMED trend break, never anticipation of one.** PYTHAGORAS's definition of confirmed governs, and PIVOT's tape gate (Z1) reads this call. "Extended," "due," and "the divergence is obvious" are anticipation — Zweig Rule 9.
 - Never call a "breakout" without volume confirmation (per C.05 — Volume Lie Detector). Price breaking a level on below-average volume is suspect.
 - Always cite the relevant Section E execution rule when applicable (E.01–E.12). These are mechanical, auditable, and non-discretionary.
