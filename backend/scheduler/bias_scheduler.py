@@ -2641,6 +2641,12 @@ async def start_scheduler():
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         from apscheduler.triggers.cron import CronTrigger
+        # R-IV.740(b): an 'interval' job with no next_run_time first fires one WHOLE INTERVAL
+        # after boot, so every deploy discarded up to an hour and a sub-hourly deploy cadence
+        # starved the job outright. prime() returns a primed first run (~boot+3min) unless the
+        # job's last stored row is younger than 50/60 of its interval, in which case it returns
+        # last row + interval so a deploy storm cannot multiply runs.
+        from scheduler.job_priming import prime
         
         scheduler = AsyncIOScheduler(timezone=ET)
 
@@ -2710,6 +2716,7 @@ async def start_scheduler():
             auto_dismiss_old_signals,
             'interval',
             hours=1,
+            next_run_time=await prime('auto_dismiss_signals', 3600),
             id='auto_dismiss_signals',
             name='Auto-Dismiss Old Signals',
             replace_existing=True
@@ -2722,6 +2729,7 @@ async def start_scheduler():
                 run_crypto_regime_job_scheduled,
                 'interval',
                 hours=1,
+                next_run_time=await prime('crypto_regime', 3600),
                 id='crypto_regime',
                 name='Crypto Regime Classifier',
                 replace_existing=True
@@ -2736,6 +2744,7 @@ async def start_scheduler():
                 run_crypto_cycle_job_scheduled,
                 'interval',
                 hours=1,
+                next_run_time=await prime('crypto_cycle', 3600),
                 id='crypto_cycle',
                 name='Crypto Cycle Extremes Dial',
                 replace_existing=True
@@ -2756,6 +2765,7 @@ async def start_scheduler():
                 run_crypto_tape_health_job_scheduled,
                 'interval',
                 minutes=15,
+                next_run_time=await prime('crypto_tape_health', 900),
                 id='crypto_tape_health',
                 name='Crypto Tape Health (spot-vs-perp CVD)',
                 replace_existing=True
@@ -2768,6 +2778,7 @@ async def start_scheduler():
             refresh_composite_bias,
             'interval',
             minutes=15,
+            next_run_time=await prime('composite_bias_refresh', 900),
             id='composite_bias_refresh',
             name='Composite Bias Refresh',
             replace_existing=True
