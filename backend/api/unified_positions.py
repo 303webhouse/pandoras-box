@@ -1925,14 +1925,20 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         idx += 1
     # R-IV.613(c)3: the PATCH path is a close path too, and a caller-supplied float lands in
     # NUMERIC exactly as it arrives. Quantized at the edge, like every other money column.
+    #
+    # R-IV.783(c): and quantized to a DECIMAL, not a float. `money_in` ends in `float(...)`, so
+    # it rounded the value and handed back a representation that still carries a binary tail --
+    # `money_in(36.15)` is the double whose exact expansion is 36.1499999999999985789...  This
+    # fix was therefore incomplete from the day it shipped. `money_db` stays in Decimal all the
+    # way to the parameter.
     if req.exit_price is not None:
-        from services.position_economics import money_in as _money_patch
+        from services.position_economics import money_db as _money_patch
 
         sets.append(f"exit_price = ${idx}")
         params.append(_money_patch(req.exit_price))
         idx += 1
     if req.realized_pnl is not None:
-        from services.position_economics import money_in as _money_patch2
+        from services.position_economics import money_db as _money_patch2
 
         sets.append(f"realized_pnl = ${idx}")
         params.append(_money_patch2(req.realized_pnl))
@@ -3183,6 +3189,12 @@ async def run_mark_to_market() -> dict:
                     unreal = _compute_unrealized_pnl(entry_price, mark, quantity, structure,
                                                      direction=(row.get("direction") or ""),
                                                      orientation=orientation)
+                    # R-IV.783(c): `_compute_unrealized_pnl` already rounds to 2dp, and that is
+                    # NOT enough -- it returns a float, and the column records the float's exact
+                    # binary expansion. This is the write path that produced the 47 stored
+                    # unrealized tails. Decimal from here to the parameter.
+                    from services.position_economics import money_db as _mdb
+                    mark, unreal = _mdb(mark), _mdb(unreal)
                     await conn.execute("""
                         UPDATE unified_positions SET
                             current_price = $1, unrealized_pnl = $2,
