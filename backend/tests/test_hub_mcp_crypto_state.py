@@ -80,8 +80,9 @@ def test_classify_non_live_state_is_degraded():
 
 
 def test_classify_stale_flag_and_row_degraded_win():
+    # stale_flag is age only (R-IV.742); a LIVE cell that is age-stale reads stale.
     assert _classify(state="LIVE", stale_flag=True, row_degraded=False,
-                     age=10, stale_threshold=CYCLE_STALE_SECONDS) == "degraded"
+                     age=10, stale_threshold=CYCLE_STALE_SECONDS) == "stale"
     assert _classify(state="LIVE", stale_flag=False, row_degraded=True,
                      age=10, stale_threshold=CYCLE_STALE_SECONDS) == "degraded"
 

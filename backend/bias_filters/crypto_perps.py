@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 TTL_PRICE = 120
 TTL_FUNDING = 900
 TTL_FLOW = 120
-SNAPSHOT_CACHE_SECONDS = 30
+SNAPSHOT_CACHE_SECONDS = 60
 PERPS_BUDGET_SECONDS = 4.0
 
 _snap_cache: Dict[str, Any] = {}
