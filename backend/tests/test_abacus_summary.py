@@ -979,3 +979,57 @@ class TestAbacusPerAccount:
         assert roth["excluded"]["return_below_neg100pct"] == 1
         assert by["ROBINHOOD"]["coverage"]["counted"] == 1
 
+
+class TestTheRouteSurfacesWhatTheLoaderComputed:
+    """R-IV.761(b) requires the READ to RETURN the fallback and the uncounted rows.
+
+    This class exists because of a real miss: the loader produced both, every loader test passed,
+    and the route -- which selects keys from `book` BY NAME -- carried neither. They were computed
+    and discarded. Caught against the live endpoint after deploy, not here, which is the point: a
+    loader test cannot see a route that drops its output.
+    """
+
+    FALLBACK = [{"account": "ROBINHOOD", "position_id": "POS_IBIT_1", "ticker": "IBIT",
+                 "status": "CLOSED", "v": -147.00, "exit_day": _dt.date(2026, 3, 12)}]
+    DROPPED = [{"account": "ROBINHOOD", "position_id": "POS_XLF_20260609_233055", "ticker": "XLF",
+                "status": "OPEN", "realized_pnl": -119.23}]
+
+    def test_the_fallback_branch_reaches_the_payload(self, client, test_api_key):
+        pool, p = _patch_book([_row(100.0)], fallback=self.FALLBACK)
+        with p:
+            d = _get(client, test_api_key).json()
+        fb = d["realized_fallback"]
+        assert fb["count"] == 1
+        assert fb["total"] == -147.00
+        assert fb["rows"][0]["ticker"] == "IBIT"
+        assert "R-IV.760(c)" in fb["note"]
+
+    def test_the_uncounted_rows_reach_the_payload_with_their_reason(self, client, test_api_key):
+        pool, p = _patch_book([_row(100.0)], dropped=self.DROPPED)
+        with p:
+            d = _get(client, test_api_key).json()
+        ex = d["realized_excluded_no_date"]
+        assert ex["count"] == 1
+        assert ex["rows"][0]["ticker"] == "XLF"
+        assert ex["rows"][0]["realized_pnl"] == -119.23
+        assert "no exit_date" in ex["rows"][0]["why"]
+
+    def test_both_keys_are_present_even_when_empty(self, client, test_api_key):
+        """POSITIVE CONTROL: zero must be SERVED as zero. An absent key reads as "nothing was
+        checked", which is the silence these blocks exist to remove."""
+        pool, p = _patch_book([_row(100.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        assert d["realized_fallback"]["count"] == 0
+        assert d["realized_excluded_no_date"]["count"] == 0
+
+    def test_net_profit_carries_its_own_basis_not_just_the_coverage_predicate(self, client,
+                                                                             test_api_key):
+        """The predicate beside it governs the RATES. A reader given only that would conclude the
+        total was drawn from the closed-only census."""
+        pool, p = _patch_book([_row(100.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        net = _stat(d, "net_profit")
+        assert "closures dated in the window" in net["basis"]
+        assert net["coverage"]["predicate"] != net["basis"]

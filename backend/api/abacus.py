@@ -965,6 +965,9 @@ async def abacus_summary(
         if st["key"] == "net_profit":
             st["value"] = book["net_profit"]
             st["coverage"] = book["coverage"]
+            # R-IV.761(b): the figure says where it came from. Its population is NOT the coverage
+            # predicate beside it, and a reader given only the predicate would conclude otherwise.
+            st["basis"] = book["net_profit_basis"]
             st["span"] = span
             st.update(live_stamp)
         elif st["key"] == "win_rate":
@@ -1129,6 +1132,12 @@ async def abacus_summary(
     # trade, so it is weighted by trade count rather than being an average of the three rates.
     out["accounts"] = book["accounts"]
     out["combined_is_pooled"] = book["combined_is_pooled"]
+    # R-IV.761(b) requires the READ to return these, not merely to compute them. The loader
+    # produced both and this route selects keys by name, so without these two lines they were
+    # computed and discarded -- which is how "nothing drops silently" would itself have dropped
+    # silently. Caught against the live endpoint, not in a test.
+    out["realized_fallback"] = book["realized_fallback"]
+    out["realized_excluded_no_date"] = book["realized_excluded_no_date"]
 
     out["range"] = rng
     out["range_applied"] = True
