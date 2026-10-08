@@ -1,8 +1,8 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-07 22:29 MDT (2026-10-08 04:29 UTC)
-**Worked against:** `origin/main` = `1bd7810` (43342ae had not landed at cut; remap diff is the three map entries only)
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r745-remap`.
+**Written:** 2026-10-08 08:51 MDT (2026-10-08 14:51 UTC)
+**Worked against:** `origin/main` = `25d579e`
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r753-dates`.
 **Hub at read time:** not re-timed this turn.
 
 ## Why this lane exists
@@ -21,20 +21,33 @@ no orders.
 - The database login is read-only.
 - No Railway CLI, no deploys, no environment-variable changes.
 
-## R-IV.745 — in flight (BUILD merges on a three-entry diff, R-IV.744(c))
-BTC → `BTCUSDT_PERP.A`, ETH → `ETHUSDT_PERP.A`, SOL → `SOLUSDT_PERP.A`.
-HYPE / ZEC / FARTCOIN already use USDT aggregates. Funding, OI, and liquidations
-for BTC/ETH/SOL move to the linear majority. No computation compares a value
-across this switch (R-IV.725(c)4). Thresholds are unchanged.
+## Remap break (R-IV.753(a) / R-IV.745)
+First cycle on the USDT-linear map: **2026-10-08 05:41:24.698 UTC
+(2026-10-07 23:41:24 MDT)** — BTC. ETH 05:41:25.209Z, SOL 05:41:26.969Z.
+That timestamp is also **BTC's first genuinely Coinalyze-sourced liquidations
+date** (closes the open line from R-IV.742(b)).
 
-**Remap break date:** TBD — record BUILD's first post-merge hourly cycle here.
+All nine cells (funding, open_interest, liquidations × BTC/ETH/SOL) were
+coinalyze / LIVE / not stale. Liquidations moved NA/okx → LIVE/coinalyze,
+which confirms R-IV.742(e).
 
-## $5M threshold collection (R-IV.745(c)) — no threshold change
-For the first 7 days after the remap, collect hourly liquidation totals per
-symbol: count, median, p90, max, and hours that crossed $5M. Report on
-**2026-10-15 or after**. Thresholds are ruled then. FARTCOIN is expected never
-to cross; BTC linear is expected to cross far more often than the coin-margined
-slice did.
+On that cycle BTC liquidations 19,335,585.87 and ETH 5,810,020.41 were FIRING
+against the $5M gate. OI jumped 6× (BTC), 16× (ETH), 17× (SOL) because the
+population changed. ETH and SOL open_interest DEGRADED → LIVE cannot be
+credited to r742 or r745: both shipped in one deploy (R-IV.753(b)).
+
+No computation compares a value across this switch (R-IV.725(c)4).
+Thresholds are unchanged until SPINE rules after the week.
+
+## 7-day collection (R-IV.745(c) widened by R-IV.753(c)) — no threshold change
+Window starts at 05:41:24.698Z. Report on **2026-10-15 or after**. Per symbol:
+
+- Hourly liquidation totals: count, median, p90, max, hours that crossed $5M.
+- `oi_change_4h`: median, p10, p90, max |value|.
+- How often `oi_extreme` fires.
+
+Any OI or oi_extreme threshold calibrated before 05:41:24Z was calibrated on
+a different population.
 
 ## Composite-break dates (R-IV.727(e) / R-IV.742(b))
 First cycle after `ed5491c` plus the scheduler boot fix: **2026-10-08 00:41:05.72 UTC
@@ -42,16 +55,19 @@ First cycle after `ed5491c` plus the scheduler boot fix: **2026-10-08 00:41:05.7
 
 | Symbol | Liquidations | Open interest |
 |---|---|---|
-| BTC | still NA, okx-sourced (pre-remap) | first LIVE, Coinalyze-sourced, that cycle |
-| ETH | still NA, okx-sourced (pre-remap) | (not dated that cycle) |
-| SOL | still NA, okx-sourced (pre-remap) | (not dated that cycle) |
-| HYPE | first LIVE, Coinalyze-sourced, that cycle | — |
-| ZEC | first LIVE, Coinalyze-sourced, that cycle | — |
-| FARTCOIN | first LIVE, Coinalyze-sourced, that cycle | — |
+| BTC | first LIVE Coinalyze-sourced: **2026-10-08 05:41:24.698Z** (remap) | first LIVE Coinalyze-sourced: 2026-10-08 00:41:05.72Z |
+| ETH | first LIVE Coinalyze-sourced: 2026-10-08 05:41:25.209Z (remap) | LIVE at remap cycle; DEGRADED→LIVE confound (r742+r745 one deploy) |
+| SOL | first LIVE Coinalyze-sourced: 2026-10-08 05:41:26.969Z (remap) | LIVE at remap cycle; DEGRADED→LIVE confound (r742+r745 one deploy) |
+| HYPE | first LIVE, Coinalyze-sourced, 00:41:05.72Z cycle | — |
+| ZEC | first LIVE, Coinalyze-sourced, 00:41:05.72Z cycle | — |
+| FARTCOIN | first LIVE, Coinalyze-sourced, 00:41:05.72Z cycle | — |
 
-## R-IV.742 — accepted
-`claude/stater-r742-stale` at `43342ae`. stale is age only. Singleflight 36→24.
-60s snapshot cache. BUILD merges under R-IV.744(b).
+## R-IV.745 — merged
+`25d579e` / `304412c`. BTC/ETH/SOL → `BTCUSDT_PERP.A` / `ETHUSDT_PERP.A` /
+`SOLUSDT_PERP.A`.
+
+## R-IV.742 — merged
+`e9e746e` / `43342ae`. stale is age only. Singleflight 36→24. 60s snapshot cache.
 
 ## R-IV.741 — merged
 `1bd7810` on `main`.
@@ -69,14 +85,14 @@ forbids holding the principal's trading key.
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r745-remap` | Pushed. Three map entries + tests + this file. | Yes — merge if the diff is only that (R-IV.744(c)). |
-| `claude/stater-r742-stale` | Accepted (`43342ae`). | BUILD under R-IV.744(b). |
+| `claude/stater-r753-dates` | Lane-file dates only. | Docs; merge when convenient. |
+| `claude/stater-r745-remap` | Merged (`25d579e`). | Done. |
+| `claude/stater-r742-stale` | Merged (`e9e746e`). | Done. |
 | `claude/stater-r741-lsr` | Merged (`1bd7810`). | Done. |
 | `claude/stater-r707-liq` | Merged (`ed5491c`). | Done. |
 
 ## What the next CC-STATER session should do first
-If BUILD merged the remap: wait for the first hourly cycle and write the remap
-break date above. On 2026-10-15 or after, report the 7-day liquidation
-totals (count / median / p90 / max / hours ≥ $5M) per symbol. Do not change
-any threshold until SPINE rules. Do not skip HYPE Binance spot. Do not
-rebuild the Binance VPN. Do not edit `bias_scheduler.py`.
+On **2026-10-15 or after**, report the 7-day collection (liquidations +
+`oi_change_4h` + oi_extreme fire rate) per symbol. Do not change any
+threshold until SPINE rules. Do not skip HYPE Binance spot. Do not rebuild
+the Binance VPN. Do not edit `bias_scheduler.py`.
