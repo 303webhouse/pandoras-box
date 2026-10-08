@@ -54,6 +54,14 @@ APPLIED_MARKERS = (
     "### § Z2 trend gate",
     "- **Z2 returns one of THREE results, not two:** PASS, FAIL, or **NOT EVALUABLE**.",
     "- **Household net-direction — report BOTH tests, separately.**",
+    # --- v5.2 (R-IV.784(c)). The RULES VERSION stamp now lives INSIDE SECTION A as its first
+    # line, which answers the R-IV.775 gap: the rules file previously carried no version marker
+    # at all while the source said consumers read one. Pinned here so a later apply that drops it
+    # fails by name.
+    "RULES VERSION: 2026-10-08/v5.2",
+    "AUTHORITATIVE STAMP",
+    "- **Credit-stress thesis.**",            # SECTION C, after the Fed-hawkish bullet
+    "- **X4's implied-volatility input",      # SECTION B's fifth bullet, new in v5.2
 )
 
 # The two bullets SECTION B replaced, quoted far enough in to be unmistakable. Two of these

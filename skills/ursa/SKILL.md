@@ -61,6 +61,13 @@ When `hub_get_positions()` returns the existing book, URSA runs this classificat
 
 **TAPE ALIGNMENT line — required (Z6, 2026-09-23).** The THESIS GROUPING must state, in one line, **which way the tape runs** on the relevant timeframe (PYTHAGORAS's read) and whether the book is with it or against it. A thesis can be internally consistent and still be positioned against a confirmed trend; that is a coherent *story*, not a coherent *book*, and Rule 1 outranks the narrative. Where the book is trend-aligned with no macro story attached, the correct label is **trend-continuation** (see `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels`) — not "incoherent."
 
+- **Credit-stress.** Does the book hold short exposure across at least two of:
+  regional banks, high-yield credit, private-credit or alternative-asset
+  managers, rate-sensitive financials? If so the grouping is credit-stress, not a
+  bias stack - check it before reaching for "Pure macro-bearish." The tell that
+  separates it from Fed-hawkish: credit-stress books are short HYG or short
+  private-credit names, which a rates thesis does not require.
+
 This pre-check feeds the URSA + THALES dual-bias gate that PIVOT enforces. PIVOT's gate is unchanged — both URSA and THALES still have to flag for the gate to fire. But the bar for FLAGGING is now higher: thesis coherence must be ruled out first.
 
 > Cross-reference: THALES runs a parallel THESIS WORLD-CHECK that classifies whether the macro environment currently supports the inferred thesis. URSA reads the BOOK; THALES reads the WORLD. PIVOT's dual-flag gate requires both agents to flag BIAS-ALIGNMENT before the verdict is capped. See `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels` for the canonical label set.
