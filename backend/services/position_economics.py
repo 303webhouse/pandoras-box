@@ -70,6 +70,36 @@ def money(x: Optional[Decimal]) -> Optional[float]:
     return float(x.quantize(CENT, rounding=ROUND_HALF_UP))
 
 
+def money_db(x: Any) -> Optional[Decimal]:
+    """Any number as money FOR A NUMERIC COLUMN: a Decimal, HALF-UP to the cent — R-IV.783(c).
+
+    `money()` and `money_in()` both end in `float(...)`, which is right at a JSON edge and WRONG
+    at a database write, and the difference is not cosmetic. A float cannot hold most cent values
+    exactly, so passing one for a NUMERIC parameter materialises its full binary expansion in the
+    column. Reproduced 2026-10-09 against the stored tails, to the last digit:
+
+        Decimal(round(36.15, 2))   -> 36.14999999999999857891452847979962825775146484375
+        Decimal(round(-150.74, 2)) -> -150.740000000000009094947017729282379150390625
+        Decimal(round(6.21, 2))    -> 6.20999999999999996447286321199499070644378662109375
+        Decimal(round(1055.7, 2))  -> 1055.700000000000045474735088646411895751953125
+
+    Those are byte-identical to GDX 191's and SIL 405's `unrealized_pnl` and GUSH 204's
+    `unrealized_pnl` and `max_loss` as stored. So `round(x, 2)` is not a defence: it rounds the
+    VALUE and leaves the REPRESENTATION, and the column records the representation.
+
+    And Python's `round` is banker's rounding on the binary value, not HALF-UP on the decimal:
+    2.675 -> 2.67 and 0.145 -> 0.14, where #27 requires 2.68 and 0.15. Both faults are fixed by
+    staying in Decimal all the way to the parameter.
+
+    None for anything unreadable, never 0 -- a figure nobody gave and a figure of zero are
+    different claims.
+    """
+    d = _d(x)
+    if d is None:
+        return None
+    return d.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
 def money_in(x: Any) -> Optional[float]:
     """Any inbound number as a money figure. R-IV.613(c)3.
 

@@ -35,6 +35,16 @@ DESCRIPTION = (
     "Returns full position records including structure, strikes, expiry, "
     "quantity, entry price, current value, unrealized PnL, stop loss, and "
     "account assignment.\n\n"
+    # R-IV.780(e)1. Named in the DESCRIPTION, not only in the payload: a committee seat decides
+    # whether it can enforce a bucket limit from what this text promises, and until now the text
+    # promised nothing about classification because the field was being dropped.
+    "**`strategy_tag` is served as stored, and never inferred.** One column currently carries "
+    "three different vocabularies: classification (`STRATEGIC`, `TACTICAL`, `CORE`), sleeve "
+    "(`TAIL`, `CONVEXITY`) and TA's buckets (`B1`, `B2`). Read it for X4, X10 and B3's limits, "
+    "and do NOT translate between the three — classification is the principal's (R-IV.730(a)). "
+    "A row may carry no tag at all: `positions_without_strategy_tag` and "
+    "`untagged_position_ids` say how many and which, and a bucket limit cannot be applied to "
+    "those rows. Treat an absent tag as unknown, never as a default bucket.\n\n"
     "SIZE: TWO FIELDS, AND THEY ANSWER DIFFERENT QUESTIONS (convention #29, "
     "R-IV.660). `quantity` is the size the position was OPENED at, including any "
     "adds -- it does NOT shrink when part of the position is closed, because the "
@@ -124,6 +134,19 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         "opened_at": row.get("entry_date") or row.get("created_at"),
         "closed_at": row.get("closed_at"),
         "trade_outcome": outcome,
+        # R-IV.780(e)1: SERVED AS STORED. `read_only/positions.py` selects * so the column was
+        # always in the row -- it was THIS projection that dropped it, which is why no agent could
+        # read a bucket and X4, X10 and B3's limits were unenforceable from the hub.
+        #
+        # One column, FOUR vocabularies (measured 2026-10-09 across 32 open rows):
+        #   classification  STRATEGIC (8, rows 968-975), TACTICAL (1, row 976), CORE (1)
+        #   sleeve          TAIL (10), CONVEXITY (8)
+        #   TA buckets      B1 (7), B2 (6)
+        # Served raw and UNINTERPRETED on purpose. A reader asking "is this tactical?" must not be
+        # answered by this lane guessing that TAIL means tactical -- classification is the
+        # principal's and is never inferred (R-IV.730(a)). The split into its own column comes
+        # with the classification column; until then a consumer sees exactly what is stored.
+        "strategy_tag": row.get("strategy_tag"),
     }
 
 
@@ -176,12 +199,23 @@ async def hub_get_positions(
     risk = capital_at_risk_from_derived(rows)
     total_at_risk = risk["capital_at_risk_cost_basis"] or 0.0
 
+    # R-IV.780(e)1: serving the field is not the same as the book being classified. Measured
+    # 2026-10-09: 4 of 32 open rows carry NO strategy_tag (ABNB 379, HYG 516, META 527, XLF 978 --
+    # all ROBINHOOD options), and for those four X4, X10 and B3 remain unenforceable no matter
+    # what this payload carries. Published as a count and a list, because "the field is served"
+    # and "every row can be classified" are different claims and only the second enforces a rule.
+    untagged = [p["position_id"] for p in positions if not p.get("strategy_tag")]
     data = {
         "account": account,
         "status": status,
         "ticker": ticker.upper() if ticker else None,
         "positions": positions,
         "position_count": len(positions),
+        "strategy_tag_basis": ("served as stored; one column carries classification "
+                               "(STRATEGIC/TACTICAL/CORE), sleeve (TAIL/CONVEXITY) and TA "
+                               "buckets (B1/B2). Never inferred (R-IV.730(a))."),
+        "positions_without_strategy_tag": len(untagged),
+        "untagged_position_ids": untagged,
         **risk,
     }
     # R-IV.548(b): when the caller asked for CLOSED or ALL, say out loud that the
@@ -195,6 +229,10 @@ async def hub_get_positions(
         + ("" if risk["complete"]
            else f"; {risk['positions_excluded']} excluded for want of lots")
         + ")."
+        # R-IV.780(e)1: said in the summary too, because a committee seat enforcing a bucket
+        # limit reads this line and needs to know the limit cannot be applied to every row.
+        + (f" {len(untagged)} of {len(positions)} carry no strategy_tag, so a bucket limit "
+           f"cannot be applied to them." if untagged else "")
     )
     if ticker:
         summary = f"{ticker.upper()}: " + summary
