@@ -79,6 +79,45 @@ def _history_range_seconds(hours: int) -> tuple[int, int]:
 COINALYZE_LIMIT_PER_MINUTE = 40
 _call_times: list[float] = []
 
+COINALYZE_BUDGET_REFUSED = "COINALYZE_BUDGET_REFUSED"
+COINALYZE_VENDOR_FAILED = "COINALYZE_VENDOR_FAILED"
+
+
+class CoinalyzeMiss:
+    """Falsy stand-in for the old None. Our 40/min refuse is not the vendor's silence."""
+
+    __slots__ = ("reason",)
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return f"CoinalyzeMiss({self.reason!r})"
+
+
+def _request_reason(data: Any) -> str:
+    if isinstance(data, CoinalyzeMiss):
+        return data.reason
+    return COINALYZE_VENDOR_FAILED
+
+
+def _none_cell_fields(data: Any) -> Dict[str, Any]:
+    reason = _request_reason(data)
+    fields: Dict[str, Any] = {"reason": reason}
+    if reason == COINALYZE_BUDGET_REFUSED:
+        fields["state"] = "NA"
+    return fields
+
+
+def _attach_miss(payload: Dict[str, Any], data: Any, error: Optional[str] = None) -> Dict[str, Any]:
+    payload.update(_none_cell_fields(data))
+    if payload.get("reason") != COINALYZE_BUDGET_REFUSED and error:
+        payload["error"] = error
+    return payload
+
 
 def _coinalyze_allow() -> bool:
     now = time.monotonic()
@@ -177,12 +216,12 @@ def _to_float(value: Any) -> Optional[float]:
         return None
 
 
-async def _make_request(endpoint: str, params: Dict[str, Any] = None) -> Optional[Dict]:
-    """Make authenticated request to Coinalyze API"""
+async def _make_request(endpoint: str, params: Dict[str, Any] = None) -> Any:
+    """Authenticated Coinalyze GET. Returns JSON, or CoinalyzeMiss (never bare None)."""
     api_key = _get_api_key()
     if not api_key:
         logger.warning("COINALYZE_API_KEY not set - cannot fetch data")
-        return None
+        return CoinalyzeMiss(COINALYZE_VENDOR_FAILED)
 
     url = f"{COINALYZE_BASE_URL}{endpoint}"
     headers = {
@@ -194,7 +233,7 @@ async def _make_request(endpoint: str, params: Dict[str, Any] = None) -> Optiona
 
     if not _coinalyze_allow():
         logger.warning("Coinalyze 40/min budget exhausted — refusing %s", endpoint)
-        return None
+        return CoinalyzeMiss(COINALYZE_BUDGET_REFUSED)
 
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
@@ -202,17 +241,17 @@ async def _make_request(endpoint: str, params: Dict[str, Any] = None) -> Optiona
 
             if response.status_code == 429:
                 logger.warning("Coinalyze HTTP 429 on %s — refusing, not sleeping", endpoint)
-                return None
+                return CoinalyzeMiss(COINALYZE_VENDOR_FAILED)
 
             if response.status_code != 200:
                 logger.error(f"Coinalyze API error: {response.status_code} - {response.text}")
-                return None
+                return CoinalyzeMiss(COINALYZE_VENDOR_FAILED)
 
             return response.json()
 
     except Exception as e:
         logger.error(f"Coinalyze request failed: {e}")
-        return None
+        return CoinalyzeMiss(COINALYZE_VENDOR_FAILED)
 
 
 async def _make_okx_request(endpoint: str, params: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
@@ -295,14 +334,13 @@ async def get_funding_rate(symbol: str = "BTC") -> Dict[str, Any]:
                 }
                 return await _finalize_result(result, cache_key, check_funding_rate, "funding_rate", "funding_rate", symbol)
         await _record_failure("funding_rate", f"Failed to fetch funding rate from Coinalyze and OKX for {symbol}", symbol)
-        return {
+        return _attach_miss({
             "funding_rate": None,
             "predicted_rate": None,
             "sentiment": "unknown",
             "signal": "UNKNOWN",
             "symbol": symbol,
-            "error": f"Failed to fetch funding rate from Coinalyze and OKX for {symbol}"
-        }
+        }, data, f"Failed to fetch funding rate from Coinalyze and OKX for {symbol}")
 
     # Parse response - Coinalyze returns array of symbols
     # DEF-FEED-TRIAGE D1 (2026-07-20): Coinalyze's "value" is ALREADY a
@@ -442,29 +480,27 @@ async def get_open_interest(symbol: str = "BTC") -> Dict[str, Any]:
                 }
                 return await _finalize_result(result, cache_key, check_open_interest, "current_oi", "open_interest", symbol)
         await _record_failure("open_interest", f"Failed to fetch OI data from Coinalyze and OKX for {symbol}", symbol)
-        return {
+        return _attach_miss({
             "current_oi": None,
             "oi_change_4h": None,
             "price_change_4h": None,
             "divergence": "unknown",
             "signal": "UNKNOWN",
             "symbol": symbol,
-            "error": f"Failed to fetch OI data from Coinalyze and OKX for {symbol}"
-        }
+        }, data, f"Failed to fetch OI data from Coinalyze and OKX for {symbol}")
 
     item = data[0]
     history = item.get("history", [])
 
     if len(history) < 4:
         await _record_failure("open_interest", f"Insufficient OI history from Coinalyze for {symbol}", symbol)
-        return {
+        return _attach_miss({
             "current_oi": None,
             "oi_change_4h": None,
             "divergence": "unknown",
             "signal": "UNKNOWN",
             "symbol": symbol,
-            "error": "Insufficient OI history"
-        }
+        }, [], "Insufficient OI history")
 
     current_oi = history[-1].get("o", 0)
     oi_4h_ago = history[-5].get("o", current_oi) if len(history) >= 5 else history[0].get("o", current_oi)
@@ -711,7 +747,7 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
                 await record_observation("okx", "liquidations", symbol, success=True)
                 return result
         await _record_failure("liquidations", f"Failed to fetch liquidation data from Coinalyze and OKX for {symbol}", symbol)
-        return {
+        return _attach_miss({
             "long_liquidations": None,
             "short_liquidations": None,
             "total_liquidations": None,
@@ -719,8 +755,7 @@ async def get_liquidations(symbol: str = "BTC") -> Dict[str, Any]:
             "composition": "unknown",
             "signal": "UNKNOWN",
             "symbol": symbol,
-            "error": f"Failed to fetch liquidation data from Coinalyze and OKX for {symbol}"
-        }
+        }, data, f"Failed to fetch liquidation data from Coinalyze and OKX for {symbol}")
 
     item = data[0]
     history = item.get("history", [])
@@ -854,26 +889,24 @@ async def get_term_structure(symbol: str = "BTC") -> Dict[str, Any]:
                 return await _finalize_result(result, cache_key, check_funding_rate, "current_funding", "term_structure", symbol)
 
         await _record_failure("term_structure", f"Failed to fetch funding history from Coinalyze and OKX for {symbol}", symbol)
-        return {
+        return _attach_miss({
             "structure": "unknown",
             "funding_trend": "unknown",
             "signal": "UNKNOWN",
             "symbol": symbol,
-            "error": f"Failed to fetch funding history from Coinalyze and OKX for {symbol}"
-        }
+        }, data, f"Failed to fetch funding history from Coinalyze and OKX for {symbol}")
 
     item = data[0]
     history = item.get("history", [])
 
     if len(history) < 2:
         await _record_failure("term_structure", f"Insufficient funding history from Coinalyze for {symbol}", symbol)
-        return {
+        return _attach_miss({
             "structure": "unknown",
             "funding_trend": "unknown",
             "signal": "UNKNOWN",
             "symbol": symbol,
-            "error": "Insufficient funding history"
-        }
+        }, [], "Insufficient funding history")
 
     # DEF-FEED-TRIAGE D1: Coinalyze's "v" is the same already-a-percentage
     # unit as get_funding_rate()'s "value" -- no *100 here either.
@@ -936,12 +969,11 @@ async def get_predicted_funding_rate(symbol: str = "BTC") -> Dict[str, Any]:
     data = await _make_request("/predicted-funding-rate", {"symbols": perp_sym})
     if not data or not isinstance(data, list) or not data:
         await _record_failure("predicted_funding_rate", f"no predicted funding for {symbol}", symbol)
-        return {
+        return _attach_miss({
             "predicted_rate": None,
             "symbol": symbol,
             "source": "coinalyze",
-            "error": f"no predicted funding for {symbol}",
-        }
+        }, data, f"no predicted funding for {symbol}")
 
     item = data[0] if isinstance(data[0], dict) else {}
     rate = _to_float(item.get("value"))
@@ -989,13 +1021,12 @@ async def get_long_short_ratio(symbol: str = "BTC") -> Dict[str, Any]:
         if isinstance(hist, list):
             rows = hist
     if not rows:
-        await _record_failure("long_short_ratio", f"no long/short ratio for {symbol}", symbol)
-        return {
+        await _record_failure("long_short_ratio", _request_reason(data), symbol)
+        return _attach_miss({
             "ratio": None,
             "symbol": symbol,
             "source": "coinalyze",
-            "error": f"no long/short ratio for {symbol}",
-        }
+        }, data, f"no long/short ratio for {symbol}")
 
     last = rows[-1] if isinstance(rows[-1], dict) else {}
     ratio = _to_float(last.get("r"))
@@ -1013,6 +1044,8 @@ async def get_long_short_ratio(symbol: str = "BTC") -> Dict[str, Any]:
         "symbol": symbol,
         "timestamp": as_of.isoformat(),
     }
+    if ratio is None:
+        return _attach_miss(result, [], f"no long/short ratio for {symbol}")
     _set_cache(cache_key, result)
     return result
 
