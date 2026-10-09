@@ -10900,6 +10900,48 @@ function updateRiskPreview() {
     }
 }
 
+// ── R-IV.767(c): one author for "don't save it twice" ─────────────────
+//
+// Three forms on this page POST /v2/positions, so the behaviour lives here once rather than in
+// three slightly different copies — which is how one of them ends up a fix behind.
+
+// Disables the button for the whole round trip and returns the undo. Called through `finally`,
+// so a failed save leaves a usable form rather than a dead button.
+function lockSubmitButton(btn) {
+    if (!btn) return () => {};
+    const prevText = btn.textContent;
+    const prevDisabled = btn.disabled;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    return () => { btn.disabled = prevDisabled; btn.textContent = prevText; };
+}
+
+// POSTs an entry; on the duplicate guard's 409 it shows the server's own sentence and offers
+// the one action that answers it. The body is read EXACTLY ONCE on every path: calling
+// `response.json()` twice yields {} the second time, which is why the options form could only
+// ever say "Unknown error" and could never have shown this refusal at all.
+async function postPositionWithDuplicateGuard(body) {
+    const send = (extra) => fetch(`${API_URL}/v2/positions`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(extra ? Object.assign({}, body, extra) : body)
+    });
+
+    let response = await send(null);
+    if (response.status === 409) {
+        const data = await response.json().catch(() => ({}));
+        const detail = typeof data.detail === 'string' ? data.detail : '';
+        // Nothing re-sends by itself. The principal says a second time that the trade really
+        // happened twice, which is the entire value of the refusal.
+        if (/same entry twice/.test(detail) && confirm(detail + '\n\nSave it anyway?')) {
+            response = await send({ confirm_duplicate: true });
+        } else {
+            return { response, data };
+        }
+    }
+    return { response, data: await response.json().catch(() => ({})) };
+}
+
 async function submitUnifiedPosition() {
     const ticker = document.getElementById('upTicker').value.trim().toUpperCase();
     if (!ticker) { alert('Enter a ticker'); return; }
@@ -10936,13 +10978,9 @@ async function submitUnifiedPosition() {
     if (target) body.target_1 = target;
     if (notes) body.notes = notes;
 
+    const unlock = lockSubmitButton(document.getElementById('upSubmit'));
     try {
-        const response = await fetch(`${API_URL}/v2/positions`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(body)
-        });
-        const data = await response.json();
+        const { data } = await postPositionWithDuplicateGuard(body);
 
         if (data.status === 'created' || data.status === 'combined') {
             document.getElementById('unifiedPositionModal').classList.remove('active');
@@ -10958,6 +10996,8 @@ async function submitUnifiedPosition() {
     } catch (error) {
         console.error('Error creating position:', error);
         alert('Failed to create position');
+    } finally {
+        unlock();
     }
 }
 
@@ -11407,14 +11447,9 @@ async function submitManualPosition() {
         account: account
     };
     
+    const unlock = lockSubmitButton(document.getElementById('confirmManualPositionBtn'));
     try {
-        const response = await fetch(`${API_URL}/v2/positions`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(positionData)
-        });
-
-        const result = await response.json();
+        const { response, data: result } = await postPositionWithDuplicateGuard(positionData);
 
         if (response.ok) {
             console.log('Manual position created:', result);
@@ -11429,6 +11464,8 @@ async function submitManualPosition() {
     } catch (error) {
         console.error('Error creating manual position:', error);
         alert('Failed to create position. Please try again.');
+    } finally {
+        unlock();
     }
 }
 
@@ -12002,26 +12039,26 @@ async function saveOptionsPosition() {
         account: 'ROBINHOOD'
     };
 
+    const unlock = lockSubmitButton(document.getElementById('saveOptionsBtn'));
     try {
-        const response = await fetch(`${API_URL}/v2/positions`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(payload)
-        });
-
-        const data = await response.json();
+        const { response, data } = await postPositionWithDuplicateGuard(payload);
 
         if (response.ok) {
             closeOptionsModal();
             loadOptionsPositions();
             console.log(`Options position added: ${underlying} ${strategy}`);
         } else {
-            const err = await response.json().catch(() => ({}));
-            alert('Error saving position: ' + (err.detail || 'Unknown error'));
+            // `data` is the body read ONCE. This line used to call `response.json()` a second
+            // time on an already-consumed stream, so `err` was always {} and the alert could
+            // only ever say "Unknown error" — every refusal this endpoint sends, including the
+            // duplicate guard's, was unreadable here.
+            alert('Error saving position: ' + (data.detail || 'Unknown error'));
         }
     } catch (e) {
         console.error('Error saving options position:', e);
         alert('Error saving position');
+    } finally {
+        unlock();
     }
 }
 

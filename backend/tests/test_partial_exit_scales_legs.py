@@ -269,6 +269,15 @@ def _combine_pool(existing, *, has_lots, lots_after, legs_shape):
         return None
 
     async def fetch(sql, *args):
+        s = " ".join(sql.split())
+        # R-IV.767(c): the duplicate guard reads here too, and it selects a DIFFERENT shape
+        # (it joins unified_positions and carries `source` and `created_at`). This fake used to
+        # answer every `fetch` with lot dicts, so the guard was handed rows with no `source` and
+        # raised KeyError -- a catch-all fake reporting on a query it was never told about.
+        # Routed explicitly: no recent twin, which is what these tests mean. The guard's own
+        # behaviour is covered in test_duplicate_lot_guard_r767.py.
+        if "JOIN unified_positions" in s and "position_lots l" in s:
+            return []
         return [dict(l) for l in lots_after]
 
     async def execute(sql, *args):
