@@ -12,6 +12,7 @@ from services.read_only.balances import get_account_balances
 # Imported ABOVE the DESCRIPTION that reads them: a module-level name used before its
 # import is a NameError at import time, which py_compile cannot see (R-IV.638(b)4).
 from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
+from models.derived_as_of import as_of_block  # R-IV.775(f): one author for the as-of shape
 from models.accounts import DISPLAY_NAMES as _ACCOUNT_DISPLAY
 from models.accounts import account_choices as _account_choices
 from models.accounts import describe_accounts as _describe_accounts
@@ -37,6 +38,13 @@ DESCRIPTION = (
     "it returns.\n\n"
     "Returns per-account balance, cash, margin, last-updated timestamp and date, and the "
     "sizing flag. Buying power is the broker's own figure and is not served.\n\n"
+    "TWO INSTANTS PER ACCOUNT, NOT INTERCHANGEABLE (R-IV.775(f)). `computed_at` is when the "
+    "DERIVED figures were computed - this request. `updated_at`, `as_of_date` and `is_stale` "
+    "describe the STORED row only. Each account's `as_of` block names which fields each instant "
+    "covers, read from that row's own `cash_source`/`balance_source`, because the same field is "
+    "derived for one account and stored for another. A derived figure is NEVER as old as the "
+    "stored date printed beside it: a 7,847.90 derived cash figure was once read as two weeks "
+    "old for exactly that reason.\n\n"
     "A reconciled triple (cash available to trade / settled / pending net, with as-of and "
     "tie-out dates) is queued to replace these figures.\n\nAccounts: " + _describe_accounts() + "."
 )
@@ -111,9 +119,25 @@ def _is_stale(updated_iso: Optional[str], hours: int = 24) -> bool:
     return delta_hours > hours
 
 
-def _build_account(row: Dict[str, Any]) -> Dict[str, Any]:
+def _build_account(row: Dict[str, Any], derived_at: Optional[datetime] = None
+                   ) -> Dict[str, Any]:
     raw_name = (row.get("account_name") or "").upper()
     name = _DB_TO_NORMAL.get(raw_name, raw_name.lower())
+    # R-IV.775(f): THE DERIVED FIGURES GET THEIR OWN INSTANT.
+    #
+    # Trade Analysis read this account's Roth cash -- 7,847.90, derived and current -- as a
+    # 2026-09-24 figure, because `updated_at`/`as_of_date` (which describe the STORED row) sat
+    # flat in the same dict beside it. Nothing here was wrong; the payload simply never said
+    # which instant belonged to which number.
+    #
+    # Which fields are derived is NOT hardcoded -- the row already says, in `cash_source` and
+    # `balance_source`, and those are per account: the same field is derived for one account and
+    # stored for another. A hand-written list here would be a second opinion about it, and would
+    # be wrong for whichever account disagreed.
+    _at = derived_at or datetime.now(timezone.utc)
+    _sources = (("cash", row.get("cash_source")), ("balance", row.get("balance_source")))
+    _derived = tuple(f for f, src in _sources if (src or "").lower() == "derived")
+    _stored = tuple(f for f, src in _sources if (src or "").lower() == "stored")
     return {
         "account": name,
         "broker": row.get("broker") or "",
@@ -144,6 +168,13 @@ def _build_account(row: Dict[str, Any]) -> Dict[str, Any]:
         # point of these rows now.
         "as_of_date": _as_of_date(row.get("updated_at")),
         "is_stale": _is_stale(row.get("updated_at")),
+        # R-IV.775(f). `updated_at`/`as_of_date`/`is_stale` above describe the STORED row ONLY.
+        # This is the instant the derived figures on this row were computed, and the block below
+        # names which fields each instant covers, so the two can no longer be read as one.
+        "computed_at": _at.isoformat(),
+        "as_of": as_of_block(derived_at=_at, stored_as_of=row.get("updated_at"), now=_at,
+                             derived_fields=_derived,
+                             stored_fields=_stored + ("margin_total",)),
         # R-IV.761(d): on EVERY row, not once in the envelope. A per-account flag travels with
         # the figure it qualifies; an envelope-level note is read once and then forgotten while
         # the numbers get copied out of the rows.
@@ -170,7 +201,11 @@ async def hub_get_portfolio_balances(account: Optional[Account] = None) -> dict:
             summary="MCP: balances data unavailable.",
         )
 
-    accounts: List[Dict[str, Any]] = [_build_account(r) for r in rows]
+    # R-IV.775(f): ONE instant for the whole response, captured before any row is built. Rows
+    # that each read their own clock would carry instants microseconds apart and invite a reader
+    # to infer an ordering between accounts that does not exist.
+    _derived_at = datetime.now(timezone.utc)
+    accounts: List[Dict[str, Any]] = [_build_account(r, _derived_at) for r in rows]
 
     # ── T4 (R-IV.394): AGGREGATES EXCLUDE OUT_OF_SCOPE BY VOCABULARY ──────
     # Measured live 2026-09-05: total_balance 21,320.13 against 9,677.78 true
@@ -227,6 +262,16 @@ async def hub_get_portfolio_balances(account: Optional[Account] = None) -> dict:
         "sizing_input": False,
         "sizing_note": SIZING_FLAG,
         "figures_are": "pre-consolidation; each account carries its own as_of_date",
+        # R-IV.775(f): said in the envelope as well as on every row, because the one mistake
+        # this prevents is a reader taking the stored row's date as the age of a derived figure.
+        "computed_at": _derived_at.isoformat(),
+        "as_of_note": (
+            "TWO different instants per account, and they are NOT interchangeable: "
+            "`computed_at` is when the derived figures (cash/balance, per each one's "
+            "*_source) were computed, which is this request; `updated_at`/`as_of_date`/"
+            "`is_stale` describe only the STORED row. Each account's `as_of` block names "
+            "which fields each instant covers. A derived figure is never as old as the "
+            "stored date beside it."),
         "reconciled_triple_queued": (
             "cash available to trade / settled / pending net, with as-of and tie-out dates"),
     }

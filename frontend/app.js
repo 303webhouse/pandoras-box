@@ -9659,14 +9659,26 @@ function renderPortfolioSummaryWidget(rhSummary, fidRothSummary, pnlData, balanc
     // Drift banner — shown only when stored balance and computed (cash+positions) diverge >$100
     const driftBannerEl = document.getElementById('rhDriftBanner');
     if (driftBannerEl) {
-        const drift = rhSummary.drift_dollars || 0;
-        if (Math.abs(drift) > 100) {
-            const updatedAt = rhSummary.balance_updated_at ? new Date(rhSummary.balance_updated_at) : null;
-            const ageDays = updatedAt ? Math.round((Date.now() - updatedAt.getTime()) / 86400000) : null;
-            const ageStr = ageDays !== null ? `Row last touched ${ageDays}d ago` : '';
-            const driftStr = drift >= 0 ? `+$${Math.abs(drift).toFixed(0)}` : `-$${Math.abs(drift).toFixed(0)}`;
+        // R-IV.792(b): the server now WITHHOLDS drift_dollars when the stored side is over 24h
+        // old, because a difference between a stale figure and a live one is not drift.
+        //
+        // `drift_dollars || 0` would have turned that null into 0 and hidden this banner
+        // altogether — swapping a misleading number for silence, with the stored balance two
+        // weeks out and the page saying nothing. A withheld figure is shown under its OWN name,
+        // with the same Reconcile button, because updating the stored balance is exactly the
+        // thing that answers it.
+        const updatedAt = rhSummary.balance_updated_at ? new Date(rhSummary.balance_updated_at) : null;
+        const ageDays = updatedAt ? Math.round((Date.now() - updatedAt.getTime()) / 86400000) : null;
+        const ageStr = ageDays !== null ? `Row last touched ${ageDays}d ago` : '';
+        const drift = rhSummary.drift_dollars;
+        const withheld = drift === null || drift === undefined;
+        if (withheld || Math.abs(drift) > 100) {
+            const headline = withheld
+                // The server's own sentence, not a paraphrase of it.
+                ? `⚠ ${escapeHtml(rhSummary.drift_basis || 'stored balance stale — drift not measurable')}`
+                : `⚠ Balance drift ${drift >= 0 ? '+' : '-'}$${Math.abs(drift).toFixed(0)} vs computed`;
             driftBannerEl.innerHTML = `
-                <span class="drift-warning">⚠ Balance drift ${driftStr} vs computed</span>
+                <span class="drift-warning">${headline}</span>
                 ${ageStr ? `<span class="drift-age">${ageStr}</span>` : ''}
                 <button class="drift-reconcile-btn">Reconcile</button>`;
             driftBannerEl.style.display = 'flex';
