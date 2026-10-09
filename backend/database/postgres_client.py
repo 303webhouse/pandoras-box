@@ -1236,6 +1236,21 @@ async def init_database():
             ("backfill exemption column", """
                 ALTER TABLE unified_positions ADD COLUMN IF NOT EXISTS backfill_exempt_reason TEXT
             """),
+            # TA-123 / R-IV.794(b)2: three taxonomies, three columns. `strategy_tag` held all
+            # three in one text field, so each row kept only whichever was written last -- and
+            # filtering it for the Roth's 20% tactical cap read 8.26% against a true 19.50%,
+            # because TSLQ's TACTICAL had been overwritten by its bucket B2.
+            #
+            # Nullable and without a CHECK, following strategy_tag's own precedent. NULL means
+            # "not recorded", and until the backfill lands it means "not yet migrated" -- which
+            # is why the payloads carry `classification_backfilled` instead of leaving a reader
+            # to infer anything from a null.
+            ("three taxonomy columns (TA-123)", """
+                ALTER TABLE unified_positions
+                    ADD COLUMN IF NOT EXISTS classification TEXT,
+                    ADD COLUMN IF NOT EXISTS sleeve_tag TEXT,
+                    ADD COLUMN IF NOT EXISTS bucket TEXT
+            """),
             # R-IV.456(a) (migrations/045): a basis covering less than the quantity says so.
             ("basis incomplete column", """
                 ALTER TABLE unified_positions
