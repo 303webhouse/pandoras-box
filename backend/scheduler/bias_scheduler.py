@@ -2594,6 +2594,18 @@ async def run_flow_confluence_job():
         logger.error("Flow confluence scan failed: %s", e)
 
 
+async def run_darkpool_collector_job():
+    """R-IV.823(e): the nightly Triton dark-pool collection. Recorded by the job itself (/health
+    stable_jobs + job_runs); its own clock stops it before 19:50 ET and before the UW reset."""
+    if not is_trading_day():
+        return
+    try:
+        from jobs.darkpool_collector import run_nightly
+        await run_nightly()
+    except Exception as e:
+        logger.error("Dark-pool collector job error: %s", e)
+
+
 async def start_scheduler():
     """Start the background scheduler"""
     global _scheduler_started, _weekly_baseline, _scheduler_status
@@ -2899,6 +2911,18 @@ async def start_scheduler():
             id='flow_confluence',
             name='Flow-Signal Confluence',
             replace_existing=True
+        )
+
+        # Triton dark-pool collection (R-IV.823(e)) -- after the close; stops itself by 19:50 ET
+        scheduler.add_job(
+            run_darkpool_collector_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=30, timezone=ET),
+            id='darkpool_collector',
+            name='Triton Dark-Pool Collector',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=1800,
         )
 
         scheduler.start()

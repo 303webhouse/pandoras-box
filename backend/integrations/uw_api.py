@@ -1282,6 +1282,23 @@ async def get_darkpool_ticker(ticker: str) -> Optional[List[Dict[str, Any]]]:
     return result
 
 
+async def get_darkpool_ticker_page(ticker: str, session: str, older_than_ms: int,
+                                   limit: int = 500) -> Optional[Dict[str, Any]]:
+    """ONE page of a ticker's dark-pool prints for ONE market date, newest first, none newer
+    than `older_than_ms` (R-IV.823(e), the Triton dark-pool collection).
+
+    Returns the WHOLE response body as received -- the collector stores it raw -- or the
+    falsy result of `_uw_request` (None / UWUnavailable). Deliberately NOT cached: the live
+    reader's cache is keyed on the ticker alone, so a dated page written into it would serve
+    an old session's prints as today's.
+    """
+    return await _uw_request(
+        f"/api/darkpool/{ticker.upper()}",
+        params={"date": session, "older_than": int(older_than_ms), "limit": int(limit)},
+        caller="darkpool_collector",
+    )
+
+
 async def get_max_pain(ticker: str) -> Optional[Dict[str, Any]]:
     """Fetch max pain data for a ticker."""
     cached = await cache_get("max_pain", ticker.upper())

@@ -1523,6 +1523,16 @@ async def health_check():
     except Exception as _sje:
         stable_jobs_block = {"error": str(_sje)}
 
+    # R-IV.826(c): the dark-pool depth probe reports on its own job's entry, not in a log
+    # nobody reads. stable_job_status carries no detail column, so it is attached here.
+    try:
+        from jobs.darkpool_collector import JOB_NAME as _dp_job, health_detail as _dp_detail
+        _jobs = stable_jobs_block.get("jobs")
+        if isinstance(_jobs, dict):
+            _jobs.setdefault(_dp_job, {"status": "never_run"}).update(await _dp_detail())
+    except Exception as _dpe:
+        logger.warning("darkpool health detail failed: %s", _dpe)
+
     # DEF-SIGNAL-PERSISTENCE-COLLAPSE: signal persistence was invisible here while
     # 459 signals were lost. Table-sourced staleness + issued-vs-persisted gap.
     signals_freshness_block: dict = {}
