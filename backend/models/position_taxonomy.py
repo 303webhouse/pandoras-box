@@ -84,18 +84,91 @@ def in_cap_scope(account: Any) -> bool:
     return (_norm(account) or "") in CAP_ACCOUNTS
 
 
-def classification_reason(account: Any, classification: Any) -> Optional[str]:
-    """Why this row has no classification, or None when it has one.
+# TA-126 / R-IV.804(b). A value with no recorded basis says so IN the field a reader is already
+# looking at, rather than appearing as a confident verdict. Fail loud, not silent: a null here
+# was indistinguishable from "this row is fine", which is how 11 citations went unnoticed.
+NO_BASIS_RECORDED = "NO BASIS RECORDED — do not gate on this value"
 
-    R-IV.797(c)2. Without this the payload cannot distinguish the 21 ROBINHOOD rows — null
-    because the cap does not reach them — from a Fidelity row nobody has classified, and a
-    reader counting nulls as gaps would report 21 missing classifications that are not missing.
+# The columns that hold each axis's basis. Only two axes have one: `sleeve_tag` is derived
+# wholly from the legacy tag and carries no separate ruling to cite, so inventing a third
+# column would be a field with nothing to put in it.
+REASON_COLUMNS: Dict[str, str] = {
+    "classification": "classification_reason",
+    "bucket": "bucket_reason",
+}
+
+
+def classification_reason(account: Any, classification: Any,
+                          stored: Any = None) -> Optional[str]:
+    """The served basis for this row's classification.
+
+    THREE cases, and conflating any two of them is the defect:
+      * classified, with a basis  -> that basis, as stored (the ruling it was written under);
+      * classified, with none     -> NO_BASIS_RECORDED, loudly, never None;
+      * not classified            -> WHY not: "not applicable: ROBINHOOD" (a decision, since the
+                                     cap does not reach that account) or "not recorded" (a gap).
+
+    R-IV.804(b) corrects my own version, which returned None for a classified row. The
+    R-IV.797(c) backfill cited a rule on every write, so the audit log has them -- but the
+    payload served null, and a citation only an auditor can reach is not served provenance.
     """
     if _norm(classification) in CLASSIFICATIONS:
-        return None
+        text = (str(stored).strip() if stored is not None else "")
+        return text or NO_BASIS_RECORDED
     if (_norm(account) or "") in NO_CLASSIFICATION_ACCOUNTS:
         return NOT_APPLICABLE_REASON
     return NOT_RECORDED_REASON
+
+
+def bucket_reason(bucket: Any, stored: Any = None) -> Optional[str]:
+    """The served basis for this row's bucket — R-IV.804(c), same fail-loud shape.
+
+    No account rule here: unlike the 20% cap, buckets are not scoped to an account, so an
+    absent bucket is always a gap and never a decision. TA's deliberate 32-row table
+    (R-IV.803(b)) will supply the bases; until it lands every bucket inherited from a legacy
+    string reads NO_BASIS_RECORDED, which is the honest state and is why `bucket_coverage` says
+    it is not safe to gate on.
+    """
+    if _norm(bucket) in BUCKETS:
+        text = (str(stored).strip() if stored is not None else "")
+        return text or NO_BASIS_RECORDED
+    return NOT_RECORDED_REASON
+
+
+def has_basis(row: Mapping[str, Any], field: str) -> bool:
+    """Does this row's value for `field` carry a recorded basis.
+
+    False when the value itself is absent: there is nothing to have a basis FOR, and counting
+    those as "missing a basis" would bury the real gaps among them.
+    """
+    if field not in REASON_COLUMNS:
+        return False
+    if _norm(row.get(field)) not in VOCABULARIES[field]:
+        return False
+    return bool((str(row.get(REASON_COLUMNS[field]) or "")).strip())
+
+
+def bucket_coverage(rows: Any) -> dict:
+    """R-IV.804(c): the bucket mirror of `cap_enforceable`, and it reports the same way.
+
+    `safe_to_gate` is False until EVERY bucketed row carries a basis. It is deliberately not
+    true-by-default: today's buckets were inherited from legacy display strings, and a gate
+    computed from them would be a gate computed from whatever was typed last -- the TA-123
+    defect, one axis over.
+    """
+    bucketed = [r for r in rows if _norm(r.get("bucket")) in BUCKETS]
+    with_basis = [r for r in bucketed if has_basis(r, "bucket")]
+    return {
+        "rows_bucketed": len(bucketed),
+        "rows_with_basis": len(with_basis),
+        "rows_without_basis": len(bucketed) - len(with_basis),
+        "position_ids_without_basis": [r.get("position_id") for r in bucketed
+                                       if not has_basis(r, "bucket")],
+        "safe_to_gate": bool(bucketed) and len(with_basis) == len(bucketed),
+        "basis": ("bucket is NOT safe to gate on until every bucketed row carries a basis; "
+                  "today's values were inherited from legacy display strings. TA's deliberate "
+                  "32-row table (R-IV.803(b)) supplies them."),
+    }
 
 
 def _norm(value: Any) -> Optional[str]:

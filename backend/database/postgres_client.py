@@ -1251,6 +1251,18 @@ async def init_database():
                     ADD COLUMN IF NOT EXISTS sleeve_tag TEXT,
                     ADD COLUMN IF NOT EXISTS bucket TEXT
             """),
+            # TA-126 / R-IV.804(b)+(c): THE ROW CARRIES ITS OWN BASIS.
+            #
+            # The R-IV.797(c) backfill passed a citation on every write, so the audit log holds
+            # them -- but `classification_reason` was COMPUTED and returned None whenever a row
+            # was classified, so all 11 Fidelity rows served a null basis. A reader of the
+            # payload could see the verdict and not where it came from, and a citation only an
+            # auditor can reach is not served provenance. These columns hold it on the row.
+            ("taxonomy basis columns (TA-126)", """
+                ALTER TABLE unified_positions
+                    ADD COLUMN IF NOT EXISTS classification_reason TEXT,
+                    ADD COLUMN IF NOT EXISTS bucket_reason TEXT
+            """),
             # R-IV.456(a) (migrations/045): a basis covering less than the quantity says so.
             ("basis incomplete column", """
                 ALTER TABLE unified_positions
