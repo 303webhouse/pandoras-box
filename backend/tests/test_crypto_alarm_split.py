@@ -165,9 +165,20 @@ def test_the_block_says_which_signal_moved_the_status():
     assert '"emitted_degrades"' in code
 
 
-def test_only_the_crypto_scanner_is_split_for_now():
-    """The change is narrow: every other class keeps the status it had."""
-    assert JOB_ALIVE_CLASSES == frozenset({"crypto_scanner"})
+def test_the_split_now_covers_all_three_conditional_crypto_producers():
+    """SUPERSEDED BY R-IV.800(b), and this test's old name said "for now" because R-IV.617(b)
+    knew the scope was provisional.
+
+    It asserted `JOB_ALIVE_CLASSES == {"crypto_scanner"}`. The other two conditional crypto
+    producers needed the identical treatment and did not get it, and `crypto_engine` duly
+    tripped a false flatline on 2026-10-08 after 12.6 quiet hours with its loop alive — the
+    same failure this module's own comment had already measured eleven times.
+
+    Still asserted as an EXACT set, not a superset: the membership changes what age source and
+    which job row a class is judged on, so a class drifting into it unnoticed is its own defect.
+    """
+    assert JOB_ALIVE_CLASSES == frozenset({"crypto_scanner", "crypto_engine",
+                                           "crypto_cvd_engine"})
 
 
 # ─────────── it must read a row that can be a FAILURE (R-IV.617(b), second pass)

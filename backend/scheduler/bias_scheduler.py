@@ -3847,6 +3847,20 @@ async def run_crypto_tape_health_job_scheduled():
     Failure here must never take down the scheduler loop.
     """
     logger.info("Running scheduled tape-health evaluation (all six symbols)...")
+    # R-IV.800(b): THIS JOB RECORDS THAT IT RAN, so `crypto_cvd_engine` can be judged on being
+    # ALIVE instead of on whether it emitted. The CVD engine lives inside this job's
+    # compute_all_tape_health(), and it emits only when a divergence/absorption condition
+    # fires -- which, with DEF-CVD-QUARANTINE's fail-closed gate, may be never. Judged on
+    # signal age that reads as a dead engine forever; judged on this row it reads as what it
+    # is, a live job with nothing to say.
+    _run_id = None
+    try:
+        from datetime import date as _date
+        from jobs.job_runs import start_run as _start_run
+        _run_id = await _start_run("crypto_tape_health", _date.today())
+    except Exception as _jr:                                    # noqa: BLE001
+        logger.warning("tape-health: could not open a job_runs record: %s", _jr)
+
     try:
         from bias_filters.crypto_tape_health_engine import compute_all_tape_health
 
@@ -3861,6 +3875,12 @@ async def run_crypto_tape_health_job_scheduled():
         _scheduler_status["crypto_tape_health"]["rows_written"] = rows_written
         _scheduler_status["crypto_tape_health"]["status"] = "completed"
         logger.info("Tape-health evaluation complete -- %d/%d symbols logged", rows_written, len(results))
+        # `rows_touched` is the symbols that got a real classification. INFORMATIONAL: a zero
+        # means "nothing qualified", which is not a fault and never degrades (R-IV.617(b)).
+        await _finish_crypto_run(_run_id, "ok", rows_written)
     except Exception as e:
         _scheduler_status["crypto_tape_health"]["status"] = f"error: {str(e)}"
         logger.error("Error in crypto tape-health job: %s", e)
+        # An errored run is recorded AS errored, so the class reads flatline rather than
+        # no_data -- `last_run` is deliberately not blind to failure for an alive-judged class.
+        await _finish_crypto_run(_run_id, "error", 0, error=str(e)[:400])
