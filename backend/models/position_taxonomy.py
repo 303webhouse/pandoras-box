@@ -121,18 +121,29 @@ def classification_reason(account: Any, classification: Any,
 
 
 def bucket_reason(bucket: Any, stored: Any = None) -> Optional[str]:
-    """The served basis for this row's bucket — R-IV.804(c), same fail-loud shape.
+    """The served basis for this row's bucket — R-IV.804(c), fail-loud.
 
-    No account rule here: unlike the 20% cap, buckets are not scoped to an account, so an
-    absent bucket is always a gap and never a decision. TA's deliberate 32-row table
-    (R-IV.803(b)) will supply the bases; until it lands every bucket inherited from a legacy
-    string reads NO_BASIS_RECORDED, which is the honest state and is why `bucket_coverage` says
-    it is not safe to gate on.
+    FOUR cases, and R-IV.807(c) added the third:
+      * bucketed, with a basis   -> that basis, as stored;
+      * bucketed, with none      -> NO_BASIS_RECORDED, loudly;
+      * NOT bucketed, with a recorded reason -> that reason: a DELIBERATE exclusion. TA-127
+        removes PDBC's and WEAT's inherited B1 and leaves IWM unbucketed, each for a stated
+        reason, and "deliberately unbucketed" must not read the same as "nobody looked";
+      * not bucketed, no reason  -> "not recorded", a gap.
+
+    I HAD WRITTEN THE THIRD CASE OUT. R-IV.804(c) said an absent bucket is "always a gap and
+    never a decision" -- true until a ruling deliberately unbucketed three rows, which is the
+    classification pattern ("not applicable: ROBINHOOD" is a decision) arriving one axis over.
+
+    THE COST, NAMED: a reason that outlives its value now reads as deliberate. So a write that
+    CLEARS a bucket must set or clear its reason in the SAME request, or a stale citation will
+    describe an exclusion nobody decided. `bucket_coverage` is unaffected either way -- it
+    counts only bucketed rows.
     """
+    text = (str(stored).strip() if stored is not None else "")
     if _norm(bucket) in BUCKETS:
-        text = (str(stored).strip() if stored is not None else "")
         return text or NO_BASIS_RECORDED
-    return NOT_RECORDED_REASON
+    return text or NOT_RECORDED_REASON
 
 
 def has_basis(row: Mapping[str, Any], field: str) -> bool:
