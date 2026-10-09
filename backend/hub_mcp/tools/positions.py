@@ -38,13 +38,21 @@ DESCRIPTION = (
     # R-IV.780(e)1. Named in the DESCRIPTION, not only in the payload: a committee seat decides
     # whether it can enforce a bucket limit from what this text promises, and until now the text
     # promised nothing about classification because the field was being dropped.
-    "**`strategy_tag` is served as stored, and never inferred.** One column currently carries "
-    "three different vocabularies: classification (`STRATEGIC`, `TACTICAL`, `CORE`), sleeve "
-    "(`TAIL`, `CONVEXITY`) and TA's buckets (`B1`, `B2`). Read it for X4, X10 and B3's limits, "
-    "and do NOT translate between the three — classification is the principal's (R-IV.730(a)). "
-    "A row may carry no tag at all: `positions_without_strategy_tag` and "
-    "`untagged_position_ids` say how many and which, and a bucket limit cannot be applied to "
-    "those rows. Treat an absent tag as unknown, never as a default bucket.\n\n"
+    "**`strategy_tag` MIXES CLASSIFICATION, SLEEVE TAG AND BUCKET. NO CAP, GATE OR FILTER MAY "
+    "BE COMPUTED FROM IT** (TA-123, R-IV.794(b)). It is a DISPLAY STRING only. One column holds "
+    "three independent taxonomies, so each row shows whichever was written last and the other "
+    "two are simply gone. That is not a presentation nuisance, it under-reads a hard cap: "
+    "filtering it for the Roth's 20% tactical cap returned SOXS alone at 8.26% against the truth "
+    "of SOXS + TSLQ at 19.50%, because TSLQ's `TACTICAL` had been overwritten by its bucket "
+    "`B2`. A limit read off this field is a limit read off the last edit.\n\n"
+    "**Read `classification` (`STRATEGIC`/`TACTICAL`), `sleeve_tag` (`TAIL`/`CONVEXITY`) and "
+    "`bucket` (`B1`/`B2`/`B3`) instead.** Three independent nullable fields, served on every "
+    "row. `classification` is what the hard cap depends on.\n\n"
+    "**AND CHECK `classification_backfilled` BEFORE ENFORCING ANYTHING.** While it is false the "
+    "three fields are present but NOT yet populated, so a `null` there means \"not yet "
+    "migrated\", NOT \"this row has no classification\". Reading the first as the second is how "
+    "an unenforced cap reports itself as a satisfied one. Values are the principal's and are "
+    "never inferred (R-IV.730(a)); an absent value is unknown, never a default.\n\n"
     "SIZE: TWO FIELDS, AND THEY ANSWER DIFFERENT QUESTIONS (convention #29, "
     "R-IV.660). `quantity` is the size the position was OPENED at, including any "
     "adds -- it does NOT shrink when part of the position is closed, because the "
@@ -78,6 +86,19 @@ def _normalize_account(value: str) -> str:
     mapping = {a.lower(): a for a in _CANONICAL_TUPLE}
     mapping["breakout_prop"] = "BREAKOUT_PROP"
     return mapping.get(value, value.upper())
+
+
+def _classification_backfilled(positions: List[Dict[str, Any]]) -> bool:
+    """Has R-IV.794(b)3's backfill run.
+
+    DERIVED FROM THE DATA, deliberately: true as soon as any row carries a classification, so it
+    flips by itself the moment the backfill writes its first row and cannot be left stale by a
+    constant nobody remembered to bump.
+
+    Its limit, stated rather than discovered: on an empty or fully-ambiguous selection it reads
+    false, which is the safe direction — "cannot enforce" rather than "nothing to enforce".
+    """
+    return any(p.get("classification") for p in positions)
 
 
 def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -147,6 +168,12 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         # principal's and is never inferred (R-IV.730(a)). The split into its own column comes
         # with the classification column; until then a consumer sees exactly what is stored.
         "strategy_tag": row.get("strategy_tag"),
+        # TA-123 / R-IV.794(b)2: the three independent taxonomies, served separately. A cap is
+        # computed from `classification`; `strategy_tag` above is a display string with no
+        # authority, because it only ever kept whichever of the three was written last.
+        "classification": row.get("classification"),
+        "sleeve_tag": row.get("sleeve_tag"),
+        "bucket": row.get("bucket"),
     }
 
 
@@ -211,9 +238,25 @@ async def hub_get_positions(
         "ticker": ticker.upper() if ticker else None,
         "positions": positions,
         "position_count": len(positions),
-        "strategy_tag_basis": ("served as stored; one column carries classification "
-                               "(STRATEGIC/TACTICAL/CORE), sleeve (TAIL/CONVEXITY) and TA "
-                               "buckets (B1/B2). Never inferred (R-IV.730(a))."),
+        "strategy_tag_basis": (
+            "DISPLAY STRING ONLY -- strategy_tag mixes classification, sleeve tag and bucket; "
+            "no cap, gate or filter may be computed from it (TA-123, R-IV.794(b)). One column "
+            "held three independent taxonomies, so each row kept only whichever was written "
+            "last: filtering it for the Roth's 20% tactical cap gave SOXS alone at 8.26% "
+            "against the truth of SOXS + TSLQ at 19.50%, TSLQ's TACTICAL having been "
+            "overwritten by its bucket B2. Read classification / sleeve_tag / bucket instead. "
+            "Never inferred (R-IV.730(a))."),
+        # The state flag, so a null in the three fields is not read as a decision. While this
+        # is false they are present but unpopulated: null means "not yet migrated", NOT "this
+        # row has no classification". Treating the first as the second is how an unenforced cap
+        # reports itself as a satisfied one.
+        "classification_backfilled": _classification_backfilled(positions),
+        "positions_without_classification": sum(
+            1 for p in positions if not p.get("classification")),
+        "position_ids_without_classification": [
+            p["position_id"] for p in positions if not p.get("classification")],
+        "cap_enforceable": _classification_backfilled(positions) and not any(
+            not p.get("classification") for p in positions),
         "positions_without_strategy_tag": len(untagged),
         "untagged_position_ids": untagged,
         **risk,

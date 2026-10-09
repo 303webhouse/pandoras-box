@@ -67,12 +67,24 @@ class TestTheProjectionIsTheThingThatDroppedIt:
 
     def test_the_DESCRIPTION_promises_the_field(self):
         """The committee reads the description to decide whether it can enforce a limit. A
-        payload that carries a field the description never mentions is the R-IV.761(d) fault."""
+        payload that carries a field the description never mentions is the R-IV.761(d) fault.
+
+        UPDATED BY TA-123 / R-IV.794(b)1. This used to assert the description told a reader to
+        "read it for X4, X10 and B3's limits". That instruction is now FORBIDDEN -- strategy_tag
+        mixes three taxonomies and a cap read from it reads 8.26% against a true 19.50%. So the
+        test keeps the parts that still hold (the field is named, values are never inferred) and
+        asserts the old instruction is GONE, rather than being loosened to pass.
+        """
         assert "strategy_tag" in P.DESCRIPTION
-        assert "never inferred" in P.DESCRIPTION
-        for v in ("STRATEGIC", "TACTICAL", "CORE", "TAIL", "CONVEXITY", "B1", "B2"):
+        assert "never inferred" in P.DESCRIPTION.lower()
+        for v in ("STRATEGIC", "TACTICAL", "TAIL", "CONVEXITY", "B1", "B2", "B3"):
             assert v in P.DESCRIPTION, v
-        assert "X4" in P.DESCRIPTION and "B3" in P.DESCRIPTION
+        # The prohibition, and the three fields that replace it.
+        assert "NO CAP, GATE OR FILTER MAY BE COMPUTED FROM IT" in P.DESCRIPTION
+        for f in ("classification", "sleeve_tag", "bucket"):
+            assert "`%s`" % f in P.DESCRIPTION, f
+        # And the instruction it replaced must not still be sitting there beside it.
+        assert "Read it for X4" not in P.DESCRIPTION
 
 
 class TestCoverageIsPublished:
