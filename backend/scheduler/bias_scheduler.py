@@ -2365,9 +2365,21 @@ async def run_wrr_scan_job():
         logger.info("WRR scan skipped — not a trading day")
         return
     try:
-        from strategies.wrr_buy_model import run_wrr_scan
+        # R-IV.809(b): THE NAME DID NOT EXIST. This imported `run_wrr_scan`, which
+        # `strategies.wrr_buy_model` has never defined -- it defines `scan_wrr()` and
+        # `run_wrr_and_process()`. The ImportError was caught by the `except` below and logged
+        # as an ordinary job error, while APScheduler reported the job "executed successfully".
+        # Measured: 0 rows have ever been written with strategy='nemesis_wrr' or a NEMESIS%
+        # signal_type, and the 2026-10-09 16:20 ET run logged
+        #   WRR scan job error: cannot import name 'run_wrr_scan' from 'strategies.wrr_buy_model'
+        #
+        # `run_wrr_and_process` is the right target: it is the one that puts hits through
+        # process_signal_unified, so they are governed, persisted and graded like every other
+        # producer. `scan_wrr` alone would compute and discard.
+        from strategies.wrr_buy_model import run_wrr_and_process
         logger.info("WRR Buy Model scan starting (scheduled)...")
-        await run_wrr_scan()
+        result = await run_wrr_and_process()
+        logger.info("WRR scan complete: %s", result)
     except Exception as e:
         logger.error(f"WRR scan job error: {e}")
 

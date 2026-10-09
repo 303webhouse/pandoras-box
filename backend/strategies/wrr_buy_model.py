@@ -33,6 +33,11 @@ VOLUME_SPIKE_RATIO = 1.5
 VOLUME_AVG_PERIOD = 20
 SMA_200_PERIOD = 200
 
+# N1(i) / R-IV.820(e). get_bars defaults to a 60-CALENDAR-day lookback (~41 bars) when no
+# from_date is given, and this model needs SMA_200_PERIOD + 5 = 205. 400 calendar days is ~275
+# trading bars: the 200 for the SMA, the 5-bar margin, and slack for holidays and halts.
+BARS_LOOKBACK_DAYS = 400
+
 
 def _compute_rsi(closes: List[float], period: int) -> Optional[float]:
     """Compute RSI from a list of closing prices."""
@@ -90,7 +95,21 @@ async def scan_wrr(tickers: Optional[List[str]] = None) -> Dict[str, Any]:
 
     for ticker in tickers:
         try:
-            bars = await get_bars(ticker, 1, "day")
+            # N1(i) / R-IV.820(e): ASK FOR ENOUGH HISTORY.
+            #
+            # This called get_bars(ticker, 1, "day") with no from_date, and get_bars then
+            # defaults to a 60-CALENDAR-day lookback (uw_api.py ~716; the yfinance path ~1976
+            # likewise) -- about 41 trading bars. The guard below needs SMA_200_PERIOD + 5 =
+            # 205, so EVERY ticker failed it and was skipped by `continue` BEFORE `scanned`
+            # incremented. The scan therefore reported scanning nothing, and read as a quiet
+            # universe rather than a broken window.
+            #
+            # 400 calendar days is ~275 trading bars: 200 for the SMA, the 5-bar margin, and
+            # room for holidays and a halted ticker without sailing close to the edge.
+            from datetime import timedelta as _td
+
+            _from = (datetime.now(timezone.utc) - _td(days=BARS_LOOKBACK_DAYS)).date().isoformat()
+            bars = await get_bars(ticker, 1, "day", from_date=_from)
             if not bars or len(bars) < SMA_200_PERIOD + 5:
                 continue
 
