@@ -10,6 +10,7 @@ from ..envelope import make_response
 from services.position_economics import capital_at_risk_from_derived
 from services.read_only.positions import list_positions
 
+from models import position_taxonomy as _tx  # TA-123/R-IV.797(c): one author for the three axes
 from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
 from models.accounts import account_choices as _account_choices
 from models.accounts import describe_accounts as _describe_accounts
@@ -174,6 +175,12 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         "classification": row.get("classification"),
         "sleeve_tag": row.get("sleeve_tag"),
         "bucket": row.get("bucket"),
+        # R-IV.797(c)2: WHY it is null, on the row. "not applicable: ROBINHOOD" and "not
+        # recorded" are both NULL in the column and mean opposite things — one is a decision,
+        # the other is a gap. Derived from the account rather than stored, so it cannot drift
+        # away from the account it describes.
+        "classification_reason": _tx.classification_reason(
+            row.get("account"), row.get("classification")),
     }
 
 
@@ -251,12 +258,21 @@ async def hub_get_positions(
         # row has no classification". Treating the first as the second is how an unenforced cap
         # reports itself as a satisfied one.
         "classification_backfilled": _classification_backfilled(positions),
+        # R-IV.797(c)2: counted over the accounts the cap REACHES. Counting the whole book
+        # reported 21 missing classifications that are not missing — ROBINHOOD rows are null
+        # by design, because Part 4 v2 governs that account by its sleeve ceiling instead.
         "positions_without_classification": sum(
-            1 for p in positions if not p.get("classification")),
+            1 for p in positions
+            if _tx.in_cap_scope(p.get("account")) and not p.get("classification")),
         "position_ids_without_classification": [
-            p["position_id"] for p in positions if not p.get("classification")],
-        "cap_enforceable": _classification_backfilled(positions) and not any(
-            not p.get("classification") for p in positions),
+            p["position_id"] for p in positions
+            if _tx.in_cap_scope(p.get("account")) and not p.get("classification")],
+        "cap_enforceable": _tx.cap_enforceable(positions),
+        "cap_scope": list(_tx.CAP_ACCOUNTS),
+        "cap_scope_basis": (
+            "the 20%% tactical cap reaches %s only; ROBINHOOD is governed by its sleeve "
+            "ceiling instead (Part 4 v2), so classification there is NULL by design and each "
+            "row says so in `classification_reason`." % ", ".join(_tx.CAP_ACCOUNTS)),
         "positions_without_strategy_tag": len(untagged),
         "untagged_position_ids": untagged,
         **risk,
