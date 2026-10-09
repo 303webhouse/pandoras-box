@@ -85,12 +85,15 @@ class TestTheMappingDoesNotGuess:
         assert reason is None and vals[field] == value
         assert all(vals[f] is None for f in tx.FIELDS if f != field)
 
-    def test_CORE_is_ambiguous_and_is_NOT_called_strategic(self):
-        """CORE was a classification under an older scheme and is neither STRATEGIC nor
-        TACTICAL. Picking one would be exactly the guess the ruling forbids."""
+    def test_legacy_CORE_maps_to_STRATEGIC(self):
+        """R-IV.797(c)1 settles what I had listed as unplaceable: CORE is a LOCATION — the Roth
+        core half, membership in the target mix — not a classification. So it is not ambiguous
+        after all, and it maps to STRATEGIC. I declined to guess and SPINE ruled; the mapping is
+        adopted rather than inferred."""
         vals, reason = tx.split_display_tag("CORE")
-        assert all(v is None for v in vals.values())
-        assert reason and "no ruled vocabulary" in reason
+        assert reason is None
+        assert vals["classification"] == "STRATEGIC"
+        assert vals["sleeve_tag"] is None and vals["bucket"] is None
 
     @pytest.mark.parametrize("tag", ["HEDGE", "MOMENTUM", "OTHER"])
     def test_the_other_orphan_words_are_ambiguous_too(self, tag):
@@ -114,33 +117,29 @@ class TestTheMappingDoesNotGuess:
             assert reason is None and vals["classification"] == "STRATEGIC"
 
 
-class TestTheConvexityDateBoundary:
-    """R-IV.794(b)3 names it: CONVEXITY on a pre-09-25 row may have been a classification."""
+class TestLegacyConvexityIsASleeveOnAnyRow:
+    """R-IV.797(c)3 replaces R-IV.794(b)3's date gate.
 
-    def test_on_a_recent_row_it_is_a_sleeve(self):
-        vals, reason = tx.split_display_tag("CONVEXITY", entry_date="2026-10-06")
+    I had withheld CONVEXITY on rows written before 2026-09-25, on the chance it had been meant
+    as a classification then. SPINE ruled the open-date question belongs to TA-045's scope —
+    whether X4 APPLIES — not to what the tag means.
+    """
+
+    @pytest.mark.parametrize("tag", ["CONVEXITY", "convexity", " CONVEXITY "])
+    def test_it_maps_to_sleeve_tag(self, tag):
+        vals, reason = tx.split_display_tag(tag)
         assert reason is None and vals["sleeve_tag"] == "CONVEXITY"
+        assert vals["classification"] is None, "it is a sleeve, never a classification"
 
-    @pytest.mark.parametrize("day", ["2026-08-11", "2026-09-24", "2026-01-01"])
-    def test_on_a_pre_09_25_row_it_is_AMBIGUOUS(self, day):
-        vals, reason = tx.split_display_tag("CONVEXITY", entry_date=day)
-        assert vals["sleeve_tag"] is None
-        assert reason and "pre-2026-09-25" in reason
+    def test_the_date_gate_is_GONE_not_merely_ignored(self):
+        """An accepted-but-ignored parameter is a trap for the next caller who passes it
+        expecting it to matter, so `entry_date` was removed rather than left inert."""
+        import inspect
 
-    def test_the_boundary_day_itself_is_a_sleeve(self):
-        vals, reason = tx.split_display_tag("CONVEXITY", entry_date="2026-09-25")
-        assert reason is None and vals["sleeve_tag"] == "CONVEXITY"
-
-    def test_an_unknown_date_does_not_silently_pass_as_recent(self):
-        """With no date there is nothing to place the row against. It maps as a sleeve, which is
-        today's meaning — recorded here so the choice is visible rather than incidental."""
-        vals, reason = tx.split_display_tag("CONVEXITY", entry_date=None)
-        assert reason is None and vals["sleeve_tag"] == "CONVEXITY"
-
-    def test_an_iso_timestamp_is_read_as_its_day(self):
-        vals, reason = tx.split_display_tag("CONVEXITY",
-                                            entry_date="2026-08-11T13:00:07+00:00")
-        assert vals["sleeve_tag"] is None and reason
+        assert "entry_date" not in inspect.signature(tx.split_display_tag).parameters
+        assert not hasattr(tx, "CONVEXITY_SLEEVE_FROM")
+        with pytest.raises(TypeError):
+            tx.split_display_tag("CONVEXITY", entry_date="2026-08-11")
 
 
 class TestCapEligibility:
@@ -279,3 +278,131 @@ class TestThePayload:
         assert "cap_enforceable" in src
         assert "positions_without_classification" in src
         assert "position_ids_without_classification" in src
+
+    def test_the_gap_count_covers_ONLY_the_accounts_the_cap_reaches(self):
+        """R-IV.797(c)2. Counting the whole book reported 21 missing classifications that are
+        not missing: ROBINHOOD rows are null BY DESIGN."""
+        import inspect
+
+        from hub_mcp.tools import positions as mod
+
+        src = inspect.getsource(mod)
+        assert "_tx.in_cap_scope(p.get(\"account\"))" in src
+        assert "_tx.cap_enforceable(positions)" in src
+
+    def test_every_row_says_WHY_its_classification_is_null(self):
+        from hub_mcp.tools.positions import _build_position
+
+        rh = _build_position({"position_id": "A", "ticker": "X", "account": "ROBINHOOD"})
+        assert rh["classification"] is None
+        assert rh["classification_reason"] == "not applicable: ROBINHOOD"
+
+        fid = _build_position({"position_id": "B", "ticker": "Y", "account": "FIDELITY_ROTH"})
+        assert fid["classification_reason"] == "not recorded", \
+            "a Fidelity null is a GAP; a Robinhood null is a decision"
+
+        done = _build_position({"position_id": "C", "ticker": "Z", "account": "FIDELITY_ROTH",
+                                "classification": "TACTICAL"})
+        assert done["classification_reason"] is None
+
+
+class TestTheCapScope:
+    """R-IV.797(c)2: the 20% cap reaches Fidelity only."""
+
+    @pytest.mark.parametrize("acct", ["FIDELITY_ROTH", "FIDELITY_401A",
+                                      "fidelity_roth", " Fidelity_401A "])
+    def test_fidelity_is_in_scope_whatever_the_spelling(self, acct):
+        assert tx.in_cap_scope(acct) is True
+
+    @pytest.mark.parametrize("acct", ["ROBINHOOD", "robinhood", None, "", "BREAKOUT"])
+    def test_robinhood_and_the_unknown_are_not(self, acct):
+        assert tx.in_cap_scope(acct) is False
+
+    def test_enforceable_when_every_fidelity_row_is_classified(self):
+        rows = [{"account": "ROBINHOOD", "classification": None},
+                {"account": "fidelity_roth", "classification": "TACTICAL"},
+                {"account": "FIDELITY_401A", "classification": "STRATEGIC"}]
+        assert tx.cap_enforceable(rows) is True, \
+            "unclassified ROBINHOOD rows must not hold the cap hostage"
+
+    def test_not_enforceable_when_one_fidelity_row_is_not(self):
+        rows = [{"account": "fidelity_roth", "classification": "TACTICAL"},
+                {"account": "FIDELITY_401A", "classification": None}]
+        assert tx.cap_enforceable(rows) is False
+
+    def test_a_bucket_in_the_classification_slot_does_not_satisfy_it(self):
+        """The defect, at the cap level: `B2` must not read as an answer."""
+        assert tx.cap_enforceable([{"account": "fidelity_roth", "classification": "B2"}]) is False
+
+    def test_not_enforceable_with_no_fidelity_rows_at_all(self):
+        """CONTROL. "Nothing to enforce against" is not "the cap is satisfied", and the safe
+        reading is the one that does not claim compliance."""
+        assert tx.cap_enforceable([{"account": "ROBINHOOD", "classification": None}]) is False
+        assert tx.cap_enforceable([]) is False
+
+    def test_the_condition_is_one_a_reachable_state_CAN_satisfy(self):
+        """My first version required every row in the BOOK, which the 21 by-design-null
+        ROBINHOOD rows made permanently unsatisfiable — "cannot enforce" forever, which is
+        indistinguishable from a broken engine. The live shape must be able to return True."""
+        live = ([{"account": "ROBINHOOD", "classification": None}] * 21
+                + [{"account": "FIDELITY_ROTH", "classification": "TACTICAL"}] * 6
+                + [{"account": "FIDELITY_401A", "classification": "STRATEGIC"}] * 5)
+        assert tx.cap_enforceable(live) is True
+
+
+class TestThePatchRoute:
+    """The three fields are WRITABLE through the hub, and validated on the way in.
+
+    `strategy_tag` has never had a value checked -- its enforcement point ("the entry UI") was
+    never built, which is how fifteen of sixteen stored values came to be words the declared
+    vocabulary did not contain. These fields are what a hard cap is computed from, so a typo is
+    a wrong cap rather than a wrong label.
+    """
+
+    def test_the_request_model_accepts_all_three(self):
+        from api.unified_positions import UpdatePositionRequest
+
+        for f in tx.FIELDS:
+            assert f in UpdatePositionRequest.model_fields, f
+            assert UpdatePositionRequest.model_fields[f].default is None
+
+    def test_the_route_validates_against_the_taxonomy_module(self):
+        import inspect
+
+        from api import unified_positions as up
+
+        src = inspect.getsource(up)
+        assert "_taxonomy_valid(_field, _value)" in src
+        # Read from the module, never retyped -- the whole point of one author.
+        assert "from models.position_taxonomy import FIELDS as _TAXONOMY_FIELDS" in src
+        for literal in ("STRATEGIC\", \"TACTICAL", "B1\", \"B2\", \"B3"):
+            assert literal not in src, "the vocabulary must not be re-typed in the route"
+
+    def test_a_sleeve_written_into_classification_is_REFUSED(self):
+        """The single mistake that produced this entire ruling, refused at the edge."""
+        from api.unified_positions import _TAXONOMY_VOCAB
+        from models.position_taxonomy import is_valid
+
+        assert is_valid("classification", "TAIL") is False
+        assert is_valid("classification", "B2") is False
+        assert _TAXONOMY_VOCAB["classification"] == ("STRATEGIC", "TACTICAL")
+
+    def test_the_empty_string_clears_a_field(self):
+        """A mis-set classification must be removable without a direct UPDATE, because the
+        alternative is someone reaching for SQL (R-IV.552(b))."""
+        import inspect
+
+        from api import unified_positions as up
+
+        src = inspect.getsource(up)
+        assert 'if _value == "":' in src
+        assert "= NULL" in src
+
+    def test_the_three_are_NOT_in_the_derived_guard(self):
+        """They are the principal's semantics, not figures the lots compute, so the derived
+        guard must not block them (the strategy_tag precedent)."""
+        from api._position_write_scope import DERIVED_COLUMNS
+
+        for f in tx.FIELDS:
+            assert f not in DERIVED_COLUMNS, f
+

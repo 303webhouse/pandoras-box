@@ -44,6 +44,12 @@ from models.derived_as_of import (  # R-IV.775(f)/792(b): a derived figure carri
 _DRIFT_DERIVED_FIELDS = ("computed_balance", "cash", "position_value", "position_count",
                          "unpriced_count", "capital_at_risk", "capital_at_risk_pct",
                          "net_direction", "stale_positions", "drift_dollars")
+
+# TA-123 / R-IV.794(b)2: read from the taxonomy module, never retyped here. A vocabulary with
+# two authors has no author, and this one is what a hard cap is computed from.
+from models.position_taxonomy import FIELDS as _TAXONOMY_FIELDS      # noqa: E402
+from models.position_taxonomy import VOCABULARIES as _TAXONOMY_VOCAB  # noqa: E402
+from models.position_taxonomy import is_valid as _taxonomy_valid      # noqa: E402
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
     entry_orientation, mark_from_legs, prior_is_good, stale_reason,
 )
@@ -333,6 +339,13 @@ class UpdatePositionRequest(BaseModel):
     # constraint. A semantic field, so MANUAL_EDIT may write it — the D1 allowlist refuses
     # marks and realized fields, not position semantics. NULL is untagged, never OTHER.
     strategy_tag: Optional[str] = None
+    # TA-123 / R-IV.794(b)2: the three independent taxonomies. Validated against
+    # models/position_taxonomy.py on the way in — unlike strategy_tag, which has never had a
+    # value checked, because its enforcement point ("the entry UI") was never built. These are
+    # what a cap is computed from, so a typo here is a wrong cap rather than a wrong label.
+    classification: Optional[str] = None
+    sleeve_tag: Optional[str] = None
+    bucket: Optional[str] = None
     status: Optional[str] = None  # OPEN, CLOSED, EXPIRED — allows reopening closed positions
     direction: Optional[str] = None  # LONG, SHORT
     structure: Optional[str] = None
@@ -2036,6 +2049,27 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
     if req.strategy_tag is not None:
         sets.append(f"strategy_tag = ${idx}")
         params.append(req.strategy_tag)
+        idx += 1
+    # TA-123 / R-IV.794(b)2 + R-IV.797(c). Each is REFUSED unless it is in its own vocabulary,
+    # so a sleeve cannot be written into the classification column -- which is the single
+    # mistake that produced this whole ruling. The sentinel "" clears a field, because a
+    # mis-set classification must be removable without a direct UPDATE.
+    for _field in _TAXONOMY_FIELDS:
+        _value = getattr(req, _field, None)
+        if _value is None:
+            continue
+        if _value == "":
+            sets.append(f"{_field} = NULL")
+            continue
+        if not _taxonomy_valid(_field, _value):
+            raise HTTPException(
+                status_code=400,
+                detail=(f"{_field} must be one of "
+                        f"{', '.join(_TAXONOMY_VOCAB[_field])} (got {_value!r}). These are "
+                        f"independent axes: a sleeve tag is not a classification, and writing "
+                        f"one into the other is the defect TA-123 found."))
+        sets.append(f"{_field} = ${idx}")
+        params.append(str(_value).strip().upper())
         idx += 1
     if req.signal_id is not None:
         sets.append(f"signal_id = ${idx}")

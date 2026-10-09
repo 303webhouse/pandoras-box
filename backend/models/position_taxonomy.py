@@ -46,14 +46,56 @@ VOCABULARIES: Dict[str, Tuple[str, ...]] = {
     "bucket": BUCKETS,
 }
 
-# `CONVEXITY` reads as a sleeve today. On a row written before 2026-09-25 it may have been
-# meant as a classification, so it is NOT auto-mapped there (R-IV.794(b)3 names this case).
-CONVEXITY_SLEEVE_FROM = "2026-09-25"
+# R-IV.797(c)3: legacy CONVEXITY maps to `sleeve_tag` on ANY row. I had withheld it on rows
+# written before 2026-09-25, on the chance it had been meant as a classification then. SPINE
+# ruled the open-date question belongs to TA-045's scope — whether X4 APPLIES — and not to what
+# the tag means. The date constant and the `entry_date` parameter are therefore gone rather than
+# accepted-and-ignored: a parameter that no longer affects the answer is a trap for the next
+# caller who passes it expecting it to.
 
-# Words that belong to no ruled vocabulary. CORE and HEDGE were classifications under an older
-# scheme; neither is STRATEGIC or TACTICAL, and choosing one here would be the guess the ruling
-# forbids.
-NOT_IN_ANY_VOCABULARY: Tuple[str, ...] = ("CORE", "HEDGE", "MOMENTUM", "OTHER")
+# R-IV.797(c)1: CORE IS A LOCATION, NOT A CLASSIFICATION — "the Roth core half, membership in
+# the target mix". So legacy CORE is not ambiguous after all; it maps to STRATEGIC. I had it
+# listed as unplaceable and SPINE ruled otherwise, applying TA-124's four axes.
+LEGACY_CLASSIFICATION: Dict[str, str] = {"CORE": STRATEGIC}
+
+# Still in no ruled vocabulary. HEDGE/MOMENTUM/OTHER were never adjudicated, and choosing for
+# them here would be the guess the ruling forbids.
+NOT_IN_ANY_VOCABULARY: Tuple[str, ...] = ("HEDGE", "MOMENTUM", "OTHER")
+
+# ── R-IV.797(c)2: the 20% cap does not reach ROBINHOOD ──────────────────────────────────────
+# Part 4 v2: that account is "governed by its sleeve ceiling instead". So a ROBINHOOD row's
+# classification is NULL BY DESIGN, and the distinction matters enormously: a null that means
+# "not applicable here" must not be counted as a gap to be filled, and a null that means "not
+# recorded" must not be counted as a decision. Both are null in the column; only the reason
+# tells them apart, so the reason is served.
+CAP_ACCOUNTS: Tuple[str, ...] = ("FIDELITY_ROTH", "FIDELITY_401A")
+NO_CLASSIFICATION_ACCOUNTS: Tuple[str, ...] = ("ROBINHOOD",)
+NOT_APPLICABLE_REASON = "not applicable: ROBINHOOD"
+NOT_RECORDED_REASON = "not recorded"
+
+
+def in_cap_scope(account: Any) -> bool:
+    """Does the 20% tactical cap reach this account.
+
+    Exact-name identity, never a prefix or a spelling: the parked-money lesson
+    ([[scope-must-not-depend-on-case]]) is that scope decided by how a name is written answers
+    differently for `FIDELITY_401A` and `fidelity_401a`.
+    """
+    return (_norm(account) or "") in CAP_ACCOUNTS
+
+
+def classification_reason(account: Any, classification: Any) -> Optional[str]:
+    """Why this row has no classification, or None when it has one.
+
+    R-IV.797(c)2. Without this the payload cannot distinguish the 21 ROBINHOOD rows — null
+    because the cap does not reach them — from a Fidelity row nobody has classified, and a
+    reader counting nulls as gaps would report 21 missing classifications that are not missing.
+    """
+    if _norm(classification) in CLASSIFICATIONS:
+        return None
+    if (_norm(account) or "") in NO_CLASSIFICATION_ACCOUNTS:
+        return NOT_APPLICABLE_REASON
+    return NOT_RECORDED_REASON
 
 
 def _norm(value: Any) -> Optional[str]:
@@ -63,8 +105,7 @@ def _norm(value: Any) -> Optional[str]:
     return s or None
 
 
-def split_display_tag(tag: Any, *, entry_date: Any = None
-                      ) -> Tuple[Dict[str, Optional[str]], Optional[str]]:
+def split_display_tag(tag: Any) -> Tuple[Dict[str, Optional[str]], Optional[str]]:
     """`({classification, sleeve_tag, bucket}, reason)` for one display tag.
 
     Every field it cannot establish stays None, and `reason` says why. `reason` is None only
@@ -88,30 +129,43 @@ def split_display_tag(tag: Any, *, entry_date: Any = None
         out["sleeve_tag"] = TAIL
         return out, None
     if t == CONVEXITY:
-        # Ambiguous on an older row: CONVEXITY may have been a classification then.
-        day = _as_day(entry_date)
-        if day is not None and day < CONVEXITY_SLEEVE_FROM:
-            return out, ("CONVEXITY on a pre-%s row: may have been written as a classification, "
-                         "not a sleeve" % CONVEXITY_SLEEVE_FROM)
+        # R-IV.797(c)3 settles what I had listed as ambiguous: legacy CONVEXITY maps to
+        # sleeve_tag, on any row. The open-date question is real but it belongs to TA-045's
+        # scope for whether X4 APPLIES, not to what the tag means — so the date no longer
+        # withholds the mapping.
         out["sleeve_tag"] = CONVEXITY
+        return out, None
+    if t in LEGACY_CLASSIFICATION:
+        # CORE is a location, not a classification (R-IV.797(c)1).
+        out["classification"] = LEGACY_CLASSIFICATION[t]
         return out, None
     if t in NOT_IN_ANY_VOCABULARY:
         return out, "%s belongs to no ruled vocabulary (not STRATEGIC/TACTICAL)" % t
     return out, "unrecognised value %r" % t
 
 
-def _as_day(value: Any) -> Optional[str]:
-    """The YYYY-MM-DD prefix of a date or ISO string, or None."""
-    if value is None:
-        return None
-    s = str(value)
-    return s[:10] if len(s) >= 10 else None
-
-
 def is_valid(field: str, value: Any) -> bool:
     """True when `value` is in `field`'s vocabulary. None is never valid — it is absence."""
     v = _norm(value)
     return v is not None and v in VOCABULARIES.get(field, ())
+
+
+def cap_enforceable(rows: Any) -> bool:
+    """Can the 20% tactical cap be computed for this selection — R-IV.797(c)2.
+
+    EVERY Fidelity row must be classified, AND ONLY FIDELITY ROWS COUNT. My first version
+    required every row in the book, which would have held the cap unenforceable forever: the 21
+    ROBINHOOD rows are null BY DESIGN, since Part 4 v2 governs that account by its sleeve
+    ceiling instead. A condition no reachable state can satisfy reports "cannot enforce" for
+    good, which is indistinguishable from the engine being broken.
+
+    False on an empty Fidelity selection: nothing to enforce against is not the same as a
+    satisfied cap, and the safe reading is the one that does not claim compliance.
+    """
+    fidelity = [r for r in rows if in_cap_scope(r.get("account"))]
+    if not fidelity:
+        return False
+    return all(cap_eligible(r) for r in fidelity)
 
 
 def cap_eligible(row: Mapping[str, Any]) -> bool:
