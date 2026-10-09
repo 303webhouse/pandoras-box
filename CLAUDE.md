@@ -44,7 +44,11 @@ Before starting any build, verify you have all necessary permissions, API keys, 
 - Deploy: SSH → edit files → `systemctl restart <service>` → verify with `journalctl -u <service> -f`
 
 ### Frontend (`frontend/`)
-- Vanilla JS PWA, dark teal theme. Cache busting — increment on every change: Agora (`/app` = `v2.html`) pins `v2.css?v=38`, `v2.js?v=45`, `assets/agora-quotes.js?v=3` (Stater and Abacus pin `v2.css` too); legacy `/app/legacy` (`index.html`) pins `styles.css?v=151`, `app.js?v=175`. New static files must live under `frontend/assets/` — only that folder is served wholesale (`backend/main.py` routes each other file by name).
+- Vanilla JS PWA, dark teal theme. New static files must live under `frontend/assets/` — only that folder is served wholesale (`backend/main.py` routes each other file by name).
+- **Cache busting — increment the `?v=` pin on every change to the file it points at.** A changed asset behind an unchanged pin is a fix that never reaches the browser.
+  - **The HTML files are the only author of those numbers. They are deliberately not restated here** (R-IV.790(d)): a version that changes on every deploy cannot be copied into a doc without going stale, and the copy that used to live on this line was four releases behind while reading as authoritative.
+  - **Read the current values, then increment from what you read — never from a number quoted anywhere else:** `grep -rn '?v=' frontend/*.html`
+  - **One asset can be pinned by several pages, independently.** `/v2.css` is pinned by `v2.html`, `stater.html` and `abacus.html`, and those three values have already diverged. Changing a shared asset means bumping *every* page that pins it; the pages you miss keep serving whatever was cached under their unchanged pin.
 
 ## Critical Patterns
 
