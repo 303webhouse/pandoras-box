@@ -197,6 +197,12 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "earnings_premarket": (100, TIER_STANDARD),
     "earnings_afterhours": (100, TIER_STANDARD),
     "earnings_dates": (100, TIER_STANDARD),
+    # R-IV.823(e): the nightly Triton dark-pool collection. It runs ONLY after the close, where
+    # STANDARD keeps 25% -- 125 calls a night under `enforce`. That is far below what the
+    # collection needs (it stops itself at an ACCOUNT total of 30,000), and the table's last
+    # 500 of headroom is all there is. Sized to fit, not to need: under `observe` (the default)
+    # this row only labels the traffic. Before `enforce` is flipped, this row needs a ruling.
+    "darkpool_collector": (500, TIER_STANDARD),
     # R-IV.432(e): the backtest module's second-vendor check -- /ohlc/1d, only for graded
     # rows whose window spans a calendar event, at most 40 tickers a pass. It runs after the
     # close, where STANDARD keeps 25% (50/day), which is the ceiling it is sized under.
