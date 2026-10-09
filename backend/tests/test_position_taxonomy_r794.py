@@ -301,9 +301,20 @@ class TestThePayload:
         assert fid["classification_reason"] == "not recorded", \
             "a Fidelity null is a GAP; a Robinhood null is a decision"
 
-        done = _build_position({"position_id": "C", "ticker": "Z", "account": "FIDELITY_ROTH",
+        # SUPERSEDED BY TA-126 / R-IV.804(b). This asserted `is None` for a classified row,
+        # which is precisely the defect TA found: all 11 Fidelity rows served a null basis
+        # beside a confident verdict, while the citations sat in the audit log where only an
+        # auditor could reach them. A classified row now serves its citation, or says loudly
+        # that none was recorded.
+        cited = _build_position({"position_id": "C", "ticker": "Z", "account": "FIDELITY_ROTH",
+                                 "classification": "TACTICAL",
+                                 "classification_reason": "R-IV.797(c)1"})
+        assert cited["classification_reason"] == "R-IV.797(c)1"
+
+        bare = _build_position({"position_id": "D", "ticker": "W", "account": "FIDELITY_ROTH",
                                 "classification": "TACTICAL"})
-        assert done["classification_reason"] is None
+        assert bare["classification_reason"] == tx.NO_BASIS_RECORDED
+        assert bare["classification_reason"] is not None
 
 
 class TestTheCapScope:

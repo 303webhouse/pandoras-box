@@ -49,6 +49,17 @@ DESCRIPTION = (
     "**Read `classification` (`STRATEGIC`/`TACTICAL`), `sleeve_tag` (`TAIL`/`CONVEXITY`) and "
     "`bucket` (`B1`/`B2`/`B3`) instead.** Three independent nullable fields, served on every "
     "row. `classification` is what the hard cap depends on.\n\n"
+    "**EVERY VALUE CARRIES ITS OWN BASIS** (TA-126, R-IV.804). `classification_reason` and "
+    "`bucket_reason` are served on every row: the ruling the value was written under, or "
+    "\"NO BASIS RECORDED — do not gate on this value\" when none was, or why the value is "
+    "absent (\"not applicable: ROBINHOOD\" is a decision; \"not recorded\" is a gap). They are "
+    "never null for a row carrying a value, because a null basis beside a confident verdict is "
+    "how 11 cited classifications came to serve nothing at all.\n\n"
+    "**`bucket` IS NOT SAFE TO GATE ON YET** (R-IV.804(c)). Today's buckets were inherited from "
+    "the legacy display strings, so they carry no basis of their own. `bucket_coverage` reports "
+    "`safe_to_gate`, how many bucketed rows have a basis, and which do not — check it exactly "
+    "as you would `cap_enforceable`. TA's deliberate 32-row table (R-IV.803(b)) supplies the "
+    "bases; until it lands, read `bucket` for information and gate on nothing.\n\n"
     "**AND CHECK `classification_backfilled` BEFORE ENFORCING ANYTHING.** While it is false the "
     "three fields are present but NOT yet populated, so a `null` there means \"not yet "
     "migrated\", NOT \"this row has no classification\". Reading the first as the second is how "
@@ -180,7 +191,10 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         # the other is a gap. Derived from the account rather than stored, so it cannot drift
         # away from the account it describes.
         "classification_reason": _tx.classification_reason(
-            row.get("account"), row.get("classification")),
+            row.get("account"), row.get("classification"), row.get("classification_reason")),
+        # R-IV.804(c): same fail-loud shape. A bucket with no recorded basis says so here
+        # rather than reading as a settled verdict.
+        "bucket_reason": _tx.bucket_reason(row.get("bucket"), row.get("bucket_reason")),
     }
 
 
@@ -268,6 +282,13 @@ async def hub_get_positions(
             p["position_id"] for p in positions
             if _tx.in_cap_scope(p.get("account")) and not p.get("classification")],
         "cap_enforceable": _tx.cap_enforceable(positions),
+        # R-IV.804(b): classified rows that serve no basis. Counted because a verdict without
+        # a citation is the state TA-126 found on all 11 Fidelity rows, and nothing said so.
+        "classifications_without_basis": sum(
+            1 for p in positions
+            if p.get("classification") and not _tx.has_basis(p, "classification")),
+        # R-IV.804(c): the bucket mirror of cap_enforceable.
+        "bucket_coverage": _tx.bucket_coverage(positions),
         "cap_scope": list(_tx.CAP_ACCOUNTS),
         "cap_scope_basis": (
             "the 20%% tactical cap reaches %s only; ROBINHOOD is governed by its sleeve "

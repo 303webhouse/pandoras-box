@@ -50,6 +50,7 @@ _DRIFT_DERIVED_FIELDS = ("computed_balance", "cash", "position_value", "position
 from models.position_taxonomy import FIELDS as _TAXONOMY_FIELDS      # noqa: E402
 from models.position_taxonomy import VOCABULARIES as _TAXONOMY_VOCAB  # noqa: E402
 from models.position_taxonomy import is_valid as _taxonomy_valid      # noqa: E402
+from models.position_taxonomy import REASON_COLUMNS as _TAXONOMY_REASON_COLUMNS  # noqa: E402
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
     entry_orientation, mark_from_legs, prior_is_good, stale_reason,
 )
@@ -346,6 +347,10 @@ class UpdatePositionRequest(BaseModel):
     classification: Optional[str] = None
     sleeve_tag: Optional[str] = None
     bucket: Optional[str] = None
+    # TA-126 / R-IV.804(b)+(c): the basis travels WITH the value. Free text — it is a citation,
+    # not a vocabulary — so it is length-capped rather than validated against a list.
+    classification_reason: Optional[str] = None
+    bucket_reason: Optional[str] = None
     status: Optional[str] = None  # OPEN, CLOSED, EXPIRED — allows reopening closed positions
     direction: Optional[str] = None  # LONG, SHORT
     structure: Optional[str] = None
@@ -2070,6 +2075,25 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
                         f"one into the other is the defect TA-123 found."))
         sets.append(f"{_field} = ${idx}")
         params.append(str(_value).strip().upper())
+        idx += 1
+    # TA-126 / R-IV.804: the basis columns. Free text (a citation), so capped rather than
+    # checked against a vocabulary; "" clears, as above. A basis written for a value that is
+    # not being set is accepted deliberately -- backfilling a citation onto an already-classified
+    # row is exactly what R-IV.804(b) is asking for.
+    for _field in _TAXONOMY_REASON_COLUMNS.values():
+        _value = getattr(req, _field, None)
+        if _value is None:
+            continue
+        _text = str(_value).strip()
+        if not _text:
+            sets.append(f"{_field} = NULL")
+            continue
+        if len(_text) > 500:
+            raise HTTPException(status_code=400,
+                                detail=f"{_field} is a citation, not a narrative: 500 characters "
+                                       f"at most (got {len(_text)})")
+        sets.append(f"{_field} = ${idx}")
+        params.append(_text)
         idx += 1
     if req.signal_id is not None:
         sets.append(f"signal_id = ${idx}")
