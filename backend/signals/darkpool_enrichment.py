@@ -122,6 +122,12 @@ async def _fetch_and_aggregate(ticker: str) -> Optional[Dict[str, Any]]:
     mid_premium    = 0.0
     no_nbbo_premium = 0.0     # prints with missing/zero NBBO — never forced directional
     total_premium_4h   = 0.0  # non-canceled, within 4h window
+    # W5 / R-IV.820(e): THIS WAS NEVER INITIALISED. Line ~162 does `total_premium_all += prem`
+    # for the size-distribution buckets, so the first print of every ticker raised
+    # UnboundLocalError, the caller recorded `darkpool_status = "error"`, and the UW call that
+    # fetched the prints was spent anyway (pipeline.py ~293-299). Every enriched signal has
+    # been paying for a dark-pool read that could not succeed.
+    total_premium_all  = 0.0  # non-canceled, ANY age — the size buckets' denominator
     large_print_count  = 0
     total_print_count  = 0    # non-canceled within 4h
     no_nbbo_count      = 0

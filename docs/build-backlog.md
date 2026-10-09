@@ -2,7 +2,7 @@
 
 Authoritative queue of in-flight, near-term, and deferred build work for Pandora's Box. Maintained as ATHENA's canonical reference for priority arbitration during Titans review passes.
 
-**Last updated:** 2026-07-15 (v4 — ZEUS Phase II / Stater Swap v2 (S-1) promoted to top-of-queue; rebuild-stack L1/L2 + Outcome Tracking Phase C + committee review logging + Phase B `get_bars` displaced; S-1 defect items absorbed; post-R-2 checkpoint + HELIOS mockup parallel-track recorded; Olympus crypto specialist Tier-3 item added; Crypto Scanner dormancy root-caused + flatline watchdog item added; F-4 cut over to unified pipeline as primary writer; S-1 CLOSED — closure note authored; canonical ticker normalization item added, closes Tier 2 #6)
+**Last updated:** 2026-10-09 (v5 — queue section replaced wholesale with SPINE R-IV.820(h): Nemesis wiring (R-IV.809 + R-IV.820(e)) at the top, then Hermes phase 2 alone, then fee-write path / boot-silence watchdog at 2x SLO / gap-3 / notional field / book delta. CC-LAB lane created with its merge gate; R-IV.809(f) and (g) moved to LAB. The 2026-07-15 ZEUS Phase II queue is closed or displaced.)
 **Maintained by:** ATHENA (Olympus Titans synthesis lane). Nick or CC may update directly when items are added, promoted, demoted, or closed.
 
 ---
@@ -41,32 +41,96 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 
 ## Top of queue (active scope)
 
-**ZEUS PHASE II — STATER SWAP v2 (crypto foundation rebuild), promoted 2026-07-14.**
-Forced by the committee brief's P0 finding (2026-07-12): `hub_get_quote("BTC")` silently resolved to a $28 NYSE ETF instead of Bitcoin, plus the crypto signal write-path bypassing L0/L1 governance entirely. Committee brief: `docs/strategy-reviews/stater-swap-redesign/2026-07-12-stater-swap-v2-committee-brief.md`. Build brief: `docs/codex-briefs/2026-07-13-stater-swap-s1-foundation-brief.md` (Brief S-1, R-0 foundation).
+**Authority: SPINE R-IV.820(h), 2026-10-09.** This section is CC-BUILD's queue as ruled, in
+order. Items are added, promoted or closed only by a SPINE ruling or by Nick directly; the
+previous contents of this section (ZEUS Phase II / Stater Swap S-1, dated 2026-07-15) are
+closed or displaced and are recorded in **Recent closures** and the tiers below.
 
-- **F-1 — Vendor verification + Symbol Capability Matrix.** SHIPPED + deployed (`1aae39e`, `222f452`). Six-symbol matrix (BTC/ETH/SOL/HYPE/ZEC/FARTCOIN), sanity bounds, LIVE/DEGRADED/DEAD health tracking, TV ticker classifier fix.
-- **F-2 — Outcome-tracking parity.** SHIPPED + deployed (`3b91328`). Asset-class-aware `outcome_resolver.py`, per-symbol bar sources, 24/7 crypto resolver loop.
-- **F-3 — Crypto data path on the hub.** SHIPPED + deployed (`90f9d10`). `hub_get_crypto_quote`, asset-class guard on `hub_get_quote` (P0 CLOSED), `/api/crypto/state/{symbol}` envelope. Countersigned by independent price-anchor check 2026-07-14.
-- **F-4 — L0 routing dual-write.** SHIPPED, then CUT OVER 2026-07-15 (Fable-directed "inverted shadow" ruling). `process_signal_unified` gained a `shadow` param (still used elsewhere); `bias_scheduler.py`'s Crypto Scanner bypass now calls the unified pipeline for REAL (persistence, Discord, broadcast, committee flagging, conflict-dismissal all live) — the original ad hoc scorer is demoted to a comparison-only shadow-logger in the same `crypto_dual_write_shadow` table. Diff report (`scripts/crypto_dual_write_diff_report.py`) now tracks RETIREMENT of the demoted logger (n>=30 real signals), not cutover — cutover already happened. Full pre-deploy Discord/fan-out review in `docs/strategy-reviews/stater-swap-redesign/s1-phase4-findings.md`.
-- **F-5 — Hygiene + bookkeeping.** IN PROGRESS (this update): Drogen framework note recovered, `session_sweep` known-red test fixed (root cause: stale hardcoded score predating an Olympus floor retune, not a classifier bug), this backlog v4 pass.
-- **R-1 through R-5** (regime/session, keep-list upgrades, strategy portfolio, new surfaces, UI port) — **QUEUED behind S-1's Done Definition**, per the brief's own "R-4/R-5 forbidden before R-0 ships" rule. **Post-R-2 checkpoint recorded as a sequencing gate below.** **S-6 (UI port) now has a named blocking dependency**: Tier 1 item #3 below (`breakout_prop` balance fake-healthy fix) must ship before S-6's distance-to-floor chip can be built correctly.
+### 1. Nemesis wiring — R-IV.809, widened by R-IV.820(e)
 
-**Displaced by this promotion (still real, real work — just no longer top-of-queue):**
-- **Rebuild stack L1 (Signal Quality) and L2 (Options Expression)** — L0 foundation work already shipped stays shipped; L1/L2 move behind ZEUS Phase II. Master brief `docs/codex-briefs/2026-06-16-rebuild-stack-master-brief.md` unchanged, just resequenced.
-- **Outcome Tracking Phase C** — partially self-paying via F-2's resolver-core work, but the full daily-walker re-walk project stays queued behind S-1.
-- **Committee review logging** — queued behind S-1.
-- **Phase B — `get_bars` migration off yfinance** — queued behind S-1 (closes ZEUS Phase I when it eventually ships).
+Three defects, not one; none of them is done until all three are.
 
-**Sequencing gate — Post-R-2 checkpoint (Titans review carry-forward, 2026-07-13):** before R-3/R-4 begin, ATHENA reassesses rebuild-stack L1 against Stater Swap's R-3/R-4 scope to decide relative priority. Standing obligation — do not skip.
+- **(b) the import fix.** `bias_scheduler.run_wrr_scan_job()` imported `run_wrr_scan`, a name
+  `strategies.wrr_buy_model` has never defined. The `except Exception` logged it as a routine
+  job error while APScheduler reported the job *"executed successfully"*. Measured: **0 rows**
+  have ever carried `strategy='nemesis_wrr'` or a `NEMESIS%` signal_type. Now points at
+  `run_wrr_and_process()`, so hits go through `process_signal_unified`.
+- **(c) L0 shadow.** `NEMESIS_LONG` added to `SUPPRESS_ALWAYS` — unproven, graded under
+  suppression, TA reviews before surfacing.
+- **N1(i) bars window.** `scan_wrr` called `get_bars(ticker, 1, "day")` with no `from_date`;
+  `get_bars` then defaults to a 60-calendar-day lookback (~41 bars) against a guard needing 205.
+  Every ticker was skipped before `scanned` incremented. Now asks for 400 calendar days.
+- **N1(ii) bias-gate scale.** The countertrend gate compares the **−1..+1** composite to **25**
+  and **75**, the March spec's 0–100 numbers — so it passes every long, rejects every short, and
+  rejects outright when the composite is unavailable, returning before the row is persisted. For
+  Nemesis rows the verdict is now RECORDED in `triggering_factors.countertrend_gate` and the row
+  is always saved. An enforced threshold on the −1..+1 scale comes later as a registered LAB
+  variant.
+- **N1(iii) dry-run bar.** The dry run passes only on **≥150 tickers scanned** with real
+  composite values. "No error" is not a pass.
+- **W5 dark-pool bug** (same deploy). `total_premium_all += prem` with the name never
+  initialised, so the first print of every ticker raised `UnboundLocalError`, the caller recorded
+  `darkpool_status = "error"`, and the UW call was spent anyway.
 
-**Parallel track approved (not gated on R-0/R-1 build sequencing):** HELIOS concept-mockup production for the eventual R-5 UI port runs DURING R-0/R-1 build work. Design work ≠ build work — the "R-5 forbidden before R-0 ships" rule binds code, not HELIOS's mockup drafting. Mockup gate (>=3 approved concepts, multi-symbol switcher, per-symbol N/A states, tier badges, >=1 Tier-3 view) still applies before any R-5 build.
+### 2. HERMES PHASE 2 — the session displacement alarm
 
-**Parallel tracks in flight (NOT part of the rebuild stack — coordinate worktrees, never `git add .`):**
-- **sb3 (scoring correctness)** — three fixes (dead ADX regime gate, double-counted/false-bearish flow, iv_rank dispersion proxy) shadow-staged on `sb3-work` (C:/th-scoring); promote pending UW-recovery confirm. Handoff: `docs/sb3-handoff-for-strategy-overhaul.md`. **Rebuild-stack L0.1b depends on this promote** (unaffected by the Phase II promotion — L0 itself already shipped).
-- **sec-work (Fable security)** — plaintext Postgres pw rotation + move to env. Branch `sec-work` (C:/th-security).
+Built alone, and moved up because it is the principal's standing complaint. The 10-08 miss is
+measured: **QQQ closed −1.65% while its largest 30-minute breach was −1.01%**, so phase 1's
+rolling-window test could not see it.
+
+- Push when a symbol's move **from the prior session's close** crosses its threshold, either
+  direction, during regular hours.
+- Starting thresholds: **SPY 1.0%, QQQ 1.25%, SMH 2.0%**. Re-alert only on a further **0.5%**.
+- Same webhook and co-breach logic as phase 1.
+- **Calibrate before enabling:** replay every session since 09-15 on stored or vendor intraday
+  bars (yfinance 5-minute covers 60 days) and report fires per symbol. A symbol firing on more
+  than **1 session in 5** has its threshold raised in 0.25% steps until it does not.
+- **Positive control: QQQ must fire on 10-08.** If calibration and the control conflict, stop and
+  report both.
+- Ship behind a flag. SPINE ratifies the final thresholds. The carry "degrossing" input is **not**
+  part of phase 2.
+
+### 3. Then, in order
+
+1. **The fee-write path** (R-IV.794(d)) — `create_position` and the add branch write `fees` as a
+   literal `0`. Accept an optional `fees` on both, with a UI field, defaulting to **null**
+   ("not recorded") rather than 0, so the next census can tell "zero" from "missing".
+2. **The boot-silence watchdog** (R-IV.804(d)) at the ruled **2× SLO**. A class dark past twice
+   its own SLO at boot is chronic: suppressed from paging and listed in an info-severity boot
+   summary. Under 2×, it pages. Controls: a restart during a fresh outage pages; a restart with a
+   class dark past 2× SLO does not and appears in the summary; empty Redis falls back with the
+   summary.
+3. **gap-3** — the write-path hook, then the `--dry-run` backfill counts.
+4. **The short-leg assignment-notional field.**
+5. **Book delta.**
+
+**LAB merges slot in as they arrive** (see below).
+
+### Lanes and gates
+
+**CC-LAB is a new lane** (the principal's decision, 2026-10-09, R-IV.820(f)). LAB owns strategy
+definitions, strategy code, historical tests and improvement. It works in its own clone
+(`C:\trading-hub-lab`), pushes `claude/lab-*` branches and **never pushes `main`**. CC-BUILD
+remains the only lane that merges `main` and deploys.
+
+**Merge gate for every LAB branch** — checked before merging, and the merge reported with its
+commit:
+
+1. tests run a real cycle (no source string-matching);
+2. no secrets or env values in the diff;
+3. nothing touches the Triton seal or Triton's code paths beyond the ordered collection;
+4. the UW budget is respected (hard stop 19:50 ET; never past the 8 PM ET reset);
+5. new jobs are registered in `/health`.
+
+**Moved to LAB and dropped from this queue:** R-IV.809(f) the roster fire count, and R-IV.809(g)
+the two-year Nemesis replay.
+
+**Rules packaging:** v5.3 (TA-131) is NOT applied alone. TA is issuing **v5.4** (v5.3 plus two
+principal rules from 2026-10-09); SPINE places it on disk. Apply once, package once.
+
+**Withdrawn, never delivered:** R-IV.811, R-IV.812, R-IV.814, R-IV.817 — replaced by R-IV.820.
 
 ---
-
 ## Tier 1 — Foundation / High-leverage / Gated
 
 ### 0. `process_signal_unified()` — Redis cache + WebSocket broadcast silently fail for every signal (platform-wide)

@@ -720,7 +720,56 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                     extreme_ok = True  # Extreme bull -> counter-short allowed
                 elif direction_ct in ("LONG", "BUY") and composite_score <= BIAS_EXTREME_BEARISH:
                     extreme_ok = True  # Extreme bear -> counter-long allowed
-            if not extreme_ok:
+
+            # ── N1(ii) / R-IV.820(e): THE THRESHOLDS ARE ON THE WRONG SCALE ──────────────
+            #
+            # BIAS_EXTREME_BULLISH/BEARISH are 75 and 25, from the March spec's 0-100 bias.
+            # `composite_score` is the -1..+1 composite (bias_engine/composite.py _clamp_score).
+            # So the arithmetic above cannot do what it reads as:
+            #   * counter-LONG needs composite <= 25  -> TRUE for every possible value: passes all
+            #   * counter-SHORT needs composite >= 75 -> FALSE for every possible value: rejects all
+            #   * composite unavailable (None)        -> extreme_ok stays False -> rejected
+            # and a rejection returns at ~1453 BEFORE the row is persisted, so the evidence of
+            # the mis-scaling was itself never written down.
+            #
+            # For NEMESIS ROWS ONLY the verdict is now RECORDED instead of enforced, and the row
+            # is always saved. Nemesis has no track record; it is in L0 SUPPRESS_ALWAYS
+            # (R-IV.809 shadow), so it is graded under suppression and reaches no actionable
+            # surface. An enforced threshold comes later as a registered LAB variant on the
+            # -1..+1 scale.
+            #
+            # MEASURED: nothing else reaches this gate. `countertrend` is set in exactly one
+            # place in the codebase -- strategies/wrr_buy_model.py:166 -- and the strategy-name
+            # test matches only `nemesis_wrr`/`wrr`. So the gate is Nemesis-only in practice and
+            # leaving it unchanged "for every other producer" changes no other producer's path.
+            _sig_type = (signal_data.get("signal_type") or "").upper()
+            _is_nemesis = strategy_lower == "nemesis_wrr" or _sig_type.startswith("NEMESIS")
+
+            if _is_nemesis:
+                _verdict = ("unavailable" if composite_score is None
+                            else ("pass" if extreme_ok else "fail"))
+                triggering_factors["countertrend_gate"] = {
+                    "verdict": _verdict,
+                    "composite": composite_score,
+                    "composite_scale": "-1..+1",
+                    "thresholds_compared": {
+                        "extreme_bullish": BIAS_EXTREME_BULLISH,
+                        "extreme_bearish": BIAS_EXTREME_BEARISH,
+                        "scale": "0..100 (March spec) — MISMATCHED, recorded not enforced",
+                    },
+                    "direction": direction_ct,
+                    "enforced": False,
+                    "basis": "R-IV.820(e) N1(ii): recorded under L0 suppression; an enforced "
+                             "threshold on the -1..+1 scale comes later as a LAB variant",
+                }
+                signal_data["triggering_factors"] = triggering_factors
+                signal_data["countertrend"] = True
+                signal_data["half_size"] = True
+                logger.info(
+                    "Nemesis gate %s (not enforced): %s %s composite=%s — row will be saved",
+                    _verdict, ticker, direction_ct, composite_score,
+                )
+            elif not extreme_ok:
                 signal_data["countertrend_rejected"] = True
                 signal_data["countertrend_reason"] = (
                     f"Bias not extreme (composite={composite_score}). "

@@ -61,6 +61,7 @@ SUPPRESS_ALWAYS: frozenset[str] = frozenset({
     "ARTEMIS_LONG",    # Artemis — no-long-edge (-0.11 alpha n=1,118; score>=80 slice -0.52%);
                        # named eviction candidate, cta-artemis-decompose 2026-06-16.
                        # ARTEMIS_SHORT stays live (salvageable-marginal, +0.04).
+    "NEMESIS_LONG",    # R-IV.809 shadow — unproven, graded under suppression; TA reviews before surfacing.
 })
 
 # signal_types suppressed ONLY when the ticker is not in the liquid universe.
