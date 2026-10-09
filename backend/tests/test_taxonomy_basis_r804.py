@@ -73,10 +73,21 @@ class TestBucketCarriesItsOwn:
         """Today's state for all 8 bucketed rows: inherited from a legacy display string."""
         assert tx.bucket_reason("B1") == tx.NO_BASIS_RECORDED
 
-    def test_an_absent_bucket_is_always_a_GAP_never_a_decision(self):
-        """Unlike the 20% cap, buckets are not scoped to an account, so there is no
-        "not applicable" case to confuse with a missing one."""
+    def test_an_absent_bucket_with_NO_reason_is_a_gap(self):
         assert tx.bucket_reason(None) == "not recorded"
+
+    def test_an_absent_bucket_WITH_a_reason_is_a_deliberate_exclusion(self):
+        """R-IV.807(c) added this case, and it overturns what R-IV.804(c) said — that an absent
+        bucket is "always a gap and never a decision". TA-127 removes PDBC's and WEAT's
+        inherited B1 and leaves IWM unbucketed, each for a stated reason, and "deliberately
+        unbucketed" must not read the same as "nobody looked"."""
+        reason = "expired 2026-10-09 before bucketing; no gate reads it"
+        assert tx.bucket_reason(None, reason) == reason
+
+    def test_a_non_vocabulary_bucket_with_a_reason_still_serves_the_reason(self):
+        """It is unbucketed as far as any gate is concerned, so it takes the same branch."""
+        assert tx.bucket_reason("TAIL", "strategic core, not a tactical bucket") == \
+            "strategic core, not a tactical bucket"
 
     def test_it_is_never_none_for_a_bucketed_row(self):
         for stored in (None, "", "x"):
@@ -89,8 +100,12 @@ class TestBucketCarriesItsOwn:
         citation passed all 34 tests. Both axes now carry the same assertion."""
         assert tx.bucket_reason("B2", blank) == tx.NO_BASIS_RECORDED
 
-    def test_a_non_vocabulary_value_acquires_no_basis(self):
-        assert tx.bucket_reason("TAIL", "whatever") == "not recorded"
+    def test_a_non_vocabulary_value_is_not_treated_as_bucketed(self):
+        """It takes the UNBUCKETED branch, so with no reason it is a gap. (It used to assert
+        that a reason was discarded here; R-IV.807(c) made a recorded reason meaningful for an
+        unbucketed row, and the case above covers that.)"""
+        assert tx.bucket_reason("TAIL") == "not recorded"
+        assert tx.has_basis({"bucket": "TAIL", "bucket_reason": "x"}, "bucket") is False
 
 
 class TestHasBasis:
