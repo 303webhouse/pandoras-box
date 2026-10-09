@@ -89,6 +89,24 @@ AGE_SOURCES: dict[str, str] = {
     # over 60 days: median gap between signals 0.5h, yet ELEVEN gaps past the 12h SLO and nine
     # past 24h, the longest 131.9h. Judged on signal age it raised eleven false flatlines.
     "crypto_scanner": AGE_SOURCE_JOB_RUNS,
+    # R-IV.800(b): the other two conditional crypto producers, for the same reason, after the
+    # same measurement. `crypto_engine` (crypto_setups.py, via main.py's 5-minute loop) emits
+    # only when a funding/session/liquidation setup fires; `crypto_cvd_engine` (inside the
+    # tape-health job) only when a divergence/absorption condition does, which with
+    # DEF-CVD-QUARANTINE's fail-closed gate may be never. Both were judged on signal age, so a
+    # quiet regime read as a dead engine -- crypto_engine tripped flatline after 12.6 quiet
+    # hours on 2026-10-08 with its loop demonstrably alive.
+    #
+    # THE ORDER MATTERED. Switching the source alone would have been WORSE than the bug: the
+    # declared source is the only source, so the signal age is discarded, and with no job_runs
+    # row these classes render `no_data` -- which does NOT degrade. /health would have gone
+    # green while the sentinel became incapable of ever firing, and the approval's own control
+    # ("/health clears for both") would have passed vacuously. So the producers were made to
+    # record their runs FIRST (main.py's crypto_scan_loop, bias_scheduler's tape-health job),
+    # which is also what R-IV.617(b) actually did for the scanner -- it added the start_run as
+    # well as the mapping.
+    "crypto_engine": AGE_SOURCE_JOB_RUNS,
+    "crypto_cvd_engine": AGE_SOURCE_JOB_RUNS,
     "triton_grader": AGE_SOURCE_JOB_RUNS,
     "circes_stew": AGE_SOURCE_JOB_RUNS,
     "circes_stew_unsurfaced": AGE_SOURCE_JOB_RUNS,
@@ -96,7 +114,13 @@ AGE_SOURCES: dict[str, str] = {
 }
 # job_runs name per class, where it differs from the class. Both CIRCE source values are
 # written by ONE pass.
-AGE_SOURCE_JOB_NAME: dict[str, str] = {"circes_stew_unsurfaced": "circes_stew"}
+AGE_SOURCE_JOB_NAME: dict[str, str] = {
+    "circes_stew_unsurfaced": "circes_stew",
+    # R-IV.800(b): the CVD engine has no job of its own -- it emits from INSIDE the tape-health
+    # job's compute_all_tape_health(). So "is the CVD engine alive" is answered by "did the
+    # tape-health job run", which is the job that would carry it if it had anything to say.
+    "crypto_cvd_engine": "crypto_tape_health",
+}
 
 # R-IV.617(b): TWO SIGNALS, AND ONLY ONE OF THEM DEGRADES.
 #
@@ -108,7 +132,14 @@ AGE_SOURCE_JOB_NAME: dict[str, str] = {"circes_stew_unsurfaced": "circes_stew"}
 #
 # A class here is judged on its run row. Its emitted count is reported beside the status and
 # cannot move it.
-JOB_ALIVE_CLASSES: frozenset[str] = frozenset({"crypto_scanner"})
+#
+# R-IV.800(b): all THREE conditional crypto producers belong here, not just the scanner. The
+# membership matters beyond bookkeeping: an alive-judged class reads `last_run`, which reports a
+# FAILED run, while the default `last_completed` is deliberately blind to failure and would
+# return None for an errored job -- rendering `no_data` instead of the flatline it is. For a
+# class whose whole question is "is it alive", that is exactly backwards.
+JOB_ALIVE_CLASSES: frozenset[str] = frozenset({"crypto_scanner", "crypto_engine",
+                                               "crypto_cvd_engine"})
 
 # Classes whose work is expected once per TRADING SESSION rather than continuously.
 # Their SLO is only evaluated when a pass was actually due -- see _pass_overdue().

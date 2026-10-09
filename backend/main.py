@@ -381,19 +381,51 @@ async def lifespan(app: FastAPI):
                 logger.warning("Factor staleness loop error: %s", e)
             await asyncio.sleep(3600)  # 60 minutes
 
+    async def _close_crypto_engine_run(run_id, status: str, rows: int, error=None):
+        """Close the crypto engine's job_runs record. Never raises into the loop.
+
+        A failure to RECORD the run must not fail the run -- but it must not look like success
+        either, because the freshness check reads this row and a silent write failure would
+        leave a live engine looking dead. Logged loudly instead (R-IV.617(b)'s reasoning).
+        """
+        if run_id is None:
+            return
+        try:
+            from jobs.job_runs import finish_run
+            await finish_run(run_id, status, rows_touched=rows, error=error)
+        except Exception as exc:                                # noqa: BLE001
+            logger.error("Crypto scan: could not close its job_runs record (%s): %s",
+                         status, exc)
+
     # Crypto setup engine: scan for BTC funding/session/liquidation setups
     async def crypto_scan_loop():
         """Run crypto setup engine every 5 minutes (24/7 — crypto never sleeps)."""
         await asyncio.sleep(90)  # 1.5 min after startup
 
         while True:
+            # R-IV.800(b): THE ENGINE RECORDS THAT IT RAN, exactly as R-IV.617(b) made the
+            # crypto SCANNER do. `crypto_engine` emits a signal only when a funding/session/
+            # liquidation setup fires, so judging it on signal age makes a quiet regime
+            # indistinguishable from a dead engine -- which is precisely the false flatline
+            # that tripped tonight after 12.6 quiet hours.
+            run_id = None
+            try:
+                from datetime import date as _date
+
+                from jobs.job_runs import start_run
+                run_id = await start_run("crypto_engine", _date.today())
+            except Exception as e:                              # noqa: BLE001
+                logger.warning("Crypto scan: could not open a job_runs record: %s", e)
             try:
                 from strategies.crypto_setups import run_crypto_scan
                 signals = await run_crypto_scan()
                 if signals:
                     logger.info("₿ Crypto scan: %d signal(s) generated", len(signals))
+                # A zero here is "nothing qualified", not a fault, and never degrades.
+                await _close_crypto_engine_run(run_id, "ok", len(signals or []))
             except Exception as e:
                 logger.warning("Crypto scan loop error: %s", e)
+                await _close_crypto_engine_run(run_id, "error", 0, error=str(e)[:400])
             await asyncio.sleep(300)  # 5 minutes
 
     # UW flow poller: populate flow_events every 5 min during market hours (ZEUS 1A.0)
