@@ -480,7 +480,18 @@ class TestTheFrontendHalf:
         assert "const err = await response.json().catch(() => ({}));" not in js
         assert "alert('Error saving position: ' + (data.detail" in js
 
-    def test_the_cache_pins_were_bumped_for_both_pages(self):
-        """A changed script behind an unchanged ?v= is a fix that never reaches the browser."""
-        assert "/app.js?v=177" in self._read("index.html")
-        assert "/v2.js?v=55" in self._read("v2.html")
+    def test_both_pages_still_pin_their_script(self):
+        """A changed script behind an unchanged `?v=` is a fix that never reaches the browser.
+
+        This asserted the literal `?v=177` / `?v=55` until R-IV.792, when the very next bump
+        broke it. A hardcoded version here is the same defect R-IV.790(d) removed from
+        CLAUDE.md: a second copy of a number that changes on every deploy. It could never have
+        caught a MISSED bump either -- only a real one. So what is pinned here is that the pin
+        EXISTS and is numeric; whether it was incremented is a review question, not a constant.
+        """
+        import re
+
+        for page, script in (("index.html", "app.js"), ("v2.html", "v2.js")):
+            m = re.search(r"/%s\?v=(\d+)" % re.escape(script), self._read(page))
+            assert m, "%s must pin /%s with a ?v=" % (page, script)
+            assert int(m.group(1)) > 0

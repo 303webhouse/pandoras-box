@@ -32,6 +32,18 @@ from models.accounts import (  # R-IV.445(a): one vocabulary, read by every writ
 from models.accounts import FIDELITY_401A as FIDELITY_401A_KEY   # R-IV.660(d)
 from models.accounts import FIDELITY_ROTH as FIDELITY_ROTH_KEY
 from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not deleted
+from models.derived_as_of import (  # R-IV.775(f)/792(b): a derived figure carries its own as-of
+    as_of_block, drift_between,
+)
+
+# R-IV.775(f). Every figure in `/v2/positions/summary` that is COMPUTED from the live book, as
+# opposed to read from the stored `account_balances` row. `account_balance` is deliberately
+# absent -- it is the stored one, and it is the figure whose date was being read onto the others.
+# `drift_dollars` IS here: it is derived too, and leaving the one conditional figure
+# unattributed is the same omission in miniature.
+_DRIFT_DERIVED_FIELDS = ("computed_balance", "cash", "position_value", "position_count",
+                         "unpriced_count", "capital_at_risk", "capital_at_risk_pct",
+                         "net_direction", "stale_positions", "drift_dollars")
 from services.leg_mark import (  # R-IV.458(a)/460(b): legs, not names, say what is held
     entry_orientation, mark_from_legs, prior_is_good, stale_reason,
 )
@@ -1395,13 +1407,24 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     except Exception:
         pass
 
+    # R-IV.775(f): the derived figures below get their OWN instant, captured once here so every
+    # figure in the payload is stamped with the same one rather than each reading a clock.
+    _derived_at = datetime.now(timezone.utc)
+
     if not positions:
         computed_empty = round(cash, 2)
+        _drift, _drift_basis = drift_between(round(stored_balance, 2), computed_empty,
+                                             stored_as_of=balance_updated_at, now=_derived_at)
         return {
             "account_balance": round(stored_balance, 2),
             "computed_balance": computed_empty,
-            "drift_dollars": round(stored_balance - computed_empty, 2),
+            "drift_dollars": _drift,
+            "drift_basis": _drift_basis,
             "balance_updated_at": balance_updated_at.isoformat() if balance_updated_at else None,
+            "computed_at": _derived_at.isoformat(),
+            "as_of": as_of_block(derived_at=_derived_at, stored_as_of=balance_updated_at,
+                                 now=_derived_at, derived_fields=_DRIFT_DERIVED_FIELDS,
+                                 stored_fields=("account_balance",)),
             "cash": cash,
             "position_value": 0.0,
             "position_count": 0,
@@ -1468,7 +1491,9 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
     # implies; drift between them triggers the reconcile banner.
     computed_balance = round(cash + total_position_value, 2)
     account_balance = round(stored_balance, 2)
-    drift_dollars = round(stored_balance - computed_balance, 2)
+    # `drift_dollars` is NOT computed here any more. It is decided once, just above the return,
+    # by models.derived_as_of -- because under R-IV.792(b) it is conditional on the stored side's
+    # age, and a figure computed here and overwritten there would be two authors for one number.
     today = date.today()
 
     # Nearest expiry
@@ -1579,11 +1604,23 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         expiry_map[exp_str]["total_cost"] += abs(p.get("cost_basis") or 0)
     expiry_clusters = sorted(expiry_map.values(), key=lambda x: x["date"])
 
+    # R-IV.792(b): a difference between a stored figure and a live one measures drift only when
+    # BOTH sides are fresh. Past 24 hours the figure is withheld and the reason takes its place —
+    # on the live book the stored side was 14.3 days old and 2,782.43 was being published as
+    # "drift" when most of it was staleness.
+    drift_dollars, drift_basis = drift_between(account_balance, computed_balance,
+                                               stored_as_of=balance_updated_at,
+                                               now=_derived_at)
     return {
         "account_balance": account_balance,
         "computed_balance": computed_balance,
         "drift_dollars": drift_dollars,
+        "drift_basis": drift_basis,
         "balance_updated_at": balance_updated_at.isoformat() if balance_updated_at else None,
+        "computed_at": _derived_at.isoformat(),
+        "as_of": as_of_block(derived_at=_derived_at, stored_as_of=balance_updated_at,
+                             now=_derived_at, derived_fields=_DRIFT_DERIVED_FIELDS,
+                             stored_fields=("account_balance",)),
         "cash": cash,
         "position_value": total_position_value,
         "position_count": len(positions),
