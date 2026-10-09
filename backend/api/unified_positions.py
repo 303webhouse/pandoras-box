@@ -301,6 +301,12 @@ class CreatePositionRequest(BaseModel):
     # The day the fill happened, on the principal's clock (R-IV.464(a)). Read by the opening
     # lot and by an add that combines into an open row; absent, the write's own instant.
     entry_date: Optional[str] = None
+    # R-IV.767(c): the way through the duplicate guard, and it DEFAULTS TO FALSE. A field that
+    # defaulted to true would be a guard that is off until someone remembers to switch it on,
+    # which is the shape of every defect in this register. The principal ticks it to say "yes,
+    # I really made this trade twice" and the second entry is then accepted and recorded as
+    # confirmed, so the book says it was deliberate rather than merely saying nothing.
+    confirm_duplicate: bool = False
 
 
 class UpdatePositionRequest(BaseModel):
@@ -560,6 +566,65 @@ def _infer_legs_from_notes(notes: str) -> Optional[List[Dict[str, Any]]]:
     return legs if len(legs) >= 2 else None
 
 
+async def _recent_duplicate_entry(conn, *, account: str, ticker: str, side: Optional[str],
+                                  req: "CreatePositionRequest") -> Optional[str]:
+    """R-IV.767(c). The refusal sentence for a re-submitted entry, or None to proceed.
+
+    The LOOKUP is here and the DECISION is in `models.lot_duplicate_guard`, deliberately apart.
+    The window below is a coarse net cast in SQL; whether two entries are the same entry is
+    decided in Python, on Decimals, where it can be tested without a database. A sloppy SQL
+    predicate therefore cannot silently widen the guard — the worst it can do is hand the
+    decision more rows than it needs.
+
+    `NOW()` is selected alongside the rows so the comparison runs on ONE clock, the database's.
+    Comparing a Python `utcnow()` against a Postgres `created_at` is how an instrument ends up
+    six hours out without raising anything.
+
+    WHAT THIS DOES NOT CLOSE, stated rather than implied: the check and the write are not one
+    transaction, so two submits landing inside the same instant could both read an empty window
+    and both proceed. The entry on the record was TEN SECONDS apart, which no lock would have
+    been holding across; a sub-millisecond race needs a partial unique index, and the obvious
+    one would refuse the legitimate identical fills an import carries. Left open knowingly, and
+    named here so the next reader does not have to rediscover it.
+    """
+    from models.lot_duplicate_guard import (
+        GUARD_WINDOW_SECONDS, find_twin, is_guarded_source, refusal_detail,
+    )
+
+    # Nothing to guard: no lot is written without a price and a size, so there is no duplicate
+    # to make. Checked rather than assumed, because the create branch lots only when both are
+    # present and a guard that fired on a priceless row would refuse what cannot duplicate.
+    if req.entry_price is None or not req.quantity:
+        return None
+    # An IMPORT is a broker export being copied, where two identical fills are one order filled
+    # in two parts. Refusing the second would corrupt the book in order to protect it.
+    if not is_guarded_source(req.source):
+        return None
+
+    rows = await conn.fetch(
+        """SELECT l.id, l.position_id, l.qty, l.price, l.created_at, l.source,
+                  p.account, p.ticker, p.direction AS side, NOW() AS db_now
+             FROM position_lots l
+             JOIN unified_positions p ON p.position_id = l.position_id
+            WHERE p.ticker = $1 AND p.account = $2
+              AND l.qty > 0
+              AND l.created_at >= NOW() - ($3::int * INTERVAL '1 second')""",
+        ticker, account, int(GUARD_WINDOW_SECONDS))
+    recent = [dict(r) for r in rows if is_guarded_source(r["source"])]
+    if not recent:
+        return None
+
+    candidate = {"account": account, "ticker": ticker, "side": side,
+                 "qty": abs(float(req.quantity)), "price": abs(float(req.entry_price))}
+    twin = find_twin(candidate, recent, now=recent[0]["db_now"])
+    if twin is None:
+        return None
+    # The confirm is handled by the CALLER, not by returning None here: a confirmed re-submit is
+    # still a known duplicate and has to be RECORDED as one. Returning None would let it through
+    # saying nothing, which trades a wrong figure for a silence -- the same bargain as before.
+    return refusal_detail(twin, candidate, now=recent[0]["db_now"])
+
+
 # ── CREATE ────────────────────────────────────────────────────────────
 
 @router.post("/v2/positions")
@@ -623,6 +688,22 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             norm_long or 0, norm_short or 0,
             str(req.expiry)[:10] if req.expiry else "",
         )
+
+        # R-IV.767(c): the duplicate guard, BEFORE either branch writes anything. It sits here
+        # rather than beside each INSERT because the same entry submitted twice can take a
+        # different branch each time -- the first submit creates the row, so the second one adds
+        # to it -- and a guard wired per-branch would miss exactly that crossing.
+        dup = await _recent_duplicate_entry(conn, account=account, ticker=req.ticker.upper(),
+                                            side=direction, req=req)
+    if dup is not None:
+        if not req.confirm_duplicate:
+            raise HTTPException(status_code=409, detail=dup)
+        # Confirmed, so it is written -- and the audit trail says it was a known duplicate
+        # accepted on purpose. An entry that goes in silently is indistinguishable from the
+        # defect this guard exists to stop, which would leave the next reader with the same
+        # question and no answer.
+        req.reason = "CONFIRMED DUPLICATE (R-IV.767(c)): %s%s" % (
+            dup, (" | " + req.reason) if req.reason else "")
 
     if existing and req.entry_price is not None:
         # --- ADD TO EXISTING POSITION (weighted average cost basis) ---

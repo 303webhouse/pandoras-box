@@ -2104,13 +2104,58 @@
     if (num('f_stop') != null) body.stop_loss = num('f_stop');
     if (num('f_target') != null) body.target_1 = num('f_target');
     if (val('f_notes')) body.notes = val('f_notes');
+    // R-IV.767(c): the principal ticked "I made this trade twice", so send it with the entry.
+    // Read and CLEARED here, so a confirm is spent on the one submit it was given for and
+    // cannot sit armed for the next entry — which would reinstate the defect with a tick in it.
+    if (addConfirmDuplicate) { body.confirm_duplicate = true; addConfirmDuplicate = false; }
     $('f_msg').className = 'form-msg'; $('f_msg').textContent = 'saving…';
+    // The button is disabled for the WHOLE round trip and re-enabled in `finally`, so a failed
+    // save leaves a usable form. The two SOXS writes were ten seconds apart, so this alone
+    // would not have stopped them -- the server guard is the half that does. It stops the
+    // double-click, which is a different mistake with the same result.
+    const btn = $('f_submit');
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'saving…'; }
     try {
       const r = await apiFetch('/api/v2/positions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(body) });
       if (r.ok) { $('f_msg').className = 'form-msg ok'; $('f_msg').textContent = 'created'; setTimeout(() => { closeModal(); refreshDesk(); }, 500); }
       else if (r.status === 401) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'sign in to add positions'; showLogin(); }
-      else { const d = await r.json().catch(() => ({})); $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'failed: ' + (d.detail || r.status); }
+      else {
+        const d = await r.json().catch(() => ({}));
+        // A 409 from the duplicate guard is the one refusal the principal can overrule, so it
+        // gets the sentence in full and a way through, not a status code.
+        if (r.status === 409 && typeof d.detail === 'string' && /same entry twice/.test(d.detail)) {
+          showDuplicateRefusal(d.detail);
+        } else {
+          $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'failed: ' + (d.detail || r.status);
+        }
+      }
     } catch (_) { $('f_msg').className = 'form-msg err'; $('f_msg').textContent = 'network error'; }
+    finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
+  }
+
+  // R-IV.767(c). The refusal, with the one action that answers it. Nothing is pre-ticked and
+  // nothing re-sends by itself: the principal has to say a second time that the trade really
+  // happened twice, which is the whole value of the refusal.
+  let addConfirmDuplicate = false;
+  function showDuplicateRefusal(detail) {
+    addConfirmDuplicate = false;
+    const msg = $('f_msg');
+    if (!msg) return;
+    msg.className = 'form-msg err';
+    msg.textContent = '';
+    const text = document.createElement('div');
+    // The sentence the server wrote, verbatim. The page does not paraphrase a refusal: a
+    // second wording is a second thing to keep true.
+    text.textContent = detail;
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'btn-secondary';
+    again.style.marginTop = '6px';
+    again.textContent = 'I really did make this trade twice — save it anyway';
+    again.addEventListener('click', () => { addConfirmDuplicate = true; submitAdd(); });
+    msg.appendChild(text);
+    msg.appendChild(again);
   }
 
   function openCloseForm(p) {
