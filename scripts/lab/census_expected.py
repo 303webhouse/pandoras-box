@@ -198,6 +198,7 @@ def scout_rows(tickers):
         def utcnow(cls):
             return cls.at.tz_convert("UTC").tz_localize(None).to_pydatetime()
 
+    min_score = sc.SCOUT_CONFIG.get("min_quality_score", 3)
     real = sc.datetime
     sc.datetime = _Clock
     rows, err, first = [], {}, None
@@ -216,7 +217,11 @@ def scout_rows(tickers):
                 first = ts.date() if first is None else min(first, ts.date())
                 _Clock.at = ts
                 try:
+                    # The scan loop's quality gate (scout_sniper_scanner.py:380-381) sits OUTSIDE
+                    # check_scout_signals, so it is applied here (census part 2, R-IV.850).
                     for sg in sc.check_scout_signals(ind.iloc[: i + 1], t):
+                        if sg.get("score", 0) < min_score:
+                            continue
                         rows.append((t, ts.date(), sg.get("signal_type", "SCOUT_ALERT"),
                                      sg["direction"], "scout15m"))
                 except Exception as e:  # noqa: BLE001
