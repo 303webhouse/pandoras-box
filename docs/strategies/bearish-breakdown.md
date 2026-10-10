@@ -34,7 +34,7 @@ and a falling 20-SMA, and fixes volume at 1.5×.
   n dates not stated.
 - 37 all-time rows (`docs/edge/results/QS-02-RESULTS.md:472`).
 - It is a short, so its market-adjusted figure is the one that matters, and none exists.
-- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+- **Task 5 replay (R-IV.850(e); `C:\temp\cc-query-handoff\lab
 emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** 3,418 fires / 1,565 dates: h1/h2/h3 date-mean −0.01 / −0.04 / **−0.02%** (t −0.27 at h3); same-date difference +0.02 (t 0.22); flat in every split. **No edge in stage 1**; the n the roster review lacked (TA-140 §4 had 12). Stage 2 not run (declared: stage 1 not positive).
 
 ## Kill rule

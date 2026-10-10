@@ -41,7 +41,7 @@ Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); princi
   Most are Crypto Scanner (`docs/edge/results/QS-02-RESULTS.md:462,471`: 489 crypto vs 49 CTA).
   The +0.82 is the equity slice.
 - No market-adjusted figure exists yet.
-- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+- **Task 5 replay (R-IV.850(e); `C:\temp\cc-query-handoff\lab
 emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** 2,209 fires / 1,420 dates: h3 date-mean **+0.17%** (t 1.69); same-date difference +0.15 (t 1.45); STACK transition flat (+0.02); sector-ETF check **negative** (−0.31, t −1.88, n 84). Weak, not established. Stage 2 owed (needs a ruling on single-name IV).
 
 ## Kill rule

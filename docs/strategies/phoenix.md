@@ -78,7 +78,7 @@ branch that **records** the countertrend verdict in `triggering_factors.countert
   gap-down-and-recover bar satisfies both.
 - Replay V-CODE is Task 5 (R-IV.809(g)). It measures whether this is rare or effectively never
   over 2007–2026.
-- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+- **Task 5 replay (R-IV.850(e); `C:\temp\cc-query-handoff\lab
 emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** 137 fires / 97 dates: h3 date-mean **−0.08%** (t −0.23); same-date control difference **−0.26** (t −0.76). Its own ablation (washout without candle and volume) is +0.25 (t 3.0, n 4,743): the coded candle + volume filters remove the washout's edge and almost all its fires. A B-shaped version would be a NEW version, tested forward.
 
 ## Kill rule

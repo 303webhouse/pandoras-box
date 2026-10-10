@@ -54,7 +54,7 @@ is recorded as not replayable. The March scale (0–100) is not the live composi
 
 ## Evidence so far
 None. No implementation has ever emitted `WRR_LONG` or `WRR_SHORT`.
-- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+- **Task 5 replay (R-IV.850(e); `C:\temp\cc-query-handoff\lab
 emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** V-SPEC without the bias condition (not replayable), three declared ROC variants. LONG positive at h3 in all three (date-mean +0.28 to +0.66%, t 1.9–2.5; same-date difference +0.19 to +0.55, t 1.4–2.2), concentrated with SPY below its 200-day and in STACK transition, negative in range. SHORT weak (variant c h1 +0.26, t 2.33 only). Three variants tried: a registration candidate, never a result. Stage 2 owed (needs a ruling on single-name IV).
 
 ## Kill rule
