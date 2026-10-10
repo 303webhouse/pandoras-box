@@ -755,8 +755,12 @@ async def _compute_signals_active() -> Dict[str, Any]:
                             # (default False = unchanged); preserve original type if withheld.
                             from config.l0_apis import apply_apis_label
                             if apply_apis_label(sig.get('ticker')):
+                                from config.strategy_aliases import record_upgraded_from
+                                record_upgraded_from(sig)  # R-IV.843(e): base type, explicit
                                 sig['signal_type'] = "APIS_CALL"
                         elif direction in ["SHORT", "SELL"]:
+                            from config.strategy_aliases import record_upgraded_from
+                            record_upgraded_from(sig)  # R-IV.843(e): base type, explicit
                             sig['signal_type'] = "KODIAK_CALL"
                     elif score >= 75:
                         sig['confidence'] = "HIGH"

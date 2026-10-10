@@ -796,6 +796,8 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                 # the original signal_type is preserved (no overwrite).
                 from config.l0_apis import apply_apis_label
                 if apply_apis_label(ticker):
+                    from config.strategy_aliases import record_upgraded_from
+                    record_upgraded_from(signal_data)  # R-IV.843(e): base type, explicit
                     signal_data["signal_type"] = "APIS_CALL"
                     logger.info(f"🐝 APIS CALL: {signal_data.get('ticker')} (score: {score})")
                 else:
@@ -804,6 +806,8 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                         f"{signal_data.get('ticker')} (score: {score})"
                     )
             elif direction in ("SHORT", "SELL"):
+                from config.strategy_aliases import record_upgraded_from
+                record_upgraded_from(signal_data)  # R-IV.843(e): base type, explicit
                 signal_data["signal_type"] = "KODIAK_CALL"
                 logger.info(f"🐻 KODIAK CALL: {signal_data.get('ticker')} (score: {score})")
         elif score >= 75:

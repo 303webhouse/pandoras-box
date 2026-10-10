@@ -20,7 +20,8 @@ from config.strategy_aliases import (
     ("SELL_RIP_EMA", "Achilles"),
     ("SELL_RIP_VWAP", "Achilles"),
     ("SELL_RIP_EARLY", "Achilles"),
-    ("NEMESIS_LONG", "Nemesis"),
+    ("NEMESIS_LONG", "Phoenix"),   # R-IV.843(e): the coded WRR is PHOENIX
+    ("NEMESIS_SHORT", "Nemesis"),
     ("WHALE_LONG", "Triton"),
 ])
 def test_signal_type_codenames(st, expected):

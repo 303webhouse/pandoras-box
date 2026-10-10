@@ -17,7 +17,7 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
+from config.strategy_aliases import codename, attach_codename, display_label, upgrade_tag  # L0.4 / R-IV.843(e)
 from config.strategy_class import attach_strategy_class, strategy_class  # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL  # RV4, R-IV.566(e)2
 from signals.session_policy import SERVE_RELEASED_SQL, is_held  # R-IV.587(b)1
@@ -347,6 +347,9 @@ async def get_active_trade_ideas(
                 "signal_id": r.get("signal_id"),
                 "strategy": r.get("strategy") or r.get("signal_type"),
                 "codename": codename(r.get("signal_type"), r.get("strategy")),  # L0.4 additive
+                "display_label": display_label(r.get("signal_type"), r.get("strategy"),
+                                               r.get("triggering_factors")),  # R-IV.843(e)
+                "upgrade_tag": upgrade_tag(r.get("signal_type")),             # R-IV.843(e)
                 "strategy_class": strategy_class(r.get("signal_type"),
                                                  r.get("strategy")),  # R-IV.577(b)
                 "session": session_of(r),                             # RV5

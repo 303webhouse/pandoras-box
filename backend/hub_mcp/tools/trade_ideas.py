@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ..decorators import mcp_tool
 from ..envelope import make_response
-from config.strategy_aliases import codename  # L0.4 display alias (additive)
+from config.strategy_aliases import codename, display_label, upgrade_tag  # L0.4 / R-IV.843(e)
 
 DESCRIPTION = (
     "Returns the hub's active scored trade ideas — the grouped Insights feed "
@@ -81,6 +81,9 @@ def _serialize_group(g: Dict[str, Any], now: datetime, include_related: bool) ->
         "strategies": g.get("strategies"),
         "signal_type": p.get("signal_type"),
         "codename": codename(p.get("signal_type"), p.get("strategy")),  # L0.4 additive
+        "display_label": display_label(p.get("signal_type"), p.get("strategy"),
+                                       p.get("triggering_factors")),  # R-IV.843(e)
+        "upgrade_tag": upgrade_tag(p.get("signal_type")),             # R-IV.843(e)
         # R-IV.578(b): `asset_class` is what makes `include_crypto` usable. Without
         # it a committee that asked for crypto would have to infer which rows are
         # crypto from the ticker, and inferring a field is the failure this whole
