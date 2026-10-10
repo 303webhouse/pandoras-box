@@ -13,7 +13,7 @@ The name means this spec only (R-IV.843(d)). The June "Nemesis v0.2" acceleratio
 | schedule / trigger | approved: once daily after the close, 4:15 PM ET (`docs/build-plans/phase-5-countertrend-lane.md:51`) |
 | status | **SPEC-ONLY**. Not implemented on either side; never counts as coverage (R-IV.830(e)) |
 | bucket ceiling | **B3 or TAIL** (before-the-turn, R-IV.823(c)3). **SHORT side carries the no-fly flag "entering parabolic shorts too early".** |
-| lifetime tries counter | **0** |
+| lifetime tries counter | **3** (V-SPEC variants a/b/c, 2026-10-10) |
 
 ## Rules as approved
 Olympus 2026-03-16 "APPROVED with conditions" (`wrr-buy-model.md:9`); Titans 2026-03-17 (`:62`).
@@ -54,6 +54,8 @@ is recorded as not replayable. The March scale (0–100) is not the live composi
 
 ## Evidence so far
 None. No implementation has ever emitted `WRR_LONG` or `WRR_SHORT`.
+- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** V-SPEC without the bias condition (not replayable), three declared ROC variants. LONG positive at h3 in all three (date-mean +0.28 to +0.66%, t 1.9–2.5; same-date difference +0.19 to +0.55, t 1.4–2.2), concentrated with SPY below its 200-day and in STACK transition, negative in range. SHORT weak (variant c h1 +0.26, t 2.33 only). Three variants tried: a registration candidate, never a result. Stage 2 owed (needs a ruling on single-name IV).
 
 ## Kill rule
 LAB proposal (SPINE and QUERY decide): if the V-SPEC replay fails stage 1 market-adjusted at the

@@ -10,7 +10,7 @@
 | schedule / trigger | `CronTrigger(mon-fri, 16:20 ET)`, id `wrr_daily_scan` (`backend/scheduler/bias_scheduler.py:2862-2863`); job `run_wrr_scan_job` (`:2361`), importing `run_wrr_and_process` (`:2379`) |
 | status | **SHADOW**: `NEMESIS_LONG` in `SUPPRESS_ALWAYS` (`backend/config/l0_routing.py:64`). **Cannot persist until `b93dabd` merges**, and **QUIET** by census (0 expected fires in 63 sessions) |
 | bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
-| lifetime tries counter | **0** |
+| lifetime tries counter | **1** (V-CODE replay, 2026-10-10) |
 
 ## Rules as coded (HEAD = 314fc21)
 | # | rule | where |
@@ -78,6 +78,8 @@ branch that **records** the countertrend verdict in `triggering_factors.countert
   gap-down-and-recover bar satisfies both.
 - Replay V-CODE is Task 5 (R-IV.809(g)). It measures whether this is rare or effectively never
   over 2007–2026.
+- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** 137 fires / 97 dates: h3 date-mean **−0.08%** (t −0.23); same-date control difference **−0.26** (t −0.76). Its own ablation (washout without candle and volume) is +0.25 (t 3.0, n 4,743): the coded candle + volume filters remove the washout's edge and almost all its fires. A B-shaped version would be a NEW version, tested forward.
 
 ## Kill rule
 LAB proposal (SPINE and QUERY decide): retire if the V-CODE replay fails stage 1 market-adjusted at
