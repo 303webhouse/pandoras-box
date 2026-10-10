@@ -795,3 +795,59 @@ CC-QUERY can verify before Friday 2026-10-09 12:00 MT (R-IV.648).
 **Blob chain.** The id in force before this amendment was `5554719d`; before Amendment 4,
 `c6203e4b`; before Amendment 3, `57cb26a3`.
 
+## SM8 · DXY CONTEXT — side-measure, stamped 2026-10-10 (R-IV.846(e))
+
+**Stamped by CC-QUERY on SPINE's ratification in R-IV.846(e), before W5's first fire.** Source: the
+principal's June design (`docs/codex-briefs/2026-06-15-triton-build-handoff.md` — flow AND dark pool
+AND market tide, plus DXY context), tightened by an independent Olympus double pass 2026-10-09.
+
+**SM8 IS A SIDE-MEASURE. It takes no exploration slot. It touches NEITHER C3 NOR C4, and no gate
+waits on it.** W3 and W4 are scored and labelled **"out of sample, not blind"**; **W5, W6 and W7 are
+blind**, this stamp preceding W5's first fire. **The definition below is frozen at this stamp** and
+keeps accruing on new Triton rows after read 7.
+
+**STRESS / CALM are renamed MOVE / QUIET**, so that a busy day is not read as a panic.
+
+### SM8a · DXY-MOVE (primary)
+
+- **Series:** the ICE US Dollar Index daily close from yfinance **`DX-Y.NYB`**. At each read, record
+  **the fetch time and the sha256 of the exact series used** (convention #32).
+- For each row, **D** = the most recent DXY daily bar dated **strictly before** `fired_at`'s **ET
+  calendar date**. **chg** = `close(D) / close(D−1) − 1`.
+- **SD** = the **sample standard deviation (n−1)** of the **20 daily changes ending at D−1**
+  (**D excluded**).
+- **MOVE** when `|chg| ≥ 1.0 × SD`, else **QUIET**.
+- **If any of the 22 closes needed is missing, the row is UNLABELED:** excluded from both groups and
+  **counted**.
+- **Print the realized MOVE share** (expected: about 3 sessions in 10).
+
+**Report:** the 3d hit rate for MOVE rows and for QUIET rows, each with **n rows, n distinct
+sessions, the SPY-direction baseline and the same-rows drift baseline** (as SM6); and **the
+difference, with a 95% interval from a bootstrap that resamples whole sessions**.
+
+### SM8b (secondary, MOVE rows only)
+
+A **2×2 table**, dollar up / dollar down by BULL / BEAR rows. Each cell shows the **3d hit rate,
+n rows, n sessions and the SPY-direction baseline**. **No "aligned" figure is computed.**
+
+### FLOOR
+
+**No SM8 conclusion is drawn before 30 distinct MOVE sessions** (about 100 sessions, roughly five
+months). **Below that, every SM8 line reads `INSUFFICIENT (n sessions)`.**
+
+### FEASIBILITY, MEASURED BEFORE THIS STAMP
+
+Checked 2026-10-10 03:22Z against the 19 regular sessions from 2026-09-15 on (session calendar taken
+from `spy_minute_bars`): **19 of 19 have a DXY close, 0 missing, 0 bars on non-equity dates, 19 of 19
+labelable, 0 UNLABELED.** Realized MOVE share **7 of 19 = 36.8%**. Series sha256
+`ed248de56eee5282b7c640e0de7890702ac015f7b9770a8159d6ac636a043f22`, 49 bars 2026-08-03 → 2026-10-09.
+**No gap, so R-IV.846(e)'s hold condition was not met and the stamp proceeded.**
+
+**ONE DEFECT RAISED AND NOT RESOLVED HERE, for SPINE (it is not a gap, so it did not block):**
+**2026-09-17 and 2026-09-18 carry the identical close `100.220001`** — the only repeated
+consecutive close in 49 bars. It makes the 2026-09-21 fire session's `chg` **exactly 0.0000%**, which
+labels that session **QUIET** on a change that may be a carried-forward print rather than a flat
+market. **The definition above treats a repeated close as a genuine zero change**, because that is
+the text ratified in R-IV.846(e) and this lane does not amend a ratified definition on its own
+judgment. **If SPINE prefers a repeated close to yield UNLABELED, that is an amendment to make before
+W5's first fire** (about 2026-10-12 07:30 MT), after which the frozen definition governs.
