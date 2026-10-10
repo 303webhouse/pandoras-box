@@ -598,3 +598,41 @@ def test_a_shadow_row_is_never_rescored_or_its_payload_replaced():
     with patch.object(pc, "get_postgres_client", new=AsyncMock(return_value=Pool())):
         asyncio.run(pc.update_signal_with_score("CIRCE_X", 70.0, "ALIGNED", {}))
     assert "<> 'SHADOW'" in seen[0]
+
+
+# ── gate v2: located on the side being faded (R-IV.838(d)) ───────────────────────
+
+@pytest.mark.parametrize("direction, price, expected", [
+    ("SHORT", 111.0, "outside"), ("SHORT", 107.0, "edge"), ("SHORT", 100.0, "mid"),
+    ("SHORT", 92.0, "opposite"), ("SHORT", 85.0, "opposite"),     # through VAL is the wrong side
+    ("LONG", 89.0, "outside"), ("LONG", 93.0, "edge"), ("LONG", 100.0, "mid"),
+    ("LONG", 108.0, "opposite"), ("LONG", 115.0, "opposite"),
+])
+def test_directional_location(direction, price, expected):
+    assert cs.va_location_directional(price, 110.0, 90.0, direction) == expected  # band 5.0
+
+
+def test_the_v1_defect_a_short_closing_at_val_no_longer_passes():
+    """Gate v1 read 100.9 as `edge` because it sits in the LOWER band (VAL 100 + 1.5), and passed
+    a SHORT whose close was nowhere near the breakout it fades."""
+    va = dict(VA, vah=106.0, val=100.0)
+    c = cand(close=100.9, va=va)
+    assert c["trigger"].direction == "SHORT"
+    assert c["payload"]["va"]["location_v1"] == "edge"          # what v1 would have passed
+    assert c["location"] == "opposite" and c["gate_pass"] is False
+    assert c["payload"]["gate_reject_reason"] == "location_opposite"
+    assert c["payload"]["gate_version"] == "circe-gate-v2"
+
+
+def test_the_v1_defect_mirrored_a_long_closing_at_vah_no_longer_passes():
+    t = only(cs.detect(frame(FLAT + [(100.5, 97.0, 99.2)])), "LONG")
+    va = dict(VA, vah=99.5, val=93.5)                            # 99.2 sits in the UPPER band
+    c = job.build_candidate("AAPL", t, va, ROT, "XLK", {"iv_rank": 30, "refreshed_at": "r"},
+                            None, "2026-07-26T20:30:00+00:00")
+    assert c["payload"]["va"]["location_v1"] == "edge"
+    assert c["location"] == "opposite" and c["gate_pass"] is False
+
+
+def test_a_short_at_its_own_edge_still_passes():
+    c = cand(close=100.9)                                        # VAH 101, band 0.5
+    assert c["location"] == "edge" and c["gate_pass"] is True

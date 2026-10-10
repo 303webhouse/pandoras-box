@@ -25,12 +25,17 @@ THE TRIGGER (B2 daily, canonical N = 20, confirmation window 1-4 bars)
     window qualify, the EARLIEST wins -- "back inside" means inside the range the
     breakout first left.
 
-LOCATION IS PART OF THE TRIGGER (PYTHIA, review consensus item 6)
-    The failed extension's extreme is located against the PRIOR session's developing VA
-    as it stood before this session opened -- never the current session's, never a
-    cumulative one (lookahead). `outside` and `edge` pass the location gate; `mid` does
-    not; an unknown location does not pass. Every geometric trigger is persisted either
-    way, so the location-quality test can be graded later.
+LOCATION IS PART OF THE TRIGGER (PYTHIA, review consensus item 6; R-IV.430(a); R-IV.838(d))
+    The FIRE CLOSE is located against the PRIOR session's developing VA as it stood before
+    this session opened -- never the current session's, never a cumulative one (lookahead).
+    Not the extreme: R-IV.430(a) ratified the close because the failed extension's extreme is
+    outside the prior VA by construction, so a gate on it could not fail. The extreme's
+    location is still recorded on every row.
+    The location is read ON THE SIDE BEING FADED (gate v2, R-IV.838(d)): a SHORT is located
+    against VAH, a LONG against VAL. `outside` and `edge` pass; `mid`, `opposite` (the close
+    sits at or through the other side's edge) and unknown do not. Gate v1 was direction-blind:
+    a SHORT closing in the lower edge band passed as `edge`. Every geometric trigger is
+    persisted either way, so the location-quality test can be graded later.
 """
 
 from __future__ import annotations
@@ -147,6 +152,30 @@ def va_location(price: Optional[float], vah: Optional[float], val: Optional[floa
     if price >= vah - band or price <= val + band:
         return "edge"
     return "mid"
+
+
+def va_location_directional(price: Optional[float], vah: Optional[float], val: Optional[float],
+                            direction: str,
+                            edge_fraction: float = VA_EDGE_FRACTION) -> Optional[str]:
+    """outside | edge | mid | opposite, read on the side being faded (R-IV.838(d)).
+
+    SHORT fades a failed breakout UP, so it is located against VAH; LONG against VAL. A close
+    at or through the OTHER side's edge band is `opposite`, which does not pass. None when the
+    VA is unusable. Never guessed."""
+    if price is None or vah is None or val is None or vah <= val:
+        return None
+    band = (vah - val) * edge_fraction
+    if direction == "SHORT":
+        if price > vah:
+            return "outside"
+        if price >= vah - band:
+            return "edge"
+        return "opposite" if price <= val + band else "mid"
+    if price < val:
+        return "outside"
+    if price <= val + band:
+        return "edge"
+    return "opposite" if price >= vah - band else "mid"
 
 
 def passes_location_gate(location: Optional[str]) -> bool:

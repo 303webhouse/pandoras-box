@@ -54,7 +54,7 @@ MIN_SESSION_COVERAGE = 0.5        # below this the session's bars are not publis
 # Bump when the location gate (or anything else that decides surfacing) changes. It
 # releases the firehose latch, which is what R-IV.421(d) asks for: the feed continues
 # only once the gate has been tightened.
-GATE_VERSION = "circe-gate-v1"
+GATE_VERSION = "circe-gate-v2"   # R-IV.838(d): located on the side being faded
 
 PRICE_BASIS = "yfinance daily, auto_adjust=True (split+dividend adjusted), fetched at run time"
 FLOW_GAP = ("no per-bar dark-pool or put-sweep store exists; this is the latest stored "
@@ -81,7 +81,8 @@ def clean_frame(frame):
 
 def va_zone(price: Optional[float], vah: Optional[float], val: Optional[float],
             edge_fraction: float = cs.VA_EDGE_FRACTION) -> Optional[str]:
-    """Which side of the VA -- detail for grading; `cs.va_location` is the gate's 3-state."""
+    """Which side of the VA -- detail for grading. The gate reads
+    `cs.va_location_directional` (gate v2, R-IV.838(d)), not this."""
     loc = cs.va_location(price, vah, val, edge_fraction)
     if loc is None:
         return None
@@ -107,7 +108,7 @@ def build_candidate(ticker: str, trig: "cs.Trigger", va: Optional[Dict[str, Any]
     """Everything known about one trigger, before the ceiling decides surfacing."""
     vah = va.get("vah") if va else None
     val = va.get("val") if va else None
-    location = cs.va_location(trig.close, vah, val)
+    location = cs.va_location_directional(trig.close, vah, val, trig.direction)
     gate_pass = cs.passes_location_gate(location)
     if gate_pass:
         reason = None
@@ -139,6 +140,8 @@ def build_candidate(ticker: str, trig: "cs.Trigger", va: Optional[Dict[str, Any]
             "location": location,
             "zone": va_zone(trig.close, vah, val),
             "located_price": "fire_close",
+            "location_rule": "directional (gate v2, R-IV.838(d))",
+            "location_v1": cs.va_location(trig.close, vah, val),   # direction-blind, continuity
             "extreme_location": cs.va_location(trig.extreme, vah, val),
             "edge_fraction": cs.VA_EDGE_FRACTION,
             "vah": vah, "val": val, "poc": (va or {}).get("poc"),
