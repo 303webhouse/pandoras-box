@@ -12,7 +12,14 @@ evaluated session:
   CIRCE    circes_stew.detect on a 75-calendar-day frame             -- pre location gate
   WRR      strategies.wrr_buy_model.scan_wrr with get_bars patched to serve the frame
 
-Usage: python scripts/lab/census_expected.py <out_dir>
+Amendment 6 (R-IV.843(c)) adds a start-date argument and the two intraday replays:
+  HG 1H    calculate_holy_grail_indicators once per ticker, check_holy_grail_signals at each
+           completed regular-session hourly bar; touch tolerance from ^VIX's prior close
+  SCOUT    calculate_scout_indicators once per ticker, check_scout_signals at each completed
+           regular-session 15m bar, its wall clock fed the bar's own ET time (~60 days of data)
+
+Usage: python scripts/lab/census_expected.py <out_dir> [YYYY-MM-DD start] [--intraday]
+       (no start = the part-1 window, 2026-07-12 .. 2026-10-09)
 """
 import asyncio
 import logging
@@ -34,6 +41,7 @@ from scanners import circes_stew as cs  # noqa: E402
 from scanners import sell_the_rip_scanner as strs  # noqa: E402
 
 WIN_FROM, WIN_TO = date(2026, 7, 12), date(2026, 10, 9)
+ET_TZ = "America/New_York"
 
 
 def proxy_universe():
@@ -45,8 +53,8 @@ def proxy_universe():
     return out[:200]
 
 
-def download(tickers):
-    raw = yf.download(tickers, start="2025-05-01", end="2026-10-10", auto_adjust=True,
+def download(tickers, start="2025-05-01", end="2026-10-10"):
+    raw = yf.download(tickers, start=start, end=end, auto_adjust=True,
                       group_by="ticker", threads=True, progress=False)
     frames = {}
     for t in tickers:
@@ -112,11 +120,108 @@ async def wrr_signals(frames, sessions, tickers):
     return out
 
 
-def main(out_dir):
+def _intraday(tickers, interval, start=None, period=None):
+    kw = {"period": period} if period else {"start": start}
+    raw = yf.download(tickers, interval=interval, auto_adjust=True, group_by="ticker",
+                      threads=True, progress=False, **kw)
+    out = {}
+    for t in tickers:
+        try:
+            df = raw[t].dropna(subset=["Open", "High", "Low", "Close"])
+        except KeyError:
+            continue
+        if len(df):
+            idx = pd.to_datetime(df.index)
+            idx = idx.tz_convert(ET_TZ) if idx.tz is not None else idx.tz_localize("UTC").tz_convert(ET_TZ)
+            df = df.copy()
+            df.index = idx
+            out[t] = df
+    return out
+
+
+def _rth_completed(ts, minutes):
+    """A bar that opened in the regular session and closed by 16:00 ET."""
+    start = ts.hour * 60 + ts.minute
+    return 570 <= start and start + minutes <= 960
+
+
+def hg_rows(tickers, win_from, vix_prior):
+    from scanners import holy_grail_scanner as hg
+    start = max(win_from - timedelta(days=100), date.today() - timedelta(days=729))
+    frames = _intraday(tickers, "1h", start=start.isoformat())
+    rows, err = [], {}
+    for t, df in frames.items():
+        try:
+            ind = hg.calculate_holy_grail_indicators(df.copy())
+        except Exception as e:  # noqa: BLE001
+            err[type(e).__name__] = err.get(type(e).__name__, 0) + 1
+            continue
+        for i in range(40, len(ind)):
+            ts = ind.index[i]
+            if ts.date() < win_from or not _rth_completed(ts, 60):
+                continue
+            v = vix_prior.get(ts.date())
+            hg._hg_touch_tolerance = 0.25 if (v is not None and v >= 25) else hg.HG_CONFIG["touch_tolerance_pct"]
+            try:
+                for sg in hg.check_holy_grail_signals(ind.iloc[: i + 1], t):
+                    rows.append((t, ts.date(), sg["signal_type"], sg["direction"], "hg1h"))
+            except Exception as e:  # noqa: BLE001
+                err[type(e).__name__] = err.get(type(e).__name__, 0) + 1
+    return rows, err, len(frames)
+
+
+def scout_rows(tickers):
+    from scanners import scout_sniper_scanner as sc
+    frames = _intraday(tickers, "15m", period="60d")
+
+    class _Clock:
+        at = None
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.at.tz_convert(tz) if tz is not None else cls.at
+
+        @classmethod
+        def utcnow(cls):
+            return cls.at.tz_convert("UTC").tz_localize(None).to_pydatetime()
+
+    real = sc.datetime
+    sc.datetime = _Clock
+    rows, err, first = [], {}, None
+    try:
+        for t, df in frames.items():
+            sc._cooldown_tracker.clear()
+            try:
+                ind = sc.calculate_scout_indicators(df.copy())
+            except Exception as e:  # noqa: BLE001
+                err[type(e).__name__] = err.get(type(e).__name__, 0) + 1
+                continue
+            for i in range(30, len(ind)):
+                ts = ind.index[i]
+                if not _rth_completed(ts, 15):
+                    continue
+                first = ts.date() if first is None else min(first, ts.date())
+                _Clock.at = ts
+                try:
+                    for sg in sc.check_scout_signals(ind.iloc[: i + 1], t):
+                        rows.append((t, ts.date(), sg.get("signal_type", "SCOUT_ALERT"),
+                                     sg["direction"], "scout15m"))
+                except Exception as e:  # noqa: BLE001
+                    err[type(e).__name__] = err.get(type(e).__name__, 0) + 1
+    finally:
+        sc.datetime = real
+    return rows, err, len(frames), first
+
+
+def main(out_dir, win_from=WIN_FROM, intraday=False):
     tickers = proxy_universe()
-    frames = download(tickers)
-    spy = download(["SPY"])["SPY"]
-    sessions = [d for d in spy.index if WIN_FROM <= d <= WIN_TO]
+    extended = win_from != WIN_FROM
+    end = (date.today() + timedelta(days=1)).isoformat() if extended else "2026-10-10"
+    lead = (win_from - timedelta(days=420)).isoformat()
+    frames = download(tickers, start=lead, end=end)
+    spy = download(["SPY"], start=lead, end=end)["SPY"]
+    last = WIN_TO if not extended else max(spy.index)
+    sessions = [d for d in spy.index if win_from <= d <= last]
     rows, errors = [], {}
     for t, df in frames.items():
         idx = list(df.index)
@@ -134,16 +239,30 @@ def main(out_dir):
                     errors[(name, type(e).__name__)] = errors.get((name, type(e).__name__), 0) + 1
     for t, d, st, direction in asyncio.run(wrr_signals(frames, sessions, list(frames))):
         rows.append((t, d, st, direction, "wrr"))
-    out = pd.DataFrame(rows, columns=["ticker", "et_date", "detector_type", "direction", "family"])
-    out.to_csv(os.path.join(out_dir, "expected_fires.csv"), index=False)
     meta = {"universe_size": len(tickers), "with_bars": len(frames),
             "missing": sorted(set(tickers) - set(frames)), "sessions": len(sessions),
             "first": str(sessions[0]), "last": str(sessions[-1]),
             "errors": {f"{k[0]}:{k[1]}": v for k, v in errors.items()}}
-    pd.Series(meta).to_json(os.path.join(out_dir, "expected_meta.json"), indent=1)
+    if intraday:
+        vix = download(["^VIX"], start=(win_from - timedelta(days=10)).isoformat(), end=end)["^VIX"]
+        closes = vix["Close"]
+        vix_prior = {d: closes.iloc[i - 1] for i, d in enumerate(closes.index) if i > 0}
+        r, e, n = hg_rows(list(frames), win_from, vix_prior)
+        rows += r
+        meta["hg1h"] = {"tickers_with_bars": n, "errors": e}
+        r, e, n, first = scout_rows(list(frames))
+        rows += r
+        meta["scout15m"] = {"tickers_with_bars": n, "errors": e, "first_bar_date": str(first)}
+    out = pd.DataFrame(rows, columns=["ticker", "et_date", "detector_type", "direction", "family"])
+    suffix = "_ext" if extended else ""
+    out.to_csv(os.path.join(out_dir, "expected_fires%s.csv" % suffix), index=False)
+    pd.Series(meta).to_json(os.path.join(out_dir, "expected_meta%s.json" % suffix), indent=1,
+                            default_handler=str)
     print(meta)
     print(out.groupby(["detector_type", "direction"]).size().to_string())
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    main(args[0], date.fromisoformat(args[1]) if len(args) > 1 else WIN_FROM,
+         intraday="--intraday" in sys.argv)
