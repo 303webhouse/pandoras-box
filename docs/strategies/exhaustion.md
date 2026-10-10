@@ -1,4 +1,6 @@
-# EXHAUSTION (Exhaustion Levels)
+# HYPNOS | Exhaustion Reversal (`EXHAUSTION_BULL` / `EXHAUSTION_BEAR`)
+
+Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); principal 2026-10-09).
 
 | field | value |
 |---|---|
