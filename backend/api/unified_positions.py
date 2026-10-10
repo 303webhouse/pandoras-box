@@ -1119,10 +1119,146 @@ async def _sweep_expired_positions(through: Optional[date] = None) -> List[Dict[
             logger.info("Expiry sweep (%s) ended %d position(s), result UNKNOWN: %s",
                         f"through {through}" if through is not None else "before today",
                         len(expired), [e["position_id"] for e in expired])
+            # R-IV.827(e): and it SETTLES THE LOTS, in a second pass outside the UPDATE's
+            # transaction. Deliberately separate: settlement needs a vendor close per ticker,
+            # and holding the status transaction open across network calls would put the whole
+            # sweep behind the slowest quote. The status write is the fact that cannot be lost;
+            # settlement is retried on the next pass for anything it could not finish.
+            try:
+                settled = await _settle_expired_lots(expired)
+                expired = [dict(e, **settled.get(e["position_id"], {})) for e in expired]
+            except Exception as exc:                        # noqa: BLE001
+                # Never raises into the sweep: a failure here leaves the rows EXPIRED with
+                # their lots open, which is the OLD behaviour and is recoverable, whereas
+                # losing the status write is not.
+                logger.error("Expiry settlement pass failed (rows stay EXPIRED, lots open): %s",
+                             exc)
         return expired
     except Exception as e:
         logger.warning("Expired position sweep failed: %s", e)
         return []
+
+
+async def _settle_expired_lots(expired: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """R-IV.827(e). Close the lots of rows that expired WORTHLESS; flag the rest.
+
+    Returns `{position_id: {verdict, reason, closed_lots, realized}}` so the caller can report
+    per row rather than in aggregate.
+
+    The decision is in `models.expiry_settlement`; this function does the reads and the writes.
+    Nothing here infers a settlement price: either every leg finished out of the money and the
+    lots close at exactly 0, or the row is marked NEEDS_DOCUMENT and no money is written.
+    """
+    from integrations.uw_api import get_bars
+    from models.expiry_settlement import (
+        ALL_OTM, NEEDS_DOCUMENT, closes_at_zero, realized_for_worthless_expiry, settle,
+    )
+    from models.position_lots import multiplier as lot_multiplier
+
+    out: Dict[str, Dict[str, Any]] = {}
+    pool = await get_postgres_client()
+    closes: Dict[tuple, Optional[float]] = {}
+
+    for row in expired:
+        pid, ticker = row["position_id"], row["ticker"]
+        expiry = row["expiry"]
+        async with pool.acquire() as conn:
+            pos = await conn.fetchrow(
+                "SELECT position_id, ticker, asset_type, expiry, long_strike, short_strike "
+                "FROM unified_positions WHERE position_id = $1", pid)
+            legs = await conn.fetch(
+                "SELECT leg_seq, option_type, side, strike FROM position_legs "
+                "WHERE position_id = $1 ORDER BY leg_seq", pid)
+            lots = await conn.fetch(
+                "SELECT id, qty, price, fees FROM position_lots WHERE position_id = $1 "
+                "ORDER BY fill_time, id", pid)
+        if pos is None:
+            continue
+
+        # The underlying's close ON the expiry date, cached per (ticker, expiry) so a
+        # multi-row expiry costs one quote.
+        key = (ticker, expiry)
+        if key not in closes:
+            closes[key] = None
+            try:
+                bars = await get_bars(ticker, 1, "day", from_date=expiry, to_date=expiry)
+                for b in (bars or []):
+                    if b.get("c") is not None:
+                        closes[key] = float(b["c"])
+                        break
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning("Expiry settlement: no close for %s on %s (%s)",
+                               ticker, expiry, type(exc).__name__)
+        close_px = closes[key]
+
+        verdict, reason = settle([dict(l) for l in legs], close_px)
+        # An EQUITY row has no moneyness and never expires; if one reaches here it waits.
+        if (pos.get("asset_type") or "").upper() not in ("OPTION", "SPREAD"):
+            verdict, reason = ("undeterminable",
+                               "asset_type %r does not expire by moneyness"
+                               % pos.get("asset_type"))
+
+        open_lots = [l for l in lots if float(l["qty"] or 0) > 0]
+        net = sum(float(l["qty"] or 0) for l in lots)
+        info = {"verdict": verdict, "reason": reason, "underlying_close": close_px,
+                "net_open_qty": net, "closed_lots": 0, "realized": None}
+
+        if not closes_at_zero(verdict) or net <= 0:
+            if net > 0:
+                async with pool.acquire() as conn, conn.transaction():
+                    await conn.execute("SELECT set_config('app.actor', $1, true)",
+                                       EXPIRY_SWEEP_ACTOR)
+                    await conn.execute("SELECT set_config('app.reason', $1, true)",
+                                       "R-IV.827(e): %s" % (reason or verdict))
+                    await conn.execute(
+                        "UPDATE unified_positions SET needs_document = $2, updated_at = NOW() "
+                        "WHERE position_id = $1",
+                        pid, "%s: %s" % (NEEDS_DOCUMENT, reason or verdict))
+                logger.info("Expiry settlement: %s marked NEEDS_DOCUMENT — %s", pid, reason)
+            out[pid] = info
+            continue
+
+        # Every leg finished out of the money: the options expired worthless. Each open lot is
+        # closed at 0, and realized is exactly minus its basis.
+        mult = lot_multiplier(pos.get("asset_type"))
+        total = Decimal(0)
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT set_config('app.actor', $1, true)", EXPIRY_SWEEP_ACTOR)
+            await conn.execute(
+                "SELECT set_config('app.reason', $1, true)",
+                "R-IV.827(e): expired worthless, every leg out of the money at the expiry close")
+            fill = f"{expiry} 16:00:00-04:00"
+            disposal = await conn.fetchval(
+                """INSERT INTO position_lots
+                       (position_id, fill_time, qty, price, fees, source, provenance)
+                   VALUES ($1, $2::timestamptz, $3, 0, 0, 'MANUAL', 'PRINCIPAL_REPORTED')
+                   RETURNING id""",
+                pid, fill, -abs(Decimal(str(net))))
+            for lot in open_lots:
+                r = realized_for_worthless_expiry(lot["qty"], lot["price"], mult, lot["fees"])
+                if r is None:
+                    continue
+                total += r
+                await conn.execute(
+                    """INSERT INTO position_lot_closures
+                           (position_id, disposal_lot_id, acquired_lot_id, qty, cost_per_unit,
+                            proceeds_per_unit, realized, multiplier)
+                       VALUES ($1, $2, $3, $4, $5, 0, $6, $7)""",
+                    pid, disposal, lot["id"], abs(Decimal(str(lot["qty"]))),
+                    abs(Decimal(str(lot["price"] or 0))), r, mult)
+                info["closed_lots"] += 1
+            await conn.execute(
+                "UPDATE unified_positions "
+                "SET realized_pnl = $2, exit_price = 0, trade_outcome = 'LOSS', "
+                "    needs_document = NULL, updated_at = NOW() "
+                "WHERE position_id = $1",
+                pid, total)
+        info["realized"] = float(total)
+        logger.info("Expiry settlement: %s expired worthless — %d lot(s) closed at 0, "
+                    "realized %.2f", pid, info["closed_lots"], float(total))
+        out[pid] = info
+
+    return out
 
 
 @router.get("/v2/positions", dependencies=[Depends(require_api_key)])

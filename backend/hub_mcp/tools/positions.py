@@ -194,6 +194,10 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         # recorded" are both NULL in the column and mean opposite things — one is a decision,
         # the other is a gap. Derived from the account rather than stored, so it cannot drift
         # away from the account it describes.
+        # R-IV.827(e): the row says its MONEY is outstanding, and why. An expired row whose
+        # legs finished in the money settles through assignment at a price only the broker
+        # document states, so the sweep flags it rather than inventing one.
+        "needs_document": row.get("needs_document"),
         "classification_reason": _tx.classification_reason(
             row.get("account"), row.get("classification"), row.get("classification_reason")),
         # R-IV.804(c): same fail-loud shape. A bucket with no recorded basis says so here

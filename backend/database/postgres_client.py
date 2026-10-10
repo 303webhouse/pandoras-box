@@ -1263,6 +1263,20 @@ async def init_database():
                     ADD COLUMN IF NOT EXISTS classification_reason TEXT,
                     ADD COLUMN IF NOT EXISTS bucket_reason TEXT
             """),
+            # R-IV.827(e): the expiry sweep marked rows EXPIRED and left their lots open --
+            # IWM 956 netting +1 with 13.08 of basis unrealized, which POSITIONS had already
+            # fixed by hand on 562 and 518. A terminal row whose lots are still open makes
+            # every lot-derived figure count a position that ended.
+            #
+            # NOT A STATUS. `status` is (OPEN, CLOSED, EXPIRED, DUPLICATE_OF) and every reader
+            # is written against that set. The contract did end, so the row still becomes
+            # EXPIRED; this column says the MONEY is outstanding and why. A reason rather than a
+            # boolean, because "needs the document" and "needs it because no strike was
+            # recorded" send POSITIONS to different places.
+            ("expiry needs-document flag (R-IV.827(e))", """
+                ALTER TABLE unified_positions
+                    ADD COLUMN IF NOT EXISTS needs_document TEXT
+            """),
             # R-IV.456(a) (migrations/045): a basis covering less than the quantity says so.
             ("basis incomplete column", """
                 ALTER TABLE unified_positions
