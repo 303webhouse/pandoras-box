@@ -206,6 +206,9 @@ def stats(frame):
     t = by_date.mean() / (by_date.std(ddof=1) / np.sqrt(nd)) if nd > 1 and by_date.std() > 0 else np.nan
     return {"n": len(frame), "n_dates": nd,
             "mean_adj_pct": round(100 * frame.r_adj.mean(), 4),
+            # the mean the t belongs to: average by signal date first (pooled mean can differ in
+            # sign when fires cluster on a few large days)
+            "date_mean_adj_pct": round(100 * by_date.mean(), 4),
             "mean_raw_pct": round(100 * frame.r.mean(), 4),
             "median_adj_pct": round(100 * frame.r_adj.median(), 4),
             "hit_adj": round(float((frame.r_adj > 0).mean()), 4),
@@ -213,12 +216,27 @@ def stats(frame):
 
 
 def main(out_dir):
-    pulled = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    """Bars are snapshotted to <out_dir>/bars.pkl on first pull and replayed from it after:
+    yfinance's adjusted prices are not bit-identical between downloads (measured: +/-1 fire at
+    threshold edges between two pulls two minutes apart), so a record must be re-runnable."""
+    import pickle
+    snap = os.path.join(out_dir, "bars.pkl")
     tickers = proxy_universe()
-    data, cal = load(tickers)
+    if os.path.exists(snap):
+        with open(snap, "rb") as fh:
+            saved = pickle.load(fh)
+        data, cal, pulled = saved["data"], saved["cal"], saved["pulled"]
+        st_bars = saved["spy_states"]
+    else:
+        pulled = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        data, cal = load(tickers)
+        st_bars = market_state.spy_states(start=START, end=END)
+        with open(snap, "wb") as fh:
+            pickle.dump({"data": data, "cal": cal, "pulled": pulled, "spy_states": st_bars}, fh)
+    data = dict(data)
     spy = data.pop("SPY")
     have = sorted(data)
-    st = market_state.spy_states(start=START, end=END)
+    st = st_bars.copy()
     st.index = pd.to_datetime(st.index)
     spy200 = spy.C > spy.C.rolling(200).mean()
     in_win = (cal >= SIG_FROM) & (cal <= SIG_TO)
@@ -319,7 +337,10 @@ def main(out_dir):
     meta = {"pulled": pulled, "source": "yfinance daily; indicators/beta auto_adjust=True; "
             "returns auto_adjust=False Open/Close (split-adjusted, dividend-unadjusted)",
             "universe_requested": len(tickers), "with_bars": len(have),
-            "missing": sorted(set(tickers) - set(have)), "signal_window": [SIG_FROM, SIG_TO],
+            "missing": sorted(set(tickers) - set(have) - {"SPY"}),
+            "spy": "benchmark only, not replayed as a ticker",
+            "snapshot": "bars.pkl (this run's pull; re-runs replay it exactly)",
+            "signal_window": [SIG_FROM, SIG_TO],
             "beta_flagged_share": round(float(ev.beta_flagged.mean()), 4) if len(ev) else None,
             "survivorship": "today's universe: survivorship-biased; sector_etfs split is the check"}
     json.dump(meta, open(os.path.join(out_dir, "meta.json"), "w"), indent=1)
