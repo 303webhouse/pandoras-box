@@ -10,7 +10,7 @@ Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); princi
 | grid cell | **CONFIRMED TURN, LONG** (partial): a fresh two-close cross above the 50-day with volume. The 09-23 definition also asks for the stack turning, which this doesn't test |
 | incumbent it would replace | n/a (incumbent) |
 | schedule / trigger | equities: `_scanner_loop` (`backend/scheduler/bias_scheduler.py:3078`) → `run_cta_scan_scheduled` (`:3317`), trading days 9–16 ET, every 15 min (first hour and from 15:00) or 30 min; crypto: `run_crypto_scan_scheduled` (`:3619`), every 30 min, 24/7 |
-| status | **LIVE**: in no suppress set; L0 default KEEP (`backend/config/l0_routing.py:72-73`) |
+| status | **LIVE, carded WEAK** (R-IV.855(c)): in no suppress set; L0 default KEEP (`backend/config/l0_routing.py:72-73`) |
 | bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
 | lifetime tries counter | **≥ 2**: H2 retune 1.10 → 1.50 (`cta_scanner.py:104`), plus the 2026-10-10 replay; earlier tries unrecorded |
 
@@ -53,3 +53,4 @@ n ≥ 30 and ≥ 20 distinct dates.
 - 2026-01-21: CTA scanner (6c3b3b1); volume threshold 1.10 → 1.50 (H2).
 - 2026-06-16: KEEP (+0.82, n = 30). 2026-10-09: card v0.
 - 2026-10-10: ceiling ruled (R-IV.838(c)).
+- 2026-10-10: stays LIVE, carded **WEAK** (R-IV.855(c)) on the Task 5 replay.
