@@ -1,4 +1,6 @@
-# BEARISH_BREAKDOWN
+# PHAETHON | Bearish Breakdown (`BEARISH_BREAKDOWN`)
+
+Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); principal 2026-10-09).
 
 | field | value |
 |---|---|
