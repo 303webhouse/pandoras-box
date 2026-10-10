@@ -30,8 +30,14 @@ SLO_SECONDS = {
     "strip": 30 * 60,       # index/rates/fx live strip: 10-min cadence, 30-min SLO (RTH)
     "movers": 30 * 60,      # movers screener: 10-min cadence, 30-min SLO (RTH)
     "ext_hours": 30 * 60,   # overnight futures: 5-min cadence, 30-min SLO (outside RTH)
+    # R-IV.864(d): Hermes phase 2's session alarm. 60-second cadence, 10-minute SLO (RTH) --
+    # wide enough that a handful of failed UW marks is not an incident, tight enough that an
+    # alarm which has stopped evaluating is noticed inside the session it stopped in. An alarm
+    # that is silently not running is indistinguishable from a calm market, which is the whole
+    # failure this registration exists to make visible.
+    "hermes_session": 10 * 60,
 }
-RTH_ONLY_FEEDS = {"strip", "movers"}
+RTH_ONLY_FEEDS = {"strip", "movers", "hermes_session"}
 # The mirror image: written only while the regular session is SHUT (and not over
 # the weekend, when futures themselves are shut). Quiet during RTH is expected.
 OFF_HOURS_FEEDS = {"ext_hours"}
@@ -44,6 +50,7 @@ JOB_FEEDS = {
     "strip": "strip",
     "movers": "movers",
     "ext_hours": "ext_hours",
+    "hermes_session_poll": "hermes_session",
 }
 
 

@@ -937,6 +937,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Could not start Stable Engine scheduler: {e}")
 
+    # Hermes phase 2: the session-displacement alarm (R-IV.864(d) go-live). RTH, 60s cadence.
+    # `HERMES_SESSION_ALERT_ENABLED` gates the PUSH, not the evaluation, so the loop logs every
+    # decision either way and the thresholds stay watchable. Started in its own try because an
+    # import failure here must not take the whole app down with it — but logged at ERROR, not
+    # warning: an alarm that failed to start is the one failure nobody would otherwise notice,
+    # and it is also visible on /health, where `hermes_session_poll` simply never records.
+    try:
+        from jobs.hermes_session_poll import run_forever as hermes_session_run
+        hermes_session_task = asyncio.create_task(hermes_session_run())
+        logger.info("✅ Hermes phase 2 session alarm started (push gated by %s)",
+                    "HERMES_SESSION_ALERT_ENABLED")
+    except Exception as e:
+        logger.error("❌ Hermes phase 2 session alarm did NOT start: %s", e)
+
     # Triton Step-0: whale-flow shadow poller (RTH 09:30-16:00 ET, 120s cadence).
     # SHADOW-ONLY — writes triton_flow_shadow; nothing reads it for scoring.
     async def triton_shadow_poller_loop():

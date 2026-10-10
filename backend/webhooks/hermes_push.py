@@ -189,7 +189,8 @@ async def push_session_alert(ticker: str, move_pct: Optional[float],
                              prior_close: Optional[float],
                              now: Optional[datetime] = None,
                              co: Optional[List[Tuple[str, float]]] = None,
-                             webhook_url: Optional[str] = None) -> dict:
+                             webhook_url: Optional[str] = None,
+                             banner: Optional[str] = None) -> dict:
     """Phase 2's push — the SESSION displacement alarm. NEVER RAISES.
 
     Deliberately in phase 1's module and on phase 1's webhook (R-IV.820(h)2: "same webhook and
@@ -202,6 +203,11 @@ async def push_session_alert(ticker: str, move_pct: Optional[float],
     displacement -- so sharing `_last_push` would let a velocity breach suppress the session
     alert that finally explains it, which is the exact miss phase 2 exists to fix. Phase 2's
     ladder lives in the poll, keyed by session date.
+
+    `banner` prepends a line to the message and defaults to None, which is byte-for-byte the
+    message a real alert sends. It exists for R-IV.864(d)'s go-live test: a test alert that the
+    principal cannot tell apart from a real one is a liability, not a test, and the alternative
+    — a second delivery path used only for testing — would prove the wrong path works.
     """
     from webhooks.hermes_session import format_message as session_message
 
@@ -218,6 +224,8 @@ async def push_session_alert(ticker: str, move_pct: Optional[float],
 
     last = prior_close * (1 + move_pct / 100.0)
     content = session_message(sym, move_pct, prior_close, last, now, co)
+    if banner:
+        content = "%s\n%s" % (banner, content)
     try:
         async with httpx.AsyncClient(timeout=6.0) as client:
             resp = await client.post(url, json={"content": content})
