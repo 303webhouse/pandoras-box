@@ -54,6 +54,9 @@ def main(d):
         q2[c] = q2[c].astype(int)
     exp = pd.concat([pd.read_csv(os.path.join(d, f))
                      for f in ("expected_fires_ext.csv", "expected_fires_hg_ext.csv")])
+    gated = os.path.join(d, "expected_fires_scout_gated.csv")
+    if os.path.exists(gated):                    # Scout re-run with the scan loop's quality gate
+        exp = pd.concat([exp[exp.family != "scout15m"], pd.read_csv(gated)])
     exp["et_date"] = pd.to_datetime(exp["et_date"]).dt.date.astype(str)
     exp = exp.drop_duplicates(["ticker", "et_date", "detector_type", "direction"])
     states = pd.read_csv(os.path.join(d, "spy_states.csv"), index_col=0)
