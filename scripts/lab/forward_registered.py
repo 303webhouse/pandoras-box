@@ -100,8 +100,11 @@ def main(out_dir, until, count_only):
 
 
 def _read(kind, reg, rows, data, spy, cal, states, until):
+    """Control (C) is EVERY universe name on each fire date (meeting the precondition); control
+    (A) is the same tickers that fired, on every precondition session."""
     ev, base = [], []
-    for t in {t for t, _ in rows}:
+    fired = {t for t, _ in rows}
+    for t in sorted(data):
         df = data[t]
         fwd = rp.forward(df, spy)
         badj, flag = rp.beta_adj(df, spy)
@@ -118,7 +121,8 @@ def _read(kind, reg, rows, data, spy, cal, states, until):
             if reg["precondition"] == "above200":
                 ok &= above.fillna(False)
             base.append(pd.DataFrame({"ticker": t, "date": cal[ok.values], "h": h,
-                                      "r": r[ok].values, "r_adj": radj[ok].values}))
+                                      "r": r[ok].values, "r_adj": radj[ok].values,
+                                      "fired_ticker": t in fired}))
     ev = pd.DataFrame(ev)
     base = pd.concat(base, ignore_index=True) if base else pd.DataFrame()
     st = states.copy()
@@ -128,8 +132,9 @@ def _read(kind, reg, rows, data, spy, cal, states, until):
         e = ev[ev.h == h] if len(ev) else ev
         out["by_horizon"][h] = rp.stats(e) if len(e) else {"n": 0}
         if len(base):
-            out["control_A"][h] = rp.stats(base[base.h == h])
-            c = base[base.h == h].groupby("date")["r_adj"].mean()
+            bh = base[base.h == h]
+            out["control_A"][h] = rp.stats(bh[bh.fired_ticker])
+            c = bh.groupby("date")["r_adj"].mean()
             fd = e.groupby("date")["r_adj"].mean() if len(e) else pd.Series(dtype=float)
             diff = (fd - c.reindex(fd.index)).dropna()
             out["control_C_diff"][h] = {"n_dates": int(len(diff)),
