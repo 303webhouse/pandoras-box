@@ -30,7 +30,16 @@ MAJORS = ["SPY", "QQQ", "IWM", "RSP", "DIA"]
 YIELDS = {"^IRX": "3M", "^FVX": "5Y", "^TNX": "10Y", "^TYX": "30Y"}
 # Addendum A2: 11 SPDR sector ETFs (kind='sector', day %) + FX (kind='fx').
 SECTORS = ["XLK", "XLF", "XLV", "XLY", "XLC", "XLI", "XLP", "XLE", "XLU", "XLRE", "XLB"]
-FX = {"DX-Y.NYB": "DXY", "USDJPY=X": "USDJPY"}
+FX = {"DX-Y.NYB": "DXY", "USDJPY=X": "USDJPY",
+      # R-IV.823(i): the yen-funded carry pairs. Captured for DISPLAY, never a signal; the measure
+      # built on them is defined (unregistered) in docs/strategies/carry-measure-definition.md.
+      "AUDJPY=X": "AUDJPY", "MXNJPY=X": "MXNJPY"}
+# The v2 FX tile shows these. The carry pairs are captured and served apart (`fx_capture`) until
+# the principal approves a display for them (ABACUS wires the screen).
+FX_DISPLAY = ("DXY", "USDJPY")
+# FX points are KEPT (R-IV.823(i)): exempt from the intraday prune, so their history accumulates.
+# Every reader of stable_intraday_points bounds its own window, so keeping them grows no response.
+FX_KEEP = tuple(FX.values())
 INTRADAY_RETENTION_DAYS = 7
 
 
@@ -273,7 +282,7 @@ def fetch_strip() -> dict:
 
 
 def append_intraday(result: dict) -> int:
-    """Append the 10-min sector/fx readings to stable_intraday_points; prune >7 days."""
+    """Append the 10-min sector/fx readings to stable_intraday_points; prune >7 days, except FX."""
     pts = result.get("intraday") or []
     if not pts:
         return 0
@@ -288,8 +297,9 @@ def append_intraday(result: dict) -> int:
                 payload,
             )
             cur.execute(
-                "DELETE FROM stable_intraday_points WHERE ts < NOW() - INTERVAL '%s days'",
-                (INTRADAY_RETENTION_DAYS,),
+                "DELETE FROM stable_intraday_points WHERE ts < NOW() - INTERVAL '%s days' "
+                "AND NOT (symbol = ANY(%s))",
+                (INTRADAY_RETENTION_DAYS, list(FX_KEEP)),
             )
     return len(payload)
 
