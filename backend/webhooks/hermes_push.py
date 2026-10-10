@@ -183,3 +183,48 @@ async def push_breach(ticker: str, move_pct: float, timeframe_min: int,
     _last_push[sym] = now
     return {"pushed": True, "reason": reason, "co_breaches": [t for t, _ in co],
             "content": content}
+
+
+async def push_session_alert(ticker: str, move_pct: Optional[float],
+                             prior_close: Optional[float],
+                             now: Optional[datetime] = None,
+                             co: Optional[List[Tuple[str, float]]] = None,
+                             webhook_url: Optional[str] = None) -> dict:
+    """Phase 2's push — the SESSION displacement alarm. NEVER RAISES.
+
+    Deliberately in phase 1's module and on phase 1's webhook (R-IV.820(h)2: "same webhook and
+    co-breach logic"). One place decides where a Hermes message goes, so a reader of either
+    message is seeing the same roster reasoned about the same way, and a change of destination
+    cannot move one phase and leave the other behind.
+
+    IT HAS ITS OWN COOLDOWN STATE, AND NOT PHASE 1'S. The two alarms answer different questions
+    on different clocks -- phase 1 a 30-minute velocity breach, phase 2 a session-to-date
+    displacement -- so sharing `_last_push` would let a velocity breach suppress the session
+    alert that finally explains it, which is the exact miss phase 2 exists to fix. Phase 2's
+    ladder lives in the poll, keyed by session date.
+    """
+    from webhooks.hermes_session import format_message as session_message
+
+    now = now or datetime.now(timezone.utc)
+    sym = (ticker or "").strip().upper()
+    if move_pct is None or prior_close is None:
+        # NOT EVALUABLE, and not recorded as anything: a push marked as sent on a figure that
+        # could not be computed would suppress the next real one.
+        return {"pushed": False, "reason": "no displacement for %s" % (sym or "?")}
+
+    url = webhook_url if webhook_url is not None else (os.getenv("DISCORD_WEBHOOK_ALERTS") or "")
+    if not url:
+        return {"pushed": False, "reason": "DISCORD_WEBHOOK_ALERTS not set"}
+
+    last = prior_close * (1 + move_pct / 100.0)
+    content = session_message(sym, move_pct, prior_close, last, now, co)
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.post(url, json={"content": content})
+        if resp.status_code >= 300:
+            return {"pushed": False, "reason": "discord HTTP %d" % resp.status_code}
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[hermes.session] %s failed: %s", sym, exc)
+        return {"pushed": False, "reason": "%s: %s" % (type(exc).__name__, exc)}
+    return {"pushed": True, "reason": "session displacement %+.2f%%" % move_pct,
+            "content": content}
