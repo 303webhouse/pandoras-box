@@ -2594,6 +2594,17 @@ async def run_flow_confluence_job():
         logger.error("Flow confluence scan failed: %s", e)
 
 
+async def run_lab_registered_shadow_job():
+    """R-IV.855(d): the two registered SHADOW forward tests (NEMESIS long, PHOENIX washout).
+    Runs before the open on the previous session's FINAL daily bar; records itself (/health +
+    job_runs) per session and catches up on recent sessions it has not completed."""
+    try:
+        from strategies.registered_shadow import run
+        await run()
+    except Exception as e:
+        logger.error("Lab registered shadow job error: %s", e)
+
+
 async def start_scheduler():
     """Start the background scheduler"""
     global _scheduler_started, _weekly_baseline, _scheduler_status
@@ -2899,6 +2910,18 @@ async def start_scheduler():
             id='flow_confluence',
             name='Flow-Signal Confluence',
             replace_existing=True
+        )
+
+        # Registered SHADOW forward tests (R-IV.855(d)) -- 07:00 ET, previous session's final bar
+        scheduler.add_job(
+            run_lab_registered_shadow_job,
+            CronTrigger(day_of_week='tue-sat', hour=7, minute=0, timezone=ET),
+            id='lab_registered_shadow',
+            name='LAB Registered Shadow (NEMESIS long, PHOENIX washout)',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
         )
 
         scheduler.start()
