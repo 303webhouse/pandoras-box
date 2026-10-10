@@ -2594,6 +2594,16 @@ async def run_flow_confluence_job():
         logger.error("Flow confluence scan failed: %s", e)
 
 
+async def run_iv_snapshot_job():
+    """R-IV.866(b): ATM IV per expiry for the registered universe + open underlyings, after the
+    close. Records itself (/health + job_runs) per session; catches up within its 250/day."""
+    try:
+        from jobs.iv_snapshot import run
+        await run()
+    except Exception as e:
+        logger.error("IV snapshot job error: %s", e)
+
+
 async def run_lab_registered_shadow_job():
     """R-IV.855(d): the two registered SHADOW forward tests (NEMESIS long, PHOENIX washout).
     Runs before the open on the previous session's FINAL daily bar; records itself (/health +
@@ -2910,6 +2920,18 @@ async def start_scheduler():
             id='flow_confluence',
             name='Flow-Signal Confluence',
             replace_existing=True
+        )
+
+        # IV snapshot (R-IV.866(b)) -- after the close; feeds stage 2 joins and X4
+        scheduler.add_job(
+            run_iv_snapshot_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=45, timezone=ET),
+            id='iv_snapshot',
+            name='IV Snapshot (ATM term structure)',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
         )
 
         # Registered SHADOW forward tests (R-IV.855(d)) -- 07:00 ET, previous session's final bar

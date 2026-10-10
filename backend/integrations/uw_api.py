@@ -1252,6 +1252,17 @@ async def get_market_tide_for_date(session: str) -> Optional[Dict[str, Any]]:
                              caller="market_tide_backfill")
 
 
+async def get_iv_term_structure(ticker: str, session: str) -> Optional[Dict[str, Any]]:
+    """ATM IV per expiry for one ticker on one market date (R-IV.866(b), the IV snapshot).
+
+    `/api/stock/{ticker}/volatility/term-structure?date=` -- the average of the at-the-money call
+    and put IV for every expiry. Returns the WHOLE body as received (the snapshot stores it), or
+    the falsy result of `_uw_request`. Deliberately NOT cached: it is dated, and read once a day.
+    """
+    return await _uw_request(f"/api/stock/{ticker.upper()}/volatility/term-structure",
+                             params={"date": session}, caller="iv_snapshot")
+
+
 async def get_darkpool_recent() -> Optional[List[Dict[str, Any]]]:
     """Fetch recent dark pool prints."""
     cached = await cache_get("darkpool", "recent")
