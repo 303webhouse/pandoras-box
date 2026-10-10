@@ -12,7 +12,7 @@ Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); princi
 | schedule / trigger | equities: `_scanner_loop` (`backend/scheduler/bias_scheduler.py:3078`) → `run_cta_scan_scheduled` (`:3317`), trading days 9–16 ET, every 15 min (first hour and from 15:00) or 30 min; crypto: `run_crypto_scan_scheduled` (`:3619`), every 30 min, 24/7 |
 | status | **LIVE**: in no suppress set; L0 default KEEP (`backend/config/l0_routing.py:72-73`) |
 | bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
-| lifetime tries counter | **≥ 1**: the volume threshold was retuned 1.10 → 1.50 ("H2", `cta_scanner.py:104`); earlier tries are unrecorded |
+| lifetime tries counter | **≥ 2**: H2 retune 1.10 → 1.50 (`cta_scanner.py:104`), plus the 2026-10-10 replay; earlier tries unrecorded |
 
 ## Rules as coded
 - **Fresh cross:** the latest close is above the 50-SMA, the prior close too, and the one before
@@ -41,6 +41,8 @@ Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); princi
   Most are Crypto Scanner (`docs/edge/results/QS-02-RESULTS.md:462,471`: 489 crypto vs 49 CTA).
   The +0.82 is the equity slice.
 - No market-adjusted figure exists yet.
+- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** 2,209 fires / 1,420 dates: h3 date-mean **+0.17%** (t 1.69); same-date difference +0.15 (t 1.45); STACK transition flat (+0.02); sector-ETF check **negative** (−0.31, t −1.88, n 84). Weak, not established. Stage 2 owed (needs a ruling on single-name IV).
 
 ## Kill rule
 LAB proposal: re-grade the equity fires at fixed horizons from the next open, market-adjusted, with
