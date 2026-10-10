@@ -23,7 +23,7 @@ from signals.feed_service import (
     session_of, tag_row,          # RV5 + R-IV.577(b): one author, not a second copy
     attach_touches, open_positions_by_ticker,   # R-IV.599(e)1
 )
-from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
+from config.strategy_aliases import codename, attach_codename, display_label, upgrade_tag  # L0.4 / R-IV.843(e)
 from config.strategy_class import strategy_class                 # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL                # RV4, R-IV.566(e)2
 from signals.session_policy import SERVE_RELEASED_SQL            # R-IV.587(b)1
@@ -107,6 +107,9 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
                 "signal_id": r.get("signal_id"),
                 "strategy": r.get("strategy") or r.get("signal_type"),
                 "codename": codename(r.get("signal_type"), r.get("strategy")),  # L0.4 additive
+                "display_label": display_label(r.get("signal_type"), r.get("strategy"),
+                                               r.get("triggering_factors")),  # R-IV.843(e)
+                "upgrade_tag": upgrade_tag(r.get("signal_type")),             # R-IV.843(e)
                 "strategy_class": strategy_class(r.get("signal_type"),
                                                  r.get("strategy")),  # R-IV.577(b)
                 "session": session_of(r),                            # RV5

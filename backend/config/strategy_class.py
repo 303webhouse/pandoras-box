@@ -46,7 +46,10 @@ ROSTER_CODENAMES = frozenset({
 # Codenamed families that are declared shadow in the codebase itself, not judged so
 # here. Triton: `jobs/triton_shadow_*`, "SHADOW-ONLY: no scoring/pipeline coupling",
 # and a registered forward window whose grades no live decision consumes.
-SHADOW_CODENAMES = frozenset({"Triton"})
+# Phoenix (R-IV.843(e)): the coded WRR, which writes NEMESIS_LONG. It used to resolve to
+# "Nemesis" and so to the roster; it is in L0 SUPPRESS_ALWAYS (config/l0_routing.py), graded
+# under suppression, which is what this set means. It has written zero rows to date.
+SHADOW_CODENAMES = frozenset({"Triton", "Phoenix"})
 
 
 def strategy_class(signal_type: Optional[str] = None,
