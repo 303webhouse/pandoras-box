@@ -84,7 +84,7 @@ be reported as a secondary column, labelled as such.
 
 ### 3.3 Market-adjusted return: the headline of every result
 
-Every return figure is reported **adjusted first, raw beside it**:
+Every return figure is reported **market-adjusted first, unadjusted-for-market ("raw") beside it**:
 
 ```
 r_adj = r − β_adj · r_SPY        (same window: entry price → horizon close, both legs)
@@ -97,10 +97,11 @@ r_adj = r − β_adj · r_SPY        (same window: entry price → horizon close
   `beta_fallback` flag. The count of flagged rows is reported.
 - **BEAR rows: flip the sign** of both r and r_adj, so a positive number always means the
   strategy made money.
-- **Basis, stated on every result.** r and r_SPY use **raw (unadjusted) prices**, which is what was
-  traded. β's daily returns use **adjusted closes**, because a split day inside the
-  regression window would otherwise dominate the slope. A row whose *holding* window contains
-  a split is excluded from that horizon and counted.
+- **Price basis, stated on every result (R-IV.830(a)).**
+  - **β** comes from **fully adjusted** daily returns (splits and dividends).
+  - **r and r_SPY** use **split-adjusted, dividend-unadjusted** prices, for the entry open and
+    the horizon close alike. This is Triton's Amendment 5 convention. A raw close across a split
+    would corrupt a 1–3 day return; a dividend adjustment would rewrite the price that was traded.
 - **β is an adjustment, never an entry filter.** No strategy may select on β.
 - Why: passive and mechanical flows can't be removed from prices; judging a strategy on what
   it did beyond the market's own move is how they are neutralised.
@@ -124,8 +125,8 @@ hundred fires on four dates are four observations of the market, not a hundred.
 
 ### 3.6 Price source
 
-Every return figure names its price source (e.g. "yfinance daily, raw OHLC, pulled
-2026-10-09"). Historical replays use **yfinance** (no key). The hub's UW bar path caps at 2
+Every return figure names its price source and basis (e.g. "yfinance daily OHLC,
+split-adjusted, dividend-unadjusted, pulled 2026-10-09"). Historical replays use **yfinance** (no key). The hub's UW bar path caps at 2
 years and is not a replay source.
 
 ## 4 · Controls: every test reports one
@@ -216,7 +217,7 @@ from code cites `file:line`, verified by reading the line, never from memory or 
 ## Change log
 ```
 
-## 8 · Hard rules (R-IV.823(b), R-IV.826(b))
+## 8 · Hard rules (R-IV.823(b), R-IV.826(b), R-IV.830(b))
 
 1. **Branches only**, named `claude/lab-<topic>`. Never push `main`. Rebase on `origin/main`
    before pushing; report branch + commit. BUILD merges and deploys.
@@ -232,16 +233,23 @@ from code cites `file:line`, verified by reading the line, never from memory or 
 6. **Results** go to `C:\temp\cc-query-handoff\lab\` with a sha256, and **are never committed**.
    The skill, cards and registrations are committed.
 7. **Every test reports a control; every return figure states its price source.**
-8. **Database:** aggregate counts only (`COUNT` / `GROUP BY`), through the **read-only
-   postgres MCP** only, on non-Triton tables, **SQL printed verbatim** in the report (E1 to
-   R-IV.552(b)). Never a `triton_*` table, never row-level output. If the MCP isn't available,
-   say so. Don't work around it.
+8. **Database:** aggregate counts only (`COUNT` / `GROUP BY`), on non-Triton tables, **SQL
+   printed verbatim** in the report (E1 to R-IV.552(b)). Never a `triton_*` table, never
+   row-level output. Route: LAB's own read-only role once BUILD provides it. Until then the
+   exact SQL goes in the report and **QUERY runs it** (R-IV.830(c), R-IV.831). Never work
+   around a missing route.
 9. **At most 2 tasks in flight.** Report as each finishes.
 10. **Acknowledge every block by number** and chase missing ones.
-11. **Python:** LAB's own venv inside `C:\trading-hub-lab` (e.g. `.venv-lab`). Never
-    `C:\trading-hub`'s `.venv-test`. Never work in `C:\trading-hub`.
-12. Commits are pathspec-scoped, credential-pattern-scanned before staging (PROJECT_RULES.md,
-    Workflow Rules). The repo is **PUBLIC**.
+11. **No secrets in LAB** (R-IV.826(b)). Python runs in LAB's own venv inside
+    `C:\trading-hub-lab` (e.g. `.venv-lab`), never `C:\trading-hub`'s `.venv-test`.
+12. **Never print the values in a config or env file** (R-IV.830(b)). To check whether a setting
+    exists, report **key names only**.
+13. **Never read outside `C:\trading-hub-lab`**, including to look for tools or settings
+    (R-IV.830(b)). Ask SPINE instead. The only paths written outside it are the ones a ruling
+    names: `C:\temp\cc-query-handoff\lab\` and `C:\lane-state\LAB.md`.
+
+House rule: commits are pathspec-scoped and credential-pattern-scanned before staging
+(PROJECT_RULES.md, Workflow Rules). The repo is **PUBLIC**.
 
 ## 9 · Result artifacts
 
@@ -252,6 +260,7 @@ quoted in the report.
 
 ## Change log
 
-- 2026-10-09: v0, from R-IV.823(d) as amended by R-IV.826. Interpretation for SPINE to
-  confirm: β is estimated on adjusted-close daily returns (split safety) while r and r_SPY stay
-  on raw prices (§3.3).
+- 2026-10-09: v0, from R-IV.823(d) as amended by R-IV.826.
+- 2026-10-09: R-IV.830. §3.3 price basis confirmed and corrected: β on fully adjusted returns;
+  r and r_SPY on split-adjusted, dividend-unadjusted prices. Hard rules 12 and 13 added; rule 8
+  gains the interim QUERY route.
