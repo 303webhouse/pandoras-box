@@ -36,6 +36,11 @@ logger = logging.getLogger("hermes.session.poll")
 # minutes after the principal could have acted on it.
 POLL_SECONDS = 60
 
+# The name this job records under, so `/health` can show that the alarm is actually running.
+# R-IV.864(d) applies gate item 5 to this job: /health's job list is not a registry but whatever
+# has RECORDED, so appearing there is earned by a completed pass and cannot be declared.
+JOB_NAME = "hermes_session_poll"
+
 # Keyed by ET session date, so a new session starts with an empty ladder.
 _session_date: Optional[str] = None
 _last_alerted: Dict[str, float] = {}
@@ -157,14 +162,47 @@ async def evaluate_once(now: Optional[datetime] = None) -> List[dict]:
     return out
 
 
+async def _recorded_pass() -> dict:
+    """One pass, with its result expressed so the job ledger can tell working from blind.
+
+    A pass that ran but could not price ANY symbol is not a success. `evaluate_once` never
+    raises, so without this check a UW outage would record a clean pass every minute while the
+    alarm saw nothing — /health would read `ok` and the next real displacement would go
+    unannounced. That is the failure shape this whole session has been removing: a silence that
+    looks like health. `OutputCheckFailed` is the existing word for "the pass completed and
+    produced nothing", and it counts toward the flatline alert.
+    """
+    from jobs.stable_jobs import OutputCheckFailed
+
+    recs = await evaluate_once()
+    for rec in recs:
+        if rec["alert"]:
+            logger.info("[hermes.session] %s", rec)
+    if recs and all(r.get("move_pct") is None for r in recs):
+        raise OutputCheckFailed(
+            "no evaluable displacement for any of %d symbol(s) — alarm is blind" % len(recs))
+    return {"symbols": len(recs)}
+
+
 async def run_forever() -> None:
-    """The loop. Catches everything: a notifier that dies takes the next alert with it."""
+    """The loop. Catches everything: a notifier that dies takes the next alert with it.
+
+    ONLY AN RTH PASS IS RECORDED. Marking a success at 03:00 would keep the feed looking fresh
+    all night on passes that evaluated nothing, so "fresh" would stop meaning "the alarm works".
+    The feed is registered RTH-only, so its quiet outside the session is expected rather than
+    read as dead.
+    """
+    from datetime import datetime as _dt
+
     await asyncio.sleep(45)
     while True:
         try:
-            for rec in await evaluate_once():
-                if rec["alert"]:
-                    logger.info("[hermes.session] %s", rec)
+            from webhooks.hermes_session import in_rth
+            if in_rth(_dt.now(timezone.utc)):
+                from jobs import stable_jobs
+                await stable_jobs._record(JOB_NAME, _recorded_pass)
+            else:
+                await evaluate_once()      # a no-op outside RTH; kept so the path stays warm
         except Exception as exc:                                    # noqa: BLE001
             logger.error("[hermes.session] poll error: %s", exc)
         await asyncio.sleep(POLL_SECONDS)
