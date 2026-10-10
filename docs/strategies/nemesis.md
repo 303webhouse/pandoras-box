@@ -11,7 +11,7 @@ The name means this spec only (R-IV.843(d)). The June "Nemesis v0.2" acceleratio
 | grid cell | **BEFORE THE TURN**, LONG and SHORT. It fades a 3+ day move at an extreme bias with RSI(3) at an extreme, on the reversal bar, with no trend confirmation |
 | incumbent it would replace | none named |
 | schedule / trigger | approved: once daily after the close, 4:15 PM ET (`docs/build-plans/phase-5-countertrend-lane.md:51`) |
-| status | **SPEC-ONLY**. Not implemented on either side; never counts as coverage (R-IV.830(e)) |
+| status | LONG: **SHADOW**, a registered forward test from 2026-10-12 (`WRR_LONG`, L0 SUPPRESS_ALWAYS). SHORT: **SPEC-ONLY**. Neither counts as coverage until LIVE (R-IV.830(e)) |
 | bucket ceiling | **B3 or TAIL** (before-the-turn, R-IV.823(c)3). **SHORT side carries the no-fly flag "entering parabolic shorts too early".** |
 | lifetime tries counter | **3** (V-SPEC variants a/b/c, 2026-10-10) |
 
@@ -65,3 +65,4 @@ LAB proposal (SPINE and QUERY decide): if the V-SPEC replay fails stage 1 market
 - 2026-03-16: approved (Olympus). 2026-03-17: Titans; data source edited to Polygon-first (d246794).
 - 2026-10-09: card v0 (R-IV.823(g)). Status SPEC-ONLY.
 - 2026-10-10: named NEMESIS | Washout Reversal; the June spec renamed IMPULSE (R-IV.843(d)(e)).
+- 2026-10-10: **LONG registered** (R-IV.855(d)): [registrations/nemesis-long-v1.md](registrations/nemesis-long-v1.md), the literal variant (ROC < −3%, brief 5B). Implemented as `WRR_LONG` / `nemesis_spec` (`backend/strategies/registered_shadow.py`), a forward test in SHADOW, QUERY grades. Primary h = 1, the only horizon its B3/TAIL ceiling can surface. SHORT is not registered.
