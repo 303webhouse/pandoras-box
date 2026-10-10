@@ -9,7 +9,7 @@
 | incumbent it would replace | n/a (incumbent) |
 | schedule / trigger | equities only: `_scanner_loop` (`backend/scheduler/bias_scheduler.py:3078`) → `run_cta_scan_scheduled` (`:3317`), trading days 9–16 ET, every 15–30 min |
 | status | **LIVE**: in no suppress set; L0 default KEEP (`backend/config/l0_routing.py:55-73`). This contradicts the 06-16 "suppress (small-n)" recommendation; the L0 brief left it out of scope (`docs/codex-briefs/2026-06-17-L0-foundation-build-brief.md:47`) |
-| bucket ceiling | **UNSET.** Needs a ruling |
+| bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
 | lifetime tries counter | **unknown, ≥ 0.** Shares the H2 volume retune (`cta_scanner.py:104`); its own history is unrecorded |
 
 ## Rules as coded
@@ -40,3 +40,4 @@ QUIET, and a ruling decides.
 
 ## Change log
 - 2026-01-28: added (465659d). 2026-06-16: "suppress (small-n)", not applied. 2026-10-09: card v0.
+- 2026-10-10: ceiling ruled (R-IV.838(c)).
