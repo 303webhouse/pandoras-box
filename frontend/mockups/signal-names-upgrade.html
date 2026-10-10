@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal names and the APIS / KODIAK upgrade — mockup</title>
+
+<!-- THE REAL AGORA STYLES, by relative path, so this is not a second copy of the palette or of
+     the card rules. Opened by double-click, `../v2.css` resolves to frontend/v2.css on disk.
+     Every colour below comes from that file's tokens; nothing here restates one. -->
+<link rel="stylesheet" href="../v2.css">
+
+<style>
+/* ── PROPOSED rules only. Nothing in this block is in v2.css yet — that is the point of the
+      mockup. If the principal approves, these move into v2.css under R-IV.832(c). ───────── */
+
+body { min-height: 100%; height: auto; padding: 18px 16px 60px; }
+.mk { max-width: 1180px; margin: 0 auto; }
+.mk h1 { font-family: var(--mono); font-size: 15px; letter-spacing: 1px; margin: 0 0 4px; color: var(--teal); }
+.mk .mk-sub { color: var(--text-2); font-size: 12px; margin: 0 0 6px; }
+.mk .mk-warn { border: 1px dashed var(--amber); color: var(--amber); border-radius: 8px;
+  padding: 7px 11px; font-family: var(--mono); font-size: 11px; margin: 10px 0 22px; }
+.mk h2 { font-family: var(--mono); font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-2); font-weight: 400; margin: 26px 0 4px; padding-top: 14px; border-top: 1px solid var(--border); }
+.mk .mk-note { color: var(--text-2); font-size: 12px; line-height: 1.45; margin: 0 0 12px; max-width: 70ch; }
+.mk .mk-note b { color: var(--text); font-weight: 600; }
+.mk .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+.mk .cell { width: 290px; }
+.mk .cap { font-family: var(--mono); font-size: 10px; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--text-2); margin: 0 0 5px; }
+.mk .phone { width: 390px; border: 1px solid var(--border-strong); border-radius: 14px;
+  padding: 10px; background: var(--bg); }
+.mk .phone .k-card + .k-card { margin-top: 10px; }
+
+/* 1 · THE TITLE. One served string — `display_label` — rendered whole, instead of this page's
+      current two spans (`.nm` + `.desc`) assembled from v2.js's own SETUP_MAP. The pipe is part
+      of the label; it is dimmed so the figure's name still reads first at a glance. */
+.k-card .nm .sep { color: var(--text-2); font-weight: 400; padding: 0 2px; }
+.k-card .nm .what { font-weight: 400; color: var(--text-2); }
+/* `.desc` is `--text-3` today (10px, the dimmest token). Folded into the title it carries real
+   meaning, so it reads at `--text-2` here — a deliberate change, for the principal to judge. */
+
+/* 2 · THE UPGRADE. The card keeps its strategy's name; the tag and the outline say it was
+      upgraded. APIS is a bull tag, so it takes the lime family; KODIAK is bear, vermilion —
+      the palette's existing meanings, not new colours.
+      `color-mix` derives the glow FROM the token rather than restating its channels: one
+      author for the colour, so a palette change cannot leave this behind. */
+.k-card.upgraded { border-width: 1px; border-style: solid; }
+.k-card.apis { border-color: var(--up); box-shadow: 0 0 0 1px var(--up),
+  0 0 14px color-mix(in srgb, var(--up) 34%, transparent); }
+.k-card.kodiak { border-color: var(--down); box-shadow: 0 0 0 1px var(--down),
+  0 0 14px color-mix(in srgb, var(--down) 34%, transparent); }
+
+.upgrade-tag { font-family: var(--mono); font-size: 9px; letter-spacing: .6px; text-transform: uppercase;
+  border-radius: 4px; padding: 1px 5px; border: 1px solid currentColor; font-weight: 700; }
+.apis .upgrade-tag { color: var(--up); }
+.kodiak .upgrade-tag { color: var(--down); }
+/* The tag sits with the name, not in the foot: it qualifies the signal, not its clock. */
+.k-card .top .upgrade-tag { margin-left: 6px; }
+
+/* 3 · THE PULSE, only while the signal is FRESH. Animating the OUTLINE and never the text:
+      a card whose text fades in and out is a card you cannot read mid-cycle (H-13). */
+@keyframes apis-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--up), 0 0 6px color-mix(in srgb, var(--up) 22%, transparent); }
+  50%      { box-shadow: 0 0 0 1px var(--up), 0 0 20px color-mix(in srgb, var(--up) 60%, transparent); }
+}
+@keyframes kodiak-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--down), 0 0 6px color-mix(in srgb, var(--down) 22%, transparent); }
+  50%      { box-shadow: 0 0 0 1px var(--down), 0 0 20px color-mix(in srgb, var(--down) 60%, transparent); }
+}
+.k-card.apis.fresh { animation: apis-pulse 2.2s ease-in-out infinite; }
+.k-card.kodiak.fresh { animation: kodiak-pulse 2.2s ease-in-out infinite; }
+
+/* 4 · REDUCED MOTION. No pulse at all — the bright outline alone still says "upgraded", so
+      nothing is lost but the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .k-card.apis.fresh, .k-card.kodiak.fresh { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="mk">
+
+  <h1>Signal names, and the APIS / KODIAK upgrade</h1>
+  <p class="mk-sub">Mockup for R-IV.832(b) · built 2026-10-09 · CC-ABACUS</p>
+  <div class="mk-warn">
+    SAMPLE DATA. Every ticker, price and grade on this page is invented, and the page makes no
+    API calls and runs no JavaScript at all. Nothing here is wired to the hub, and nothing on the
+    live Agora has changed. Its styles come from the real <code>frontend/v2.css</code>, so the cards
+    look exactly as they would in the app.
+  </div>
+
+  <h2>1 · Every signal reads “FIGURE | Description”</h2>
+  <p class="mk-note">
+    One served string per signal (<b>display_label</b>), rendered whole. Today Agora assembles the
+    title from its own copy of the names in <code>v2.js</code>, which is why <b>MIDAS, HECTOR and
+    NEMESIS have no entry and render as raw internal names</b> — I confirmed that in the code:
+    <code>SETUP_MAP</code> holds only ICARUS, HELEN, ARGO, ACHILLES, TRITON, HERA and CIRCE’S STEW.
+  </p>
+  <div class="row">
+    <div class="cell">
+      <div class="k-card">
+        <div class="top"><span class="nm">ACHILLES <span class="sep">|</span> <span class="what">Sell the Rip</span></span>
+          <span class="grade" data-gloss="GRADE">B</span></div>
+        <div class="lvls"><span class="tkr">IWM</span>
+          <span class="side-short">SHORT 214.80</span><span>T 211.20</span><span>S 216.40</span>
+          <span class="val-muted">15m</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-off">L·</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 38m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="k-card">
+        <div class="top"><span class="nm">MIDAS <span class="sep">|</span> <span class="what">Golden Touch</span></span>
+          <span class="grade val-up" data-gloss="GRADE">A</span></div>
+        <div class="lvls"><span class="tkr">GLD</span>
+          <span class="side-long">LONG 318.40</span><span>T 324.00</span><span>S 315.10</span>
+          <span class="val-muted">1h</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-ok">L✓</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 1h 12m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="k-card">
+        <div class="top"><span class="nm">PERSEPHONE <span class="sep">|</span> <span class="what">Two-Close Turn</span></span>
+          <span class="grade" data-gloss="GRADE">B</span></div>
+        <div class="lvls"><span class="tkr">XLE</span>
+          <span class="side-long">LONG 91.25</span><span>T 94.10</span><span>S 89.80</span>
+          <span class="val-muted">1d</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-off">F·</span>
+          <span class="ev-ok">L✓</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 2h 05m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>2 · APIS and KODIAK upgrade a signal — they do not replace it</h2>
+  <p class="mk-note">
+    The card <b>keeps its strategy’s name</b>, shows the tag, and its outline brightens. APIS is a
+    bull tag so it takes the lime family; KODIAK is bear, so vermilion — the palette’s existing
+    meanings, not new colours.
+    <br><br>
+    <b>SPINE’s recommendation, for you to judge:</b> pulse only while the signal is <b>fresh</b>
+    (the first 15 minutes), then hold the bright outline steady. Constant motion across several
+    cards pulls attention away from everything else on the screen — including the cards that are
+    not upgraded. Both states are below, side by side, so you can see the difference.
+  </p>
+  <div class="row" id="upgrades">
+    <div class="cell">
+      <p class="cap">APIS · long · FRESH (pulsing)</p>
+      <div class="k-card upgraded apis fresh">
+        <div class="top"><span class="nm">MIDAS <span class="sep">|</span> <span class="what">Golden Touch</span></span>
+          <span class="upgrade-tag">APIS</span>
+          <span class="grade val-up" data-gloss="GRADE">A</span></div>
+        <div class="lvls"><span class="tkr">GLD</span>
+          <span class="side-long">LONG 318.40</span><span>T 324.00</span><span>S 315.10</span>
+          <span class="val-muted">1h</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-ok">L✓</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 4m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+    <div class="cell">
+      <p class="cap">APIS · long · OLDER (steady)</p>
+      <div class="k-card upgraded apis">
+        <div class="top"><span class="nm">MIDAS <span class="sep">|</span> <span class="what">Golden Touch</span></span>
+          <span class="upgrade-tag">APIS</span>
+          <span class="grade val-up" data-gloss="GRADE">A</span></div>
+        <div class="lvls"><span class="tkr">GLD</span>
+          <span class="side-long">LONG 318.40</span><span>T 324.00</span><span>S 315.10</span>
+          <span class="val-muted">1h</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-ok">L✓</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 47m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+    <div class="cell">
+      <p class="cap">KODIAK · short · FRESH (pulsing)</p>
+      <div class="k-card upgraded kodiak fresh">
+        <div class="top"><span class="nm">ACHILLES <span class="sep">|</span> <span class="what">Sell the Rip</span></span>
+          <span class="upgrade-tag">KODIAK</span>
+          <span class="grade" data-gloss="GRADE">B</span></div>
+        <div class="lvls"><span class="tkr">IWM</span>
+          <span class="side-short">SHORT 214.80</span><span>T 211.20</span><span>S 216.40</span>
+          <span class="val-muted">15m</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-off">L·</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 7m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+    <div class="cell">
+      <p class="cap">KODIAK · short · OLDER (steady)</p>
+      <div class="k-card upgraded kodiak">
+        <div class="top"><span class="nm">ACHILLES <span class="sep">|</span> <span class="what">Sell the Rip</span></span>
+          <span class="upgrade-tag">KODIAK</span>
+          <span class="grade" data-gloss="GRADE">B</span></div>
+        <div class="lvls"><span class="tkr">IWM</span>
+          <span class="side-short">SHORT 214.80</span><span>T 211.20</span><span>S 216.40</span>
+          <span class="val-muted">15m</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-off">L·</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 1h 33m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>3 · A shadow strategy stays quieter than everything else</h2>
+  <p class="mk-note">
+    Shadow keeps its dashed outline, its <b>shadow</b> tag and no glow, so an upgraded card never
+    has to compete with an unbacktested one for attention. An upgrade tag on a shadow card is not
+    drawn here, because a shadow signal is never sized — if that combination can occur, it needs
+    its own ruling before it gets a treatment.
+  </p>
+  <div class="row">
+    <div class="cell">
+      <p class="cap">shadow · no glow, no pulse</p>
+      <div class="k-card shadow">
+        <div class="top"><span class="nm">TRITON <span class="sep">|</span> <span class="what">Whale Hunting</span></span>
+          <span class="grade" data-gloss="GRADE">—</span></div>
+        <div class="lvls"><span class="tkr">BTC</span>
+          <span class="side-long">LONG 61250</span><span>T 63400</span><span>S 60100</span>
+          <span class="val-muted">5m</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-off">F·</span>
+          <span class="ev-off">L·</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="shadow-tag">shadow</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>4 · The same cards at phone width (390px)</h2>
+  <p class="mk-note">
+    The column below is a real 390px box, so this is what the cards do on your phone — the long
+    titles are the thing to look at. “PERSEPHONE | Two-Close Turn” is the longest name in the
+    roster, and it is here on purpose.
+  </p>
+  <div class="row">
+    <div class="phone">
+      <div class="k-card upgraded apis fresh">
+        <div class="top"><span class="nm">MIDAS <span class="sep">|</span> <span class="what">Golden Touch</span></span>
+          <span class="upgrade-tag">APIS</span>
+          <span class="grade val-up" data-gloss="GRADE">A</span></div>
+        <div class="lvls"><span class="tkr">GLD</span>
+          <span class="side-long">LONG 318.40</span><span>T 324.00</span><span>S 315.10</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-ok">L✓</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 4m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+      <div class="k-card upgraded kodiak">
+        <div class="top"><span class="nm">ACHILLES <span class="sep">|</span> <span class="what">Sell the Rip</span></span>
+          <span class="upgrade-tag">KODIAK</span>
+          <span class="grade" data-gloss="GRADE">B</span></div>
+        <div class="lvls"><span class="tkr">IWM</span>
+          <span class="side-short">SHORT 214.80</span><span>T 211.20</span><span>S 216.40</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-ok">F✓</span>
+          <span class="ev-off">L·</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 1h 33m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+      <div class="k-card">
+        <div class="top"><span class="nm">PERSEPHONE <span class="sep">|</span> <span class="what">Two-Close Turn</span></span>
+          <span class="grade" data-gloss="GRADE">B</span></div>
+        <div class="lvls"><span class="tkr">XLE</span>
+          <span class="side-long">LONG 91.25</span><span>T 94.10</span><span>S 89.80</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-off">F·</span>
+          <span class="ev-ok">L✓</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 2h 05m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+      <div class="k-card shadow">
+        <div class="top"><span class="nm">TRITON <span class="sep">|</span> <span class="what">Whale Hunting</span></span>
+          <span class="grade" data-gloss="GRADE">—</span></div>
+        <div class="lvls"><span class="tkr">BTC</span>
+          <span class="side-long">LONG 61250</span><span>T 63400</span><span>S 60100</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-off">F·</span>
+          <span class="ev-off">L·</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="shadow-tag">shadow</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>5 · With “reduce motion” turned on, nothing pulses</h2>
+  <p class="mk-note">
+    The bright outline alone still says “upgraded”, so the only thing lost is the movement. If you
+    want to see it: iPhone → Settings → Accessibility → Motion → Reduce Motion, then reload this
+    page. The two FRESH cards above will hold steady and look exactly like the OLDER pair.
+  </p>
+
+  <h2>6 · Not asked for — the state where the name has not arrived yet</h2>
+  <p class="mk-note">
+    Added for your judgement, not part of the request. The new title needs the backend to serve
+    <b>display_label</b>; until LAB adds it, Agora falls back to the names it holds today. For
+    MIDAS, HECTOR and NEMESIS it holds <b>none</b>, so the card shows the raw internal name — which
+    is what the live page does right now. If you would rather it showed something else while the
+    field is missing, this is the card to tell me about.
+  </p>
+  <div class="row">
+    <div class="cell">
+      <p class="cap">fallback · no display_label served</p>
+      <div class="k-card">
+        <div class="top"><span class="nm">momentum_thrust_v2</span>
+          <span class="grade" data-gloss="GRADE">B</span></div>
+        <div class="lvls"><span class="tkr">QQQ</span>
+          <span class="side-long">LONG 498.20</span><span>T 505.00</span><span>S 494.60</span>
+          <span class="val-muted">30m</span></div>
+        <div class="k-evidence"><span class="ev-ok">R✓</span><span class="ev-off">F·</span>
+          <span class="ev-off">L·</span><span class="ev-off">C·</span></div>
+        <div class="foot"><span class="clock-chip">⏱ 22m</span>
+          <button class="btn-committee" type="button">Committee</button></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
