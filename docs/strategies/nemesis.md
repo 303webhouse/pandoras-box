@@ -3,7 +3,7 @@
 | field | value |
 |---|---|
 | signal_type / strategy keys | approved: `WRR_LONG`, `WRR_SHORT`, lane `COUNTERTREND` (`docs/approved-strategies/wrr-buy-model.md:45-46`). **No code emits either.** |
-| emitting code | **none.** The coded `NEMESIS_LONG` is a different rule set with its own card: [wrr-code.md](wrr-code.md) |
+| emitting code | **none.** The coded `NEMESIS_LONG` is a different rule set with its own card: [phoenix.md](phoenix.md) |
 | side | BOTH (approved) |
 | grid cell | **BEFORE THE TURN**, LONG and SHORT. It fades a 3+ day move at an extreme bias with RSI(3) at an extreme, on the reversal bar, with no trend confirmation |
 | incumbent it would replace | none named |
@@ -40,7 +40,7 @@ wording for the short side.
 half; TP2 the 3-day SMA or VWAP reversion. **Max hold 2–3 days. Not a swing trade.**
 
 ## Rules as coded
-None. See [wrr-code.md](wrr-code.md) for what was built under this name and the 22-point
+None. See [phoenix.md](phoenix.md) for what was built under this name and the 22-point
 difference list.
 
 ## For the replay (R-IV.809(g), Task 5)
