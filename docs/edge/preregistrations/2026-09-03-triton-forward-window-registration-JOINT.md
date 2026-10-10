@@ -795,3 +795,173 @@ CC-QUERY can verify before Friday 2026-10-09 12:00 MT (R-IV.648).
 **Blob chain.** The id in force before this amendment was `5554719d`; before Amendment 4,
 `c6203e4b`; before Amendment 3, `57cb26a3`.
 
+## SM8 · DXY CONTEXT — side-measure, stamped 2026-10-10 (R-IV.846(e))
+
+**Stamped by CC-QUERY on SPINE's ratification in R-IV.846(e), before W5's first fire.** Source: the
+principal's June design (`docs/codex-briefs/2026-06-15-triton-build-handoff.md` — flow AND dark pool
+AND market tide, plus DXY context), tightened by an independent Olympus double pass 2026-10-09.
+
+**SM8 IS A SIDE-MEASURE. It takes no exploration slot. It touches NEITHER C3 NOR C4, and no gate
+waits on it.** W3 and W4 are scored and labelled **"out of sample, not blind"**; **W5, W6 and W7 are
+blind**, this stamp preceding W5's first fire. **The definition below is frozen at this stamp** and
+keeps accruing on new Triton rows after read 7.
+
+**STRESS / CALM are renamed MOVE / QUIET**, so that a busy day is not read as a panic.
+
+### SM8a · DXY-MOVE (primary)
+
+- **Series:** the ICE US Dollar Index daily close from yfinance **`DX-Y.NYB`**. At each read, record
+  **the fetch time and the sha256 of the exact series used** (convention #32).
+- For each row, **D** = the most recent DXY daily bar dated **strictly before** `fired_at`'s **ET
+  calendar date**. **chg** = `close(D) / close(D−1) − 1`.
+- **SD** = the **sample standard deviation (n−1)** of the **20 daily changes ending at D−1**
+  (**D excluded**).
+- **MOVE** when `|chg| ≥ 1.0 × SD`, else **QUIET**.
+- **If any of the 22 closes needed is missing, the row is UNLABELED:** excluded from both groups and
+  **counted**.
+- **Print the realized MOVE share** (expected: about 3 sessions in 10).
+
+**Report:** the 3d hit rate for MOVE rows and for QUIET rows, each with **n rows, n distinct
+sessions, the SPY-direction baseline and the same-rows drift baseline** (as SM6); and **the
+difference, with a 95% interval from a bootstrap that resamples whole sessions**.
+
+### SM8b (secondary, MOVE rows only)
+
+A **2×2 table**, dollar up / dollar down by BULL / BEAR rows. Each cell shows the **3d hit rate,
+n rows, n sessions and the SPY-direction baseline**. **No "aligned" figure is computed.**
+
+### FLOOR
+
+**No SM8 conclusion is drawn before 30 distinct MOVE sessions** (about 100 sessions, roughly five
+months). **Below that, every SM8 line reads `INSUFFICIENT (n sessions)`.**
+
+### FEASIBILITY, MEASURED BEFORE THIS STAMP
+
+Checked 2026-10-10 03:22Z against the 19 regular sessions from 2026-09-15 on (session calendar taken
+from `spy_minute_bars`): **19 of 19 have a DXY close, 0 missing, 0 bars on non-equity dates, 19 of 19
+labelable, 0 UNLABELED.** Realized MOVE share **7 of 19 = 36.8%**. Series sha256
+`ed248de56eee5282b7c640e0de7890702ac015f7b9770a8159d6ac636a043f22`, 49 bars 2026-08-03 → 2026-10-09.
+**No gap, so R-IV.846(e)'s hold condition was not met and the stamp proceeded.**
+
+**ONE DEFECT RAISED AND NOT RESOLVED HERE, for SPINE (it is not a gap, so it did not block):**
+**2026-09-17 and 2026-09-18 carry the identical close `100.220001`** — the only repeated
+consecutive close in 49 bars. It makes the 2026-09-21 fire session's `chg` **exactly 0.0000%**, which
+labels that session **QUIET** on a change that may be a carried-forward print rather than a flat
+market. **The definition above treats a repeated close as a genuine zero change**, because that is
+the text ratified in R-IV.846(e) and this lane does not amend a ratified definition on its own
+judgment. **If SPINE prefers a repeated close to yield UNLABELED, that is an amendment to make before
+W5's first fire** (about 2026-10-12 07:30 MT), after which the frozen definition governs.
+
+## SM9 · DIRECTION AND TREND SPLITS OF SM3 — side-measure, stamped 2026-10-10 (R-IV.847)
+
+**Stamped by CC-QUERY on SPINE's ratification in R-IV.847, with SM8 and before W5's first fire.**
+
+**WHY.** The principal asks whether Triton is a *bullish* signal, or a *good* one once the dominant
+trend is known. Reads 1–3 show BULL beating BEAR every week — which is also what an up-tape does to
+any set of calls. **C4's same-rows baseline cannot separate the two: in a direction-pure cell its
+excess is an identity** (first market read, (b)). **SM9 therefore measures selection against SPY**,
+split by direction and by trend, declared before W5 so that W5–W7 test it blind.
+
+**LABEL: HYPOTHESIS GENERATION ONLY**, like Amendment 1's strata. **C3, C4, criterion (v) and every
+verdict are unchanged.** SM9 is **data-motivated** (reads 1–3), so **W1–W4 are "out of sample, not
+blind"** and **W5, W6 and W7 are blind**. **No exploration slot is charged: this registration's
+accounting has no slot budget to charge** — the strata S1/S2/S3 and H-CORE4 are declared without any
+slot count, and the only prior occurrence of the word in this document is SM8's own line. **If SPINE
+intends a budget, it must be created; none is spent here, and none remains to report.**
+
+**UNIT OF INFERENCE: the week** (R-IV.306(b)). **Every week's figures are reported.** **No SM9 result
+is called significant unless it holds in ≥ 5 of 7 computable weeks, or a stated week-level test is
+applied.** With only three blind weeks, **SM9 can only propose**; a finding becomes a new premise
+**with its own registration, after read 7**.
+
+### SM9a · DIRECTION (primary)
+
+Split **SM3, as already defined**, into **BULL** rows and **BEAR** rows. For each:
+- the **SM3 hit rate**;
+- the **mean signed 3d excess over SPY, in percentage points**;
+- **n rows**; **n distinct sessions**;
+- a **95% interval from a bootstrap that resamples whole sessions**.
+
+**Beside them, for context only:** the **raw 3d hit rate** and the **SPY-direction baseline**.
+
+### SM9b · MARKET TREND (secondary)
+
+Label each row by **SPY's STACK-FIRST state** — C1's ruled rule: the **20/50/120/200 stack aligned
+bull or bear for ≥ 10 consecutive sessions**, from **completed daily bars dated strictly before
+`fired_at`'s ET date**:
+- **WITH-TREND** when the row's direction matches the stack;
+- **COUNTER-TREND** when opposite;
+- **NO TREND** otherwise.
+
+Report **SM9a's columns for each group**. **While the bull stack holds, WITH-TREND equals BULL**; it
+is declared now so that **a regime change is measured blind**.
+
+### SM9c · OWN TREND (secondary)
+
+The **same split on the ticker's own stack**, same rule, same columns. **A ticker without 200
+completed sessions is UNLABELED and counted.**
+
+### ONCE, LABELLED EXPLORATORY
+
+**SM9a and SM9c on the EXPLORE population**, reported once and labelled **EXPLORATORY**. **Nothing
+that touches or isolates the sealed set** (id ≤ 377783 **AND** `fired_at` ≥ 2026-08-17 — both
+predicates, counts included).
+
+### FEASIBILITY, MEASURED BEFORE THIS STAMP
+
+Checked 2026-10-10 03:32Z on the pinned bar vendor (yfinance; A3(e) — the bar vendor is part of the
+instrument). SPY: 591 daily bars 2024-06-03 → 2026-10-09, series sha256
+`e51243fd7add642b44497d4208ea220034508e51f34cee2730821adfb680bdee`.
+
+- **SM9b: all 19 sessions from 2026-09-15 are labelable; 0 blocked by a bar gap.**
+- **The stack is BULL on all 19.** So **SM9b is currently degenerate with SM9a** — WITH-TREND is
+  exactly BULL today. That is the ruling's own stated expectation, and it is why the rule is frozen
+  before a regime change rather than after one.
+- **SM9c: 101 of W3's 103 tickers have ≥ 210 completed sessions.** **DRAM (113) and SPCX (64) fall
+  short and are UNLABELED and counted**, by the registered rule rather than as a failure. No ticker
+  returned no data.
+- **No bar gap blocks any label, so R-IV.847(g)'s hold condition was not met and the stamp
+  proceeded.**
+
+**ONE ACCOUNTING NOTE, raised not resolved:** R-IV.847(f) names the EXPLORE population as **6,098
+rows**. The same predicate (`id ≤ 377783 AND fired_at < 2026-08-17`, graded at 3d) measures **6,099**
+as of 2026-10-10 03:30Z — **one row more, which is exactly the upper bound of the first market read's
+own declared tripwire `[6,045 · 6,099]`**. The EXPLORE population is therefore **not fixed**: it
+accretes as grading completes. **Every EXPLORATORY figure carries its as-of**, and one further graded
+row would breach that tripwire.
+
+## SM8 · AMENDMENT 1 — THE SUSPECT CLOSE — stamped 2026-10-10 (R-IV.848(b))
+
+**Stamped by CC-QUERY on SPINE's ratification in R-IV.848(b), before W5's first fire.** It amends
+SM8 as stamped above, in response to the defect this lane raised at the original stamp.
+
+**A DXY close identical to the previous session's close at FULL VENDOR PRECISION is SUSPECT.**
+
+**A row whose own `chg` uses a SUSPECT close — as `close(D)` or as `close(D−1)` — is UNLABELED and
+counted.** **SD windows are computed as stamped** (the sample standard deviation of the 20 daily
+changes ending at D−1, D excluded); the amendment reaches `chg` only, never the SD window.
+
+### Effect, measured at the stamp
+
+Over the 49-bar series `2026-08-03 → 2026-10-09` there is **exactly one SUSPECT close**:
+**2026-09-18 = `100.220001`, identical at full vendor precision to 2026-09-17.** It is the only
+repeated consecutive close in the series (43 distinct values among 49 bars).
+
+**Two fire sessions become UNLABELED and counted:**
+
+| fire session | week | why |
+|---|---|---|
+| **2026-09-21** | **W2** | its `close(D)` is 2026-09-18, SUSPECT |
+| **2026-09-22** | **W2** | its `close(D−1)` is 2026-09-18, SUSPECT |
+
+**Correction to R-IV.848(b)'s own parenthesis, which states these rows are W1.** Measured against the
+registered cohort boundaries, **2026-09-21 and 2026-09-22 are W2 fire sessions** (W1 is
+2026-09-15 → 09-18; W2 is 09-21 → 09-25). **The substance is unaffected — W1 and W2 are both out of
+sample for SM8, which is blind only from W5 — but the week label is corrected here so the count is
+attributed to the right cohort when SM8 reports.**
+
+**Why the amendment matters beyond these two rows:** before it, a carried-forward print produced
+`chg = 0.0000%`, which is below any SD and therefore labelled **QUIET** — a stale vendor value
+silently becoming a measurement, with nothing raising an error. The amendment makes that case
+**UNLABELED and counted** instead, which is the same discipline SM8 already applies to a missing
+close.
