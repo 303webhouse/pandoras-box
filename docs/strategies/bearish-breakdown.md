@@ -12,7 +12,7 @@ Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); princi
 | schedule / trigger | equities only: `_scanner_loop` (`backend/scheduler/bias_scheduler.py:3078`) → `run_cta_scan_scheduled` (`:3317`), trading days 9–16 ET, every 15–30 min |
 | status | **LIVE**: in no suppress set; L0 default KEEP (`backend/config/l0_routing.py:55-73`). This contradicts the 06-16 "suppress (small-n)" recommendation; the L0 brief left it out of scope (`docs/codex-briefs/2026-06-17-L0-foundation-build-brief.md:47`) |
 | bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
-| lifetime tries counter | **unknown, ≥ 0.** Shares the H2 volume retune (`cta_scanner.py:104`); its own history is unrecorded |
+| lifetime tries counter | **≥ 1** (the 2026-10-10 replay; earlier history unrecorded) |
 
 ## Rules as coded
 - **Fresh cross down:** the latest close is below the 50-SMA, the prior close too, and the one
@@ -34,6 +34,8 @@ and a falling 20-SMA, and fixes volume at 1.5×.
   n dates not stated.
 - 37 all-time rows (`docs/edge/results/QS-02-RESULTS.md:472`).
 - It is a short, so its market-adjusted figure is the one that matters, and none exists.
+- **Task 5 replay (R-IV.850(e); `C:	emp\cc-query-handoff\lab
+emesis-replay-TASK5-RESULTS.md`, results sha256 `2964fc9e…`): yfinance daily 2007-01-03 → 2026-09-30, 196 names (survivorship-biased), next-open entry, market-adjusted, date-clustered t. REPLAY, not a verdict.** 3,418 fires / 1,565 dates: h1/h2/h3 date-mean −0.01 / −0.04 / **−0.02%** (t −0.27 at h3); same-date difference +0.02 (t 0.22); flat in every split. **No edge in stage 1**; the n the roster review lacked (TA-140 §4 had 12). Stage 2 not run (declared: stage 1 not positive).
 
 ## Kill rule
 LAB proposal: re-grade market-adjusted at fixed horizons with a same-date control. Retire if
