@@ -186,6 +186,7 @@ class TestNoHelperIsCalledByANameThatDoesNotExist:
     FILES = [
         "jobs/stable_jobs.py", "jobs/market_tide_sink.py", "jobs/spy_minute_sink.py",
         "jobs/spy_minute_backfill.py", "jobs/tide_backfill.py", "jobs/loss_alert.py",
+        "strategies/registered_shadow.py",
         "api/portfolio.py", "api/unified_positions.py", "api/crypto_market.py",
         "bias_filters/crypto_perps.py", "bias_filters/crypto_cycle_engine.py",
         "services/open_quantity.py", "services/position_economics.py",
