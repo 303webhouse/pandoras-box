@@ -85,7 +85,11 @@ class TestPhaethonIsShadowed:
         for t in ("STRIKE_IB_BREAK", "HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY",
                   "TRAPPED_LONGS", "ARTEMIS_LONG", "NEMESIS_LONG"):
             assert t in SUPPRESS_ALWAYS, t
-        assert len(SUPPRESS_ALWAYS) == 8
+        # NO COUNT HERE, deliberately. `test_nemesis_wiring_r809.py` now asserts the EXACT set
+        # in full (R-IV.861(c)), so a second count in this file would be a second copy of one
+        # fact — and it is the copy that would be forgotten: mine said 8 and broke the moment
+        # R-IV.855(d)'s two registered types arrived. One author for the set; this test keeps
+        # only what it is actually for, which is that PHAETHON's addition disturbed nothing.
         for t in ("ARTEMIS_SHORT", "TRAPPED_SHORTS", "GOLDEN_TOUCH", "TWO_CLOSE_VOLUME",
                   "DEATH_CROSS"):
             assert t not in SUPPRESS_ALWAYS, t

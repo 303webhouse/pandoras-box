@@ -233,11 +233,16 @@ class TestNemesisIsSuppressed:
         for t in ("STRIKE_IB_BREAK", "HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY",
                   "TRAPPED_LONGS", "ARTEMIS_LONG"):
             assert t in SUPPRESS_ALWAYS, t
-        # 8 since R-IV.857(b) added BEARISH_BREAKDOWN (PHAETHON) to shadow. The exact count is
-        # kept rather than loosened to a superset: this assertion is what caught that addition,
-        # which is precisely the job of a control on a set that decides what reaches a surface.
-        assert len(SUPPRESS_ALWAYS) == 8
-        assert "BEARISH_BREAKDOWN" in SUPPRESS_ALWAYS
+        # THE EXACT SET, named in full — R-IV.861(c). LAB's form is better than the count I had
+        # and replaces it: a named set fails on an unintended addition exactly as a count does,
+        # and it also says WHICH types are suppressed, so the next reader does not have to go
+        # and look. Ten members: the six originals, NEMESIS_LONG (R-IV.809),
+        # BEARISH_BREAKDOWN/PHAETHON (R-IV.857(b)), and the two registered forward tests
+        # (R-IV.855(d)).
+        assert SUPPRESS_ALWAYS == frozenset({
+            "STRIKE_IB_BREAK", "HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY",
+            "TRAPPED_LONGS", "ARTEMIS_LONG", "NEMESIS_LONG", "BEARISH_BREAKDOWN",
+            "WRR_LONG", "PHOENIX_WASHOUT"})
         # And the types explicitly kept live stay out of it.
         for t in ("ARTEMIS_SHORT", "TWO_CLOSE_VOLUME", "GOLDEN_TOUCH", "TRAPPED_SHORTS"):
             assert t not in SUPPRESS_ALWAYS, t

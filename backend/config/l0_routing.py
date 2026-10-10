@@ -67,6 +67,8 @@ SUPPRESS_ALWAYS: frozenset[str] = frozenset({
                           # a SURFACE verdict, not a kill. The row is still written and still
                           # graded, which is the whole point of a shadow — a type that stopped
                           # persisting would stop accumulating the record the review needs.
+    "WRR_LONG",        # R-IV.855(d): NEMESIS long, registered forward test (nemesis-long-v1) — SHADOW.
+    "PHOENIX_WASHOUT", # R-IV.855(d): PHOENIX washout, registered forward test (phoenix-washout-v1) — SHADOW.
 })
 
 # signal_types suppressed ONLY when the ticker is not in the liquid universe.
