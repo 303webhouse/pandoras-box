@@ -929,3 +929,39 @@ as of 2026-10-10 03:30Z — **one row more, which is exactly the upper bound of 
 own declared tripwire `[6,045 · 6,099]`**. The EXPLORE population is therefore **not fixed**: it
 accretes as grading completes. **Every EXPLORATORY figure carries its as-of**, and one further graded
 row would breach that tripwire.
+
+## SM8 · AMENDMENT 1 — THE SUSPECT CLOSE — stamped 2026-10-10 (R-IV.848(b))
+
+**Stamped by CC-QUERY on SPINE's ratification in R-IV.848(b), before W5's first fire.** It amends
+SM8 as stamped above, in response to the defect this lane raised at the original stamp.
+
+**A DXY close identical to the previous session's close at FULL VENDOR PRECISION is SUSPECT.**
+
+**A row whose own `chg` uses a SUSPECT close — as `close(D)` or as `close(D−1)` — is UNLABELED and
+counted.** **SD windows are computed as stamped** (the sample standard deviation of the 20 daily
+changes ending at D−1, D excluded); the amendment reaches `chg` only, never the SD window.
+
+### Effect, measured at the stamp
+
+Over the 49-bar series `2026-08-03 → 2026-10-09` there is **exactly one SUSPECT close**:
+**2026-09-18 = `100.220001`, identical at full vendor precision to 2026-09-17.** It is the only
+repeated consecutive close in the series (43 distinct values among 49 bars).
+
+**Two fire sessions become UNLABELED and counted:**
+
+| fire session | week | why |
+|---|---|---|
+| **2026-09-21** | **W2** | its `close(D)` is 2026-09-18, SUSPECT |
+| **2026-09-22** | **W2** | its `close(D−1)` is 2026-09-18, SUSPECT |
+
+**Correction to R-IV.848(b)'s own parenthesis, which states these rows are W1.** Measured against the
+registered cohort boundaries, **2026-09-21 and 2026-09-22 are W2 fire sessions** (W1 is
+2026-09-15 → 09-18; W2 is 09-21 → 09-25). **The substance is unaffected — W1 and W2 are both out of
+sample for SM8, which is blind only from W5 — but the week label is corrected here so the count is
+attributed to the right cohort when SM8 reports.**
+
+**Why the amendment matters beyond these two rows:** before it, a carried-forward print produced
+`chg = 0.0000%`, which is below any SD and therefore labelled **QUIET** — a stale vendor value
+silently becoming a measurement, with nothing raising an error. The amendment makes that case
+**UNLABELED and counted** instead, which is the same discipline SM8 already applies to a missing
+close.
