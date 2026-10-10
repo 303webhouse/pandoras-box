@@ -10,7 +10,7 @@ Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); princi
 | grid cell | **CONFIRMED TURN, SHORT**: a fresh two-close cross below the 50-day, volume, and a falling 20-SMA (the stack turning, partially) |
 | incumbent it would replace | n/a (incumbent) |
 | schedule / trigger | equities only: `_scanner_loop` (`backend/scheduler/bias_scheduler.py:3078`) → `run_cta_scan_scheduled` (`:3317`), trading days 9–16 ET, every 15–30 min |
-| status | **LIVE**: in no suppress set; L0 default KEEP (`backend/config/l0_routing.py:55-73`). This contradicts the 06-16 "suppress (small-n)" recommendation; the L0 brief left it out of scope (`docs/codex-briefs/2026-06-17-L0-foundation-build-brief.md:47`) |
+| status | **SHADOW** (R-IV.855(c), 2026-10-10: no edge on n = 3,418). Still stored and graded; BUILD moves it into L0 `SUPPRESS_ALWAYS` (until then the code still reads KEEP, `backend/config/l0_routing.py:55-73`) |
 | bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
 | lifetime tries counter | **≥ 1** (the 2026-10-10 replay; earlier history unrecorded) |
 
@@ -45,3 +45,4 @@ QUIET, and a ruling decides.
 ## Change log
 - 2026-01-28: added (465659d). 2026-06-16: "suppress (small-n)", not applied. 2026-10-09: card v0.
 - 2026-10-10: ceiling ruled (R-IV.838(c)).
+- 2026-10-10: **SHADOW** by R-IV.855(c), on the Task 5 replay (no edge, n = 3,418). Its grid cell (CONFIRMED TURN SHORT) reads SHADOW.

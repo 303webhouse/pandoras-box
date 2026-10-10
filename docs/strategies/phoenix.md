@@ -10,7 +10,7 @@
 | schedule / trigger | `CronTrigger(mon-fri, 16:20 ET)`, id `wrr_daily_scan` (`backend/scheduler/bias_scheduler.py:2862-2863`); job `run_wrr_scan_job` (`:2361`), importing `run_wrr_and_process` (`:2379`) |
 | status | **SHADOW**: `NEMESIS_LONG` in `SUPPRESS_ALWAYS` (`backend/config/l0_routing.py:64`). **Cannot persist until `b93dabd` merges**, and **QUIET** by census (0 expected fires in 63 sessions) |
 | bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
-| lifetime tries counter | **1** (V-CODE replay, 2026-10-10) |
+| lifetime tries counter | **2** (V-CODE replay; the washout variant registered 2026-10-10) |
 
 ## Rules as coded (HEAD = 314fc21)
 | # | rule | where |
@@ -90,3 +90,4 @@ LAB proposal (SPINE and QUERY decide): retire if the V-CODE replay fails stage 1
 - 2026-10-09: 314fc21: import, bars window and gate-scale fixes; L0 SHADOW. Card v0.
 - 2026-10-10: persistence defect found and fixed (b93dabd, pending merge); census: QUIET.
 - 2026-10-10: named PHOENIX; ceiling ruled (R-IV.838(c)). Card renamed from wrr-code.md.
+- 2026-10-10: PHOENIX as coded **stays SHADOW** (R-IV.855(c)). Its washout variant (no candle, no volume test) is registered as a NEW variant: [registrations/phoenix-washout-v1.md](registrations/phoenix-washout-v1.md) (`PHOENIX_WASHOUT`, forward test in SHADOW, QUERY grades). Lifetime tries counter: 2.
