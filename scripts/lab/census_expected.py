@@ -120,10 +120,19 @@ async def wrr_signals(frames, sessions, tickers):
     return out
 
 
-def _intraday(tickers, interval, start=None, period=None):
+def _intraday(tickers, interval, start=None, period=None, chunk=20):
+    """Chunked: one bulk 1h request for ~200 tickers came back empty (amendment 6 run 1)."""
     kw = {"period": period} if period else {"start": start}
-    raw = yf.download(tickers, interval=interval, auto_adjust=True, group_by="ticker",
-                      threads=True, progress=False, **kw)
+    out = {}
+    for i in range(0, len(tickers), chunk):
+        part = tickers[i:i + chunk]
+        raw = yf.download(part, interval=interval, auto_adjust=True, group_by="ticker",
+                          threads=True, progress=False, **kw)
+        out.update(_split_intraday(raw, part))
+    return out
+
+
+def _split_intraday(raw, tickers):
     out = {}
     for t in tickers:
         try:
@@ -147,7 +156,11 @@ def _rth_completed(ts, minutes):
 
 def hg_rows(tickers, win_from, vix_prior):
     from scanners import holy_grail_scanner as hg
-    start = max(win_from - timedelta(days=100), date.today() - timedelta(days=729))
+    # yfinance refuses 1h history older than 730 days, measured from UTC, and answers an
+    # over-long request with NOTHING (no error). 720 days from the UTC date leaves a margin.
+    from datetime import datetime, timezone
+    utc_today = datetime.now(timezone.utc).date()
+    start = max(win_from - timedelta(days=100), utc_today - timedelta(days=720))
     frames = _intraday(tickers, "1h", start=start.isoformat())
     rows, err = [], {}
     for t, df in frames.items():
