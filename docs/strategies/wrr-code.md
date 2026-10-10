@@ -8,7 +8,7 @@
 | grid cell | **WITH-TREND LONG.** A washout dip-buy in a name above its 200-day (`:128-131`); R-IV.823(c)2 places it here as a candidate |
 | incumbent it would replace | none named |
 | schedule / trigger | `CronTrigger(mon-fri, 16:20 ET)`, id `wrr_daily_scan` (`backend/scheduler/bias_scheduler.py:2862-2863`); job `run_wrr_scan_job` (`:2361`), importing `run_wrr_and_process` (`:2379`) |
-| status | **SHADOW**: `NEMESIS_LONG` in `SUPPRESS_ALWAYS` (`backend/config/l0_routing.py:64`). **BROKEN until 314fc21** (2026-10-09): it had never emitted a row (below) |
+| status | **SHADOW**: `NEMESIS_LONG` in `SUPPRESS_ALWAYS` (`backend/config/l0_routing.py:64`). **Cannot persist until `b93dabd` merges**, and **QUIET** by census (0 expected fires in 63 sessions) |
 | bucket ceiling | **UNSET.** It is neither before-the-turn nor flow-originated, so R-IV.823(c)3–4 don't apply. Needs a ruling before SURFACE |
 | lifetime tries counter | **0** |
 
@@ -57,7 +57,27 @@ branch that **records** the countertrend verdict in `triggering_factors.countert
   while APScheduler reported success, and the 60-day default bars window could never pass the
   205-bar guard.
 - 314fc21's dry run: 197 tickers scanned, 0 hits (one session).
-- Replay V-CODE is Task 5 (R-IV.809(g)).
+- **A hit still could not persist after 314fc21.** The dict set `target_price` and no
+  `target_1`, which `log_signal` indexes (`backend/database/postgres_client.py:3015`); the
+  pipeline swallows the KeyError (`backend/signals/pipeline.py:1582-1585`). Fixed on
+  `claude/lab-nemesis-persist` @ `b93dabd`, with a test that drives a real hit into the real
+  `log_signal`.
+- **QUIET by its own rules** (R-IV.809(f) census, 63 sessions × 197 tickers, yfinance completed
+  bars): **0 expected fires.** Funnel, in ticker-days:
+
+  | stage | ticker-days |
+  |---|---|
+  | all evaluated | 12,411 |
+  | above the 200-day | 8,246 |
+  | + RSI(3) ≤ 10 | 1,308 |
+  | + ROC ≤ −8% | 144 |
+  | + volume ≥ 1.5× | 23 |
+  | + candle | **0** |
+
+  The plain-mean RSI(3) ≤ 10 needs a down close; the candle needs close > open. Only a
+  gap-down-and-recover bar satisfies both.
+- Replay V-CODE is Task 5 (R-IV.809(g)). It measures whether this is rare or effectively never
+  over 2007–2026.
 
 ## Kill rule
 LAB proposal (SPINE and QUERY decide): retire if the V-CODE replay fails stage 1 market-adjusted at
@@ -66,3 +86,4 @@ LAB proposal (SPINE and QUERY decide): retire if the V-CODE replay fails stage 1
 ## Change log
 - 2026-03-17: built (9f40b4a); 2026-03-17 wired with a broken import (22d47de); 2026-04-15 bars to UW (7e19fbf).
 - 2026-10-09: 314fc21: import, bars window and gate-scale fixes; L0 SHADOW. Card v0.
+- 2026-10-10: persistence defect found and fixed (b93dabd, pending merge); census: QUIET.
