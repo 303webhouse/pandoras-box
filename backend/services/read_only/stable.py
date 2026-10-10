@@ -591,7 +591,12 @@ async def get_rates() -> dict:
 
 
 async def get_fx() -> dict:
-    """DXY + USDJPY latest level, day change, and intraday series."""
+    """DXY + USDJPY latest level, day change, and intraday series (`fx`, what the v2 tile shows).
+
+    R-IV.823(i): the carry pairs (AUDJPY, MXNJPY) are captured beside them and served under
+    `fx_capture`, apart from `fx`, so no screen changes until the principal approves a display.
+    """
+    from stable_engine.strip import FX_DISPLAY, FX_KEEP
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
@@ -600,14 +605,19 @@ async def get_fx() -> dict:
             )
             pts = await conn.fetch(
                 """SELECT symbol, ts, value FROM stable_intraday_points
-                   WHERE symbol IN ('DXY','USDJPY') AND ts >= NOW() - INTERVAL '1 day' ORDER BY symbol, ts"""
+                   WHERE symbol = ANY($1::text[]) AND ts >= NOW() - INTERVAL '1 day' ORDER BY symbol, ts""",
+                list(FX_KEEP),
             )
             series = {}
             for r in pts:
                 series.setdefault(r["symbol"], []).append({"ts": r["ts"].isoformat(), "value": r["value"]})
-            as_of = max((r["as_of"] for r in latest if r["as_of"]), default=None)
-            fx = [{**dict(r), "series": series.get(r["symbol"], [])} for r in latest]
-            return _envelope(as_of, "provisional", len(fx) == 0, feed="strip", fx=fx, count=len(fx))
+            shown = [r for r in latest if r["symbol"] in FX_DISPLAY]
+            as_of = max((r["as_of"] for r in shown if r["as_of"]), default=None)
+            fx = [{**dict(r), "series": series.get(r["symbol"], [])} for r in shown]
+            capture = [{**dict(r), "series": series.get(r["symbol"], [])}
+                       for r in latest if r["symbol"] not in FX_DISPLAY]
+            return _envelope(as_of, "provisional", len(fx) == 0, feed="strip", fx=fx, count=len(fx),
+                             fx_capture=capture)
     except Exception as e:
         logger.warning("[services.stable] get_fx failed: %s", e)
-        return _envelope(None, "provisional", True, feed="strip", fx=[], count=0)
+        return _envelope(None, "provisional", True, feed="strip", fx=[], count=0, fx_capture=[])
