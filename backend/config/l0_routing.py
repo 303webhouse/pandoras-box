@@ -62,6 +62,8 @@ SUPPRESS_ALWAYS: frozenset[str] = frozenset({
                        # named eviction candidate, cta-artemis-decompose 2026-06-16.
                        # ARTEMIS_SHORT stays live (salvageable-marginal, +0.04).
     "NEMESIS_LONG",    # R-IV.809 shadow — unproven, graded under suppression; TA reviews before surfacing.
+    "WRR_LONG",        # R-IV.855(d): NEMESIS long, registered forward test (nemesis-long-v1) — SHADOW.
+    "PHOENIX_WASHOUT", # R-IV.855(d): PHOENIX washout, registered forward test (phoenix-washout-v1) — SHADOW.
 })
 
 # signal_types suppressed ONLY when the ticker is not in the liquid universe.
