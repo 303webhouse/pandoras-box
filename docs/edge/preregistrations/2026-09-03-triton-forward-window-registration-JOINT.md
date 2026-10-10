@@ -965,3 +965,81 @@ attributed to the right cohort when SM8 reports.**
 silently becoming a measurement, with nothing raising an error. The amendment makes that case
 **UNLABELED and counted** instead, which is the same discipline SM8 already applies to a missing
 close.
+
+## SM7 · DARK POOL — side-measure, stamped 2026-10-10 (R-IV.846(f), R-IV.848(c), R-IV.854(b))
+
+**Stamped by CC-QUERY on SPINE's ratification.** Proposed under R-IV.846(f), ratified with three
+settlements in R-IV.848(c), and stamped once R-IV.854(b) re-pointed the condition from R-IV.825(d)
+— which never reached this lane — to **R-IV.846(f)**, whose text this proposal reproduces.
+
+**Verified before stamping, not asserted:** the staged proposal was checked against R-IV.846(f)
+**requirement by requirement — 22 of 22 matched, 0 departures** — and the only additions were the
+three questions the settlements below now answer.
+
+**SM7 IS A SIDE-MEASURE. It takes no exploration slot** (this registration has no slot budget).
+**It touches NEITHER C3 NOR C4, and no gate waits on it.** **Blind from W6** — this stamp precedes
+Mon 2026-10-19's first fire; **W3, W4 and W5 are "out of sample, not blind"**.
+
+**SM7 CLAIMS NO AGGRESSOR SIDE**, because an off-exchange print has none.
+
+### Window
+
+The **240 regular-session minutes before `fired_at`**, **reaching into the prior session when
+needed**. Prints are placed by **`executed_at`**. **Canceled and extended-hours prints are
+excluded.**
+
+**SETTLEMENT 3 — CROSS-SESSION (R-IV.848(c)3):** a window reaching into the prior session is
+**marked CROSS-SESSION and STAYS POOLED**. **Report the marked share**, with a **descriptive split
+beside the primary figures**.
+
+### Coverage
+
+A row whose window **cannot be completed from LAB's collection** is **TRUNCATED** and **reported on
+its own line, never pooled.**
+
+### SM7a · INTENSITY (primary)
+
+`R = dark-pool notional in the window ÷ (the ticker's 20-session average daily dollar volume ×
+240/390)`.
+
+Split rows into **thirds by R within each read week**. Report the **3d hit rate for the top third vs
+the bottom third**, with **n rows, n distinct sessions and the SPY-direction baseline**.
+
+### SM7b · LOCATION (secondary)
+
+**SETTLEMENT 2 — PRICE RANGE (R-IV.848(c)2): the window's OWN PRINTS, high to low.** Never the lit
+range, so SM7b never mixes two series.
+
+Split that range into **10 equal buckets**; the bucket holding the **most notional** is the window's
+**dark-pool POC**.
+
+- A POC in the **lower third supports BULL**, the **upper third BEAR**, the **middle third NEUTRAL**.
+- A row is **ALIGNED** when the POC supports its direction. **Rows with fewer than 20 prints are
+  UNSCORED.**
+- Report **ALIGNED / OPPOSED / NEUTRAL** with the same columns, **plus a momentum control:** whether
+  **spot at fire is above or below the window's first print**.
+
+### FLOOR
+
+**SETTLEMENT 1 — (R-IV.848(c)1): no SM7 conclusion before 30 distinct sessions in EACH compared
+group.** Below that, **every SM7 line reads `INSUFFICIENT (n sessions)`**, exactly as SM8's floor
+requires. The group is the unit the floor counts — top third and bottom third each need 30, and
+ALIGNED / OPPOSED / NEUTRAL each need 30.
+
+### Descriptive only, never registered
+
+The **quote-rule split** (buy / sell / mid, **dead band = half the half-spread**), **with the
+mid-plus-unclassified share printed.**
+
+### FEASIBILITY AT THE STAMP — ITS INPUT DOES NOT EXIST YET
+
+Measured 2026-10-10 03:28Z: **there is no dark-pool print store.** An `information_schema` sweep for
+dark / print / offexch / lit / tape returns only `crypto_tape_health_log`, a crypto health log
+holding no prints; LAB's collection directory holds only its census. **The ADDV denominator IS
+available** (`stable_daily_bars.c`, `.v` per ticker-day, so a 20-session average dollar volume is
+computable).
+
+**So every SM7 line reads TRUNCATED or `INSUFFICIENT (n sessions)` until LAB's collector lands
+(R-IV.823 Task 2 / R-IV.849(f)1), and this stamp buys BLINDNESS rather than figures.** That is the
+point of stamping it now: the definition is fixed before the data exists, so nothing in it can be
+chosen after seeing an outcome.
