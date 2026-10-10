@@ -233,7 +233,11 @@ class TestNemesisIsSuppressed:
         for t in ("STRIKE_IB_BREAK", "HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY",
                   "TRAPPED_LONGS", "ARTEMIS_LONG"):
             assert t in SUPPRESS_ALWAYS, t
-        assert len(SUPPRESS_ALWAYS) == 7
+        # R-IV.855(d) adds the two registered SHADOW forward tests. The set is named in full, so
+        # an unintended addition still fails here exactly as the count did.
+        assert SUPPRESS_ALWAYS == frozenset({
+            "STRIKE_IB_BREAK", "HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY",
+            "TRAPPED_LONGS", "ARTEMIS_LONG", "NEMESIS_LONG", "WRR_LONG", "PHOENIX_WASHOUT"})
         # And the types explicitly kept live stay out of it.
         for t in ("ARTEMIS_SHORT", "TWO_CLOSE_VOLUME", "GOLDEN_TOUCH", "TRAPPED_SHORTS"):
             assert t not in SUPPRESS_ALWAYS, t
