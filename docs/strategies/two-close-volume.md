@@ -9,7 +9,7 @@
 | incumbent it would replace | n/a (incumbent) |
 | schedule / trigger | equities: `_scanner_loop` (`backend/scheduler/bias_scheduler.py:3078`) → `run_cta_scan_scheduled` (`:3317`), trading days 9–16 ET, every 15 min (first hour and from 15:00) or 30 min; crypto: `run_crypto_scan_scheduled` (`:3619`), every 30 min, 24/7 |
 | status | **LIVE**: in no suppress set; L0 default KEEP (`backend/config/l0_routing.py:72-73`) |
-| bucket ceiling | **UNSET.** Not before-the-turn, not flow-originated. Needs a ruling |
+| bucket ceiling | **No provenance ceiling: C5 and F5 do not reach this cell.** Ordinary bucket rules apply: intent at entry, X4, X10 (R-IV.838(c)) |
 | lifetime tries counter | **≥ 1**: the volume threshold was retuned 1.10 → 1.50 ("H2", `cta_scanner.py:104`); earlier tries are unrecorded |
 
 ## Rules as coded
@@ -48,3 +48,4 @@ n ≥ 30 and ≥ 20 distinct dates.
 ## Change log
 - 2026-01-21: CTA scanner (6c3b3b1); volume threshold 1.10 → 1.50 (H2).
 - 2026-06-16: KEEP (+0.82, n = 30). 2026-10-09: card v0.
+- 2026-10-10: ceiling ruled (R-IV.838(c)).
