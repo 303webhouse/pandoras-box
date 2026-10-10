@@ -1,4 +1,7 @@
-# NEMESIS: the March-approved WRR Buy/Sell Day
+# NEMESIS | Washout Reversal: the March-approved WRR Buy/Sell Day (N4)
+
+The name means this spec only (R-IV.843(d)). The June "Nemesis v0.2" acceleration spec is
+**IMPULSE (v0.2, 2026-06-16)**, SPEC-ONLY (`docs/codex-briefs/2026-06-16-nemesis-spec.md`).
 
 | field | value |
 |---|---|
@@ -11,10 +14,6 @@
 | status | **SPEC-ONLY**. Not implemented on either side; never counts as coverage (R-IV.830(e)) |
 | bucket ceiling | **B3 or TAIL** (before-the-turn, R-IV.823(c)3). **SHORT side carries the no-fly flag "entering parabolic shorts too early".** |
 | lifetime tries counter | **0** |
-
-**Name collision, not to be confused:** `docs/codex-briefs/2026-06-16-nemesis-spec.md` ("Nemesis
-v0.2") specifies an unrelated, direction-agnostic acceleration detector under the same name.
-This card is the March WRR spec only (R-IV.823(c)2).
 
 ## Rules as approved
 Olympus 2026-03-16 "APPROVED with conditions" (`wrr-buy-model.md:9`); Titans 2026-03-17 (`:62`).
@@ -63,3 +62,4 @@ LAB proposal (SPINE and QUERY decide): if the V-SPEC replay fails stage 1 market
 ## Change log
 - 2026-03-16: approved (Olympus). 2026-03-17: Titans; data source edited to Polygon-first (d246794).
 - 2026-10-09: card v0 (R-IV.823(g)). Status SPEC-ONLY.
+- 2026-10-10: named NEMESIS | Washout Reversal; the June spec renamed IMPULSE (R-IV.843(d)(e)).

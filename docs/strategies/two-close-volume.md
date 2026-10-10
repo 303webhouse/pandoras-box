@@ -1,4 +1,6 @@
-# TWO_CLOSE_VOLUME
+# PERSEPHONE | Two-Close Turn (`TWO_CLOSE_VOLUME`)
+
+Name per the registry (`backend/config/strategy_aliases.py`, R-IV.843(e); principal 2026-10-09).
 
 | field | value |
 |---|---|

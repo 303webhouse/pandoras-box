@@ -1,4 +1,4 @@
-# PHOENIX: the coded WRR (named 2026-10-10, R-IV.838(c))
+# PHOENIX | Uptrend Dip-Buy: the coded WRR (named 2026-10-10, R-IV.838(c); description R-IV.843(e))
 
 | field | value |
 |---|---|
