@@ -39,6 +39,13 @@ DESCRIPTION = (
     # R-IV.780(e)1. Named in the DESCRIPTION, not only in the payload: a committee seat decides
     # whether it can enforce a bucket limit from what this text promises, and until now the text
     # promised nothing about classification because the field was being dropped.
+    "**`status=CLOSED` returns CLOSED rows ONLY. EXPIRED and DUPLICATE_OF rows appear only "
+    "under `ALL`** (TA-138). A CLOSED filter is not \"everything that has ended\".\n\n"
+    "**`trade_outcome` is NOT an open-position filter. Select open rows with "
+    "`open_quantity > 0`** — never by `trade_outcome`, and never by `strategy_tag` "
+    "(R-IV.844(d)3, standing for every gate). `trade_outcome` is served AS STORED and is "
+    "`UNKNOWN` on a row that ended without a recorded result; until R-IV.844(d)2 it wrongly read "
+    "\"OPEN\" on 124 rows that were not open.\n\n"
     "**`strategy_tag` MIXES CLASSIFICATION, SLEEVE TAG AND BUCKET. NO CAP, GATE OR FILTER MAY "
     "BE COMPUTED FROM IT** (TA-123, R-IV.794(b)). It is a DISPLAY STRING only. One column holds "
     "three independent taxonomies, so each row shows whichever was written last and the other "
@@ -126,18 +133,33 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         except ValueError:
             dte = None
 
+    # R-IV.844(d)2: THE STORED VALUE IS SERVED, and a row that is not open is never "OPEN".
+    #
+    # This RECOMPUTED the outcome and defaulted to "OPEN" for ANY status, so only CLOSED rows
+    # ever entered the derivation. Measured on the live book before the fix:
+    #
+    #   124 non-open rows were served as "OPEN"  -- 84 DUPLICATE_OF and 40 EXPIRED
+    #   103 rows served something other than what they store, including 37 EXPIRED rows whose
+    #       stored outcome is LOSS
+    #   IWM 956 (EXPIRED, stored UNKNOWN) was served as "OPEN", which is how POSITIONS found it
+    #
+    # Two faults in one expression. It invented a verdict from realized/unrealized instead of
+    # reading the column the book keeps, and its DEFAULT asserted the most consequential thing
+    # it could -- that the position is still open -- about every status it had not been taught.
+    #
+    # The derivation is safe to delete: all 534 CLOSED rows carry a stored outcome, and zero of
+    # them disagreed with the derived one, so nothing that was right becomes wrong.
     status = (row.get("status") or "").upper()
-    outcome = "OPEN"
-    if status == "CLOSED":
-        unrealized = row.get("realized_pnl") or row.get("unrealized_pnl")
-        if unrealized is None:
-            outcome = "OPEN"
-        elif unrealized > 0:
-            outcome = "WIN"
-        elif unrealized < 0:
-            outcome = "LOSS"
-        else:
-            outcome = "BREAKEVEN"
+    stored_outcome = row.get("trade_outcome")
+    if stored_outcome:
+        outcome = stored_outcome
+    elif status == "OPEN":
+        outcome = "OPEN"
+    else:
+        # No result recorded on a row that has ended. "UNKNOWN" is the vocabulary's own word for
+        # that -- and it is what the expiry sweep writes -- whereas "OPEN" would be a claim
+        # about the book that the row itself contradicts.
+        outcome = "UNKNOWN"
 
     return {
         "position_id": row.get("position_id") or row.get("id"),
