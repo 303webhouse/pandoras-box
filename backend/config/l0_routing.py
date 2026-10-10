@@ -62,6 +62,11 @@ SUPPRESS_ALWAYS: frozenset[str] = frozenset({
                        # named eviction candidate, cta-artemis-decompose 2026-06-16.
                        # ARTEMIS_SHORT stays live (salvageable-marginal, +0.04).
     "NEMESIS_LONG",    # R-IV.809 shadow — unproven, graded under suppression; TA reviews before surfacing.
+    "BEARISH_BREAKDOWN",  # PHAETHON — R-IV.857(b) shadow: stored and graded, not surfaced.
+                          # Same mechanism as NEMESIS_LONG and HOLY_GRAIL_1H: L0 suppression is
+                          # a SURFACE verdict, not a kill. The row is still written and still
+                          # graded, which is the whole point of a shadow — a type that stopped
+                          # persisting would stop accumulating the record the review needs.
 })
 
 # signal_types suppressed ONLY when the ticker is not in the liquid universe.
