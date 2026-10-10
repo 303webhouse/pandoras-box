@@ -83,3 +83,12 @@ CIRCE stays in shadow. Retirement is SPINE's and QUERY's (09-23 S2).
 ## Change log
 - 2026-04-22: Olympus ADD (PROVISIONAL). 2026-09-16: built (d990abb). 2026-09-17: SHADOW deployed.
 - 2026-10-09: card v0 (R-IV.823(g), R-IV.830(g)).
+- **2026-10-10: gate v2 proposed** (R-IV.838(d); `claude/lab-circe-gate-v2` @ `378b7e3`).
+  - The fire close is now located on the side being faded: VAH for a SHORT, VAL for a LONG.
+    A close at or through the other side's edge is `opposite` and fails.
+  - `GATE_VERSION` goes `circe-gate-v1` → `circe-gate-v2`, and v1's reading is kept as
+    `va.location_v1`. **The shadow record splits at v2's deploy date**, to be entered here
+    when BUILD deploys.
+  - **Not moved to the extreme.** R-IV.430(a) ratified the close because the extreme sits at
+    or beyond the prior VAH/VAL in every case, so a gate on it could not fail. That question is
+    open with SPINE.
