@@ -163,6 +163,9 @@ async def scan_wrr(tickers: Optional[List[str]] = None) -> Dict[str, Any]:
                 "entry_price": round(c, 2),
                 "stop_loss": round(l * 0.98, 2),  # 2% below today's low
                 "target_price": round(c + (c - l * 0.98) * 3, 2),  # 3:1 R:R
+                # R-IV.830: log_signal INDEXES target_1 (postgres_client.py:3015). Without it
+                # every hit KeyErrors at persist, which the pipeline logs and swallows.
+                "target_1": round(c + (c - l * 0.98) * 3, 2),
                 "countertrend": True,
                 "half_size": True,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
