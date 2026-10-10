@@ -130,3 +130,48 @@ async def test_catch_up_stops_at_the_daily_cap(monkeypatch):
     out = await iv.run(now=datetime(2026, 10, 13, 17, 0, tzinfo=iv.ET), fetch=lambda *a: None)
     assert ran == [date(2026, 10, 13)]
     assert out["sessions"][1] == {"session": "2026-10-12", "deferred": "daily cap"}
+
+
+@pytest.mark.asyncio
+async def test_a_session_with_no_live_iv_anywhere_is_retried(monkeypatch):
+    """Vendor served another date's structure for every ticker: rows written, none usable."""
+    import database.postgres_client as pg
+    import jobs.job_runs as jr
+    import jobs.stable_jobs as sj
+
+    stale = {"data": [dict(r, date="2026-10-09") for r in TERM["data"]]}
+
+    async def _fetch(ticker, session):
+        return stale
+
+    class _Acq:
+        async def __aenter__(self):
+            return _Conn([])
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acq()
+
+    async def _pool():
+        return _Pool()
+
+    async def _not_done(job, session):
+        return False
+
+    raised = []
+
+    async def _record(name, fn, session_date=None):
+        try:
+            return await fn()
+        except Exception as e:  # noqa: BLE001
+            raised.append(type(e))
+            return None
+
+    monkeypatch.setattr(pg, "get_postgres_client", _pool)
+    monkeypatch.setattr(jr, "has_completed", _not_done)
+    monkeypatch.setattr(sj, "_record", _record)
+    await iv.run(now=datetime(2026, 10, 12, 17, 0, tzinfo=iv.ET), fetch=_fetch)
+    assert raised == [RuntimeError]

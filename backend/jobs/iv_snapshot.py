@@ -205,8 +205,11 @@ async def run(now: Optional[datetime] = None, fetch: Optional[Fetch] = None) -> 
             pool = await get_postgres_client()
             async with pool.acquire() as conn:
                 res = await snapshot_session(conn, session, fetch)
-            if res["rows_touched"] == 0:
-                raise RuntimeError("iv_snapshot %s: nothing written (%s)" % (session, res))
+            if res["rows_touched"] == 0 or res["no_live_iv"] >= res["rows_touched"]:
+                # Nothing written, or every row without a live IV: most likely the vendor served
+                # another session's structure (rows whose `date` is not this session are dropped).
+                # An ERROR, so the session is retried rather than recorded as done.
+                raise RuntimeError("iv_snapshot %s: no live IV (%s)" % (session, res))
             return res
 
         out = await _record(JOB_NAME, _one, session_date=session)
