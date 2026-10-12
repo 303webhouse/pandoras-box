@@ -42,8 +42,9 @@ FP_PCT = 0.04
 VALUE_LINE_SYMBOL = "^VALUA"
 HISTORY_FROM = date(2006, 1, 1)
 SOURCES = {
-    "breadth_thrust": "SUBSTITUTE: advancing share of the Stable Engine universe (~690 names, "
-                      "today's, theme-weighted) from daily closes; Zweig used NYSE issues",
+    "breadth_thrust": "SUBSTITUTE, NOT ZWEIG'S SERIES: advancing share of the Stable Engine "
+                      "universe (~690 names, today's, theme-weighted) from daily closes; Zweig "
+                      "used NYSE issues. A thrust here is not a Zweig thrust (R-IV.879(c))",
     "four_percent": "SUBSTITUTE: Value Line Arithmetic (^VALUA, yfinance) weekly closes; "
                     "Zweig used the Value Line Composite (geometric)",
     "definitions": "Martin Zweig, Winning on Wall Street (1986)",

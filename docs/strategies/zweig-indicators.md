@@ -24,7 +24,9 @@ exchange, universe and smoothing vary.
 **Implementation.** EMA with α = 2/11; a thrust fires on the first session the EMA exceeds 0.615
 within 10 sessions of its last reading below 0.40; one thrust per arming.
 
-**INPUT: SUBSTITUTE.** Zweig used NYSE issues.
+**INPUT: SUBSTITUTE, labelled "not Zweig's series"** (R-IV.879(c)): display only; nothing reads it
+as a signal. A paid NYSE breadth feed would be the principal's decision, if ever wanted.
+Zweig used NYSE issues.
 - **No free source of NYSE advance/decline counts exists:** Yahoo serves none (^ADVN, ^DECLN,
   ^ADV, ^DECL, ^NYAD all empty, measured 2026-10-12); the free Unicorn archive stopped in 2020;
   the rest are paid feeds.
@@ -75,3 +77,4 @@ to the original data.
 
 ## Change log
 - 2026-10-12: v0 (R-IV.877(b)).
+- 2026-10-12: the substitute is labelled "not Zweig's series" on the payload (R-IV.879(c)).
