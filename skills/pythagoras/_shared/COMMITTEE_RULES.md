@@ -141,7 +141,7 @@ reading this section resolves its version from THIS line, not from whatever
 document carried the section to it. Supersedes 2026-10-09/v5.3, 2026-10-08/v5.2,
 /v5.1, /v5, /v4, /v3 and 2026-10-07/v2.
 
-Applied from: account-context-2026-10-09-v5_4.md · sha256 3b7f3ac89bd60defad1ebed032525a27a5153fb0d1405137783ba46c32b5863e · 2026-10-12
+Applied from: claude/account-context-2026-10-09-v5_4.md · sha256 3b7f3ac89bd60defad1ebed032525a27a5153fb0d1405137783ba46c32b5863e · 2026-10-12
 
 NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
 came from a source named below within this conversation.
