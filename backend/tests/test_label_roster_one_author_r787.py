@@ -29,8 +29,12 @@ SKILLS = os.path.join(REPO, "skills")
 RULES_NAME = "COMMITTEE_RULES.md"
 
 # The canonical source hash R-IV.787(b) gated on.
-SOURCE = "claude/account-context-2026-10-08-v5_2.md"
-SOURCE_SHA = "2a4a4eaf82c4b9b306f9d0705eee656b8c4e09462ded3a3343fad462b8307b71"
+# R-IV.873(b): v5.4 is applied; the stamp names the source document that was applied, so
+# this pair moves with it. The `claude/` prefix is the convention the stamp has always
+# used -- my first application dropped it and these eight tests caught that, which is
+# the point of asserting the stamp rather than merely its presence.
+SOURCE = "claude/account-context-2026-10-09-v5_4.md"
+SOURCE_SHA = "3b7f3ac89bd60defad1ebed032525a27a5153fb0d1405137783ba46c32b5863e"
 
 
 def _md_files():
