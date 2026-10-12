@@ -81,6 +81,16 @@ regimes, ≥ 60% of winners at the value-area edge.
   strategy must beat, not a verdict on it (`:83-90`). By the horizon finding above, it is
   outside both B3 and TAIL.
 - Shadow fires since 2026-09-17: counts come with the census (R-IV.809(f)).
+- **Live record: pre-fix, not the TA-135 bar** (QUERY R-IV.908(f), via R-IV.927(c); graded by
+  the LIVE-GRADER before the grader fix; all inside the last 90 days):
+  - **CIRCE has never surfaced a graded row:** it is SHADOW.
+  - Suppressed LONG: hit rate 15.74% on 324 verdicts (16 verdict dates); excess −1.234.
+  - Suppressed SHORT: hit rate 19.30% on 114 verdicts; excess −1.414.
+  - **It does not count toward the B3 or TAIL bar:**
+    - it was graded by the pre-fix grader, not on CIRCE's one-session rule;
+    - the long side's 16 dates are under the 20-date floor.
+  - The asset class of these verdicts is not stated in the relay. Under TA-147, only equity
+    rows may ever enter the bar.
 
 ## Kill rule
 Per TA-135: if the B3 bar is reached and fails, or stage 2 fails on vega, no note is written and
@@ -90,6 +100,7 @@ CIRCE stays in shadow. Retirement is SPINE's and QUERY's (09-23 S2).
 - 2026-04-22: Olympus ADD (PROVISIONAL). 2026-09-16: built (d990abb). 2026-09-17: SHADOW deployed.
 - 2026-10-09: card v0 (R-IV.823(g), R-IV.830(g)).
 - 2026-10-12: evidence bar made EQUITY-ONLY; crypto is reported separately (TA-147, R-IV.909(b)).
+- 2026-10-12: live record cited, pre-fix and not the TA-135 bar (QUERY R-IV.908(f), R-IV.927(c)).
 - **2026-10-10: gate v2 proposed** (R-IV.838(d); `claude/lab-circe-gate-v2` @ `378b7e3`).
   - The fire close is now located on the side being faded: VAH for a SHORT, VAL for a LONG.
     A close at or through the other side's edge is `opposite` and fails.
