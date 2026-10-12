@@ -47,9 +47,44 @@ _last_alerted: Dict[str, float] = {}
 _prior_close: Dict[str, float] = {}
 
 
+# The running loop, so /health can say whether the alarm is ARMED. R-IV.867(a): "enabled" and
+# "recently recorded" are different questions, and before this the first was answerable only by
+# reading container logs — so an alarm that failed to start was invisible on the surface we look
+# at. It is held here rather than in main.py because this module is what /health can import.
+_task = None
+
+
+def set_task(task) -> None:
+    global _task
+    _task = task
+
+
+def armed_status() -> dict:
+    """Is the alarm armed? Distinguishes NEVER STARTED from STARTED AND DIED.
+
+    Collapsing those two into one false would hide which of two very different failures
+    happened: an import that blew up at boot, or a loop that raised its way out afterwards.
+    `run_forever` catches everything, so `died` should be unreachable — which is exactly why it
+    is worth reporting if it ever appears.
+    """
+    from webhooks.hermes_session import FLAG, is_enabled
+
+    t = _task
+    out = {"flag": FLAG, "enabled": is_enabled(), "task_started": t is not None,
+           "task_alive": bool(t is not None and not t.done())}
+    if t is not None and t.done():
+        try:
+            exc = t.exception()
+            out["died"] = type(exc).__name__ if exc else "returned without error"
+        except Exception:                                           # noqa: BLE001
+            out["died"] = "cancelled"
+    return out
+
+
 def reset_for_tests() -> None:
-    global _session_date
+    global _session_date, _task
     _session_date = None
+    _task = None
     _last_alerted.clear()
     _prior_close.clear()
 
