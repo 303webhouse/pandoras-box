@@ -630,10 +630,28 @@ async def account_shed(tier: str, now=None) -> Optional[str]:
     return None
 
 
+#: Callers funded from UW_FOREIGN_RESERVE (12,000), NOT from the hub's DAILY_BUDGET.
+#:
+#: WHY A SECOND TABLE AND NOT A ROW IN `QUOTAS`. That table sums to exactly 26,000 against a
+#: 28,000 DAILY_BUDGET, and the sum is asserted by a test. Putting the backfill's 2,500 in it
+#: would either break that assertion or quietly eat the 2,000 of headroom the whole governor was
+#: measured around. R-IV.921(b)3 funds the backfill "from the foreign reserve", which is the
+#: part of the 40,000 account limit the hub deliberately does not spend -- so it is tracked
+#: here, separately, and the hub's own budget arithmetic is left exactly as it was.
+#:
+#: These entries are TEMPORARY by ruling: the allowance lapses after 2026-10-23 and the job
+#: refuses to run past it on its own (darkpool_backfill.ALLOWANCE_THROUGH).
+FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
+    "darkpool_backfill_triton": (2500, TIER_STANDARD),   # R-IV.921(b)3, through 2026-10-23
+}
+
+
 def quota_for(caller: str) -> Tuple[int, str]:
     """(quota, tier) for a caller tag, with sane defaults for unknowns."""
     if caller in QUOTAS:
         return QUOTAS[caller]
+    if caller in FOREIGN_RESERVE_QUOTAS:
+        return FOREIGN_RESERVE_QUOTAS[caller]
     if caller == "untagged":
         return (UNTAGGED_QUOTA, DEFAULT_TIER)
     return (DEFAULT_QUOTA, DEFAULT_TIER)
