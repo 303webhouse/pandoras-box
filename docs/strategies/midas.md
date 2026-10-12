@@ -7,7 +7,7 @@
 | side | LONG |
 | grid cell | **WITH-TREND LONG** (a deep pullback to the 120-day inside an intact uptrend) |
 | schedule / trigger | the CTA `_scanner_loop`, trading days 9–16 ET, on a forming daily bar; also the crypto scanner |
-| status | **LIVE, pending QUERY's read of its surfaced outcomes** (R-IV.879(b)); L0 default KEEP |
+| status | **LIVE, pending QUERY's read of its surfaced outcomes** (R-IV.879(b)); L0 default KEEP. The read is to be filled in from QUERY's relabelled R-IV.880 reissue when it lands. **The live figure is NOT CITABLE: 152 of 178 rows are INVALIDATED,** because the invalidation level sits above the entry. The fix is approved (R-IV.894(c)) and pending in BUILD's versioned grader fix |
 | bucket ceiling | No provenance ceiling: C5 and F5 do not reach this cell |
 | lifetime tries counter | ≥ 1: the volume threshold was retuned 2.00 → 1.30 (`backend/scanners/cta_scanner.py:105`); earlier tries unrecorded; unchanged by Task 8 |
 
@@ -25,4 +25,4 @@ h3:
 - **No edge in replay.** The decision waits on QUERY's read of the rows it actually surfaced.
 
 ## Change log
-- 2026-01: CTA scanner. 2026-10-12: card v0 (R-IV.879(b)).
+- 2026-01: CTA scanner. 2026-10-12: card v0 (R-IV.879(b)). 2026-10-12: live figure marked not citable (R-IV.898(a)). Invalidation spec approved (R-IV.894(c)): `min(SMA120 − 0.25·ATR, entry − 0.25·ATR)`.
