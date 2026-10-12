@@ -87,15 +87,34 @@ def test_only_the_ruled_callers_are_exempt():
 
 # ── the second user of the mechanism — R-IV.823(e) / R-IV.839(c) ────────────
 
-def test_darkpool_collector_has_the_ruled_quota():
-    """LAB shipped it at 500 and said the row needed a ruling. The ruling is 3,000."""
-    assert quota_for("darkpool_collector") == (3000, TIER_STANDARD)
+def test_darkpool_collector_has_the_interim_quota():
+    """R-IV.886(d): 250, not the 3,000 of R-IV.839(c). 3,000 does not FIT -- it put the table at
+    28,750 against a 26,000 ceiling, with UW_GOVERNOR_MODE = enforce in production, so the
+    overrun would refuse real calls. 250 is exactly the room available, and the resize waits on
+    10 UW days of measured spend."""
+    assert quota_for("darkpool_collector") == (250, TIER_STANDARD)
+
+
+def test_the_table_fits_the_ceiling_EXACTLY_at_the_interim_figure():
+    """The reason 250 and not 300: it is the whole remaining room, to the call. This asserts the
+    arithmetic the interim rests on, so a later quota change cannot silently reintroduce the
+    overrun that held the merge."""
+    from integrations.uw_governor import QUOTAS
+
+    assert sum(q for q, _ in QUOTAS.values()) == 26000
 
 
 def test_darkpool_collector_keeps_its_quota_at_1630_when_it_runs():
-    """Its cron is 16:30 ET. At 500 with the tier factor it would have had 125 calls a night;
-    at 3,000 with the per-caller factor it has all 3,000."""
-    assert effective_quota("darkpool_collector", AT_1630) == (3000, TIER_STANDARD)
+    """Its cron is 16:30 ET. Without the per-caller factor, STANDARD's 25% would leave 62 calls
+    -- which is why the factor matters more at 250 than it did at 3,000."""
+    assert effective_quota("darkpool_collector", AT_1630) == (250, TIER_STANDARD)
+
+
+def test_darkpool_ticker_is_left_UNRESIZED():
+    """R-IV.886(d): darkpool_ticker stays as it was until the measurement. Asserted so a resize
+    cannot ride along unnoticed with the collector's."""
+    assert quota_for("darkpool_ticker") == (500, TIER_STANDARD)
+    assert "darkpool_ticker" not in OFF_HOURS_FACTOR_BY_CALLER
 
 
 def test_darkpool_collector_is_NOT_promoted_to_foreground():
