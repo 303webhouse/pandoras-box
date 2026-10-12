@@ -26,12 +26,24 @@ Source of verdicts (the docs are truth, not memory):
     (route CTA by signal_type; RESISTANCE_REJECTION liquid-only)
   - `docs/codex-briefs/2026-06-17-L0-session1-cc-launch-brief.md` §T2
 
-Scope note (Phase-0 2026-06-17): the equity scanners (Holy Grail, CTA) route
-through `process_signal_unified`, so this gate covers them. The crypto scanner
-(`bias_scheduler.py` crypto path) writes via `log_signal` directly and is NOT
-covered — by design: its `PULLBACK_ENTRY` population (strategy='Crypto
-Scanner') was never in the -0.25 equity analysis. Whether crypto PULLBACK_ENTRY
-should be suppressed is an explicit decision for the enforce brief.
+Scope note — CORRECTED 2026-10-12 (R-IV.892(c)). The note here used to say the crypto scanner
+"writes via `log_signal` directly and is NOT covered — by design". **That is no longer true and
+following it produces the wrong answer.** `bias_scheduler.py:3850` calls
+`process_signal_unified(trade_signal, source="crypto_scanner")`, and :3728 records that the
+`log_signal()` bypass was "demoted to a shadow-logger". So the crypto path goes through the SAME
+chokepoint as the equity scanners and IS covered by this gate.
+
+Why that matters beyond tidiness: this gate keys on `signal_type` alone, and several types are
+emitted by BOTH an equity and a crypto scanner — `TRAPPED_SHORTS` is produced by the CTA Scanner
+(`scanners/cta_scanner.py:1153`) and by the Crypto Scanner (`config/asset_class.py:10`). Adding
+such a type here therefore suppresses BOTH asset classes, and the stale note above would have
+reassured a reader that crypto was untouched. R-IV.892(c) asked for equity-only shadowing of
+TRAPPED_SHORTS and said to stop if the mechanism could only key on type. It can only key on
+type, so that request was refused rather than half-met.
+
+Suppressing one asset class of a shared type needs a different key — `source`
+("cta_scanner" / "crypto_scanner", already passed to `process_signal_unified`) or
+`asset_class` — which is a mechanism change and SPINE's to rule.
 """
 
 from __future__ import annotations
@@ -152,7 +164,8 @@ def should_divert(decision: Dict[str, Any]) -> bool:
 # column: signal_type can drift after gate eval (a Holy_Grail signal relabeled
 # APIS_CALL keeps its correct SUPPRESS tag), and the tag is exactly what the
 # ≥2-week "zero keepers lost" shadow window validated. Rows with no tag
-# (pre-gate history, the crypto path that bypasses the chokepoint) COALESCE to keep.
+# (pre-gate history — NOT the crypto path, which routes through the chokepoint since the
+# log_signal bypass was demoted; see the corrected scope note above) COALESCE to keep.
 _L0_SUPPRESS_PREDICATE = (
     "COALESCE((triggering_factors->'l0_shadow'->>'would_suppress')::boolean, false) = false"
 )

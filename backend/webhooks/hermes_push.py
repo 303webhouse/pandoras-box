@@ -181,8 +181,15 @@ async def push_breach(ticker: str, move_pct: float, timeframe_min: int,
 
     # Only a DELIVERED message starts the cooldown.
     _last_push[sym] = now
+    # R-IV.901(b)3: ntfy runs IN PARALLEL with Discord until the principal confirms an ntfy
+    # test arrived. Its failure never affects the Discord verdict above -- the cooldown is
+    # already set, and making a second relay able to un-deliver the first would be worse than
+    # either alone.
+    ntfy = await _also_ntfy(sym, "velocity breach %s%.2f%% in %dm"
+                            % ("+" if move_pct >= 0 else "", move_pct, timeframe_min),
+                            "check the chart; this is a notifier, not a signal")
     return {"pushed": True, "reason": reason, "co_breaches": [t for t, _ in co],
-            "content": content}
+            "content": content, "ntfy": ntfy}
 
 
 async def push_session_alert(ticker: str, move_pct: Optional[float],
@@ -234,5 +241,28 @@ async def push_session_alert(ticker: str, move_pct: Optional[float],
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("[hermes.session] %s failed: %s", sym, exc)
         return {"pushed": False, "reason": "%s: %s" % (type(exc).__name__, exc)}
+    ntfy = await _also_ntfy(sym, "session move %+.2f%%" % move_pct,
+                            "look at the session; nothing has been traded")
     return {"pushed": True, "reason": "session displacement %+.2f%%" % move_pct,
-            "content": content}
+            "content": content, "ntfy": ntfy}
+
+
+async def _also_ntfy(ticker: str, alert_type: str, action: str) -> dict:
+    """Send the same alert to the phone relay. NEVER RAISES, and never affects Discord's verdict.
+
+    R-IV.901(b)3 keeps both relays running until the principal confirms ntfy arrived, so this is
+    additive by construction: it is called AFTER the Discord push has already been recorded as
+    delivered. A second channel that could un-deliver the first would be worse than either.
+
+    The ntfy payload is NOT the Discord text. It is rebuilt from ticker / type / action, because
+    the Discord message carries figures (a dollar P&L in B2's case) that R-IV.901(b)2 bars from
+    a third-party relay.
+    """
+    try:
+        from integrations.ntfy_push import is_configured, send
+        if not is_configured():
+            return {"sent": False, "reason": "NTFY_TOPIC not set"}
+        return await send(ticker, alert_type, action)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[hermes.push] ntfy leg failed for %s: %s", ticker, type(exc).__name__)
+        return {"sent": False, "reason": type(exc).__name__}

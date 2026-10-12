@@ -2604,6 +2604,18 @@ async def run_iv_snapshot_job():
         logger.error("IV snapshot job error: %s", e)
 
 
+async def run_b2_cut_alert_job():
+    """TA-141 §3 / R-IV.888(c)1: the B2 three-day cut prompt. Runs after the close, because the
+    cut is the CLOSE of the third full trading session — a pass during that session would read
+    NOT_YET and do nothing. Records itself for /health via stable_jobs._record."""
+    try:
+        from jobs.b2_cut_alert_job import JOB_NAME, run
+        from jobs.stable_jobs import _record
+        await _record(JOB_NAME, run)
+    except Exception as e:
+        logger.error("B2 cut alert job error: %s", e)
+
+
 async def run_zweig_job():
     """R-IV.877(b): Zweig indicators, display-only. First run backfills from 2006 (yfinance);
     then incremental from stable_daily_bars. Recorded for /health (stable_jobs)."""
@@ -2956,6 +2968,19 @@ async def start_scheduler():
             CronTrigger(day_of_week='mon-fri', hour=16, minute=45, timezone=ET),
             id='iv_snapshot',
             name='IV Snapshot (ATM term structure)',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+
+        # B2 three-day cut prompt (TA-141 §3) -- 16:15 ET, just after the close the cut is
+        # measured at. The flag B2_CUT_ALERT_ENABLED gates the PUSH, not the evaluation.
+        scheduler.add_job(
+            run_b2_cut_alert_job,
+            CronTrigger(day_of_week='mon-fri', hour=16, minute=15, timezone=ET),
+            id='b2_cut_alert',
+            name='B2 three-day cut alert',
             replace_existing=True,
             max_instances=1,
             coalesce=True,
