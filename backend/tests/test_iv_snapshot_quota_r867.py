@@ -80,9 +80,19 @@ def test_only_the_ruled_callers_are_exempt():
     """A named set, not a count: it fails on an unintended addition exactly as a count would AND
     says which callers are exempt, so the next reader need not go and look.
 
-    It did its job -- adding darkpool_collector under R-IV.876(e) failed this assertion rather
-    than passing silently, which is the whole reason to name the set instead of counting it."""
-    assert set(OFF_HOURS_FACTOR_BY_CALLER) == {"iv_snapshot", "darkpool_collector"}
+    It has now done its job TWICE: adding darkpool_collector under R-IV.876(e), and
+    darkpool_backfill_triton under R-IV.940(b), each failed this assertion rather than passing
+    silently. That is the whole reason to name the set instead of counting it.
+
+    Each exemption needs the same justification -- the caller's WHOLE WINDOW is after the close,
+    so budgeting it as though off-hours were its idle time is wrong. The backfill earned it the
+    hard way: the 0.25 factor turned its ruled 2,500/day into 625 and blocked the first night's
+    run after about 600 calls."""
+    assert set(OFF_HOURS_FACTOR_BY_CALLER) == {
+        "iv_snapshot",                # R-IV.867(e)
+        "darkpool_collector",         # R-IV.876(e) / R-IV.839(c)
+        "darkpool_backfill_triton",   # R-IV.940(b)
+    }
 
 
 # ── the second user of the mechanism — R-IV.823(e) / R-IV.839(c) ────────────
