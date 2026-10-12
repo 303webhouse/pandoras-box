@@ -158,9 +158,16 @@ def test_health_summary_still_flatlines_on_consecutive_failures(monkeypatch):
 
     monkeypatch.setattr(js, "get_all", fake_get_all)
     monkeypatch.setattr(js, "unrecorded_failures", no_unrecorded)
-    out = asyncio.run(js.health_summary())
+    # SUN_EVENING deliberately: the instant at which the calendar WOULD excuse silence. Read on
+    # a session day this test passed without exercising its own claim, because the calendar was
+    # flatlining the row too -- so only the failure counter can be responsible for the verdict
+    # here.
+    out = asyncio.run(js.health_summary(now=SUN_EVENING))
     assert out["jobs"]["nightly"]["status"] == "flatline"
     assert out["any_flatline"] is True
+    # And the calendar's own answer at this instant is "not overdue", which is what makes the
+    # assertion above attributable to the failure counter alone.
+    assert is_overdue("nightly", FRI_NIGHT, now_et=SUN_EVENING)[0] is False
 
 
 def test_health_summary_is_calm_on_a_quiet_weekend(monkeypatch):
@@ -181,7 +188,40 @@ def test_health_summary_is_calm_on_a_quiet_weekend(monkeypatch):
 
     monkeypatch.setattr(js, "get_all", fake_get_all)
     monkeypatch.setattr(js, "unrecorded_failures", no_unrecorded)
-    out = asyncio.run(js.health_summary())
+    # THE CLOCK IS INJECTED, and that is the point of this line. Without it the function read
+    # the real one, so this test passed all weekend and failed from 16:05 ET on the next
+    # session day -- when `provisional` genuinely began owing a run. The function was right
+    # both times; the test could not say which instant it was asserting about.
+    out = asyncio.run(js.health_summary(now=SUN_EVENING))
     assert out["any_flatline"] is False, out["jobs"]
     assert out["jobs"]["nightly"]["status"] == "ok"
     assert "session_cadence" in out["jobs"]["nightly"]
+
+
+def test_health_summary_flatlines_when_a_session_day_passes_unrun(monkeypatch):
+    """The pair, and the case that caught the clock: SAME fixture rows, SAME real function, one
+    instant later. By Monday 21:30 ET both windows have closed with Friday as the last pass, so
+    the quiet MUST end. A weekend silence that does not break on Monday is the old bug wearing
+    the new fix's clothes."""
+    import asyncio
+
+    from stable_engine import job_status as js
+
+    async def fake_get_all():
+        return [{"job_name": "nightly", "last_success_at": FRI_NIGHT,
+                 "consecutive_failures": 0, "last_error": None},
+                {"job_name": "provisional", "last_success_at": FRI_NIGHT,
+                 "consecutive_failures": 0, "last_error": None}]
+
+    async def no_unrecorded():
+        return []
+
+    monkeypatch.setattr(js, "get_all", fake_get_all)
+    monkeypatch.setattr(js, "unrecorded_failures", no_unrecorded)
+    out = asyncio.run(js.health_summary(now=MON_NIGHT))
+    assert out["any_flatline"] is True, out["jobs"]
+    for name in ("nightly", "provisional"):
+        assert out["jobs"][name]["status"] == "flatline", out["jobs"][name]
+        # And it says WHY, naming the session owed rather than an age in hours.
+        assert "2026-10-12" in out["jobs"][name]["session_cadence"], out["jobs"][name]
+        assert out["jobs"][name]["consecutive_failures"] == 0   # nothing failed; it never ran
