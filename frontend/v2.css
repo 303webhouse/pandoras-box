@@ -613,6 +613,48 @@ body {
 .btn-committee:hover { background: rgba(20,184,166,0.12); }
 .clock { width: 9px; height: 9px; border-radius: 50%; background: var(--teal); }
 .clock-chip { font-family: var(--mono); font-size: 10px; color: var(--teal); border: 1px solid rgba(20,184,166,0.4); border-radius: 999px; padding: 1px 7px; }
+
+/* ── R-IV.900(b) · "FIGURE | Description", and the APIS/KODIAK upgrade ─────────────────────
+   Approved from frontend/mockups/signal-names-upgrade.html with the option "pulse while fresh".
+   These rules were written in that mockup and have MOVED here; the mockup links this file and no
+   longer carries a copy, so there is one author for them. */
+.k-card .nm .sep { color: var(--text-2); font-weight: 400; padding: 0 2px; }
+/* The description folded into the title carries real meaning, so it reads at --text-2. The old
+   separate `.desc` span is --text-3, which fails AA at 10px (R-IV.416(e)'s measurement). */
+.k-card .nm .what { font-weight: 400; color: var(--text-2); }
+
+/* The card keeps its strategy's name; the tag and the outline say it was upgraded. APIS is a bull
+   tag so it takes the lime family, KODIAK bear so vermilion -- the palette's existing meanings.
+   `color-mix` derives the glow FROM the token instead of restating its channels: one author for
+   the colour, so a palette change cannot leave this behind (D6). */
+.k-card.apis { border-color: var(--up); box-shadow: 0 0 0 1px var(--up),
+  0 0 14px color-mix(in srgb, var(--up) 34%, transparent); }
+.k-card.kodiak { border-color: var(--down); box-shadow: 0 0 0 1px var(--down),
+  0 0 14px color-mix(in srgb, var(--down) 34%, transparent); }
+.upgrade-tag { font-family: var(--mono); font-size: 9px; letter-spacing: .6px; text-transform: uppercase;
+  border-radius: 4px; padding: 1px 5px; border: 1px solid currentColor; font-weight: 700; }
+.apis .upgrade-tag { color: var(--up); }
+.kodiak .upgrade-tag { color: var(--down); }
+/* The tag sits with the name, not in the foot: it qualifies the signal, not its clock. */
+.k-card .top .upgrade-tag { margin-left: 6px; }
+
+/* The pulse animates the OUTLINE and never the text: a card whose text fades in and out cannot be
+   read mid-cycle (H-13). It runs only while `.fresh` -- the first 15 minutes, which v2.js decides
+   from the same instant the card's own time label shows. */
+@keyframes apis-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--up), 0 0 6px color-mix(in srgb, var(--up) 22%, transparent); }
+  50%      { box-shadow: 0 0 0 1px var(--up), 0 0 20px color-mix(in srgb, var(--up) 60%, transparent); }
+}
+@keyframes kodiak-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--down), 0 0 6px color-mix(in srgb, var(--down) 22%, transparent); }
+  50%      { box-shadow: 0 0 0 1px var(--down), 0 0 20px color-mix(in srgb, var(--down) 60%, transparent); }
+}
+.k-card.apis.fresh { animation: apis-pulse 2.2s ease-in-out infinite; }
+.k-card.kodiak.fresh { animation: kodiak-pulse 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  /* No pulse at all. The bright outline alone still says "upgraded", so only the movement goes. */
+  .k-card.apis.fresh, .k-card.kodiak.fresh { animation: none; }
+}
 .k-card.acked .clock-chip { animation: none; border-style: dashed; }
 
 /* b9 River */
