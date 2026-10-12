@@ -17,7 +17,9 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
+from config.strategy_aliases import (  # L0.4 display alias (additive)
+    attach_codename, attach_label_fields, codename,
+)
 from config.strategy_class import attach_strategy_class, strategy_class  # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL  # RV4, R-IV.566(e)2
 from signals.session_policy import SERVE_RELEASED_SQL, is_held  # R-IV.587(b)1
@@ -373,7 +375,13 @@ async def get_active_trade_ideas(
 
     # Dedup scan-based strategies, recount, rebuild strategy list
     for g in groups_map.values():
-        tag_row(attach_codename(g["primary_signal"]))  # L0.4 + R-IV.577(b) + RV5
+        # R-IV.935(e)1. THIS IS THE SECOND GROUP BUILDER. `get_active_trade_ideas` lives
+        # here, so /trade-ideas/grouped reaches this loop while /main-feed and the flat
+        # route reach the near-identical one in api/trade_ideas.py. Wiring only that one
+        # served the fields on two surfaces out of three -- measured on the live payload,
+        # where /grouped came back with codename="Hector" and no display_label. The same
+        # pair of files split the confirmation bonus under R-IV.901(e).
+        attach_label_fields(tag_row(attach_codename(g["primary_signal"])))
         attach_touches(g["primary_signal"], book)      # R-IV.599(e)1
         g["related_signals"] = _dedup_related_signals(g["related_signals"])
         g["signal_count"] = 1 + len(g["related_signals"])

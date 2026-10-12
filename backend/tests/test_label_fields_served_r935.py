@@ -129,3 +129,53 @@ def test_a_route_shaped_row_gets_both_fields():
     assert out["display_label"] == "Phaethon | Bearish Breakdown"
     assert "upgrade_tag" in out and out["upgrade_tag"] is None
     assert out["signal_type"] == "BEARISH_BREAKDOWN" and out["strategy"] == "CTA Scanner"
+
+# ── the census that stops a THIRD builder from being missed ──────────────
+
+def _call_counts(path: pathlib.Path) -> tuple[int, int]:
+    """(attach_codename calls, attach_label_fields calls), from the parsed tree."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except SyntaxError:
+        return (0, 0)
+    cn = lf = 0
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+            if n.func.id == "attach_codename":
+                cn += 1
+            elif n.func.id == "attach_label_fields":
+                lf += 1
+    return (cn, lf)
+
+
+def test_every_codename_enrichment_has_a_label_fields_sibling():
+    """WHY A CENSUS AND NOT TWO ASSERTIONS. `get_active_trade_ideas` is defined in
+    signals/feed_service.py, not in api/trade_ideas.py, so the feed holds TWO near-identical
+    group builders: /trade-ideas/grouped reaches feed_service's loop while /main-feed and the
+    flat route reach trade_ideas'. Wiring one served the fields on two surfaces out of three,
+    and only the live payload showed it -- /grouped came back carrying codename="Hector" with
+    no display_label.
+
+    The SAME pair of files split the confirmation bonus under R-IV.901(e). So the rule is
+    counted, not spot-checked: wherever a row is given its codename, it is given its label in
+    the same place. A third copy of the loop then fails here instead of on a surface."""
+    gaps = []
+    for sub in ("api", "signals"):
+        for f in sorted((_BACKEND / sub).glob("*.py")):
+            cn, lf = _call_counts(f)
+            if cn and lf < cn:
+                gaps.append("%s/%s: %d attach_codename, only %d attach_label_fields"
+                            % (sub, f.name, cn, lf))
+    assert not gaps, "codename enriched without the label fields: %r" % (gaps,)
+
+
+def test_all_three_known_enrichment_sites_are_present():
+    """Named explicitly so a REMOVAL is as visible as an addition."""
+    sites = {
+        ("api", "trade_ideas.py"): 2,       # the grouped loop + the flat route's _enrich
+        ("signals", "feed_service.py"): 1,  # get_active_trade_ideas' loop
+    }
+    for (sub, name), want in sites.items():
+        _cn, lf = _call_counts(_BACKEND / sub / name)
+        assert lf >= want, "%s/%s has %d attach_label_fields, expected >= %d" % (
+            sub, name, lf, want)
