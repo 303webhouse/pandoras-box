@@ -187,6 +187,11 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     # 2000 matches the "~1,680 UW calls/day" main.py:878 already documented.
     "flow_per_expiry": (2000, TIER_STANDARD),
     "darkpool_ticker": (500, TIER_STANDARD),
+    # R-IV.867(e): the daily ATM implied-volatility snapshot. Runs ONCE a session at 16:45 ET,
+    # one /option-contracts call per universe ticker. 250 covers the universe with headroom and
+    # is paired with a per-caller off-hours factor of 1.0 below -- without that, STANDARD's 25%
+    # cut would leave it 62 calls for a job whose entire purpose happens after the close.
+    "iv_snapshot": (250, TIER_STANDARD),
     "stock_info": (400, TIER_STANDARD),           # +/info backfill headroom for T5b Phase C
     "news_headlines": (300, TIER_STANDARD),
     "short_interest": (200, TIER_STANDARD),
@@ -260,6 +265,22 @@ ACCOUNT_EXHAUSTED = "ACCOUNT_NEAR_LIMIT"
 #
 # Holidays come from the ONE calendar (market_calendar), not a weekday test, so
 # a Thanksgiving poll is gated the same as a Sunday one.
+# R-IV.867(e): PER-CALLER off-hours exemption, which takes precedence over the tier factor.
+#
+# The tier factor asks "how much does this KIND of caller need outside RTH?" and 25% is right
+# for a scanner that has little to refresh at 03:00. It is wrong for a caller whose entire job
+# IS after the close: iv_snapshot runs at 16:45 ET and would be cut to a quarter of a budget it
+# needs in full, once, on the only occasion it ever runs.
+#
+# WHY NOT PROMOTE IT TO FOREGROUND, which already carries a 1.0 factor. Because the tier does
+# two jobs: it sets the off-hours factor AND it sets what gets shed first under pressure.
+# FOREGROUND is never shed -- "a live read is a live read" -- and a nightly snapshot is exactly
+# the thing that SHOULD be shed before a live quote. A per-caller factor buys the off-hours
+# quota without buying the shedding immunity, which is the only part it needs.
+OFF_HOURS_FACTOR_BY_CALLER = {
+    "iv_snapshot": 1.0,          # 16:45 ET, once a session
+}
+
 NON_RTH_QUOTA_FACTOR = {
     TIER_BACKGROUND: 0.0,    # a sector heatmap has nothing to refresh at 03:00
     TIER_STANDARD: 0.25,
@@ -290,7 +311,9 @@ def effective_quota(caller: str, now_et=None) -> Tuple[int, str]:
     quota, tier = quota_for(caller)
     if _is_rth(now_et):
         return quota, tier
-    factor = NON_RTH_QUOTA_FACTOR.get(tier, 0.25)
+    # A per-caller exemption wins over the tier's factor. `.get` with the tier factor as the
+    # default keeps every unlisted caller on exactly the behaviour it had before.
+    factor = OFF_HOURS_FACTOR_BY_CALLER.get(caller, NON_RTH_QUOTA_FACTOR.get(tier, 0.25))
     return max(0, int(quota * factor)), tier
 
 
