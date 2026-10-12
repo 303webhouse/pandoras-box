@@ -335,6 +335,19 @@ with sync_playwright() as p:
     check('the served display_label is rendered whole', k and k['nm'] == 'ACHILLES | Sell the Rip', k)
     check('...split into the figure and the description, with the pipe between',
           k and k['hasSep'] and k['hasWhat'], k)
+    # R-IV.938(b): CAPITALS BY STYLING. The codename renders uppercase and the DESCRIPTION DOES
+    # NOT, and the served string itself is untouched -- so a copy out of the page still carries the
+    # spelling BUILD authored. Transforming the string instead would have hidden that difference.
+    cap = pg.evaluate("""() => {
+        const c = [...document.querySelectorAll('.k-card')].find(e => e.textContent.includes('IWM'));
+        const f = c.querySelector('.nm .figure'), w = c.querySelector('.nm .what');
+        return {figT: getComputedStyle(f).textTransform, whatT: getComputedStyle(w).textTransform,
+                figText: f.textContent, whatText: w.textContent,
+                figInk: f.getBoundingClientRect().height > 0}; }""")
+    check('the codename is capitalised by styling', cap['figT'] == 'uppercase', cap)
+    check('...and the description is not', cap['whatT'] == 'none', cap)
+    check('...and the SERVED string is untouched underneath',
+          cap['figText'] == 'ACHILLES' or cap['figText'] == 'Achilles', cap)
     check('...and the old separate desc span is gone', k and not k['desc'], k)
     check('KODIAK tags the card and keeps the strategy name', k and k['tag'] == 'KODIAK', k)
     check('...in the vermilion family', k and k['tagColor'] == 'rgb(255, 92, 51)', k)
