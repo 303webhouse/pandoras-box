@@ -36,8 +36,14 @@ def test_resistance_rejection_non_liquid_suppressed(ticker):
 
 
 # --- keepers untouched --------------------------------------------------
+# TRAPPED_SHORTS left this list under R-IV.878(e) (HECTOR to SHADOW). It was the FOURTH place
+# naming this type as a keeper -- after l0_routing's trailing comment and the loops in
+# test_nemesis_wiring_r809 and test_shadow_and_cohort_r857. R-IV.861(c) consolidated the
+# SUPPRESSED set to a single author and left its COMPLEMENT with four, so one roster move needed
+# four edits and the suite found the last one for me. An inverse list is as much a copy as the
+# list, and nobody consolidated this half.
 @pytest.mark.parametrize("st", [
-    "GOLDEN_TOUCH", "TRAPPED_SHORTS", "TWO_CLOSE_VOLUME", "APIS_CALL",
+    "GOLDEN_TOUCH", "TWO_CLOSE_VOLUME", "APIS_CALL",
     "SELL_RIP_EMA", "ARTEMIS_SHORT", "FOOTPRINT_LONG",
     "KODIAK_CALL", "SOME_UNKNOWN_TYPE",
 ])

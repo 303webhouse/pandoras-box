@@ -69,6 +69,13 @@ SUPPRESS_ALWAYS: frozenset[str] = frozenset({
                           # persisting would stop accumulating the record the review needs.
     "WRR_LONG",        # R-IV.855(d): NEMESIS long, registered forward test (nemesis-long-v1) — SHADOW.
     "PHOENIX_WASHOUT", # R-IV.855(d): PHOENIX washout, registered forward test (phoenix-washout-v1) — SHADOW.
+    "TRAPPED_SHORTS",  # HECTOR — R-IV.878(e) shadow, by the PHAETHON mechanism exactly: the row
+                       # is still WRITTEN and still GRADED, only not surfaced. Note this type was
+                       # named as a keeper in FOUR places until this change -- the comment below
+                       # and three test keeper-lists -- because R-IV.861(c) gave the suppressed
+                       # SET one author and left its COMPLEMENT with four. A comment asserting a
+                       # type is kept while the set suppresses it is one fact with two authors,
+                       # and the comment is the copy a reader believes.
 })
 
 # signal_types suppressed ONLY when the ticker is not in the liquid universe.
@@ -76,8 +83,9 @@ SUPPRESS_IF_NON_LIQUID: frozenset[str] = frozenset({
     "RESISTANCE_REJECTION",  # +0.73 liquid (KEEP) / -1.76 single-name (SUPPRESS)
 })
 
-# Everything not named above is KEPT untouched (GOLDEN_TOUCH, TRAPPED_SHORTS,
-# TWO_CLOSE_VOLUME, APIS_CALL, sell_the_rip*, ARTEMIS_SHORT, footprint, etc.).
+# Everything not named above is KEPT untouched (GOLDEN_TOUCH, TWO_CLOSE_VOLUME,
+# APIS_CALL, sell_the_rip*, ARTEMIS_SHORT, footprint, etc.).
+# TRAPPED_SHORTS was on this list until R-IV.878(e) moved HECTOR to SHADOW.
 
 
 def _enforce_enabled() -> bool:
