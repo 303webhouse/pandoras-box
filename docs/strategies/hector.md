@@ -7,7 +7,8 @@
 | side | LONG |
 | grid cell | **WITH-TREND LONG** (momentum above the 200-day and the 20-bar VWAP) |
 | schedule / trigger | the CTA `_scanner_loop` (`backend/scheduler/bias_scheduler.py`), trading days 9–16 ET, on a forming daily bar; also the crypto scanner (24/7) |
-| status | **LIVE** (R-IV.884, 2026-10-12). NOT in `SUPPRESS_ALWAYS` (`backend/config/l0_routing.py` — present on the kept-live list in `backend/tests/test_nemesis_wiring_r809.py`). This card previously read SHADOW per R-IV.879(b); **R-IV.884 withdrew that move and BUILD reverted it** (`dcb61a65`), because QUERY's live outcomes (R-IV.880) disagree with the replay below — 58.99% hits and +4.07% excess on 473 verdicts on surfaced rows. **Two independent routes disagree, so nothing moves until LAB reconciles them.** The replay finding stands as a finding; it no longer governs the roster. |
+| status: EQUITY ("CTA Scanner") | **Ruled SHADOW (R-IV.893), NOT ENFORCED.** L0 routing keys on `signal_type` only, so suppressing `TRAPPED_SHORTS` would also suppress crypto: BUILD's stop (R-IV.892). **The regrade decides it.** Under the fixed grader, ≥ 30 equity verdicts with a hit rate > 50% → LIVE. Otherwise → SHADOW, and SPINE rules on an asset-class routing key. Until then it surfaces as before. The earlier "58.99% on 473" (R-IV.880) was ~94% Crypto Scanner rows and is not equity evidence (R-IV.889(b)) |
+| status: CRYPTO ("Crypto Scanner") | **Unchanged: LIVE.** 392 verdicts on 18 dates, graded by the LIVE-GRADER before the fix. **This is not HECTOR's equity evidence.** |
 | bucket ceiling | No provenance ceiling: C5 and F5 do not reach this cell (the R-IV.838(c) reading for with-trend cells) |
 | lifetime tries counter | unrecorded before LAB; unchanged by Task 8 (evaluation only) |
 
@@ -27,7 +28,7 @@
   - transition −0.03 (t −0.33); range +0.06 (t 0.32); sector ETFs −0.12 (t −1.61).
 
 ## Kill rule
-Retirement is SPINE's and QUERY's. It is LIVE: the SHADOW move was withdrawn by R-IV.884 on the day it was proposed, because the live record disagrees with the replay. It moves only when the two routes are reconciled.
+Retirement is SPINE's and QUERY's. Equity is ruled SHADOW (R-IV.893) but not enforced, because routing cannot yet separate asset classes. The regrade under the fixed grader decides: ≥ 30 equity verdicts and > 50% → LIVE; otherwise SHADOW plus a routing-key ruling. Crypto is unchanged.
 
 ## Change log
-- 2026-01: CTA scanner. 2026-10-12: card v0; SHADOW proposed (R-IV.879(b)) and WITHDRAWN the same day (R-IV.884) — stays LIVE pending LAB's reconciliation of the replay against QUERY's live outcomes (R-IV.880).
+- 2026-01: CTA scanner. 2026-10-12: card v0; SHADOW proposed (R-IV.879(b)) and WITHDRAWN the same day (R-IV.884) — stays LIVE pending LAB's reconciliation of the replay against QUERY's live outcomes (R-IV.880). 2026-10-12: status split by asset class (R-IV.898(a)). Equity: SHADOW ruled (R-IV.893), not enforced (R-IV.892), the regrade decides. Crypto: unchanged.
