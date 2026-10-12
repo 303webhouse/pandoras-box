@@ -49,6 +49,12 @@ Then run the suite twice, with ENGINE unset and ENGINE=webkit, and report PER AS
 than as one pass/fail: which of the four held, and for any that did not, what the payload carried
 instead.
 
+R-IV.943(a) ADDED THE SECOND SURFACE. The River row shows the same codename, and it showed it in
+Title Case while the card showed capitals. It is capitals there too now, by the same means -- a
+class the stylesheet acts on, NOT an upper-cased string -- so the checks below assert both the
+computed transform AND that the text under it is still the spelling BUILD served. The River lives
+in an overlay that has to be opened first; see `river()`.
+
 Control: the pinned build (9beda308) shows the name and description as two separate spans, with no
 pipe, no tag and no glow, however the feed is labelled.
 """
@@ -183,6 +189,26 @@ CARD = """(tkr) => {
           cls: c.className, anim: cs.animationName, shadow: cs.boxShadow};
 }"""
 
+# R-IV.943(a) -- THE SECOND SURFACE. The River row shows the same codename, and until this ruling
+# it showed it in Title Case while the card showed capitals: the same word, two cases, one page.
+# The row lives in an overlay, so it has to be OPENED before it can be measured -- a check that
+# queries `.rl-row` without opening the panel finds nothing and passes for the wrong reason, which
+# is why this helper returns the row count and the caller asserts on it.
+def river(pg):
+    pg.evaluate("() => { const b = document.querySelector('#riverPreviewBtn'); if (b) b.click(); }")
+    pg.wait_for_timeout(700)
+    return pg.evaluate("() => document.querySelectorAll('.rl-row').length")
+
+RIVER_ROW = """(tkr) => {
+  const r = [...document.querySelectorAll('.rl-row')].find(e => e.textContent.includes(tkr));
+  if (!r) return null;
+  const f = r.querySelector('.rl-main .figure'), d = r.querySelector('.rl-desc');
+  return {found: true, raw: !!r.querySelector('.rl-raw'),
+          t: f ? getComputedStyle(f).textTransform : null,
+          text: f ? f.textContent : null,
+          descT: d ? getComputedStyle(d).textTransform : null};
+}"""
+
 with sync_playwright() as p:
     ENGINE = os.environ.get('ENGINE', 'chromium')
     print('engine:', ENGINE)
@@ -196,6 +222,14 @@ with sync_playwright() as p:
     check('CONTROL: ...keeps the description in a separate span', c and c['desc'], c)
     check('CONTROL: ...renders no tag even though the feed carries one', c and c['tag'] is None, c)
     check('CONTROL: ...and no glow', c and c['shadow'] in ('none', ''), c)
+    # POSITIVE CONTROL for the River check below. On the pinned page the row has no `.figure`
+    # element at all, so the probe returns no transform -- which is exactly the Title-Case River
+    # that R-IV.943(a) was ruled on. Without this, a River check that silently found nothing would
+    # pass on both builds and measure nothing.
+    co = river(po)
+    check('CONTROL: the pinned River draws its rows too', co > 0, co)
+    crv = po.evaluate(RIVER_ROW, 'IWM')
+    check('CONTROL: ...and its codename is NOT capitalised', crv and crv['t'] is None, crv)
     pctx.close()
 
     # ── TODAY: the fields are not served. The format still applies; nothing is invented. ──
@@ -232,6 +266,17 @@ with sync_playwright() as p:
         for row in FEED['rows']:
             tk = row.get('ticker')
             got = pg.evaluate(CARD, tk)
+            # WHICH ROWS GET A CARD IS THE SERVER'S CLAIM, not every row in the payload. The Kairos
+            # tile draws `roster.slice(0, 3)` of the ROSTER class (v2.js:2467), so a non-roster or
+            # shadow row correctly gets no card and belongs in the Unproven lane instead. Asserting
+            # a card for every fed row is the same fault as keying the assertions to the stub's
+            # tickers: an expectation taken from the fixture rather than derived from the data. The
+            # first real capture caught it -- JPM, class `non-roster`.
+            cls = str(row.get('strategy_class') or '').strip().lower()
+            if cls != 'roster':
+                check('%s: a %s row draws NO card, which is where it belongs' % (tk, cls or 'unclassed'),
+                      got is None, got)
+                continue
             if not got:
                 check('the capture\'s %s row rendered a card' % tk, False, 'no card for ' + str(tk))
                 continue
@@ -269,6 +314,46 @@ with sync_playwright() as p:
                               % (tk, 'yes' if 'display_label' in row else 'NO',
                                  'yes' if 'upgrade_tag' in row else 'NO',
                                  'yes' if 'codename' in row else 'NO'))
+        # FIELD PRESENCE IS A PAYLOAD FACT, not a rendering one, so it is counted over EVERY
+        # captured row -- not the three the Kairos tile can draw. Reporting assumption 4 from the
+        # rendered rows alone would describe 3 of 13 and read as if it described the feed.
+        n = len(CAPTURED)
+        for f in ('display_label', 'upgrade_tag', 'codename'):
+            pres = sum(1 for r in CAPTURED if f in r)
+            full = sum(1 for r in CAPTURED if r.get(f) not in (None, '', []))
+            verdict[4].append('%s: on %d/%d rows, non-null on %d' % (f, pres, n, full))
+        # R-IV.943(b)2: a field that arrives on every row and is null on every row is SERVED but
+        # NOT EXERCISED. The two are different findings and must not be reported as one.
+        tags = set(r.get('upgrade_tag') for r in CAPTURED)
+        if tags == {None}:
+            verdict[2].append('NOT EXERCISED by this capture: upgrade_tag arrives on all %d rows '
+                              'and is null on all %d -- served, never set' % (n, n))
+        # R-IV.943(b)3: `related_signals` is the GROUPED endpoint's field. Measure whether it is
+        # here rather than asserting from memory which endpoint carries it.
+        verdict[4].append('related_signals: on %d/%d rows of this endpoint'
+                          % (sum(1 for r in CAPTURED if 'related_signals' in r), n))
+
+        # R-IV.943(a) ON THE CAPTURE: every captured row the River actually draws must capitalise
+        # by styling and leave the served string alone. Derived per row, never keyed to a ticker --
+        # a capture contains whatever fired that day. Lanes filter, so some rows will not be drawn
+        # at all; the count of rows checked is reported rather than assumed.
+        nrows = river(pg)
+        check('the River preview opens against the capture', nrows > 0, nrows)
+        seen, bad = 0, []
+        for row in FEED['rows']:
+            tk, label = row.get('ticker'), row.get('display_label')
+            if not tk or not label:
+                continue
+            rv = pg.evaluate(RIVER_ROW, tk)
+            if not rv or rv['raw'] or not rv['t']:
+                continue
+            seen += 1
+            fig = label.split('|', 1)[0].strip()
+            if rv['t'] != 'uppercase' or rv['text'].strip() != fig:
+                bad.append('%s: transform=%s text=%r wanted %r' % (tk, rv['t'], rv['text'], fig))
+        check('every captured River row the page drew (%d of %d) is capitals by styling, '
+              'over the spelling BUILD served' % (seen, len(FEED['rows'])), not bad, bad)
+        verdict[1].append('River rows drawn and checked: %d' % seen)
         check('no page errors against the capture', not errs, errs)
         ctx.close()
 
@@ -361,6 +446,17 @@ with sync_playwright() as p:
     x = pg.evaluate(CARD, 'XLE')
     check('a signal with no tag gets the title and nothing else',
           x and x['tag'] is None and 'upgraded' not in x['cls'], x)
+    # R-IV.943(a): the River row, by the SAME means -- a class the stylesheet acts on. The served
+    # string underneath must still be BUILD's own spelling, because R-IV.900 protected this row's
+    # content and only its CASE was ruled on here.
+    nrows = river(pg)
+    check('the River preview opens and draws its rows', nrows > 0, nrows)
+    rv = pg.evaluate(RIVER_ROW, 'IWM')
+    check('the River row capitalises the codename too', rv and rv['t'] == 'uppercase', rv)
+    check('...by styling: the served string under it is untouched',
+          rv and rv['text'] in ('Achilles', 'ACHILLES'), rv)
+    check('...and the description beside it is NOT capitalised',
+          rv and rv['descT'] in (None, 'none'), rv)
     check('no page errors with the fields served', not errs, errs)
     ctx.close()
 

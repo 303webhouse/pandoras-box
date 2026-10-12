@@ -31,6 +31,10 @@ body { min-height: 100%; height: auto; padding: 18px 16px 60px; }
    sideways on an actual phone, which is the fault it exists to demonstrate the absence of. */
 .mk .phone { width: 390px; max-width: 100%; }
 .mk .q { border-left: 2px solid var(--teal); padding-left: 10px; margin: 6px 0 0; }
+/* R-IV.943(c): a block that was a question and now has an answer. Lime, because it is
+   settled, and distinct from the teal of one still open -- the two must not look alike on a
+   page whose whole subject is telling a confirmed thing from an unconfirmed one. */
+.mk .ok { border-left: 2px solid var(--up); padding-left: 10px; margin: 6px 0 0; }
 
 /* ── THE AGE. Always shown beside a mark-derived figure, in every state. A price with no age is a
       price the reader assumes is current, which is the whole failure this is for. ─────────────── */
@@ -170,7 +174,10 @@ body { min-height: 100%; height: auto; padding: 18px 16px 60px; }
     </div>
   </div>
 
-  <h2>5 · The choices in this draft, for the principal to overrule</h2>
+  <h2>5 · The choices in this draft — APPROVED, R-IV.943(c)</h2>
+  <p class="mk-note ok"><b>All three were approved as drawn</b>, unless the principal says otherwise
+    when he sees it. They are left written out below, because a choice whose reason is recorded can
+    be revisited; one that is only a habit cannot.</p>
   <p class="mk-note">
     <b>The figure is struck through, not hidden.</b> A mark that cannot be trusted still produced
     the number in the book, and that number is the only clue to how far off the book might be.
@@ -185,20 +192,33 @@ body { min-height: 100%; height: auto; padding: 18px 16px 60px; }
     come to mean "fine" — and then a field that stopped arriving would look like good news.
   </p>
 
-  <h2>6 · What I need from BUILD before this can ship</h2>
-  <p class="mk-note q">
-    <b>1. Is <code>mark_as_of</code> an instant or a day?</b> If it arrives as midnight UTC it is a
-    DAY someone wrote down, and an "age" computed from it is wrong by up to a day — the trap
-    R-IV.726 found in <code>entry_date</code>. An age needs a real instant.
+  <h2>6 · The three questions, ANSWERED — R-IV.943(c)</h2>
+  <p class="mk-note ok">
+    SPINE ruled all three to BUILD. <b>This draft is drawn correctly against the answers</b>, so
+    nothing here changes; what follows is the record of what the fields are, so a later session
+    does not have to re-derive it from the page.
     <br><br>
-    <b>2. What shape is <code>mark_integrity</code>?</b> This draft assumes a flag that says the
-    quote is wide. If it is a number (a spread width, a ratio), the page should not pick the
-    threshold that decides "wide" — that is a judgement with one author, and it belongs with
-    whoever measures the quote.
+    <b>1. <code>mark_as_of</code> is an exact UTC INSTANT, never a day.</b> So the age is a real
+    subtraction and R-IV.726's trap does not apply here: there is no midnight-UTC value to mistake
+    for a moment. It still gets converted for display, never read as written.
     <br><br>
-    <b>3. Does 26 hours come from the hub or from the page?</b> The same answer: if the hub decides
-    staleness, the page should render the hub's verdict rather than recompute it from a timestamp
-    and risk the two disagreeing. If the page decides, 26 hours lives in one named constant.
+    <b>2. <code>mark_integrity</code> is a WORD — <code>ok</code> / <code>stale</code> /
+    <code>wide</code> / <code>unknown</code> — plus a reason, never a number.</b> So
+    <b>the page picks no threshold</b>, which is what this draft assumed and the reason it assumed
+    it: the judgement about what counts as wide belongs with whoever measures the quote. The
+    <code>unknown</code> word is why this draft draws "age unknown" as its own state rather than
+    folding it into "no mark".
+    <br><br>
+    <b>3. The 26-hour line is the HUB'S display verdict, set in one backend place.</b> The page
+    renders the verdict and does not recompute it, so the two cannot disagree. <b>And it is not the
+    same rule as the B2 gate's</b>, which uses its own post-close test (Convention&nbsp;#38) —
+    two different questions about the same price, deliberately kept apart: "is this price old enough
+    to warn a reader" is not "is this price admissible as a measurement".
+    <br><br>
+    <b>Still not shippable.</b> Neither field is served yet. R-IV.943(c) holds this behind BUILD
+    reporting <code>mark_as_of</code> and <code>mark_integrity</code> on the positions payload —
+    drawing an age from a field that does not arrive is the fake-freshness this whole treatment
+    exists to prevent.
   </p>
 
 </div>
