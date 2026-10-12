@@ -101,27 +101,60 @@ def _roll_session(et_date: str) -> bool:
     return True
 
 
+async def _snapshot(ticker: str) -> Optional[dict]:
+    """One governed UW read, shared by both price readers below.
+
+    THE LOG LEVEL IS THE POINT OF THIS FUNCTION. This job recorded 389 consecutive failures
+    saying "no evaluable displacement for any of 3 symbol(s)" and never once succeeded, because
+    the name the mark reader imported -- `get_stock_info` -- did not exist anywhere in the tree.
+    The ImportError was swallowed by a broad `except Exception` and written at DEBUG, so the
+    single fact that explained every one of those failures was never recorded. A missing name is
+    a programming error, not a transient data condition, and it is now reported as one.
+    """
+    try:
+        from integrations.uw_api import get_snapshot
+    except ImportError:
+        logger.error("[hermes.session] get_snapshot is not importable -- the alarm cannot price "
+                     "anything until that is fixed", exc_info=True)
+        return None
+    try:
+        snap = await get_snapshot(ticker)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[hermes.session] %s snapshot unavailable: %s", ticker,
+                       type(exc).__name__)
+        return None
+    if not isinstance(snap, dict) or not snap:
+        # The governor's UWUnavailable sentinel is falsy by design and lands here too.
+        logger.warning("[hermes.session] %s snapshot empty or blocked by the governor", ticker)
+        return None
+    return snap
+
+
+def _as_float(value) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def _prior_session_close(ticker: str) -> Optional[float]:
-    """The PRIOR session's closing price. None when it cannot be established.
+    """The PRIOR regular session's closing price. None when it cannot be established.
+
+    Taken from `prevDay.c`, which is the figure P1.10 (2026-04-28) exists to provide:
+    /stock-state's own `prev_close` ROLLS FORWARD during post-market to today's regular close,
+    so reading that field directly reports a move of about zero on a day the symbol actually
+    fell. get_snapshot derives prevDay from regular-session /ohlc/1d bars instead, which is
+    correct pre-market, in RTH, post-market and overnight alike.
 
     The prior CLOSE, never today's open: a gap IS displacement, and on a gap-down morning the
     move from yesterday's close is exactly what the principal wants to be told about. Measuring
-    from the open would hide it — the same reasoning the calibration replay uses, so the live
+    from the open would hide it -- the same reasoning the calibration replay uses, so the live
     alarm and the replay that set its thresholds are answering one question.
     """
-    from integrations.uw_api import get_bars
-
-    try:
-        bars = await get_bars(ticker, 1, "day")
-    except Exception as exc:                                        # noqa: BLE001
-        logger.warning("[hermes.session] %s prior close unavailable: %s", ticker,
-                       type(exc).__name__)
+    snap = await _snapshot(ticker)
+    if not snap:
         return None
-    closes = [b.get("c") for b in (bars or []) if b.get("c") is not None]
-    if len(closes) < 2:
-        return None
-    # The last bar is today once the session is open, so the prior session is the one before it.
-    return float(closes[-2])
+    return _as_float((snap.get("prevDay") or {}).get("c"))
 
 
 async def _mark(ticker: str) -> Optional[float]:
@@ -130,18 +163,13 @@ async def _mark(ticker: str) -> Optional[float]:
     A stale mark is worse than no mark here: it would produce a confident displacement from a
     price that is not the price, and `should_alert` has a NOT EVALUABLE branch precisely so this
     can refuse rather than guess.
-    """
-    try:
-        from integrations.uw_api import get_stock_info
 
-        info = await get_stock_info(ticker)
-        for key in ("last", "price", "close", "mark"):
-            v = (info or {}).get(key)
-            if v is not None:
-                return float(v)
-    except Exception as exc:                                        # noqa: BLE001
-        logger.debug("[hermes.session] %s mark unavailable: %s", ticker, type(exc).__name__)
-    return None
+    `lastTrade.p` is the live last trade, and is aware of the post-market session.
+    """
+    snap = await _snapshot(ticker)
+    if not snap:
+        return None
+    return _as_float((snap.get("lastTrade") or {}).get("p"))
 
 
 async def evaluate_once(now: Optional[datetime] = None) -> List[dict]:
