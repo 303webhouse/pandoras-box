@@ -622,7 +622,10 @@ body {
    serves "Achilles | Sell the Rip" and this renders ACHILLES, so a copy out of the page still
    carries the spelling BUILD authored, and a change of mind is one line here rather than a change
    to the feed. Scoped to the figure: the description is deliberately NOT capitalised. */
-.k-card .nm .figure { text-transform: uppercase; }
+/* R-IV.943(a): the River row joins the card. ONE rule is the single author of where capitals
+   apply, so the two surfaces cannot drift apart again by someone styling only one of them. */
+.k-card .nm .figure,
+.rl-main .figure { text-transform: uppercase; }
 .k-card .nm .sep { color: var(--text-2); font-weight: 400; padding: 0 2px; }
 /* The description folded into the title carries real meaning, so it reads at --text-2. The old
    separate `.desc` span is --text-3, which fails AA at 10px (R-IV.416(e)'s measurement). */

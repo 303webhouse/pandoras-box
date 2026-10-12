@@ -2884,7 +2884,11 @@
     // R-IV.900(b) · the NAME comes from the same author as the card's (`display_label` when it is
     // served), but this row is NOT reformatted: its description already sits after the price, and
     // folding it into the title would reorder a row the ruling did not approve a change to.
-    const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b>${esc(titleParts(s, disp).figure)}</b>`;
+    // R-IV.943(a): the codename is capitals HERE TOO, by the same means as the card -- a class
+    // the stylesheet acts on, never a transformed string. The principal's naming rule holds on
+    // every surface; R-IV.900 protected this row's CONTENT, not its case, and the content is
+    // byte-for-byte what it was.
+    const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b class="figure">${esc(titleParts(s, disp).figure)}</b>`;
     const err = rowError(s);
     return `<div class="rl-row${err ? ' rl-bad' : ''}" data-sid="${esc(s.signal_id || '')}">
         <div class="rl-main">${name} <span class="rl-tkr" data-chart="${esc(String(s.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
