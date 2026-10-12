@@ -267,4 +267,15 @@ class TestTheCollectorIsObservable:
         # caught that function's cache_set, so the assertion was about the wrong code.
         body = src[i:src.index("\nasync def ", i + 10)]
         assert "cache_set" not in body
-        assert 'caller="market_tide_backfill"' in body
+        # THE CACHING GUARD IS THE LINE ABOVE and it is untouched. This second line only pins
+        # the governor TAG, which R-IV.901(c)1 changed from "market_tide_backfill" to the
+        # existing "market_tide" row: the backfill had no quota row of its own, so it fell to
+        # DEFAULT 500 — outside the 26,000 ceiling and therefore a hole in it.
+        #
+        # THE COST OF SHARING, recorded here because this is where a reader will look: the
+        # backfill's spend is no longer separable from the live fetch's in the governor or in
+        # the 90-day ledger. For the 10-UW-day resize (R-IV.886(e)) that row's max now mixes two
+        # different workloads — a scheduled backfill and a live read — so it is less
+        # interpretable than either alone. The alternative was its own row at 500, from a table
+        # with zero slack. Quota cost zero; observability cost this.
+        assert 'caller="market_tide"' in body

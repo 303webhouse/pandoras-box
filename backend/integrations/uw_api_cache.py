@@ -203,6 +203,31 @@ async def increment_429_counter(caller: str = "untagged") -> None:
         pass
 
 
+async def get_caller_count_or_none(caller: str) -> Optional[int]:
+    """Today's count for one caller, or **None when the counter could not be READ**.
+
+    R-IV.901(c)2. `get_caller_count()` below returns 0 on failure, which makes "this caller has
+    made no calls yet" and "Redis is unreachable" the SAME ANSWER. The governor then compares 0
+    against a quota, concludes there is room, and fails open to unlimited — so a Redis blip
+    removes the ceiling entirely rather than reducing it.
+
+    That is the "instrument that cannot distinguish" fault: the reading is not wrong, it is
+    unable to be wrong, because both states produce the same number. This variant separates
+    them so the governor can enter a degraded mode instead of an unbounded one. It is a NEW
+    function rather than a changed signature, so the existing callers keep their behaviour.
+    """
+    redis = await _get_redis()
+    if not redis:
+        return None
+    try:
+        from datetime import date
+        key = f"uw:daily_requests_by_caller:{date.today().isoformat()}"
+        v = await redis.hget(key, caller)
+        return int(v) if v else 0
+    except Exception:
+        return None
+
+
 async def get_caller_count(caller: str) -> int:
     """Today's request count for a single caller tag (B2 governor quota check).
 

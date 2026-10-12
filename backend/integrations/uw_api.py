@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from integrations.uw_governor import LIMIT_BODY_MARKER as _GOV_LIMIT_MARKER
+from integrations.uw_governor import trip_breaker as _gov_trip_breaker
 from integrations.uw_api_cache import (
     cache_get, cache_set, increment_daily_counter, increment_429_counter,
     get_daily_count, get_cache_stats,
@@ -324,7 +326,22 @@ async def _uw_request(path: str, params: dict = None, caller: str = "untagged") 
                     # silent None on throttle is indistinguishable from "no data"
                     # — the fake-healthy pattern that made the 2026-06-16 outage
                     # invisible. Falsy, so existing fallback paths still fire.
-                    logger.warning("UW API %s: rate limited (429) — returning UWUnavailable(RATE_LIMITED)", path)
+                    # R-IV.901(c)3: a BURST limit and the ACCOUNT'S DAILY limit are both 429,
+                    # and only the body tells them apart. A burst 429 is routine and must not
+                    # stop the hub; `daily_request_limit_hit` means the account has nothing left
+                    # until 20:00 ET, so every caller stops. Reading the body is the only way to
+                    # know, because the counter header that would have said so is absent.
+                    try:
+                        _body = (resp.text or "")[:500]
+                    except Exception:                               # noqa: BLE001
+                        _body = ""
+                    if _GOV_LIMIT_MARKER in _body:
+                        _gov_trip_breaker(_body)
+                        logger.error("UW API %s: 429 with %s — the ACCOUNT is at its daily "
+                                     "limit; breaker tripped", path, _GOV_LIMIT_MARKER)
+                    else:
+                        logger.warning("UW API %s: rate limited (429) — returning "
+                                       "UWUnavailable(RATE_LIMITED)", path)
                     return UWUnavailable(_GOV_RATE_LIMITED, caller=caller)
                 else:
                     logger.error("UW API %s: HTTP %d — %s", path, resp.status_code, resp.text[:200])
@@ -363,7 +380,8 @@ async def get_ohlc(
     ticker: str,
     candle_size: str = "1d",
     lookback_days: int = 30,
-    caller: str = "ohlc",
+    *,
+    caller: str,
 ) -> Optional[List[Dict[str, Any]]]:
     """Fetch OHLC bars from UW `/api/stock/{ticker}/ohlc/{candle_size}`.
 
@@ -1248,8 +1266,16 @@ async def get_market_tide_for_date(session: str) -> Optional[Dict[str, Any]]:
     keyed on "market" alone, and writing a dated series into it would serve yesterday's tide as
     today's -- the wrong-asset fault in a different costume.
     """
+    # R-IV.901(c)1: tagged to the EXISTING `market_tide` row rather than its own. `market_tide_backfill`
+    # had no row, so it fell to DEFAULT 500 -- outside the 26,000 sum and therefore a hole in the
+    # ceiling. Sharing the row funds it at zero cost to the total.
+    #
+    # TIER CONSEQUENCE, FLAGGED: `market_tide` is FOREGROUND, which is never shed and carries a
+    # 1.0 off-hours factor. A BACKFILL is exactly the kind of bulk work that should be shed
+    # FIRST under pressure -- the same argument that kept darkpool_collector out of FOREGROUND
+    # (R-IV.839(c)). Applied as ruled; the tier mismatch is reported rather than worked around.
     return await _uw_request("/api/market/market-tide", params={"date": session},
-                             caller="market_tide_backfill")
+                             caller="market_tide")
 
 
 async def get_iv_term_structure(ticker: str, session: str) -> Optional[Dict[str, Any]]:
