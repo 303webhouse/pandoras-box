@@ -140,9 +140,16 @@ def route(r):
     return j({}, 404)
 
 fails = []
+# This console is cp1252. Every line out of this suite goes through here, because a stray dash or
+# box character in a SUMMARY kills the run after every assertion has already passed — which is the
+# worst possible moment to lose the output.
+def say(*parts):
+    print(' '.join(str(p) for p in parts).encode('ascii', 'replace').decode('ascii'))
+
+
 def check(n, c, x=''):
     line = ('PASS ' if c else 'FAIL ') + n + (' >> ' + str(x)[:300] if x and not c else '')
-    print(line.encode('ascii', 'replace').decode('ascii'))
+    say(line)
     if not c: fails.append(n)
 
 def page(b, old=False, w=1440, motion='no-preference'):
@@ -214,7 +221,115 @@ with sync_playwright() as p:
     # card, so a capture is trimmed to what the tile will actually render.
     FEED['rows'] = CAPTURED[:3] if CAPTURED else WIRED
     if CAPTURED:
-        print('   (the WIRED pass is running against the CAPTURED payload)')
+        # R-IV.934: the checks below this point are keyed to the STUB's own tickers, so against a
+        # real capture they would fail for the wrong reason -- naming rows the payload does not
+        # contain. A capture therefore drives its OWN assertions, derived per row from the two
+        # fields that row actually carries, and the suite reports PER ASSUMPTION as R-IV.929(b)
+        # requires.
+        say('   (the WIRED pass is running against the CAPTURED payload)')
+        pg, ctx, errs = page(b)
+        verdict = {1: [], 2: [], 3: [], 4: []}
+        for row in FEED['rows']:
+            tk = row.get('ticker')
+            got = pg.evaluate(CARD, tk)
+            if not got:
+                check('the capture\'s %s row rendered a card' % tk, False, 'no card for ' + str(tk))
+                continue
+            label, tag = row.get('display_label'), row.get('upgrade_tag')
+            # ASSUMPTION 1 — one string, split on the FIRST pipe; no pipe renders whole.
+            if label is None:
+                verdict[1].append('%s: NO display_label on the row' % tk)
+            elif '|' in label:
+                want = label.split('|', 1)
+                hit = (got['nm'] == label.strip() or got['nm'] == ' | '.join(x.strip() for x in want)) \
+                      and got['hasSep'] and got['hasWhat']
+                check('%s: "%s" renders as figure + pipe + description' % (tk, label[:40]), hit, got)
+                verdict[1].append('%s: pipe label OK' % tk if hit else '%s: MISMATCH %r' % (tk, got['nm']))
+            else:
+                hit = got['nm'] == label.strip() and not got['hasSep']
+                check('%s: "%s" has no description, so it renders whole with no pipe' % (tk, label[:40]), hit, got)
+                verdict[1].append('%s: no-pipe label OK' % tk if hit else '%s: MISMATCH %r' % (tk, got['nm']))
+            # ASSUMPTIONS 2 and 3 — the bare word, or no treatment at all.
+            if tag in ('APIS', 'KODIAK'):
+                want_colour = 'rgb(124, 255, 107)' if tag == 'APIS' else 'rgb(255, 92, 51)'
+                hit = got['tag'] == tag and tag.lower() in got['cls'] and got['shadow'] not in ('none', '') \
+                      and got['tagColor'] == want_colour
+                check('%s: %s tags the card, in its own family colour, with the glow' % (tk, tag), hit, got)
+                verdict[2].append('%s: %s OK' % (tk, tag) if hit else '%s: %s MISMATCH' % (tk, tag))
+            elif tag:
+                hit = got['tag'] is None and 'upgraded' not in got['cls']
+                check('%s: the unrecognised tag %r draws nothing' % (tk, tag), hit, got)
+                verdict[3].append('%s: %r ignored' % (tk, tag) if hit else '%s: %r DREW SOMETHING' % (tk, tag))
+            else:
+                hit = got['tag'] is None and 'upgraded' not in got['cls']
+                check('%s: no tag on the row, so none on the card' % tk, hit, got)
+                verdict[2].append('%s: untagged OK' % tk if hit else '%s: untagged MISMATCH' % tk)
+            # ASSUMPTION 4 — both fields arrive per row, beside `codename`.
+            verdict[4].append('%s: display_label=%s upgrade_tag=%s codename=%s'
+                              % (tk, 'yes' if 'display_label' in row else 'NO',
+                                 'yes' if 'upgrade_tag' in row else 'NO',
+                                 'yes' if 'codename' in row else 'NO'))
+        check('no page errors against the capture', not errs, errs)
+        ctx.close()
+
+        # The capture's REAL labels on a phone, and with motion reduced. An earlier version of this
+        # block exited before these ran, which silently dropped the two checks that matter most for
+        # a real payload: the longest label the roster can produce is far longer than any stub's.
+        for w in (360, 390, 430):
+            pp, pctx2, perrs = page(b, w=w)
+            hits = pp.evaluate("""() => {
+              const out = [];
+              document.querySelectorAll('.k-card').forEach((card) => {
+                const cr = card.getBoundingClientRect();
+                // LEAVES only: an element always "overlaps" its own ancestor, and a wrapped inline
+                // element's bounding rect is the union of its lines. Both are measurement
+                // artefacts, not ink, and both fooled this check once.
+                const leaves = [...card.querySelectorAll('*')].filter((e) => {
+                  if (e.children.length || !e.textContent.trim()) return false;
+                  const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+                // PER-LINE boxes, not the bounding rect. A wrapped inline element's bounding rect
+                // is the UNION of its lines — a full-width box spanning them all — so it overlaps
+                // whatever shares its first line by construction. That is geometry, not ink, and
+                // it is the second artefact to fool this check: the first was comparing an element
+                // with its own ancestor.
+                const bx = [];
+                leaves.forEach((e) => { const t = e.textContent.trim().slice(0, 18);
+                  [...e.getClientRects()].forEach((r) => {
+                    if (r.width > 0 && r.height > 0) bx.push({t, l: r.left, rt: r.right, tp: r.top, b: r.bottom}); }); });
+                for (let a = 0; a < bx.length; a++) for (let c = a + 1; c < bx.length; c++) {
+                  const ox = Math.min(bx[a].rt, bx[c].rt) - Math.max(bx[a].l, bx[c].l);
+                  const oy = Math.min(bx[a].b, bx[c].b) - Math.max(bx[a].tp, bx[c].tp);
+                  if (ox > 1 && oy > 1) out.push([bx[a].t, bx[c].t]); }
+                leaves.forEach((e) => { if (e.getBoundingClientRect().right > cr.right + 1)
+                  out.push(['SPILLS OUT OF ITS CARD', e.textContent.trim().slice(0, 22)]); });
+              });
+              return out; }""")
+            check('%dpx: the capture\'s own labels neither collide nor spill' % w, not hits, hits)
+            check('%dpx: the page does not scroll sideways' % w,
+                  pp.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"))
+            check('%dpx: no page errors' % w, not perrs, perrs)
+            pctx2.close()
+        prm, rmctx, _ = page(b, motion='reduce')
+        check('reduce motion: nothing pulses, on the capture too', prm.evaluate(
+            "() => [...document.querySelectorAll('.k-card.fresh')].every(c => getComputedStyle(c).animationName === 'none')"))
+        rmctx.close()
+
+        say('')
+        say('-- PER ASSUMPTION (R-IV.929(b)) --')
+        names = {1: 'display_label is ONE string, split on the FIRST pipe',
+                 2: 'upgrade_tag is the bare word APIS or KODIAK',
+                 3: 'any other tag value is ignored on purpose',
+                 4: 'both arrive per row, beside codename'}
+        for k in (1, 2, 3, 4):
+            rows_ = verdict[k] or ['(no row in this capture exercised it)']
+            say('  %d. %s' % (k, names[k]))
+            for line in rows_:
+                say('       ' + line)
+        say('')
+        say('%d checks failed' % len(fails))
+        for f in fails: say('  - ' + f)
+        b.close()
+        sys.exit(1 if fails else 0)
     pg, ctx, errs = page(b)
     k = pg.evaluate(CARD, 'IWM')
     check('the served display_label is rendered whole', k and k['nm'] == 'ACHILLES | Sell the Rip', k)
