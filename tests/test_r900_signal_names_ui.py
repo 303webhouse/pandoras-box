@@ -26,6 +26,29 @@ With that set, the WIRED pass serves the captured rows instead of the stub, and 
 BUILD's shape and the assumptions above shows up as a failing title or a missing tag rather than as
 a green run. Without it, the suite says so in its first line of output.
 
+── HOW TO TAKE THAT CAPTURE (R-IV.929(b)) ────────────────────────────────────────────────────────
+SPINE granted ONE authenticated capture, and only once BUILD reports the two fields served. Its
+terms: never print or store the credential; strip nothing but the auth header; run the suite in
+Chromium AND WebKit; report whether the shape matches the four assumptions above.
+
+  1. The route is gated by `utils.pivot_auth.require_api_key`, which accepts EITHER an
+     `X-API-Key: <PIVOT_API_KEY>` header OR a signed `pivot_session` cookie.
+  2. `PIVOT_API_KEY` comes only from `railway variables`, whose CLI token EXPIRES, and
+     `railway login` is interactive — so a dead token means the principal has to run it. A dead
+     token looks like a 401 on this route while /health still answers 200.
+  3. Read the key into a shell variable and send it as a header. Do not echo it, do not write it
+     into the captured file, do not paste it into a report. What is captured is the SIGNALS payload
+     and nothing else: the auth header is the only thing stripped, because it is the only thing
+     that is a credential.
+  4. SPINE'S PERMISSION IS NOT THE HARNESS'S. An earlier attempt at exactly this call was refused
+     by the tool-permission layer as a production read. That control is separate from the ruling,
+     so expect a prompt and let the principal approve it. If it is refused, say so and stop — do
+     not reach for another route to the same bytes.
+
+Then run the suite twice, with ENGINE unset and ENGINE=webkit, and report PER ASSUMPTION rather
+than as one pass/fail: which of the four held, and for any that did not, what the payload carried
+instead.
+
 Control: the pinned build (9beda308) shows the name and description as two separate spans, with no
 pipe, no tag and no glow, however the feed is labelled.
 """
