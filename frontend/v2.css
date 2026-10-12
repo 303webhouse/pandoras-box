@@ -618,6 +618,11 @@ body {
    Approved from frontend/mockups/signal-names-upgrade.html with the option "pulse while fresh".
    These rules were written in that mockup and have MOVED here; the mockup links this file and no
    longer carries a copy, so there is one author for them. */
+/* R-IV.938(b): CAPITALS on the codename, by styling. The served string is untouched -- BUILD
+   serves "Achilles | Sell the Rip" and this renders ACHILLES, so a copy out of the page still
+   carries the spelling BUILD authored, and a change of mind is one line here rather than a change
+   to the feed. Scoped to the figure: the description is deliberately NOT capitalised. */
+.k-card .nm .figure { text-transform: uppercase; }
 .k-card .nm .sep { color: var(--text-2); font-weight: 400; padding: 0 2px; }
 /* The description folded into the title carries real meaning, so it reads at --text-2. The old
    separate `.desc` span is --text-3, which fails AA at 10px (R-IV.416(e)'s measurement). */
