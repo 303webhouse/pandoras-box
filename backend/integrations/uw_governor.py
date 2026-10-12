@@ -202,13 +202,18 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "earnings_premarket": (100, TIER_STANDARD),
     "earnings_afterhours": (100, TIER_STANDARD),
     "earnings_dates": (100, TIER_STANDARD),
-    # R-IV.823(e) / R-IV.839(c), ruled: the nightly Triton dark-pool collection gets 3,000/day
-    # and a per-caller off-hours factor of 1.0 below. LAB sized this at 500 and said so plainly
-    # -- "before `enforce` is flipped, this row needs a ruling" -- and its reasoning for why 500
-    # is wrong is exactly right: the job runs ONLY after the close, where STANDARD keeps 25%, so
-    # 500 would become 125 calls a night. The ruling answers both halves, and the collector's own
-    # clock still stops it before 19:50 ET and before the UW reset, whatever this row allows.
-    "darkpool_collector": (3000, TIER_STANDARD),
+    # R-IV.886(d), INTERIM: 250/day, which is exactly the room the table has. 3,000 was ruled
+    # (R-IV.839(c)) and does NOT fit -- the table sums to 26,000 against a 26,000 ceiling at 250,
+    # and 28,750 at 3,000, while UW_GOVERNOR_MODE is `enforce` in production, so the overrun
+    # would refuse real calls. The resize to ~3,000 waits on 10 UW days of measured spend
+    # (R-IV.886(e)); this row collects FORWARD ROWS FIRST on the room available.
+    #
+    # The per-caller off-hours factor of 1.0 below is what makes 250 usable at all: the job runs
+    # ONLY after the close, where STANDARD keeps 25%, so without it this would be 62 calls.
+    # NOT promoted to FOREGROUND (R-IV.839(c)) -- that would also buy immunity from shedding,
+    # and a nightly bulk collection is the first thing that should be shed, not the last.
+    # The collector's own clock still stops it before 19:50 ET and the UW reset regardless.
+    "darkpool_collector": (250, TIER_STANDARD),
     # R-IV.432(e): the backtest module's second-vendor check -- /ohlc/1d, only for graded
     # rows whose window spans a calendar event, at most 40 tickers a pass. It runs after the
     # close, where STANDARD keeps 25% (50/day), which is the ceiling it is sized under.
