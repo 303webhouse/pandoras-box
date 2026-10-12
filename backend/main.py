@@ -944,8 +944,9 @@ async def lifespan(app: FastAPI):
     # warning: an alarm that failed to start is the one failure nobody would otherwise notice,
     # and it is also visible on /health, where `hermes_session_poll` simply never records.
     try:
-        from jobs.hermes_session_poll import run_forever as hermes_session_run
-        hermes_session_task = asyncio.create_task(hermes_session_run())
+        from jobs import hermes_session_poll as _hermes_poll
+        hermes_session_task = asyncio.create_task(_hermes_poll.run_forever())
+        _hermes_poll.set_task(hermes_session_task)   # so /health can report ARMED
         logger.info("✅ Hermes phase 2 session alarm started (push gated by %s)",
                     "HERMES_SESSION_ALERT_ENABLED")
     except Exception as e:
@@ -1525,6 +1526,16 @@ async def health_check():
     except Exception as _ze:
         zeus_block["error"] = str(_ze)
 
+    # Hermes phase 2: is the session alarm ARMED? R-IV.867(a). Distinct from the job ledger
+    # below, which says whether it has recently RECORDED — and which stays silent outside RTH by
+    # design. An alarm that never started would otherwise look exactly like a quiet market.
+    hermes_session_block: dict = {}
+    try:
+        from jobs.hermes_session_poll import armed_status
+        hermes_session_block = armed_status()
+    except Exception as _hse:
+        hermes_session_block = {"error": str(_hse)}
+
     # Stable Engine job health — a dead data pipe is now visible where we already look.
     stable_jobs_block: dict = {}
     try:
@@ -1667,6 +1678,7 @@ async def health_check():
         "postgres": postgres_state,
         "websocket_connections": len(manager.active_connections),
         "zeus": zeus_block,
+        "hermes_session": hermes_session_block,
         "stable_jobs": stable_jobs_block,
         "signals_freshness": signals_freshness_block,
         "strike_watermarks": strike_watermarks_block,

@@ -385,24 +385,50 @@ async def apply_scoring(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             pool = await get_postgres_client()
             sq_ticker = (signal_data.get("ticker") or "").upper()
             async with pool.acquire() as conn:
+                # R-IV.867(c): `updated_at` is selected because the bonus now depends on it.
+                # squeeze_scores holds ONE upserted row per ticker, so a row that stopped being
+                # refreshed kept paying +4/+8 forever on a figure from another market.
                 sq_row = await conn.fetchrow(
                     "SELECT composite_score, squeeze_tier, short_pct_float, "
-                    "days_to_cover FROM squeeze_scores WHERE ticker = $1",
+                    "days_to_cover, updated_at FROM squeeze_scores WHERE ticker = $1",
                     sq_ticker,
                 )
-            if sq_row and (sq_row["composite_score"] or 0) >= 20:
+            if sq_row:
+                from models.squeeze_freshness import bonus_for as _sq_bonus_if_fresh
+                from models.squeeze_freshness import decide as _sq_decide
                 cs = float(sq_row["composite_score"] or 0)
-                squeeze_bonus = 8 if cs >= 30 else 4
+                squeeze_bonus, sq_skipped = _sq_decide(cs, sq_row["updated_at"])
+            else:
+                squeeze_bonus, sq_skipped = 0, None
+
+            if squeeze_bonus:
                 score = min(100, score + squeeze_bonus)
+                # This key keeps its exact meaning -- "the bonus was applied" -- because a
+                # count of it is the measure of the defect's reach. A refusal is recorded under
+                # a DIFFERENT key below: widening this one would silently change what every
+                # historical comparison of it means.
                 triggering_factors["squeeze"] = {
                     "bonus": squeeze_bonus,
                     "composite_score": cs,
                     "squeeze_tier": sq_row["squeeze_tier"],
                     "short_float": float(sq_row["short_pct_float"]) if sq_row["short_pct_float"] else None,
                     "days_to_cover": float(sq_row["days_to_cover"]) if sq_row["days_to_cover"] else None,
+                    "as_of": sq_row["updated_at"].isoformat() if sq_row["updated_at"] else None,
                 }
                 logger.info("Squeeze confluence for %s: +%d (score %.0f, tier %s)",
                             sq_ticker, squeeze_bonus, cs, sq_row["squeeze_tier"])
+            elif sq_skipped:
+                # A bonus that WOULD have paid and was refused on age. Recorded rather than
+                # dropped: a bonus that quietly stops applying is indistinguishable from one
+                # that was never earned, and the difference is a dead collector.
+                triggering_factors["squeeze_skipped"] = {
+                    "would_have_been": _sq_bonus_if_fresh(cs),
+                    "reason": sq_skipped,
+                    "composite_score": cs,
+                    "as_of": sq_row["updated_at"].isoformat() if sq_row["updated_at"] else None,
+                }
+                logger.warning("Squeeze score for %s IGNORED — %s (composite %.0f, would have "
+                               "been +%d)", sq_ticker, sq_skipped, cs, _sq_bonus_if_fresh(cs))
         except Exception as sq_err:
             logger.debug("Squeeze cross-reference skipped: %s", sq_err)
 
