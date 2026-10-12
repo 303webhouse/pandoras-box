@@ -341,6 +341,13 @@ async def get_sector_divergence(window: str = Query("1d", pattern="^(1d|5d)$")):
         return _envelope(as_of, "provisional", degraded, feed="strip", window=window, sectors=out, count=len(out))
 
 
+@router.get("/zweig")
+async def get_zweig(days: int = Query(60, ge=1, le=6000)):
+    """Zweig breadth thrust + four percent model: DISPLAY-ONLY regime context, substitute inputs
+    labelled on the payload (R-IV.877(b)). Not a signal, a filter or a gate."""
+    return await stable_read.get_zweig(days)
+
+
 @router.get("/fx")
 async def get_fx():
     """DXY + USDJPY latest level, day change, and intraday series."""
