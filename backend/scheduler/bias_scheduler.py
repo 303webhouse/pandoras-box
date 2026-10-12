@@ -2604,6 +2604,22 @@ async def run_iv_snapshot_job():
         logger.error("IV snapshot job error: %s", e)
 
 
+async def run_zweig_job():
+    """R-IV.877(b): Zweig indicators, display-only. First run backfills from 2006 (yfinance);
+    then incremental from stable_daily_bars. Recorded for /health (stable_jobs)."""
+    try:
+        import asyncio as _aio
+        from jobs.stable_jobs import _record
+        from stable_engine.zweig import run_zweig_update
+
+        async def _run():
+            return await _aio.to_thread(run_zweig_update)
+
+        await _record("zweig", _run)
+    except Exception as e:
+        logger.error("Zweig job error: %s", e)
+
+
 async def run_lab_registered_shadow_job():
     """R-IV.855(d): the two registered SHADOW forward tests (NEMESIS long, PHOENIX washout).
     Runs before the open on the previous session's FINAL daily bar; records itself (/health +
@@ -2940,6 +2956,18 @@ async def start_scheduler():
             CronTrigger(day_of_week='mon-fri', hour=16, minute=45, timezone=ET),
             id='iv_snapshot',
             name='IV Snapshot (ATM term structure)',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+
+        # Zweig indicators (R-IV.877(b)) -- display only; after the Stable Engine's daily bars
+        scheduler.add_job(
+            run_zweig_job,
+            CronTrigger(day_of_week='mon-fri', hour=22, minute=30, timezone=ET),
+            id='zweig',
+            name='Zweig Breadth Thrust + Four Percent (display only)',
             replace_existing=True,
             max_instances=1,
             coalesce=True,
