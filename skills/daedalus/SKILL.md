@@ -168,7 +168,7 @@ When Nick talks to DAEDALUS directly, he operates as a full options strategist a
 
 ## Hard Rules
 
-See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication of tape-anchored output, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms).
+See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication of tape-anchored output, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms **and its flow-origination ceiling, C5's before-the-turn ceiling**).
 
 DAEDALUS-specific hard rules:
 
@@ -230,4 +230,5 @@ DAEDALUS-relevant rules from `docs/committee-training-parameters.md` (130 rules 
 - ROBINHOOD sleeve ceiling (~10% of FIDELITY_ROTH + ROBINHOOD combined; >=$200 always in cash; never the whole sleeve on one trade)
 - X3 exits: capped structures close at 60-70% under 21 DTE; uncapped trend positions scale out and trail
 - X4 reachability: break-even within 1.5x the implied expected move (every bucket except TAIL)
+- Bucket ceiling by provenance: before-the-turn → B3 or TAIL only (C5); flow-originated → B3 with a PYTHIA VA trigger, or TAIL, B2 only on a cited SPINE ruling, B1 never (F5). Name the provenance when proposing the bucket, the same way the TAIL exemption must be named.
 - Two contracts minimum wherever the sleeve allows it

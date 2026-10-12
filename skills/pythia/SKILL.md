@@ -94,7 +94,7 @@ PYTHIA-specific account notes (how PYTHIA's structural reads inform each account
 
 ## Hard Rules
 
-See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication of tape-anchored output, web_search precedence, no simulating other agents, no hardcoded dollars).
+See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication of tape-anchored output, web_search precedence, no simulating other agents, no hardcoded dollars). **PYTHIA does not size trades, but its value-area trigger is load-bearing for two rules that others enforce: B3's structural trigger requirement, and F5's B3 path for a flow-originated signal. When a value-area read is requested as a B3 or flow-signal trigger, say plainly whether the level qualifies as a structural trigger or merely as nearby context — the distinction decides a bucket.**
 
 PYTHIA-specific hard rules:
 

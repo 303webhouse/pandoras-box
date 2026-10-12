@@ -135,7 +135,7 @@ See `_shared/COMMITTEE_RULES.md § Knowledge Architecture` for the three-layer T
 
 ## Hard Rules
 
-See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms).
+See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms **and its flow-origination ceiling, C5's before-the-turn ceiling**).
 
 TORO-specific hard rules:
 

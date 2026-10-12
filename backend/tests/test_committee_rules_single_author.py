@@ -58,7 +58,10 @@ APPLIED_MARKERS = (
     # line, which answers the R-IV.775 gap: the rules file previously carried no version marker
     # at all while the source said consumers read one. Pinned here so a later apply that drops it
     # fails by name.
-    "RULES VERSION: 2026-10-08/v5.2",
+    # R-IV.873(b): v5.4 supersedes v5.2 and CONTAINS v5.3, so the stamp moves and v5.3 is
+    # never applied separately. The stamp is the thing scheduled tasks resolve on, so it is
+    # asserted as an exact string rather than a prefix.
+    "RULES VERSION: 2026-10-09/v5.4",
     "AUTHORITATIVE STAMP",
     "- **Credit-stress thesis.**",            # SECTION C, after the Fed-hawkish bullet
     "- **X4's implied-volatility input",      # SECTION B's fifth bullet, new in v5.2
@@ -212,5 +215,14 @@ class TestTheAppliedRulesText:
                        "**X3 — exits by structure.**",
                        "**X4 — reachability (DAEDALUS hard rule).**",
                        "**X7 — max loss for the portfolio cap",
-                       "**X10 — flow confirms, it does not originate.**"):
+                       ):
             assert bullet in t, bullet
+
+        # X10 is NO LONGER in that list, and deliberately so: v5.4 SECTION B rewrote it to carry
+        # its ceiling, so the old exact string is gone and "untouched" stopped being true of it.
+        # The assertion is not dropped -- it moves to the new text, because a replaced bullet
+        # still has to exist. During application a 50-character key missed the longer first line
+        # and APPENDED the new X10 beside the old one; one rule stated twice with two different
+        # ceilings is worse than either, so the shape is pinned here.
+        assert "**X10 — flow confirms, it does not originate. WITH ITS CEILING" in t
+        assert t.count("- **X10 — flow confirms") == 1, "X10 must appear exactly once"
