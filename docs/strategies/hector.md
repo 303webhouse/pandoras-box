@@ -7,7 +7,7 @@
 | side | LONG |
 | grid cell | **WITH-TREND LONG** (momentum above the 200-day and the 20-bar VWAP) |
 | schedule / trigger | the CTA `_scanner_loop` (`backend/scheduler/bias_scheduler.py`), trading days 9–16 ET, on a forming daily bar; also the crypto scanner (24/7) |
-| status | **SHADOW** (R-IV.879(b), 2026-10-12): negative in every regime, including against its same-date control. Still stored and graded; BUILD moves it into L0 `SUPPRESS_ALWAYS` |
+| status | **LIVE, pending reconciliation** (R-IV.885(b), 2026-10-12). SPINE's SHADOW ruling (R-IV.879(b)) is withdrawn: QUERY's live surfaced outcomes (R-IV.880) show TRAPPED_SHORTS 58.99% hits, +4.07% excess on 473 verdicts (61.93% on 415 in 90 days), against the replay's negative. Task 12 reconciles the two |
 | bucket ceiling | No provenance ceiling: C5 and F5 do not reach this cell (the R-IV.838(c) reading for with-trend cells) |
 | lifetime tries counter | unrecorded before LAB; unchanged by Task 8 (evaluation only) |
 
@@ -31,3 +31,9 @@ Retirement is SPINE's and QUERY's. It is in SHADOW now; it surfaces again only o
 
 ## Change log
 - 2026-01: CTA scanner. 2026-10-12: card v0; SHADOW (R-IV.879(b)).
+- 2026-10-12: back to LIVE pending reconciliation (R-IV.885(b)).
+  - Task 12 (`horizon-reconcile-TASK12-RESULTS.md`): graded with the live rule exactly as coded,
+    the equity replay hits 26% (32% without the signal-day bar; 30% in 2026), so no LAB-side step
+    closes the gap to 59%.
+  - Census Q1 shows about 94% of its 90-day rows are Crypto Scanner. Step (i), QUERY's split by
+    scanner and asset class, is the step expected to close it.
