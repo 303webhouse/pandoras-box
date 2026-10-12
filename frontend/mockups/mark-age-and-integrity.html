@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A mark's age, and when it is stale or wide — draft</title>
+
+<!-- The REAL Agora styles, by relative path, so this is not a second copy of the palette or of the
+     row rules. Opened by double-click, `../v2.css` resolves to frontend/v2.css on disk. -->
+<link rel="stylesheet" href="../v2.css">
+
+<style>
+/* ── PROPOSED rules only. Nothing here is in v2.css: this is a DRAFT (R-IV.938(e)), and it ships
+      only once `mark_as_of` and `mark_integrity` exist. ───────────────────────────────────────── */
+
+body { min-height: 100%; height: auto; padding: 18px 16px 60px; }
+.mk { max-width: 1180px; margin: 0 auto; }
+.mk h1 { font-family: var(--mono); font-size: 15px; letter-spacing: 1px; margin: 0 0 4px; color: var(--teal); }
+.mk .mk-sub { color: var(--text-2); font-size: 12px; margin: 0 0 6px; }
+.mk .mk-warn { border: 1px dashed var(--amber); color: var(--amber); border-radius: 8px;
+  padding: 7px 11px; font-family: var(--mono); font-size: 11px; margin: 10px 0 22px; }
+.mk h2 { font-family: var(--mono); font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-2); font-weight: 400; margin: 26px 0 4px; padding-top: 14px; border-top: 1px solid var(--border); }
+.mk .mk-note { color: var(--text-2); font-size: 12px; line-height: 1.45; margin: 0 0 12px; max-width: 74ch; }
+.mk .mk-note b { color: var(--text); font-weight: 600; }
+.mk .cap { font-family: var(--mono); font-size: 10px; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--text-2); margin: 14px 0 5px; }
+.mk .surface { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel);
+  overflow: hidden; max-width: 560px; }
+/* A true 390px box on a desktop, which is its purpose — but it must not make THIS page scroll
+   sideways on an actual phone, which is the fault it exists to demonstrate the absence of. */
+.mk .phone { width: 390px; max-width: 100%; }
+.mk .q { border-left: 2px solid var(--teal); padding-left: 10px; margin: 6px 0 0; }
+
+/* ── THE AGE. Always shown beside a mark-derived figure, in every state. A price with no age is a
+      price the reader assumes is current, which is the whole failure this is for. ─────────────── */
+.mark-age { font-family: var(--mono); font-size: 10px; color: var(--text-2); white-space: nowrap; }
+/* Amber is "we cannot confirm this" — which is exactly what a stale or a wide mark is. NOT
+   vermilion: an old price is not a fired breaker, and the two must not read alike. */
+.mark-flag { font-family: var(--mono); font-size: 9px; letter-spacing: .4px; text-transform: uppercase;
+  color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 0 4px;
+  white-space: nowrap; }
+.mark-flag + .mark-flag { margin-left: 3px; }
+/* When a mark cannot be trusted, the FIGURE it produced is struck through rather than hidden: the
+   number is still evidence, and hiding it would lose the only clue to how far off the book is. */
+.mark-suspect { text-decoration: line-through; text-decoration-thickness: 1px; color: var(--text-2); }
+.mk .pos-row .ppnl .amt.mark-suspect { color: var(--text-2); }
+</style>
+</head>
+<body>
+<div class="mk">
+
+  <h1>A mark's age, and when it is stale or wide</h1>
+  <p class="mk-sub">DRAFT for R-IV.938(e) · 2026-10-12 · CC-ABACUS</p>
+  <div class="mk-warn">
+    SAMPLE DATA, AND NOT SHIPPED. Every ticker, price and age here is invented; the page makes no
+    API calls and runs no JavaScript. It needs two fields the hub does not serve yet —
+    <b>mark_as_of</b> and <b>mark_integrity</b> (R-IV.935(d)) — so nothing on the live Agora has
+    changed and nothing will until they exist.
+  </div>
+
+  <h2>1 · Why the age goes on the row at all</h2>
+  <p class="mk-note">
+    The Book row shows a <b>P&amp;L</b>, and the panel shows a <b>mark</b>. Both are computed from
+    the same price, so when that price is a day old, <b>both figures are a day old</b> — and today
+    neither says so. A number with no age reads as current, which is the one thing it must not do
+    when it isn't. So the age is shown in <b>every</b> state, not only the bad ones: an age that
+    appears only when something is wrong teaches you to read its absence as "fine", and then a
+    missing field looks like good news.
+  </p>
+
+  <h2>2 · The panel's Mark column</h2>
+  <p class="cap">fresh · 4 minutes old · nothing to flag</p>
+  <div class="surface"><table class="pp-table" style="width:100%">
+    <thead><tr><th>Position</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th></tr></thead>
+    <tbody><tr class="pp-row"><td><b>SPY</b><div class="pp-dim">put debit spread 580/570</div></td>
+      <td class="pp-num">$171 <span class="mark-age">4m ago</span></td>
+      <td class="pp-num"><span class="pp-up">+$23</span></td></tr></tbody>
+  </table></div>
+
+  <p class="cap">stale · older than 26 hours</p>
+  <div class="surface"><table class="pp-table" style="width:100%">
+    <thead><tr><th>Position</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th></tr></thead>
+    <tbody><tr class="pp-row"><td><b>HYG</b><div class="pp-dim">put debit spread 76/73</div></td>
+      <td class="pp-num"><span class="mark-suspect">$96</span> <span class="mark-age">31h ago</span>
+        <span class="mark-flag" title="This price is older than 26 hours. It is shown because it is the last one the hub has, not because it is current.">stale</span></td>
+      <td class="pp-num"><span class="mark-suspect">+$26</span></td></tr></tbody>
+  </table></div>
+
+  <p class="cap">wide · the hub's width flag · a price you could not trade at</p>
+  <div class="surface"><table class="pp-table" style="width:100%">
+    <thead><tr><th>Position</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th></tr></thead>
+    <tbody><tr class="pp-row"><td><b>WRTH</b><div class="pp-dim">long call 42</div></td>
+      <td class="pp-num"><span class="mark-suspect">$1.85</span> <span class="mark-age">6m ago</span>
+        <span class="mark-flag" title="The bid and ask are far apart, so the midpoint is not a price anyone would fill at.">wide</span></td>
+      <td class="pp-num"><span class="mark-suspect">−$14</span></td></tr></tbody>
+  </table></div>
+
+  <p class="cap">both · old AND untradeable</p>
+  <div class="surface"><table class="pp-table" style="width:100%">
+    <thead><tr><th>Position</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th></tr></thead>
+    <tbody><tr class="pp-row"><td><b>UVXY</b><div class="pp-dim">long call 18</div></td>
+      <td class="pp-num"><span class="mark-suspect">$0.42</span> <span class="mark-age">3d ago</span>
+        <span class="mark-flag">stale</span><span class="mark-flag">wide</span></td>
+      <td class="pp-num"><span class="mark-suspect">−$88</span></td></tr></tbody>
+  </table></div>
+
+  <p class="cap">the two absences, which are not the same thing</p>
+  <div class="surface"><table class="pp-table" style="width:100%">
+    <thead><tr><th>Position</th><th class="pp-num">Mark</th><th class="pp-num">P&amp;L</th></tr></thead>
+    <tbody>
+      <tr class="pp-row"><td><b>PDBC</b><div class="pp-dim">equity</div></td>
+        <td class="pp-num">$702 <span class="mark-flag" title="The hub served a price but no mark_as_of, so how old it is cannot be said.">age unknown</span></td>
+        <td class="pp-num"><span class="mark-suspect">+$12</span></td></tr>
+      <tr class="pp-row"><td><b>XLE</b><div class="pp-dim">equity</div></td>
+        <td class="pp-num"><span class="pp-amber">no mark</span></td>
+        <td class="pp-num"><span class="pp-amber">no P&amp;L</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="mk-note q">
+    <b>A price whose age is unknown is not the same as no price</b>, and neither is the same as a
+    stale one. The first says the hub could not tell us when; the second says there is nothing to
+    show. Today the page has one phrase for the whole family, and a reader cannot tell which
+    happened.
+  </p>
+
+  <h2>3 · The Book row, where the P&amp;L is the only figure</h2>
+  <p class="mk-note">
+    The Book row has no Mark column — the P&amp;L is the mark-derived figure on it, so the age and
+    the flags belong beside <b>that</b>.
+  </p>
+  <div class="surface">
+    <div class="pos-row">
+      <span class="ptk"><span class="pos-acct">Robinhood</span>SPY</span>
+      <span class="pmid"><span class="pstruct">11/20 580/570P ×2</span><span class="pdte">38 DTE</span></span>
+      <span class="ppnl"><span class="amt pp-up">+$23</span><span class="pct">+15.5%</span>
+        <span class="mark-age">4m ago</span></span>
+    </div>
+    <div class="pos-row">
+      <span class="ptk"><span class="pos-acct">FID ROTH</span>HYG</span>
+      <span class="pmid"><span class="pstruct">11/20 76/73P ×5</span><span class="pdte">38 DTE</span></span>
+      <span class="ppnl"><span class="amt mark-suspect">+$26</span><span class="pct mark-suspect">+37.1%</span>
+        <span class="mark-age">31h ago</span> <span class="mark-flag">stale</span></span>
+    </div>
+    <div class="pos-row">
+      <span class="ptk"><span class="pos-acct">Robinhood</span>UVXY</span>
+      <span class="pmid"><span class="pstruct">12/18 18C ×3</span><span class="pdte">66 DTE</span></span>
+      <span class="ppnl"><span class="amt mark-suspect">−$88</span><span class="pct mark-suspect">−67.7%</span>
+        <span class="mark-age">3d ago</span> <span class="mark-flag">stale</span><span class="mark-flag">wide</span></span>
+    </div>
+  </div>
+
+  <h2>4 · Phone width (390px)</h2>
+  <p class="mk-note">
+    The row is a three-column grid and the age and flags go in the last column, under the P&amp;L.
+    This is the arrangement to judge: it is the tightest column on the narrowest screen.
+  </p>
+  <div class="surface phone">
+    <div class="pos-row">
+      <span class="ptk"><span class="pos-acct">FID ROTH</span>HYG</span>
+      <span class="pmid"><span class="pstruct">11/20 76/73P ×5</span><span class="pdte">38 DTE</span></span>
+      <span class="ppnl"><span class="amt mark-suspect">+$26</span><span class="pct mark-suspect">+37.1%</span>
+        <span class="mark-age">31h ago</span> <span class="mark-flag">stale</span></span>
+    </div>
+    <div class="pos-row">
+      <span class="ptk"><span class="pos-acct">Robinhood</span>UVXY</span>
+      <span class="pmid"><span class="pstruct">12/18 18C ×3</span><span class="pdte">66 DTE</span></span>
+      <span class="ppnl"><span class="amt mark-suspect">−$88</span><span class="pct mark-suspect">−67.7%</span>
+        <span class="mark-age">3d ago</span> <span class="mark-flag">stale</span><span class="mark-flag">wide</span></span>
+    </div>
+  </div>
+
+  <h2>5 · The choices in this draft, for the principal to overrule</h2>
+  <p class="mk-note">
+    <b>The figure is struck through, not hidden.</b> A mark that cannot be trusted still produced
+    the number in the book, and that number is the only clue to how far off the book might be.
+    Hiding it would be tidier and would lose that. The strike is what says "do not read this as
+    your position's worth".
+    <br><br>
+    <b>Amber, not red.</b> Amber already means "we cannot confirm this" everywhere else on Agora.
+    An old or illiquid price is exactly that; it is not a fired breaker, and the two must not look
+    alike.
+    <br><br>
+    <b>The age is always shown.</b> If it appeared only when something was wrong, its absence would
+    come to mean "fine" — and then a field that stopped arriving would look like good news.
+  </p>
+
+  <h2>6 · What I need from BUILD before this can ship</h2>
+  <p class="mk-note q">
+    <b>1. Is <code>mark_as_of</code> an instant or a day?</b> If it arrives as midnight UTC it is a
+    DAY someone wrote down, and an "age" computed from it is wrong by up to a day — the trap
+    R-IV.726 found in <code>entry_date</code>. An age needs a real instant.
+    <br><br>
+    <b>2. What shape is <code>mark_integrity</code>?</b> This draft assumes a flag that says the
+    quote is wide. If it is a number (a spread width, a ratio), the page should not pick the
+    threshold that decides "wide" — that is a judgement with one author, and it belongs with
+    whoever measures the quote.
+    <br><br>
+    <b>3. Does 26 hours come from the hub or from the page?</b> The same answer: if the hub decides
+    staleness, the page should render the hub's verdict rather than recompute it from a timestamp
+    and risk the two disagreeing. If the page decides, 26 hours lives in one named constant.
+  </p>
+
+</div>
+</body>
+</html>
