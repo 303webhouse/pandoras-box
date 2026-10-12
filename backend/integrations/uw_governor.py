@@ -409,6 +409,13 @@ ACCOUNT_EXHAUSTED = "ACCOUNT_NEAR_LIMIT"
 OFF_HOURS_FACTOR_BY_CALLER = {
     "iv_snapshot": 1.0,          # 16:45 ET, once a session
     "darkpool_collector": 1.0,   # 16:30 ET, nightly; R-IV.839(c) "do NOT promote to FOREGROUND"
+    # R-IV.940(b): the backfill is DESIGNED to run after the close, so the 0.25 off-hours
+    # haircut turned the ruled 2,500/day allowance into 625 and blocked the run after ~600
+    # calls on its first night. Measured, not inferred: the vendor block read
+    # "QUOTA_EXCEEDED detail=625/625", and 2500 x 0.25 is 625. Same exemption as the
+    # collector beside it, for the same reason: a job whose whole window is off-hours cannot
+    # be budgeted as though off-hours were its idle time.
+    "darkpool_backfill_triton": 1.0,
 }
 
 NON_RTH_QUOTA_FACTOR = {

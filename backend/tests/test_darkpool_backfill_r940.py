@@ -282,3 +282,42 @@ def test_the_session_row_reports_the_WHOLE_session_not_one_slice():
     page and print counts are re-read from the pages table before the upsert."""
     src = inspect.getsource(bf.collect_one)
     assert "FROM darkpool_backfill_pages WHERE ticker = $1" in src
+
+
+# ── the off-hours haircut that throttled the ruled allowance ────────────
+
+def test_the_backfill_is_EXEMPT_from_the_off_hours_haircut():
+    """MEASURED on the first night: the vendor block read "QUOTA_EXCEEDED detail=625/625" and
+    the run stopped after ~600 calls. 2,500 x 0.25 is 625 -- TIER_STANDARD's off-hours factor.
+    The backfill's whole window is after the close, so budgeting it as though off-hours were
+    its idle time turns the ruled 2,500/day into 625. The collector beside it already carries
+    the same exemption for the same reason."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from integrations.uw_governor import OFF_HOURS_FACTOR_BY_CALLER, effective_quota
+
+    assert OFF_HOURS_FACTOR_BY_CALLER.get(bf.CALLER) == 1.0
+    off_hours = datetime(2026, 10, 12, 19, 30, tzinfo=ZoneInfo("America/New_York"))
+    assert effective_quota(bf.CALLER, off_hours)[0] == 2500
+
+
+def test_a_normal_STANDARD_caller_still_takes_the_haircut():
+    """The control. An exemption that applied to everything would not be an exemption, and the
+    off-hours factor exists for good reasons on every caller that is idle after the close."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from integrations.uw_governor import effective_quota, quota_for
+
+    off_hours = datetime(2026, 10, 12, 19, 30, tzinfo=ZoneInfo("America/New_York"))
+    full, _ = quota_for("ohlc_bars")
+    assert effective_quota("ohlc_bars", off_hours)[0] == int(full * 0.25)
+
+
+def test_a_quota_block_stops_the_RUN_not_just_the_session():
+    """Treated as a per-session error on the first night, the run walked through 18 further
+    sessions writing empty rows and reported a newest-session-touched of 09-16 it had never
+    read. A progress figure counting sessions nobody fetched is worse than no figure."""
+    src = inspect.getsource(bf.fetch_page)
+    assert "QUOTA_EXCEEDED" in src and "budget.stop" in src

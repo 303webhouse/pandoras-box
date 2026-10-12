@@ -237,7 +237,15 @@ async def fetch_page(ticker: str, session: date, cursor: Optional[str],
         return None, msg
     # The governor's sentinel is falsy; it means the call was never issued.
     if resp is not None and not isinstance(resp, dict):
-        return None, "governor blocked: %r" % (resp,)
+        detail = "governor blocked: %r" % (resp,)
+        # A QUOTA BLOCK IS A RUN-LEVEL FACT, NOT A PER-SESSION ERROR. Treated as the latter on
+        # the first night, the run walked on through 18 further sessions writing empty rows and
+        # reported a "newest session touched" of 09-16 that it had never actually read. It cost
+        # no calls, but a progress figure that counts sessions nobody fetched is worse than no
+        # figure at all.
+        if "QUOTA_EXCEEDED" in detail or "quota" in detail.lower():
+            budget.stop(detail)
+        return None, detail
     return resp, None
 
 
