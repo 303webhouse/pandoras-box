@@ -590,6 +590,34 @@ async def get_rates() -> dict:
                          curve_points=None, curve_points_5d_ago=None)
 
 
+async def get_zweig(days: int = 60) -> dict:
+    """Zweig indicators, DISPLAY-ONLY (R-IV.877(b)). Both inputs are SUBSTITUTES, labelled on the
+    payload: the breadth thrust runs on the Stable Engine universe's advancing share, not NYSE
+    issues; the 4% model on Value Line Arithmetic, not the geometric composite."""
+    from stable_engine.zweig import SOURCES
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT session_date, advancers, decliners, adv_share, bt_ema10, bt_state, bt_thrust,
+                          vl_week_close, fp_state, fp_signal, updated_at
+                   FROM stable_zweig ORDER BY session_date DESC LIMIT $1""", int(days))
+            thrusts = await conn.fetch(
+                "SELECT session_date FROM stable_zweig WHERE bt_thrust ORDER BY session_date DESC LIMIT 10")
+        series = [dict(r) for r in reversed(rows)]
+        for r in series:
+            r["session_date"] = r["session_date"].isoformat()
+            r.pop("updated_at", None)
+        as_of = rows[0]["updated_at"] if rows else None
+        return _envelope(as_of, "provisional", not rows, feed="zweig", display_only=True,
+                         sources=SOURCES, latest=series[-1] if series else None, series=series,
+                         recent_thrusts=[r["session_date"].isoformat() for r in thrusts])
+    except Exception as e:
+        logger.warning("[services.stable] get_zweig failed: %s", e)
+        return _envelope(None, "provisional", True, feed="zweig", display_only=True,
+                         sources=SOURCES, latest=None, series=[], recent_thrusts=[])
+
+
 async def get_fx() -> dict:
     """DXY + USDJPY latest level, day change, and intraday series."""
     try:
