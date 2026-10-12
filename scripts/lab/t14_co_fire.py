@@ -258,7 +258,9 @@ def live_outcomes(out_dir, snap_path):
     for t in list(ALWAYS_SCAN) + list(SP500_EXPANDED) + list(RUSSELL_HIGH_VOLUME) + sorted(snap["data"]):
         if t not in tickers and t != "SPY":
             tickers.append(t)
-    rp.START, rp.END = "2024-01-01", None
+    from datetime import datetime, timezone
+    # yfinance's end is exclusive: today's (possibly forming) session is never included
+    rp.START, rp.END = "2024-01-01", datetime.now(timezone.utc).date().isoformat()
     data, cal = rp.load(tickers)
     spy = data.pop("SPY")
     o = outcome_table(data, spy)
