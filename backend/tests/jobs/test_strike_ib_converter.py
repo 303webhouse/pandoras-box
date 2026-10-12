@@ -342,3 +342,65 @@ async def test_dry_run_performs_no_insert(monkeypatch):
     assert calls == []
     assert stats["emitted"] == 0
     assert stats["seen"] == 1
+
+
+# ── R-IV.873(d)1: dry-run is off, so verify the row lands SUPPRESSED ────────
+
+def _event():
+    return {"id": 7, "ticker": "SPY", "price": 101.0, "ib_high": 102.0, "ib_low": 99.0,
+            "timestamp": datetime(2026, 10, 12, 14, 30, tzinfo=timezone.utc)}
+
+
+def test_the_row_is_built_as_SHADOW():
+    """STRIKE_IB_DRY_RUN was 'true' in Railway for the converter's whole life, so it logged
+    "would emit" and never called log_signal -- which is why STRIKE_IB_BREAK had no rows.
+    With the flag off it writes for real, so what it writes has to be checked."""
+    from jobs.strike_ib_converter import build_signal_data
+
+    sd = build_signal_data(_event(), "LONG", date(2026, 10, 12), False)
+    assert sd["status"] == "SHADOW"
+
+
+def test_the_row_carries_its_own_suppression_tag():
+    """The converter bypasses process_signal_unified, so no gate stamps this for it. The tag is
+    written at build time or the row reaches an actionable surface."""
+    from jobs.strike_ib_converter import build_signal_data
+
+    sd = build_signal_data(_event(), "LONG", date(2026, 10, 12), False)
+    l0 = sd["triggering_factors"]["l0_shadow"]
+    assert l0["would_suppress"] is True
+    assert l0["signal_type"] == "STRIKE_IB_BREAK"
+
+
+def test_the_type_is_also_suppressed_by_the_L0_table():
+    """Defence in depth: the tag covers this writer, the table covers anything that ever routes
+    the type through the pipeline instead."""
+    from config.l0_routing import SUPPRESS_ALWAYS
+
+    assert "STRIKE_IB_BREAK" in SUPPRESS_ALWAYS
+
+
+def test_log_signal_preserves_SHADOW_and_does_not_invent_it():
+    """log_signal maps status with an inline conditional -- `"SHADOW" if ... == "SHADOW" else
+    "ACTIVE"` -- so both directions are asserted. Parsed from the write path's source because
+    there is no object to interrogate, and read across BOTH halves of it (R-IV.871)."""
+    import inspect
+
+    from database import postgres_client as pc
+
+    src = inspect.getsource(pc.log_signal) + inspect.getsource(pc._log_signal_insert)
+    assert '"SHADOW" if signal_data.get("status") == "SHADOW" else "ACTIVE"' in src
+
+
+def test_every_variant_this_writer_produces_is_shadow():
+    """Not a pair for the mapping test above -- it asserts the same property on the other
+    branches, which is what is actually checkable here: direction and the reversal flag both
+    change the row, and neither may change its status. (The mapping's own negative case lives
+    in log_signal's tests, not this file.)"""
+    from jobs.strike_ib_converter import build_signal_data
+
+    for direction in ("LONG", "SHORT"):
+        for is_reversal in (False, True):
+            sd = build_signal_data(_event(), direction, date(2026, 10, 12), is_reversal)
+            assert sd["status"] == "SHADOW", (direction, is_reversal)
+            assert sd["triggering_factors"]["l0_shadow"]["would_suppress"] is True
