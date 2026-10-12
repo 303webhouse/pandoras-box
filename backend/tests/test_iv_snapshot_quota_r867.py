@@ -27,12 +27,14 @@ import pytz
 sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 
 from integrations.uw_governor import (  # noqa: E402
-    NON_RTH_QUOTA_FACTOR, OFF_HOURS_FACTOR_BY_CALLER, TIER_STANDARD, effective_quota, quota_for,
+    NON_RTH_QUOTA_FACTOR, OFF_HOURS_FACTOR_BY_CALLER, TIER_FOREGROUND, TIER_STANDARD,
+    effective_quota, quota_for,
 )
 
 ET = pytz.timezone("America/New_York")
 RTH = ET.localize(datetime(2026, 10, 13, 11, 0))        # a Tuesday, mid-session
-AT_1645 = ET.localize(datetime(2026, 10, 13, 16, 45))   # when the job actually runs
+AT_1645 = ET.localize(datetime(2026, 10, 13, 16, 45))   # when iv_snapshot runs
+AT_1630 = ET.localize(datetime(2026, 10, 13, 16, 30))   # when darkpool_collector runs
 OVERNIGHT = ET.localize(datetime(2026, 10, 14, 3, 0))
 
 
@@ -75,9 +77,33 @@ def test_an_unlisted_standard_caller_still_takes_the_25_percent_cut(caller, rth_
 
 
 def test_only_the_ruled_callers_are_exempt():
-    """A named set, not a count: it fails on an unintended addition exactly as a count would
-    AND says which callers are exempt, so the next reader need not go and look."""
-    assert set(OFF_HOURS_FACTOR_BY_CALLER) == {"iv_snapshot"}
+    """A named set, not a count: it fails on an unintended addition exactly as a count would AND
+    says which callers are exempt, so the next reader need not go and look.
+
+    It did its job -- adding darkpool_collector under R-IV.876(e) failed this assertion rather
+    than passing silently, which is the whole reason to name the set instead of counting it."""
+    assert set(OFF_HOURS_FACTOR_BY_CALLER) == {"iv_snapshot", "darkpool_collector"}
+
+
+# ── the second user of the mechanism — R-IV.823(e) / R-IV.839(c) ────────────
+
+def test_darkpool_collector_has_the_ruled_quota():
+    """LAB shipped it at 500 and said the row needed a ruling. The ruling is 3,000."""
+    assert quota_for("darkpool_collector") == (3000, TIER_STANDARD)
+
+
+def test_darkpool_collector_keeps_its_quota_at_1630_when_it_runs():
+    """Its cron is 16:30 ET. At 500 with the tier factor it would have had 125 calls a night;
+    at 3,000 with the per-caller factor it has all 3,000."""
+    assert effective_quota("darkpool_collector", AT_1630) == (3000, TIER_STANDARD)
+
+
+def test_darkpool_collector_is_NOT_promoted_to_foreground():
+    """R-IV.839(c), explicitly: "Do NOT promote it to FOREGROUND." FOREGROUND would have given
+    the same 1.0 factor and also made it immune from shedding, and a nightly bulk collection is
+    the first thing that should be shed under pressure, not the last."""
+    assert quota_for("darkpool_collector")[1] == TIER_STANDARD
+    assert quota_for("darkpool_collector")[1] != TIER_FOREGROUND
 
 
 def test_the_tier_factors_themselves_are_unchanged():

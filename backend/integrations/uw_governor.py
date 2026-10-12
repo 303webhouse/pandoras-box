@@ -202,12 +202,13 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "earnings_premarket": (100, TIER_STANDARD),
     "earnings_afterhours": (100, TIER_STANDARD),
     "earnings_dates": (100, TIER_STANDARD),
-    # R-IV.823(e): the nightly Triton dark-pool collection. It runs ONLY after the close, where
-    # STANDARD keeps 25% -- 125 calls a night under `enforce`. That is far below what the
-    # collection needs (it stops itself at an ACCOUNT total of 30,000), and the table's last
-    # 500 of headroom is all there is. Sized to fit, not to need: under `observe` (the default)
-    # this row only labels the traffic. Before `enforce` is flipped, this row needs a ruling.
-    "darkpool_collector": (500, TIER_STANDARD),
+    # R-IV.823(e) / R-IV.839(c), ruled: the nightly Triton dark-pool collection gets 3,000/day
+    # and a per-caller off-hours factor of 1.0 below. LAB sized this at 500 and said so plainly
+    # -- "before `enforce` is flipped, this row needs a ruling" -- and its reasoning for why 500
+    # is wrong is exactly right: the job runs ONLY after the close, where STANDARD keeps 25%, so
+    # 500 would become 125 calls a night. The ruling answers both halves, and the collector's own
+    # clock still stops it before 19:50 ET and before the UW reset, whatever this row allows.
+    "darkpool_collector": (3000, TIER_STANDARD),
     # R-IV.432(e): the backtest module's second-vendor check -- /ohlc/1d, only for graded
     # rows whose window spans a calendar event, at most 40 tickers a pass. It runs after the
     # close, where STANDARD keeps 25% (50/day), which is the ceiling it is sized under.
@@ -285,6 +286,7 @@ ACCOUNT_EXHAUSTED = "ACCOUNT_NEAR_LIMIT"
 # quota without buying the shedding immunity, which is the only part it needs.
 OFF_HOURS_FACTOR_BY_CALLER = {
     "iv_snapshot": 1.0,          # 16:45 ET, once a session
+    "darkpool_collector": 1.0,   # 16:30 ET, nightly; R-IV.839(c) "do NOT promote to FOREGROUND"
 }
 
 NON_RTH_QUOTA_FACTOR = {
