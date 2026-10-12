@@ -27,7 +27,11 @@ logger = logging.getLogger("hydra_api")
 router = APIRouter(prefix="/hydra", tags=["Hydra Squeeze Scanner"])
 
 
-@router.get("/scores")
+# R-IV.871(d), HYDRA P7: both Hydra READ surfaces now require the hub's API key, under the same
+# `require_api_key` dependency /exposure, /refresh and /lightning already use. Declared on the
+# decorator rather than as a parameter so it cannot be lost in a future signature edit, and so
+# the auth is visible on the route line itself.
+@router.get("/scores", dependencies=[Depends(require_api_key)])
 async def get_squeeze_scores(
     limit: int = Query(default=15, le=50),
     min_score: float = Query(default=30.0),
@@ -98,7 +102,7 @@ async def get_position_exposure(_=Depends(require_api_key)):
     }
 
 
-@router.get("/convergence")
+@router.get("/convergence", dependencies=[Depends(require_api_key)])
 async def check_convergence():
     """Cross-reference active Hermes catalyst events with elevated squeeze scores."""
     pool = await get_postgres_client()

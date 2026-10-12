@@ -289,7 +289,12 @@ def test_the_payload_is_persisted_in_the_insert_not_after_it():
     write can never leave a fire without it."""
     import inspect
     from database import postgres_client as pc
-    assert "triggering_factors" in inspect.getsource(pc.log_signal)
+    # R-IV.871: the write path is TWO functions since log_signal was split so the wrapper
+    # could own the contract check and the failure ledger. Reading only log_signal made this
+    # assertion search the wrapper and miss the INSERT entirely. Both halves are read, rather
+    # than the whole module, so a substring cannot match unrelated code and pass vacuously.
+    assert "triggering_factors" in (inspect.getsource(pc.log_signal)
+                                    + inspect.getsource(pc._log_signal_insert))
 
 
 # ── the prior-session VA: no lookahead ────────────────────────────────────────────

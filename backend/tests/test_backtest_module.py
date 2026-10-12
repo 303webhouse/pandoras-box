@@ -528,7 +528,11 @@ class _RecConn:
 def test_every_row_stores_its_expiry_and_a_bad_value_never_loses_the_signal():
     """R-IV.432(f): both halves of DEF-SHADOW-EXPIRES-AT-DROPPED."""
     from database import postgres_client as pc
-    src = inspect.getsource(pc.log_signal)
+    # R-IV.871: the write path is TWO functions since log_signal was split so the wrapper
+    # could own the contract check and the failure ledger. Reading only log_signal made this
+    # assertion search the wrapper and miss the INSERT entirely. Both halves are read, rather
+    # than the whole module, so a substring cannot match unrelated code and pass vacuously.
+    src = inspect.getsource(pc.log_signal) + inspect.getsource(pc._log_signal_insert)
     assert "status, expires_at" in src and "$38, $39" in src
     assert "_expiry_for_db(" in src
     f = pc._expiry_for_db

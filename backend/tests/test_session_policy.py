@@ -274,7 +274,11 @@ class TestADropIsARow:
         from database import postgres_client as pc
         from signals import pipeline
 
-        insert = inspect.getsource(pc.log_signal)
+    # R-IV.871: the write path is TWO functions since log_signal was split so the wrapper
+    # could own the contract check and the failure ledger. Reading only log_signal made this
+    # assertion search the wrapper and miss the INSERT entirely. Both halves are read, rather
+    # than the whole module, so a substring cannot match unrelated code and pass vacuously.
+        insert = inspect.getsource(pc.log_signal) + inspect.getsource(pc._log_signal_insert)
         assert '"SHADOW" if signal_data.get("status") == "SHADOW" else "ACTIVE"' in insert
 
         src = inspect.getsource(pipeline._persist_withheld)
