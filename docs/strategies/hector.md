@@ -7,7 +7,7 @@
 | side | LONG |
 | grid cell | **WITH-TREND LONG** (momentum above the 200-day and the 20-bar VWAP) |
 | schedule / trigger | the CTA `_scanner_loop` (`backend/scheduler/bias_scheduler.py`), trading days 9–16 ET, on a forming daily bar; also the crypto scanner (24/7) |
-| status | **SHADOW** (R-IV.879(b), 2026-10-12): negative in every regime, including against its same-date control. Still stored and graded; BUILD moves it into L0 `SUPPRESS_ALWAYS` |
+| status | **LIVE** (R-IV.884, 2026-10-12). NOT in `SUPPRESS_ALWAYS` (`backend/config/l0_routing.py` — present on the kept-live list in `backend/tests/test_nemesis_wiring_r809.py`). This card previously read SHADOW per R-IV.879(b); **R-IV.884 withdrew that move and BUILD reverted it** (`dcb61a65`), because QUERY's live outcomes (R-IV.880) disagree with the replay below — 58.99% hits and +4.07% excess on 473 verdicts on surfaced rows. **Two independent routes disagree, so nothing moves until LAB reconciles them.** The replay finding stands as a finding; it no longer governs the roster. |
 | bucket ceiling | No provenance ceiling: C5 and F5 do not reach this cell (the R-IV.838(c) reading for with-trend cells) |
 | lifetime tries counter | unrecorded before LAB; unchanged by Task 8 (evaluation only) |
 
@@ -27,7 +27,7 @@
   - transition −0.03 (t −0.33); range +0.06 (t 0.32); sector ETFs −0.12 (t −1.61).
 
 ## Kill rule
-Retirement is SPINE's and QUERY's. It is in SHADOW now; it surfaces again only on new evidence.
+Retirement is SPINE's and QUERY's. It is LIVE: the SHADOW move was withdrawn by R-IV.884 on the day it was proposed, because the live record disagrees with the replay. It moves only when the two routes are reconciled.
 
 ## Change log
-- 2026-01: CTA scanner. 2026-10-12: card v0; SHADOW (R-IV.879(b)).
+- 2026-01: CTA scanner. 2026-10-12: card v0; SHADOW proposed (R-IV.879(b)) and WITHDRAWN the same day (R-IV.884) — stays LIVE pending LAB's reconciliation of the replay against QUERY's live outcomes (R-IV.880).
