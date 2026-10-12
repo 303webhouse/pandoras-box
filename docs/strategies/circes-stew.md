@@ -56,6 +56,12 @@ regimes, ≥ 60% of winners at the value-area edge.
   - market-adjusted headline, long and short reported separately;
   - split by market state; **a range-only result is a CONDITIONAL edge.**
 - **Evidence bar, TAIL:** no win-rate bar. Report the distribution and the sleeve spend.
+- **EQUITY-ONLY (TA-147, amending TA-135 §4; R-IV.909(b); set before CIRCE's data arrives):**
+  - every figure in either evidence bar is computed on **equity** fires only;
+  - **crypto fires are reported separately and never pooled** with equity, in any count, rate
+    or distribution;
+  - the n ≥ 30 fires and ≥ 20 distinct dates floors apply to the **equity** count. Crypto rows
+    never fill an equity floor.
 - **TA writes no note at all** if stage 2 fails on vega, or if the result doesn't beat a
   same-date control of all names at a value-area edge.
 - CIRCE stays in shadow.
@@ -83,6 +89,7 @@ CIRCE stays in shadow. Retirement is SPINE's and QUERY's (09-23 S2).
 ## Change log
 - 2026-04-22: Olympus ADD (PROVISIONAL). 2026-09-16: built (d990abb). 2026-09-17: SHADOW deployed.
 - 2026-10-09: card v0 (R-IV.823(g), R-IV.830(g)).
+- 2026-10-12: evidence bar made EQUITY-ONLY; crypto is reported separately (TA-147, R-IV.909(b)).
 - **2026-10-10: gate v2 proposed** (R-IV.838(d); `claude/lab-circe-gate-v2` @ `378b7e3`).
   - The fire close is now located on the side being faded: VAH for a SHORT, VAL for a LONG.
     A close at or through the other side's edge is `opposite` and fails.
