@@ -81,7 +81,11 @@ async def _fetch_uw(base_symbol: str) -> Optional[Dict[str, Any]]:
 
     pair = f"{base_symbol}-USD"
     try:
-        resp = await uw_api._uw_request(f"/api/crypto/{pair}/state", caller="hub_get_crypto_quote")
+        # R-IV.901(c)1: tagged to the EXISTING `crypto_bars_state_api` row. `hub_get_crypto_quote`
+        # had none, so it fell to DEFAULT 500, outside the 26,000 sum. This endpoint IS the crypto
+        # state API, so the row already describes the traffic -- funded at zero cost to the total.
+        resp = await uw_api._uw_request(f"/api/crypto/{pair}/state",
+                                        caller="crypto_bars_state_api")
     except Exception as exc:
         logger.warning("UW crypto state errored for %s: %s", pair, exc)
         return None

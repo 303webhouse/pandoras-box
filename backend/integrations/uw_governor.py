@@ -40,7 +40,124 @@ import logging
 import os
 from typing import Dict, Optional, Tuple
 
-from integrations.uw_api_cache import DAILY_BUDGET, get_caller_count
+from integrations.uw_api_cache import (
+    DAILY_BUDGET, get_caller_count, get_caller_count_or_none,
+)
+
+# ── R-IV.901(c)2: the degraded path when the Redis counter cannot be read ──────────────────────
+#
+# HOW MANY PROCESSES CALL UW: **ONE**, established rather than assumed.
+#   * Procfile's web entry is `uvicorn main:app` with NO `--workers`, so a single process;
+#   * `railway.json` sets no `numReplicas`, so Railway's default of 1 replica;
+#   * production holds one service that calls UW (`pandoras-box`; the other is Postgres);
+#   * the `worker:` entry runs run_discord_bot.py, which contains ZERO UW references, and per
+#     CLAUDE.md the bot runs on the VPS only.
+#
+# So the divisor the ruling asks for is 1 and each caller keeps its whole quota while degraded.
+# It is written as a divisor anyway, because the day a second replica appears, two processes each
+# allowing a full quota would silently double the ceiling — the arithmetic should already be
+# there rather than needing to be remembered.
+UW_PROCESS_COUNT = 1
+
+_DEGRADED: Dict[str, int] = {}
+_DEGRADED_ALERTED: Dict[str, str] = {}      # caller -> the UW day it was alerted on
+
+
+def degraded_cap(quota: int) -> int:
+    """This process's share of a caller's quota while the shared counter is unreadable."""
+    return max(1, int(quota) // max(1, UW_PROCESS_COUNT))
+
+
+def _degraded_count(caller: str) -> int:
+    return _DEGRADED.get(caller, 0)
+
+
+def note_degraded_call(caller: str) -> None:
+    """Count one call in this process's own tally. Called on the allow path, so the degraded
+    ceiling actually fills instead of reading 0 forever."""
+    _DEGRADED[caller] = _DEGRADED.get(caller, 0) + 1
+
+
+def _alert_degraded_once(caller: str) -> None:
+    """ONE alert per caller per UW day. A degraded gate that announced itself on every call
+    would bury the fact it is degraded in the noise of saying so."""
+    try:
+        from integrations.uw_spend_ledger import uw_day
+        today = uw_day().isoformat()
+    except Exception:                                               # noqa: BLE001
+        today = "unknown"
+    if _DEGRADED_ALERTED.get(caller) == today:
+        return
+    _DEGRADED_ALERTED[caller] = today
+    logger.error("UW governor DEGRADED for caller=%s: the shared counter is unreadable, so this "
+                 "process is capping on its own tally at quota/%d. The ceiling is being held "
+                 "locally, not globally.", caller, UW_PROCESS_COUNT)
+
+
+def degraded_state() -> Dict[str, Any]:
+    """For /health: which callers are being held locally rather than globally."""
+    return {"process_count": UW_PROCESS_COUNT,
+            "callers_degraded": dict(_DEGRADED),
+            "alerted_today": dict(_DEGRADED_ALERTED)}
+
+
+def reset_degraded_for_tests() -> None:
+    _DEGRADED.clear()
+    _DEGRADED_ALERTED.clear()
+    _BREAKER.clear()
+
+
+# ── R-IV.901(c)3: the daily-limit breaker ──────────────────────────────────────────────────────
+#
+# The ONLY exhaustion on record (2026-09-11, 23,417 requests) happened with every caller inside
+# its own quota, which is the case the static table cannot catch and the account gate exists for.
+# That gate is inert: UW's `x-uw-daily-req-count` header has not arrived for over 36 hours, so
+# `account_shed()` can never fire because its input never comes.
+#
+# THIS WORKS WITHOUT THE HEADER. When UW refuses a request with HTTP 429 and a body naming
+# `daily_request_limit_hit`, the account is at its cap — stated by the vendor, in the only form
+# it offers when it has nothing left to give. One such refusal stops EVERY caller until the
+# 20:00 ET reset.
+#
+# KEYED ON THE UW DAY, NOT A TIMER. The breaker records the UW day it tripped on, and clears
+# because the day changes — so a restart does not forget it within the day and nothing has to
+# remember to cancel it. (A sleeping timer would be lost on the next deploy, which happens
+# several times a day here.)
+LIMIT_BODY_MARKER = "daily_request_limit_hit"
+BREAKER_TRIPPED = "ACCOUNT_DAILY_LIMIT"
+
+_BREAKER: Dict[str, str] = {}      # "day" -> the UW day it tripped on
+
+
+def _today_uw() -> str:
+    try:
+        from integrations.uw_spend_ledger import uw_day
+        return uw_day().isoformat()
+    except Exception:                                               # noqa: BLE001
+        return "unknown"
+
+
+def breaker_is_tripped() -> bool:
+    """True while UW has told us the account is at its daily limit, for THIS UW day."""
+    return _BREAKER.get("day") == _today_uw()
+
+
+def trip_breaker(detail: str = "") -> None:
+    """Called when UW returns 429 + the daily-limit marker. Alerts ONCE per UW day."""
+    today = _today_uw()
+    if _BREAKER.get("day") == today:
+        return
+    _BREAKER["day"] = today
+    _BREAKER["detail"] = (detail or "")[:200]
+    logger.error("UW governor BREAKER TRIPPED for UW day %s: the vendor refused a request with "
+                 "429 %s. Every UW caller is stopped until the 20:00 ET reset. This is the "
+                 "account limit, which the static quota table cannot see and the account gate "
+                 "cannot read while the quota header is absent.", today, LIMIT_BODY_MARKER)
+
+
+def breaker_state() -> Dict[str, Any]:
+    return {"tripped": breaker_is_tripped(), "tripped_on": _BREAKER.get("day"),
+            "detail": _BREAKER.get("detail"), "uw_day": _today_uw()}
 
 logger = logging.getLogger("uw_governor")
 
@@ -527,12 +644,44 @@ async def precheck(caller: str) -> Optional[UWUnavailable]:
 
     Returns a UWUnavailable sentinel when the caller is over quota AND the
     governor is enforcing; returns None (allow) otherwise. In observe mode it
-    LOGS a would-block but never blocks. Fail-open: if the counter is
-    unreadable (Redis down) the count reads 0 and the call proceeds — we never
-    block UW because of an infra blip.
+    LOGS a would-block but never blocks.
+
+    DEGRADED, NOT UNLIMITED (R-IV.901(c)2). This used to say: "if the counter is unreadable
+    (Redis down) the count reads 0 and the call proceeds". That made an infra blip remove the
+    ceiling rather than lower it, because 0 and "unknown" were the same value. An unreadable
+    counter now caps on this process's own tally at quota/UW_PROCESS_COUNT, and alerts once per
+    caller per UW day.
     """
+    # Gate 0 (R-IV.901(c)3): the vendor has said the ACCOUNT is done for the day. Checked first
+    # and for every tier, including FOREGROUND -- "a live read is a live read" is an argument
+    # about OUR priorities, and it does not buy requests UW has already refused to serve.
+    if breaker_is_tripped():
+        if _mode() == "enforce":
+            logger.warning("UW governor BLOCK caller=%s reason=breaker %s", caller,
+                           _BREAKER.get("day"))
+            return UWUnavailable(BREAKER_TRIPPED, caller=caller, tier=effective_quota(caller)[1],
+                                 detail="UW daily limit hit on %s" % _BREAKER.get("day"))
+        logger.warning("UW governor WOULD-BLOCK caller=%s reason=breaker mode=observe", caller)
+
     quota, tier = effective_quota(caller)
-    count = await get_caller_count(caller)
+
+    # R-IV.901(c)2: DEGRADED, NOT UNLIMITED. `get_caller_count` returns 0 when Redis cannot be
+    # read, so "no calls yet" and "the counter is gone" were the same answer and the gate failed
+    # open to unlimited — a blip removed the ceiling instead of lowering it. The _or_none variant
+    # distinguishes them; an unreadable counter now falls back to this process's own tally,
+    # capped at the same quota, with ONE alert per caller per UW day.
+    read = await get_caller_count_or_none(caller)
+    degraded = read is None
+    if degraded:
+        count = _degraded_count(caller)
+        # THE LIMIT MOVES TOO. Comparing a local tally against the GLOBAL quota would have made
+        # the divisor decorative -- computed and never applied -- so the cap is the limit here.
+        limit = degraded_cap(quota)
+        _alert_degraded_once(caller)
+    else:
+        count = read
+        limit = quota
+        _DEGRADED.pop(caller, None)      # the real counter is back; stop shadowing it
 
     # Gate 2: the ACCOUNT, whoever filled it. Checked even when this caller is
     # inside its own quota — that is the case the 2026-09-11 exhaustion was.
@@ -545,22 +694,27 @@ async def precheck(caller: str) -> Optional[UWUnavailable]:
         logger.info("UW governor WOULD-BLOCK caller=%s tier=%s reason=account_shed %s "
                     "mode=observe", caller, tier, shed)
 
-    if count < quota:
+    if count < limit:
+        if degraded:
+            # Tally the allow, or the local ceiling reads 0 for ever and degraded becomes
+            # unlimited by a slower route than the one this replaced.
+            note_degraded_call(caller)
         return None
 
     mode = _mode()
+    suffix = " DEGRADED(local tally, cap=quota/%d)" % UW_PROCESS_COUNT if degraded else ""
     if mode == "enforce":
         logger.warning(
-            "UW governor BLOCK caller=%s count=%d quota=%d tier=%s mode=enforce",
-            caller, count, quota, tier,
+            "UW governor BLOCK caller=%s count=%d limit=%d tier=%s mode=enforce%s",
+            caller, count, limit, tier, suffix,
         )
         return UWUnavailable(QUOTA_EXCEEDED, caller=caller, tier=tier,
-                             detail=f"{count}/{quota}")
+                             detail=f"{count}/{limit}{suffix}")
 
     # observe (default): log the would-block, allow the call through.
     logger.warning(
-        "UW governor WOULD-BLOCK caller=%s count=%d quota=%d tier=%s mode=observe",
-        caller, count, quota, tier,
+        "UW governor WOULD-BLOCK caller=%s count=%d limit=%d tier=%s mode=observe%s",
+        caller, count, limit, tier, suffix,
     )
     return None
 
