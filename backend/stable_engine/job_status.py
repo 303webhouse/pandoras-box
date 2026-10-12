@@ -278,7 +278,23 @@ async def health_summary() -> dict:
         age = (now - ls).total_seconds() if ls else None
         feed = JOB_FEEDS.get(name, name)
         fails = j["consecutive_failures"] or 0
-        flat = fails >= FAILURE_ALERT_THRESHOLD or feed_flatline(feed, age)
+        # R-IV.871(c): for a job whose cadence is the market calendar, "how many hours old" is
+        # the wrong unit -- it made nightly/provisional read flatline every weekend, when they
+        # had not failed and had not been due. The calendar answers "has it run for the most
+        # recent session that expected it" instead. It returns None past the horizon, and None
+        # falls back to the hour-based SLO rather than silently declaring health.
+        overdue_reason = None
+        try:
+            from models.feed_calendar_age import is_overdue
+            overdue, overdue_reason = is_overdue(name, ls, now_et=now.astimezone(ET))
+        except Exception:                                           # noqa: BLE001
+            overdue = None
+        if overdue is None:
+            flat = fails >= FAILURE_ALERT_THRESHOLD or feed_flatline(feed, age)
+        else:
+            # A recorded failure still flatlines regardless of the calendar: a weekday failure
+            # must stay visible, which is the half of (c) that matters.
+            flat = fails >= FAILURE_ALERT_THRESHOLD or bool(overdue)
         status = "flatline" if flat else ("stale" if fails > 0 else "ok")
         if rank[status] > rank[worst]:
             worst = status
@@ -291,6 +307,10 @@ async def health_summary() -> dict:
             "last_success_age_s": round(age) if age is not None else None,
             "last_error": (j["last_error"] or None),
         }
+        if overdue_reason and overdue is not None:
+            # Carried onto the surface so a reader can tell "quiet because it is Sunday" from
+            # "quiet because it died on Wednesday" without going to the logs.
+            out_jobs[name]["session_cadence"] = overdue_reason
     # R-IV.360(1): failures Postgres could not record. A channel nobody reads is
     # not a channel -- it is a different place to be silent. These escalate the
     # verdict, because a failure that could not be written down is strictly worse
