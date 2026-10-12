@@ -264,10 +264,16 @@ async def get_all() -> list[dict]:
         return []
 
 
-async def health_summary() -> dict:
-    """Worst job status + oldest tracked feed age, for the /health stable_jobs block."""
+async def health_summary(*, now: datetime | None = None) -> dict:
+    """Worst job status + oldest tracked feed age, for the /health stable_jobs block.
+
+    `now` exists so a test can state WHICH instant it is asserting about. Reading the
+    real clock made the weekend-calm test pass all weekend and fail from 16:05 ET on the
+    next session day -- a verdict that changes with the hour it is read is not evidence.
+    Production passes nothing and gets the real clock.
+    """
     jobs = await get_all()
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     out_jobs: dict[str, dict] = {}
     worst = "ok"
     rank = {"ok": 0, "stale": 1, "flatline": 2}
