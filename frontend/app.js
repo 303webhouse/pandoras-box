@@ -4374,6 +4374,13 @@ function formatSignalType(raw) {
 // we do NOT duplicate it here; we only consume the additive field. Raw
 // signal_type/strategy stay untouched for CSS classes, filters, and logic.
 function signalDisplayName(signal) {
+    // R-IV.900(b): `display_label` is the backend's single author of names (R-IV.833) and comes
+    // FIRST. It is not served yet, so today every caller falls through exactly as before -- this
+    // is the one place that has to change when it arrives, which is why it changes here and not
+    // at the six call sites.
+    if (signal && typeof signal.display_label === 'string' && signal.display_label.trim()) {
+        return signal.display_label.trim();
+    }
     if (signal && signal.codename) return signal.codename;
     return formatSignalType((signal && (signal.signal_type || signal.strategy)) || '');
 }

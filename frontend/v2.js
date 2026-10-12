@@ -2511,8 +2511,12 @@
       const themeTag = tm && tm.theme ? `${esc(tm.theme)}${tm.theme_score != null ? ' ' + Math.round(tm.theme_score) : ''}${tm.theme_status ? ' ' + String(tm.theme_status).slice(0, 3).toLowerCase() : ''}${tm.inverse ? ' (inv)' : ''}` : '';
       const shadow = disp.shadow;
       const grade = s._grade;
-      return `<div class="k-card${shadow ? ' shadow' : ''}">
-        <div class="top"><span class="nm">${esc(disp.name)}</span><span class="desc">${esc(disp.desc)}</span>
+      // R-IV.900(b): the upgrade keeps the strategy's own name and adds a tag and an outline. The
+      // pulse is on only while the signal is fresh, per the principal's approved option.
+      const up = upgradeOf(s);
+      const upCls = up ? ` upgraded ${UPGRADE_CLASS[up]}${isFresh(s) ? ' fresh' : ''}` : '';
+      return `<div class="k-card${shadow ? ' shadow' : ''}${upCls}">
+        <div class="top"><span class="nm">${signalTitle(s, disp)}</span>${up ? `<span class="upgrade-tag">${esc(up)}</span>` : ''}
           <span class="grade ${grade === 'A' ? 'val-up' : ''}" data-gloss="GRADE">${grade}</span></div>
         <div class="lvls"><span class="tkr" data-ticker="${esc(s.ticker)}" data-chart="${esc(String(s.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(s.ticker)}</span>
           <span class="${sideCls}">${side || ''} ${s.entry_price != null ? Number(s.entry_price).toFixed(2) : ''}</span>
@@ -2617,6 +2621,53 @@
   // R-IV.591(b): the row sits where it became actionable. Both are stamps the row carries, so
   // R-IV.563 holds either way — this is not a substituted time, it is the other real one.
   const rowTime = (s) => { const r = heldRelease(s); return r != null ? r : firstTime(s.fired_at, s.timestamp, s.created_at); };
+
+  // ── R-IV.832(a) / R-IV.900(b) · "FIGURE | Description", and the APIS/KODIAK upgrade ───────
+  //
+  // ONE SERVED STRING. `display_label` is the backend's single author of names (R-IV.833).
+  // IT IS NOT SERVED YET -- nothing in backend/ mentions the field -- so this falls back to the
+  // name and description the page already holds, which is what R-IV.832(c) directs. The approved
+  // FORMAT applies either way; what the fallback cannot supply is a name for a strategy
+  // `SETUP_MAP` has no entry for, and MIDAS, HECTOR and NEMESIS are those: they render their raw
+  // identifier today, exactly as they do now, until the field arrives.
+  //
+  // Nothing here derives a name. The pipe is a separator, not a value.
+  function titleParts(s, disp) {
+    const served = s && typeof s.display_label === 'string' ? s.display_label.trim() : '';
+    if (served) {
+      const i = served.indexOf('|');
+      return i < 0 ? { figure: served, what: '' }
+                   : { figure: served.slice(0, i).trim(), what: served.slice(i + 1).trim() };
+    }
+    return { figure: disp.name || 'SETUP', what: disp.desc || '' };
+  }
+  function signalTitle(s, disp) {
+    const p = titleParts(s, disp);
+    if (!p.what) return esc(p.figure);
+    return esc(p.figure) + ' <span class="sep">|</span> <span class="what">' + esc(p.what) + '</span>';
+  }
+
+  // The tag is the SERVER's word. An unrecognised one gets no treatment rather than the wrong
+  // one: a bull glow on a bear tag would be worse than no glow at all.
+  const UPGRADE_CLASS = { APIS: 'apis', KODIAK: 'kodiak' };
+  function upgradeOf(s) {
+    const t = String((s && s.upgrade_tag) || '').trim().toUpperCase();
+    return UPGRADE_CLASS[t] ? t : null;
+  }
+
+  // FRESH, for the approved "pulse while fresh". Keyed on `rowTime` -- the instant the card
+  // already shows -- which for a HELD signal is its RELEASE (R-IV.585(a)). A setup that fired at
+  // 4am and reached the desk at 9:30 is new at 9:30; keying on the fire time would mean the rows
+  // that most need attention never pulse at all.
+  //
+  // This reads the clock against a served instant, exactly as the row's own time label does. It
+  // is not a derived FIELD: a server-side `is_fresh` would be stale between polls, which is the
+  // argument for computing it at render.
+  const FRESH_MINUTES = 15;
+  function isFresh(s) {
+    const t = rowTime(s);
+    return t != null && (Date.now() - t) < FRESH_MINUTES * 60000;
+  }
 
   function addRiverItems(items) { (items || []).forEach((it) => { if (it && it.id) _river.set(it.id, it); }); }
   function signalRiverItem(s, smap) {
@@ -2825,7 +2876,10 @@
     const o = opts || {};
     const disp = setupDisplay(s.codename || s.signal_type || s.strategy);
     const side = (s.direction || '').toUpperCase();
-    const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b>${esc(disp.name)}</b>`;
+    // R-IV.900(b) · the NAME comes from the same author as the card's (`display_label` when it is
+    // served), but this row is NOT reformatted: its description already sits after the price, and
+    // folding it into the title would reorder a row the ruling did not approve a change to.
+    const name = o.raw ? `<span class="rl-raw">${esc(s.signal_type || s.strategy || 'SETUP')}</span>` : `<b>${esc(titleParts(s, disp).figure)}</b>`;
     const err = rowError(s);
     return `<div class="rl-row${err ? ' rl-bad' : ''}" data-sid="${esc(s.signal_id || '')}">
         <div class="rl-main">${name} <span class="rl-tkr" data-chart="${esc(String(s.ticker || '').toUpperCase())}" tabindex="0" role="button">${esc(s.ticker || '')}</span> <span class="rl-dir">${esc(side)}</span>${s.entry_price != null ? ' @ ' + Number(s.entry_price).toFixed(2) : ''}${disp.desc && !o.raw ? ` <span class="rl-desc">${esc(disp.desc)}</span>` : ''}</div>
