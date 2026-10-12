@@ -141,7 +141,18 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
         g["strategies"] = strats
         g["distinct_strategy_count"] = len(set(s.lower() for s in strats))
         g["last_signal_at"] = g["newest_at"]
-        confirmation_bonus = min(5, max(0, (g["signal_count"] - 1) * 2))
+        # R-IV.901(e): ONE AUTHOR, and it counts distinct TYPES. The expression here used to be
+        # min(5, max(0, (g["signal_count"] - 1) * 2)) -- a count of ROWS, so one signal
+        # re-firing inside the grouping window earned +2 for confirming itself. It lived
+        # identically in api/trade_ideas.py and signals/feed_service.py, so fixing one would
+        # have left the other paying the old bonus and the two surfaces disagreeing about the
+        # same idea.
+        from scoring.confirmation_bonus import compute as _conf_compute
+        from scoring.confirmation_bonus import legacy_v1 as _conf_legacy
+        confirmation_bonus, _conf_prov = _conf_compute(
+            g.get("primary_signal"), g.get("related_signals"))
+        g.update(_conf_prov)
+        g["confirmation_bonus_v1_was"] = _conf_legacy(g.get("signal_count"))
         base_score = g["primary_signal"].get("score_v2") or g["primary_signal"].get("score") or 0
         g["display_score"] = min(100, base_score + confirmation_bonus)
         g["confirmation_bonus"] = confirmation_bonus
