@@ -109,13 +109,27 @@ def _enforce_enabled() -> bool:
 L0_ENFORCE: bool = _enforce_enabled()
 
 
-def evaluate_l0_gate(signal_data: Dict[str, Any]) -> Dict[str, Any]:
+def evaluate_l0_gate(
+    signal_data: Dict[str, Any],
+    price_integrity: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Compute the L0.1a suppression decision for one signal.
 
     Pure / side-effect-free: reads `signal_type` and `ticker`, returns the
     decision dict to be tagged under `triggering_factors.l0_shadow`. Does NOT
     mutate `signal_data` and NEVER drops/diverts (that is the caller's job, and
     only under a future enforce flip).
+
+    `price_integrity` (R-IV.935(b)1) is a verdict ALREADY MEASURED by
+    `signals.price_integrity.check()`, passed in rather than fetched, because that
+    needs I/O and this function is pure. A verdict other than "ok" sets
+    `would_suppress` on THAT ROW ONLY -- the type stays live, which is the whole
+    point: ARTEMIS_SHORT is QUERY's only |t| > 2 type (R-IV.926(d)), so switching
+    the type off to stop two tickers would hide our strongest signal.
+
+    THIS FUNCTION REMAINS THE ONLY AUTHOR OF `would_suppress`. The price check
+    measures and hands over; it does not write the field beside this one. A fact
+    with two writers is the defect this register keeps re-finding.
     """
     signal_type = (signal_data.get("signal_type") or "").strip()
     ticker = signal_data.get("ticker")
@@ -137,7 +151,17 @@ def evaluate_l0_gate(signal_data: Dict[str, Any]) -> Dict[str, Any]:
             "liquid → keep" if liquid else "non-liquid → suppress"
         )
 
-    return {
+    # R-IV.935(b)1: a row whose price cannot be trusted is withdrawn from actionable
+    # surfaces on its own, without touching the type's standing. "unknown" counts too --
+    # "I could not check" is not "I checked and it is fine", and the ruling says a missing
+    # reference is flagged, not passed.
+    pi_status = (price_integrity or {}).get("status")
+    if pi_status and pi_status != "ok":
+        would_suppress = True
+        reason = "%s; price integrity %s: %s" % (
+            reason, pi_status, (price_integrity or {}).get("reason") or "no reason given")
+
+    out = {
         "v": L0_SHADOW_VERSION,
         "mode": "enforce" if L0_ENFORCE else "shadow",
         "signal_type": signal_type,
@@ -146,6 +170,10 @@ def evaluate_l0_gate(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         "is_liquid": liquid,
         "reason": reason,
     }
+    if price_integrity is not None:
+        # Stored on the tag so (b)3's count per ticker needs no re-derivation.
+        out["price_integrity"] = price_integrity
+    return out
 
 
 def should_divert(decision: Dict[str, Any]) -> bool:

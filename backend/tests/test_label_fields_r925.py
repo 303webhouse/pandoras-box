@@ -25,45 +25,49 @@ def _fresh():
     sa.reset_card_cache_for_tests()
 
 
-# ── upgrade_tag: exactly two prefixes, nothing else ────────────────────────
-
-def test_APIS_prefix_tags_APIS():
-    assert sa.upgrade_tag("APIS_CALL") == "APIS"
-
-
-def test_KODIAK_prefix_tags_KODIAK():
-    assert sa.upgrade_tag("KODIAK_CALL") == "KODIAK"
-
+# ── upgrade_tag: NOTHING carries one, per R-IV.935(e)2 ────────────────────
+#
+# R-IV.925(b) gave the tag to APIS_*/KODIAK_* types. R-IV.935(e)2 reverses exactly that:
+# those rows carry NO tag, because for them APIS *is* the strategy and its codename is already
+# the label ("APIS_CALL" -> "Apis"), so a tag would only restate it. That prefix was the only
+# rule granting a tag, so today nothing earns one -- and these tests say so out loud rather
+# than being deleted, so the reversal is visible to the next reader.
 
 @pytest.mark.parametrize("t", [
+    "APIS_CALL", "KODIAK_CALL", "apis_call", "KODIAK_PUT",
     "GOLDEN_TOUCH", "TRAPPED_SHORTS", "BEARISH_BREAKDOWN", "SELL_RIP_EMA", "WHALE_LONG",
-    "NEMESIS_LONG", "WRR_LONG", "", None,
+    "NEMESIS_LONG", "WRR_LONG", "RAPIS_CALL", "MY_APIS_THING", "", None,
 ])
-def test_everything_else_has_NO_tag(t):
-    """Absent, not an empty string: "no tag" and "a tag that is blank" are different facts and
-    the frontend tests truthiness."""
+def test_no_type_carries_an_upgrade_tag(t):
     assert sa.upgrade_tag(t) is None
 
 
-def test_the_tag_is_a_bare_upper_case_word():
-    for t in ("APIS_CALL", "KODIAK_CALL"):
-        tag = sa.upgrade_tag(t)
-        assert tag and tag.isupper() and tag.isalpha(), tag
+def test_the_APIS_and_KODIAK_rule_is_GONE_not_merely_unreachable():
+    """The reversal is in the FUNCTION, not in a caller that happens not to ask. Read from the
+    parsed source so the docstring explaining the old rule cannot satisfy this."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(sa.upgrade_tag)))
+    fn = tree.body[0]
+    body = [n for n in fn.body if not (isinstance(n, ast.Expr)
+                                       and isinstance(n.value, ast.Constant))]
+    assert len(body) == 1 and isinstance(body[0], ast.Return), ast.dump(fn)
+    assert body[0].value.value is None
 
 
-def test_a_type_merely_CONTAINING_apis_is_not_tagged():
-    """Keyed on the PREFIX as ruled. "RAPIS_CALL" or "MY_APIS_THING" must not tag."""
-    assert sa.upgrade_tag("RAPIS_CALL") is None
-    assert sa.upgrade_tag("MY_APIS_THING") is None
+def test_the_tag_is_still_SERVED_as_a_present_null():
+    """"No tag" and "no such field" are different facts; ABACUS reads `s.upgrade_tag` and a
+    present null is a different contract from a missing key."""
+    sig = sa.attach_label_fields({"signal_type": "APIS_CALL"})
+    assert "upgrade_tag" in sig and sig["upgrade_tag"] is None
 
 
-def test_the_tag_keys_on_the_TYPE_not_the_strategy():
-    """So a strategy that happens to emit an APIS_ type cannot tag its other types too."""
-    assert sa.upgrade_tag("GOLDEN_TOUCH", "apis_scanner") is None
-
-
-def test_casing_of_the_input_does_not_matter():
-    assert sa.upgrade_tag("apis_call") == "APIS"
+def test_the_tag_never_stands_in_for_the_label():
+    """R-IV.935(e)2's words. APIS_CALL's label is its own codename, with no tag beside it."""
+    assert sa.display_label("APIS_CALL") == "Apis"
+    assert sa.upgrade_tag("APIS_CALL") is None
 
 
 # ── display_label: "CODENAME | Description", or the codename alone ─────────
@@ -89,22 +93,24 @@ def test_a_codename_with_NO_card_is_returned_ALONE_with_no_pipe():
         assert label
 
 
-def test_the_two_TAGGED_types_are_exactly_the_two_with_no_card():
-    """Worth pinning because it is surprising: the only types that earn an upgrade tag are the
-    only two whose label is a bare codename."""
-    assert sa.upgrade_tag("APIS_CALL") == "APIS"
-    assert "|" not in sa.display_label("APIS_CALL")
-    assert sa.upgrade_tag("KODIAK_CALL") == "KODIAK"
-    assert "|" not in sa.display_label("KODIAK_CALL")
+def test_the_two_cardless_types_are_a_bare_codename_and_nothing_else():
+    """APIS and KODIAK have no card, so their label is the codename alone -- and under
+    R-IV.935(e)2 there is no tag beside it either."""
+    for t, name in (("APIS_CALL", "Apis"), ("KODIAK_CALL", "Kodiak")):
+        assert sa.display_label(t) == name
+        assert "|" not in sa.display_label(t)
+        assert sa.upgrade_tag(t) is None
 
 
 def test_a_card_whose_codename_is_in_no_map_still_supplies_the_label():
     """Seven of eleven cards name a codename `CODENAME_BY_SIGNAL_TYPE` maps nothing to, so their
     types produced "Bearish Breakdown" instead of "PHAETHON | Bearish Breakdown". The card's own
     title states the pairing, so it is READ, not invented."""
-    assert sa.display_label("BEARISH_BREAKDOWN") == "PHAETHON | Bearish Breakdown"
-    assert sa.display_label("ARTEMIS_SHORT").startswith("ARTEMIS | ")
-    assert sa.display_label("TWO_CLOSE_VOLUME").startswith("PERSEPHONE | ")
+    # TITLE CASE, per R-IV.935(e)3: the card titles are ALL CAPS, the DATA is not, and the
+    # page styles the capitals. A codename shouting in the payload cannot be un-shouted by CSS.
+    assert sa.display_label("BEARISH_BREAKDOWN") == "Phaethon | Bearish Breakdown"
+    assert sa.display_label("ARTEMIS_SHORT").startswith("Artemis | ")
+    assert sa.display_label("TWO_CLOSE_VOLUME").startswith("Persephone | ")
 
 
 def test_the_hardcoded_map_still_WINS_over_the_card():
@@ -141,7 +147,7 @@ def test_attach_sets_both_fields_without_touching_the_originals():
     out = sa.attach_label_fields(sig)
     assert out is sig
     assert sig["display_label"] == "Apis"
-    assert sig["upgrade_tag"] == "APIS"
+    assert sig["upgrade_tag"] is None            # R-IV.935(e)2
     assert sig["signal_type"] == "APIS_CALL" and sig["strategy"] == "Apis Scanner"
 
 

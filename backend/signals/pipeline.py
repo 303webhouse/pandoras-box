@@ -1428,9 +1428,22 @@ async def process_signal_unified(
     #     write is deferred because apply_scoring() reassigns triggering_factors
     #     wholesale (pipeline.py ~L689), which would clobber an early tag.
     #     Enforce (actual divert) is a separate, separately-gated brief.
+    # R-IV.935(b)1: measure the incoming price against the hub's own reader FIRST, then hand
+    # the verdict to the gate. Measured here because it needs I/O and `evaluate_l0_gate` is
+    # pure; decided there because that function is the one author of `would_suppress`.
+    # LOG-AND-FLAG, NEVER REJECT: nothing below can drop a signal, and `check()` never raises.
+    _pi = None
+    try:
+        from signals.price_integrity import check as _pi_check
+        _pi = await _pi_check(signal_data)
+        if _pi:
+            signal_data["price_integrity"] = _pi
+    except Exception as _pi_err:
+        logger.warning("price integrity check failed (non-blocking): %s", _pi_err)
+
     try:
         from config.l0_routing import evaluate_l0_gate
-        signal_data["_l0_decision"] = evaluate_l0_gate(signal_data)
+        signal_data["_l0_decision"] = evaluate_l0_gate(signal_data, price_integrity=_pi)
     except Exception as _l0_err:
         logger.warning("L0 gate evaluation failed (shadow, non-blocking): %s", _l0_err)
 
