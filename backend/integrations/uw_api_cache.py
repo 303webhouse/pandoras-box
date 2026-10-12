@@ -151,6 +151,18 @@ async def increment_daily_counter(caller: str = "untagged") -> int:
             except Exception:
                 pass
 
+        # R-IV.886(e): the DURABLE record, beside the Redis counters and not instead of them.
+        # The counters above are the governor's live input -- hot path, cheap, deliberately
+        # allowed to vanish so an infra blip never blocks a UW call. Ten days of history wants
+        # the opposite properties, so it goes to its own table keyed on the UW DAY (20:00 ET
+        # rollover), not on the UTC date these keys use. Failure is swallowed at the callee;
+        # the measurement must never be why a request does not go out.
+        try:
+            from integrations.uw_spend_ledger import record as _ledger_record
+            await _ledger_record(caller)
+        except Exception as exc:
+            logger.debug("spend ledger not recorded for %s: %s", caller, type(exc).__name__)
+
         # Budget alerts at multiple thresholds (50/70/85/95%)
         # Use Redis flag per threshold per day to ensure each fires only once.
         for threshold_pct in BUDGET_ALERT_THRESHOLDS:
