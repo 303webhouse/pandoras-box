@@ -23,7 +23,9 @@ from signals.feed_service import (
     session_of, tag_row,          # RV5 + R-IV.577(b): one author, not a second copy
     attach_touches, open_positions_by_ticker,   # R-IV.599(e)1
 )
-from config.strategy_aliases import codename, attach_codename  # L0.4 display alias (additive)
+from config.strategy_aliases import (  # L0.4 display alias (additive)
+    attach_codename, attach_label_fields, codename,
+)
 from config.strategy_class import strategy_class                 # R-IV.577(b)
 from config.asset_class import EXCLUDE_CRYPTO_SQL                # RV4, R-IV.566(e)2
 from signals.session_policy import SERVE_RELEASED_SQL            # R-IV.587(b)1
@@ -130,7 +132,9 @@ async def _query_tier_groups(pool, tier: str, limit: int = 50) -> list:
 
     # Dedup, finalize, sort
     for g in groups_map.values():
-        tag_row(attach_codename(g["primary_signal"]))  # L0.4 + R-IV.577(b) + RV5
+        # R-IV.935(e)1: display_label / upgrade_tag served here too. attach_label_fields had
+        # ZERO callers outside tests, so the fields R-IV.833 ruled were built and never served.
+        attach_label_fields(tag_row(attach_codename(g["primary_signal"])))
         g["related_signals"] = _dedup_related_signals(g["related_signals"])
         g["signal_count"] = 1 + len(g["related_signals"])
         strats = [g["primary_signal"].get("strategy") or g["primary_signal"].get("signal_type") or "UNKNOWN"]
@@ -261,7 +265,7 @@ async def get_trade_ideas_feed(
     book = await open_positions_by_ticker(pool)
 
     def _enrich(row) -> dict:
-        d = tag_row(attach_codename(serialize_db_row(dict(row))))
+        d = attach_label_fields(tag_row(attach_codename(serialize_db_row(dict(row)))))  # R-IV.935(e)1
         d["is_liquid"] = is_liquid(d.get("ticker"))
         attach_touches(d, book)
         return d

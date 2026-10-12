@@ -209,6 +209,20 @@ def reset_card_cache_for_tests() -> None:
 _CODENAME_BY_CARD_TYPE: Optional[Dict[str, str]] = None
 
 
+def _title_case_codename(name: str) -> str:
+    """"PHAETHON" -> "Phaethon". Title Case in the DATA; the page styles the capitals
+    (R-IV.935(e)3).
+
+    NOT str.title(), which breaks on the apostrophe the card-title pattern allows:
+    "CIRCE'S" -> "Circe'S", because it treats the S after the quote as a new word. Each
+    space-separated word gets its first letter upper and the remainder lower instead.
+    """
+    out = []
+    for word in (name or "").split(" "):
+        out.append(word[:1].upper() + word[1:].lower() if word else word)
+    return " ".join(out)
+
+
 def card_codenames() -> Dict[str, str]:
     """{SIGNAL_TYPE: CODENAME} read from the cards' own title lines.
 
@@ -241,7 +255,9 @@ def card_codenames() -> Dict[str, str]:
         m = _CARD_TITLE.match(first)
         if not m:
             continue
-        cn = m.group(1).strip()
+        # The card titles are ALL CAPS; the stored value is Title Case per R-IV.935(e)3,
+        # so the data carries the name and the page decides how to shout it.
+        cn = _title_case_codename(m.group(1).strip())
         for t in _re.findall(r"`([A-Z][A-Z0-9_]{2,})`", m.group(2)):
             out.setdefault(t.upper(), cn)
     _CODENAME_BY_CARD_TYPE = out
@@ -266,16 +282,21 @@ def display_label(signal_type: Optional[str], strategy: Optional[str] = None) ->
 
 
 def upgrade_tag(signal_type: Optional[str], strategy: Optional[str] = None) -> Optional[str]:
-    """"APIS" for APIS_* types, "KODIAK" for KODIAK_* types, otherwise None.
+    """Currently None for EVERY type. R-IV.935(e)2 corrected the rule I had built.
 
-    Keyed on the SIGNAL TYPE's prefix exactly as ruled, and on the type only -- not the strategy
-    -- so a strategy that happens to emit one of these types cannot tag its other types too.
+    R-IV.925(b) gave the tag to a row whose own `signal_type` carried an APIS_ or KODIAK_
+    prefix. R-IV.935(e)2 reverses exactly that: "Rows whose own type is APIS_* or KODIAK_*
+    carry NO upgrade_tag", consistent with the accepted KODIAK_CALL no-tag decision. The reason
+    it reads right: for those rows APIS *is* the strategy, and its codename is already the
+    label -- `APIS_CALL` -> "Apis" -- so a tag would only restate it. "A tag never stands in
+    for" the label.
+
+    That prefix was the only rule granting a tag, so with it withdrawn NO type earns one today.
+    The field is kept, and kept PRESENT-AND-NULL, because ABACUS reads `s.upgrade_tag` and a
+    present null is a different contract from a missing key. It is deliberately not quietly
+    repurposed: no rule for what else might earn a tag has been ruled, and R-IV.925(b) says do
+    not invent labels. When one is, it goes here.
     """
-    t = _norm(signal_type).upper()
-    if t.startswith("APIS_"):
-        return "APIS"
-    if t.startswith("KODIAK_"):
-        return "KODIAK"
     return None
 
 

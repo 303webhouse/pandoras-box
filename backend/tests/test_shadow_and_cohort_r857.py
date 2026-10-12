@@ -115,8 +115,26 @@ class TestShadowMeansSTOREDAsWellAsNotSurfaced:
                     pytest.fail("%s consults SUPPRESS_ALWAYS in code: %r" % (rel, line.strip()))
 
     def test_the_pipeline_treats_the_L0_verdict_as_a_non_blocking_label(self):
+        """PARSED, not grepped. This asserted the literal text "evaluate_l0_gate(signal_data)"
+        and broke the moment R-IV.935(b)1 passed the price verdict as a second argument -- a
+        change that did not touch the property under test. What matters is that the gate is
+        called ON signal_data and its answer is STORED as a label, so the structure is checked
+        and the spelling is free."""
+        import ast
+
         src = _src(os.path.join("signals", "pipeline.py"))
-        assert "evaluate_l0_gate(signal_data)" in src
+        tree = ast.parse(src)
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                 and n.func.id == "evaluate_l0_gate"]
+        assert len(calls) == 1, "expected exactly one gate evaluation, found %d" % len(calls)
+        call = calls[0]
+        assert call.args and isinstance(call.args[0], ast.Name)             and call.args[0].id == "signal_data", ast.dump(call)
+        # the verdict is assigned somewhere, never used as a condition that returns early
+        assert any(isinstance(n, ast.Assign) and any(
+            isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+            and c.func.id == "evaluate_l0_gate" for c in ast.walk(n))
+            for n in ast.walk(tree)), "the gate's verdict is not assigned anywhere"
         assert "shadow, non-blocking" in src
         assert '_tf["l0_shadow"] = _l0_decision' in src
 
