@@ -2972,9 +2972,57 @@ async def log_signal(
     """
     Log a new signal to the database
     This runs async to avoid blocking the main pipeline
+
+    R-IV.839(b) — THE SWALLOWED-WRITE CLASS. This used to reach in with brackets for eight
+    fields, three of which (entry_price, stop_loss, target_1) the schema has always allowed to
+    be NULL. An ALERT has no stop and no target -- that is what makes it an alert -- so every
+    alert-shaped dict raised KeyError from inside the INSERT, every emitter caught it as
+    `except Exception`, and the type simply never appeared. A signal type that never persists
+    is indistinguishable from one that never fired.
+
+    Now: the six fields the DATABASE declares NOT NULL are required BY NAME, signal_id is
+    generated when absent, the nullable ones bind NULL, and no failure is silent -- every one is
+    logged at ERROR, counted in `signal_persist_failures` by type, and re-raised. Re-raising is
+    deliberate: the caller's own bookkeeping (STRIKE's record_attempt, the scanners' counters)
+    must still see the failure, and swallowing it here would just move the silence.
     """
+    from database import persist_failures
+    from models.signal_contract import SignalContractError, prepare
+
+    try:
+        signal_id, generated = prepare(signal_data)
+    except SignalContractError as exc:
+        logger.error("Signal REFUSED, not stored: %s", exc)
+        await persist_failures.record(signal_data, exc)
+        raise
+    if generated:
+        # Written back so the caller logs the id that was actually stored rather than None.
+        signal_data["signal_id"] = signal_id
+        logger.info("Signal had no signal_id; generated %s for type %s",
+                    signal_id, signal_data.get("signal_type"))
+
+    try:
+        return await _log_signal_insert(signal_data, signal_id, market_state, factor_snapshot)
+    except Exception as exc:                                        # noqa: BLE001
+        # The write itself failed. ERROR + counted + RE-RAISED: the caller's own bookkeeping
+        # must still see it, and catching it here would move the silence rather than end it.
+        logger.error("Signal INSERT FAILED for %s (type %s): %s: %s",
+                     signal_id, signal_data.get("signal_type"), type(exc).__name__, exc)
+        await persist_failures.record(signal_data, exc)
+        raise
+
+
+async def _log_signal_insert(
+    signal_data: Dict[Any, Any],
+    signal_id: str,
+    market_state: Optional[Dict[Any, Any]] = None,
+    factor_snapshot: Optional[Dict[Any, Any]] = None,
+) -> bool:
+    """The INSERT. Split out so the wrapper above owns the contract check and the failure ledger
+    without re-indenting the statement -- and private, so a future caller cannot reach past the
+    ledger by calling the insert directly."""
     pool = await get_postgres_client()
-    
+
     timestamp = _normalize_timestamp_for_db(signal_data.get("timestamp"))
     calendar_fields = await _build_calendar_metadata(timestamp, signal_data.get("ticker"))
     # Allow explicit overrides from callers while keeping auto-compute as default.
@@ -3017,16 +3065,19 @@ async def log_signal(
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
-            signal_data['signal_id'],
+            signal_id,
             timestamp,  # Use converted datetime
             signal_data['strategy'],
             signal_data['ticker'],
             signal_data['asset_class'],
             signal_data['direction'],
             signal_data['signal_type'],
-            signal_data['entry_price'],
-            signal_data['stop_loss'],
-            signal_data['target_1'],
+            # NULLABLE in the schema, so .get() -- an alert carries no stop and no target, and
+            # demanding them is what kept alert types out of the table entirely. NULL and not
+            # 0: a zero stop is a price, an absent one is no stop at all.
+            signal_data.get('entry_price'),
+            signal_data.get('stop_loss'),
+            signal_data.get('target_1'),
             signal_data.get('target_2'),
             signal_data.get('risk_reward'),
             signal_data.get('timeframe'),
@@ -3974,6 +4025,15 @@ async def log_options_position(position: Dict[Any, Any]):
             # credential does not belong in a config row; secrets stay in the environment.
             "cooldown_minutes": 15,
         }))
+
+        # R-IV.839(b): the signal-persistence failure ledger. Created here as well as lazily in
+        # persist_failures.ensure_table() so /health can report an honest zero on a fresh
+        # database rather than an error -- and so the first thing that ever writes to it is not
+        # also the first thing that has to create it, on an error path.
+        from database.persist_failures import DDL as _PF_DDL
+        from database.persist_failures import DDL_INDEX as _PF_IDX
+        await conn.execute(_PF_DDL)
+        await conn.execute(_PF_IDX)
 
         # Hydra squeeze scores table
         await conn.execute("""

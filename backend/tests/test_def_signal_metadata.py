@@ -86,9 +86,23 @@ def _arg_index(column: str) -> int:
 
     from database import postgres_client as _pc
 
-    src = inspect.getsource(_pc.log_signal)
+    # R-IV.871: read the MODULE, not one function. This used to read
+    # inspect.getsource(_pc.log_signal), and when the insert was split into
+    # _log_signal_insert() so the wrapper could own the contract check and the failure ledger,
+    # the regex matched nothing and this assertion fired AT IMPORT -- aborting collection of the
+    # whole suite, which is a far worse failure than the drift it guards against.
+    #
+    # That is this test's own lesson applied to itself: an anchor tied to where the statement
+    # currently LIVES will eventually point at the wrong place. The module has exactly one
+    # `INSERT INTO signals (`, so anchoring on the statement rather than its container survives
+    # the next refactor too.
+    # R-IV.871: the write path is TWO functions since log_signal was split so the wrapper
+    # could own the contract check and the failure ledger. Reading only log_signal made this
+    # assertion search the wrapper and miss the INSERT entirely. Both halves are read, rather
+    # than the whole module, so a substring cannot match unrelated code and pass vacuously.
+    src = inspect.getsource(_pc.log_signal) + inspect.getsource(_pc._log_signal_insert)
     match = re.search(r"INSERT INTO signals \(\s*(.*?)\)\s*VALUES", src, re.S)
-    assert match, "log_signal's INSERT could not be read"
+    assert match, "the signals INSERT could not be found in postgres_client"
     columns = [c.strip() for c in match.group(1).split(",")
                if c.strip() and not c.strip().startswith("--")]
     assert column in columns, "%s is not a column of log_signal's INSERT; it lists %s" % (

@@ -274,7 +274,11 @@ def test_a_failed_evidence_write_never_raises_into_the_signal_path():
 def test_log_signal_writes_evidence_only_after_a_real_insert():
     import inspect
     from database import postgres_client as pc
-    src = inspect.getsource(pc.log_signal)
+    # R-IV.871: the write path is TWO functions since log_signal was split so the wrapper
+    # could own the contract check and the failure ledger. Reading only log_signal made this
+    # assertion search the wrapper and miss the INSERT entirely. Both halves are read, rather
+    # than the whole module, so a substring cannot match unrelated code and pass vacuously.
+    src = inspect.getsource(pc.log_signal) + inspect.getsource(pc._log_signal_insert)
     i_ins, i_ev = src.index("inserted = "), src.index("_write_iv_regime_evidence")
     assert i_ins < i_ev
     assert "else:" in src[i_ins:i_ev], "a duplicate insert must not overwrite stored evidence"

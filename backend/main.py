@@ -1526,6 +1526,22 @@ async def health_check():
     except Exception as _ze:
         zeus_block["error"] = str(_ze)
 
+    # R-IV.839(b): signals that failed to PERSIST, by type, last 24h. A signal type that never
+    # persists used to be indistinguishable from one that never fired, because every emitter
+    # catches its own write failure. `unrecorded` is reported separately on purpose: if Postgres
+    # is why the signal did not land, it is also why the ledger row did not, so a clean sheet
+    # and an unwritable ledger must not look the same.
+    persist_failures_block: dict = {}
+    try:
+        from database.persist_failures import summary_24h
+        persist_failures_block = await summary_24h()
+        if persist_failures_block.get("total_24h"):
+            degraded_by.append("signal_persist_failures:%d" % persist_failures_block["total_24h"])
+        if persist_failures_block.get("unrecorded"):
+            degraded_by.append("signal_persist_failures:unrecorded")
+    except Exception as _pfe:
+        persist_failures_block = {"error": str(_pfe)}
+
     # Hermes phase 2: is the session alarm ARMED? R-IV.867(a). Distinct from the job ledger
     # below, which says whether it has recently RECORDED — and which stays silent outside RTH by
     # design. An alarm that never started would otherwise look exactly like a quiet market.
@@ -1678,6 +1694,7 @@ async def health_check():
         "postgres": postgres_state,
         "websocket_connections": len(manager.active_connections),
         "zeus": zeus_block,
+        "signal_persist_failures": persist_failures_block,
         "hermes_session": hermes_session_block,
         "stable_jobs": stable_jobs_block,
         "signals_freshness": signals_freshness_block,
