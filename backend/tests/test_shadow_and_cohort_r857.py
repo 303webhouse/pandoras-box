@@ -90,12 +90,8 @@ class TestPhaethonIsShadowed:
         # fact — and it is the copy that would be forgotten: mine said 8 and broke the moment
         # R-IV.855(d)'s two registered types arrived. One author for the set; this test keeps
         # only what it is actually for, which is that PHAETHON's addition disturbed nothing.
-        # TRAPPED_SHORTS left this list under R-IV.878(e) (HECTOR to SHADOW). Worth recording:
-        # R-IV.861(c) consolidated the SUPPRESSED set to a single author, but its COMPLEMENT --
-        # the "kept live" list -- still had FOUR (l0_routing's comment, r809's loop, this one, and
-        # test_l0_routing's parametrize), and all four had to be edited for one roster move. An
-        # inverse list is as much a copy as the list, and it was the half nobody consolidated.
-        for t in ("ARTEMIS_SHORT", "GOLDEN_TOUCH", "TWO_CLOSE_VOLUME", "DEATH_CROSS"):
+        for t in ("ARTEMIS_SHORT", "TRAPPED_SHORTS", "GOLDEN_TOUCH", "TWO_CLOSE_VOLUME",
+                  "DEATH_CROSS"):
             assert t not in SUPPRESS_ALWAYS, t
 
 

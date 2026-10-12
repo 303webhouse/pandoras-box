@@ -236,18 +236,15 @@ class TestNemesisIsSuppressed:
         # THE EXACT SET, named in full — R-IV.861(c). LAB's form is better than the count I had
         # and replaces it: a named set fails on an unintended addition exactly as a count does,
         # and it also says WHICH types are suppressed, so the next reader does not have to go
-        # and look. ELEVEN members: the six originals, NEMESIS_LONG (R-IV.809),
-        # BEARISH_BREAKDOWN/PHAETHON (R-IV.857(b)), the two registered forward tests
-        # (R-IV.855(d)), and TRAPPED_SHORTS/HECTOR (R-IV.878(e)).
+        # and look. Ten members: the six originals, NEMESIS_LONG (R-IV.809),
+        # BEARISH_BREAKDOWN/PHAETHON (R-IV.857(b)), and the two registered forward tests
+        # (R-IV.855(d)).
         assert SUPPRESS_ALWAYS == frozenset({
             "STRIKE_IB_BREAK", "HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY",
             "TRAPPED_LONGS", "ARTEMIS_LONG", "NEMESIS_LONG", "BEARISH_BREAKDOWN",
-            "WRR_LONG", "PHOENIX_WASHOUT", "TRAPPED_SHORTS"})
-        # And the types explicitly kept live stay out of it. TRAPPED_SHORTS was in THIS list
-        # until R-IV.878(e) moved HECTOR to SHADOW -- it was named in both halves of this
-        # assertion, so adding it to the set alone would have left the two contradicting each
-        # other, and the second half is the one that would have failed.
-        for t in ("ARTEMIS_SHORT", "TWO_CLOSE_VOLUME", "GOLDEN_TOUCH"):
+            "WRR_LONG", "PHOENIX_WASHOUT"})
+        # And the types explicitly kept live stay out of it.
+        for t in ("ARTEMIS_SHORT", "TWO_CLOSE_VOLUME", "GOLDEN_TOUCH", "TRAPPED_SHORTS"):
             assert t not in SUPPRESS_ALWAYS, t
 
 
