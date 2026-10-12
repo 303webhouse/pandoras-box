@@ -2641,10 +2641,15 @@
     }
     return { figure: disp.name || 'SETUP', what: disp.desc || '' };
   }
+  // R-IV.938(b): the CODENAME is shown in capitals and the description is not, which is what the
+  // principal approved. It is done by STYLING, not by upper-casing the string: BUILD keeps serving
+  // Title Case, the page keeps rendering what it was served, and a copy/paste still carries the
+  // served spelling. So the figure gets a span of its own to carry that rule.
   function signalTitle(s, disp) {
     const p = titleParts(s, disp);
-    if (!p.what) return esc(p.figure);
-    return esc(p.figure) + ' <span class="sep">|</span> <span class="what">' + esc(p.what) + '</span>';
+    const fig = '<span class="figure">' + esc(p.figure) + '</span>';
+    if (!p.what) return fig;
+    return fig + ' <span class="sep">|</span> <span class="what">' + esc(p.what) + '</span>';
   }
 
   // The tag is the SERVER's word. An unrecognised one gets no treatment rather than the wrong
