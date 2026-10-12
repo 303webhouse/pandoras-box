@@ -25,6 +25,10 @@
     value area;
   - `outside` and `edge` pass (`circes_stew.py:53`); `mid` and unknown do not;
   - edge = the outer 25% of the value area (`:51`), PROVISIONAL until 30 fires.
+  - **The structural trigger is PYTHIA-LOC v1** (`PYTHIA-LOC-v1.md`, sha256
+    `0b40642505e999482c26e406fa1b2186399344b807a6b6b27c7067a853d6bfdb`; approved R-IV.937(c)).
+    It is gate v2's direction-aware reading: a SHORT against VAH, a LONG against VAL, at the
+    fire close. Any parameter change is v2.
 - **Levels** (`:168-174`): entry at the fire close, stop at the failed extreme, target 2R (`:54`).
 - **Ceiling:** 10 a day (`:50`). Over it, none surface.
 - **Universe:** tickers PYTHIA covered in the last 5 sessions (`circes_stew_job.py:49`).
@@ -101,6 +105,7 @@ CIRCE stays in shadow. Retirement is SPINE's and QUERY's (09-23 S2).
 - 2026-10-09: card v0 (R-IV.823(g), R-IV.830(g)).
 - 2026-10-12: evidence bar made EQUITY-ONLY; crypto is reported separately (TA-147, R-IV.909(b)).
 - 2026-10-12: live record cited, pre-fix and not the TA-135 bar (QUERY R-IV.908(f), R-IV.927(c)).
+- 2026-10-12: cites PYTHIA-LOC v1 (`0b406425…`) as its structural trigger (R-IV.937(c)).
 - **2026-10-10: gate v2 proposed** (R-IV.838(d); `claude/lab-circe-gate-v2` @ `378b7e3`).
   - The fire close is now located on the side being faded: VAH for a SHORT, VAL for a LONG.
     A close at or through the other side's edge is `opposite` and fails.
