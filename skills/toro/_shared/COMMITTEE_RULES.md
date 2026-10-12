@@ -136,12 +136,12 @@ Each agent's `SKILL.md` retains a short "what it owns vs what belongs to other a
 
 ## § Account Context Framework
 
-RULES VERSION: 2026-10-08/v5.2 — AUTHORITATIVE STAMP. An agent or scheduled task
+RULES VERSION: 2026-10-09/v5.4 — AUTHORITATIVE STAMP. An agent or scheduled task
 reading this section resolves its version from THIS line, not from whatever
-document carried the section to it. Supersedes 2026-10-08/v5.1, /v5, /v4, /v3 and
-2026-10-07/v2.
+document carried the section to it. Supersedes 2026-10-09/v5.3, 2026-10-08/v5.2,
+/v5.1, /v5, /v4, /v3 and 2026-10-07/v2.
 
-Applied from: claude/account-context-2026-10-08-v5_2.md · sha256 2a4a4eaf82c4b9b306f9d0705eee656b8c4e09462ded3a3343fad462b8307b71 · 2026-10-08
+Applied from: account-context-2026-10-09-v5_4.md · sha256 3b7f3ac89bd60defad1ebed032525a27a5153fb0d1405137783ba46c32b5863e · 2026-10-12
 
 NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
 came from a source named below within this conversation.
@@ -361,6 +361,67 @@ section:**
    R-IV.778(b)**, on the ground that 4 DTE is not a multi-week horizon.
 5. **A row opened before 2026-09-25 keeps its tag** under TA-045's scope, whatever
    X4 would now say about it.
+
+### § Bucket ceilings by signal provenance — RULED 2026-10-09 [R-IV.822(c)]
+
+Two rules cap **which buckets a ticket may claim**, by where its signal came from.
+They are **ceilings on the eligible set**, not bucket definitions, and they do not
+touch the definitions above.
+
+**C5 — a signal that fades a move BEFORE the trend breaks surfaces only as B3 or
+TAIL.** "Breaks" is the 2026-09-23 definition: **a daily close through the 50-day
+average, the average stack turning, and volume confirming.** A signal taken before
+all three conditions hold is before-the-turn, whatever its conviction and whatever
+the eventual outcome. A before-the-turn **SHORT** additionally carries the no-fly
+flag **"entering parabolic shorts too early"** written on its face, at proposal and
+on the row. [Principal 2026-10-09; 09-23 collision #3]
+
+**F5 — a flow-originated signal may be:**
+- **B3**, with a PYTHIA value-area trigger;
+- **TAIL**;
+- **B2** only after a **registered forward pass** and **a SPINE ruling that cites
+  it**;
+- **B1 never.**
+
+A signal is **flow-originated** when the flow read is the reason the ticket exists.
+Where a thesis stands on trend and structure on its own and flow is read afterwards,
+the signal is not flow-originated and F5 does not reach it — that case is X10's,
+unchanged. [Principal 2026-10-09; sharpens X10]
+
+**How these interact with bucket-at-entry. TESTED IN THIS ORDER, and the order is
+the rule:**
+
+1. **C5 and F5 define the ELIGIBLE SET** of buckets for that signal.
+2. **The principal's intent at entry chooses WITHIN that set** (TA-044; TA-045
+   scope; consequence 3 above).
+3. **The chosen tag is set at entry** and is not changed to fit the outcome.
+
+**These do not compete, and reading either as the whole rule breaks the other.** A
+ceiling the intent could override would not be a ceiling. An intent the ceiling
+replaced would make every before-the-turn ticket a B3 by default, including the ones
+meant as TAIL — and B3 and TAIL are very different tickets: B3 carries a mechanical
+stop, a same-day close and a concurrency limit; TAIL carries none of those and is
+X4-exempt.
+
+**Neither rule is a retagging licence.** A ticket discovered after entry to have
+been before-the-turn, or to have been flow-originated, is **not** retagged down to
+B3. It is recorded on the row as **entered outside its eligible set**, with the
+author and the reason, exactly as TA-044 requires of any post-entry bucket note. The
+breach is the record; the tag stays as entered.
+
+**What F5 actually changes, stated precisely so it is not oversold.** X10 as written
+covers B1 and B2 only, and says a trade whose entire reason is flow *does not pass*.
+Against that text, F5:
+- **makes B1 absolute** for a flow-originated signal — never, on Rule 16 grounds;
+- **opens one narrow path to B2 that X10's text did not have**: a registered forward
+  pass plus a citing SPINE ruling. Measured against a strict reading of "does not
+  pass," this is a **loosening**, and it is gated on evidence rather than on
+  judgment. It is named as a loosening here so nobody records F5 as a pure tightening;
+- **adds nothing to B3.** B3's own definition already requires a structural PYTHIA
+  value-area trigger, so F5's B3 clause restates a condition B3 already carries. It
+  is a confirmation, not a new gate;
+- **leaves TAIL unconditioned**, consistent with TAIL being the one tag X4 exempts
+  by design.
 
 **ROBINHOOD.** The options and tail/convexity sleeve: high-risk, high-reward plays,
 lottos, and portfolio hedges against a broad correction or worse.
@@ -597,6 +658,19 @@ tranches land. Two holdings are handled explicitly:
   accounts** — linked to the brokerage window, holding no tradable capital. Flows
   are carried **where they enter a tracked account, never at the conduit**.
   [TA-105 §1, TA-106 §2]
+- **Reading a thesis label's example holdings as a statement of what the book
+  holds.** They are a template. The instance: on 2026-10-09 TA said the principal
+  was "positioned short duration via TLT puts," reading the example tickers in
+  § Bias and Thesis Labels' Fed-hawkish entry as an inventory. **The principal had
+  closed those puts at a profit**, and the book showed five closed TLT rows and
+  nothing open. The book is read from the book. [TA-128, R-IV.806(c)]
+- **A before-the-turn signal sized as a B1 or B2 thesis ticket.** Capped at B3 or
+  TAIL by C5. [R-IV.822(c)3]
+- **X10 read as silent on B3 and TAIL.** It is silent on them in its own text, which
+  is why F5 states the ceiling across all four tags rather than leaving the two
+  smallest unconditioned. [R-IV.822(c)4]
+- **Reading C5 or F5 as a substitute for the principal's intent at entry.** They
+  bound the eligible set; the intent chooses inside it. Both run, in that order.
 - Previously retired and still retired: "Fidelity Roth IRA — inverse ETFs only";
   ROBINHOOD's "5% max risk per trade"; "max 3 contracts".
 
@@ -627,6 +701,14 @@ When two agents with opposing or different mandates reach the same directional c
 ## § Bias and Thesis Labels
 
 When URSA's THESIS GROUPING pre-check or THALES's THESIS WORLD-CHECK classify the existing book against a coherent macro thesis, these are the canonical labels. Both agents use the same labels so PIVOT's dual-flag gate can detect agreement reliably.
+
+**The holdings named in each label below are a TEMPLATE, not an INVENTORY.** They
+describe how a thesis is typically expressed. They are not a claim that the
+household holds them, and no agent may state, imply or size from a position
+because a label names it. **What the book holds is read from the book** —
+POSITIONS, or `hub_get_positions` — in the same turn as the claim. A label whose
+example tickers the book no longer carries is a label to re-check, not a position
+to report. [TA-128]
 
 - **Iran-escalation thesis.** Long energy (XLE, USO, oil-equity), long ag (CF, MOS, food), short consumer discretionary (XLY), short high-multiple growth, short credit (HYG). Macro tells: oil rising, energy leading, ag inputs firming, geopolitical headlines elevated.
 - **AI-bubble-deflation thesis.** Short AI names (IGV, software), short semis, short hyperscaler infrastructure. Macro tells: semis breaking down, IGV/software de-rating, hyperscaler capex narratives cracking.
@@ -678,6 +760,7 @@ These additional rules apply only to agents that recommend specific trade entrie
   $200–300 cap and the B3 $100 cap are **retired** as of 2026-09-23. What survives
   from the bucket rules: B3 keeps max 2 concurrent, max 3/day, same-day close, and
   a structural PYTHIA VA trigger.
+
 - **B3 daily circuit breaker — UNCHANGED.** Two consecutive B3 losses in a single session triggers a circuit breaker — no further B3 entries that day, regardless of direction or which agent surfaces the setup. **The $300 daily max loss cap remains, regardless of trade count.** Applies to TORO long-B3 and URSA short-B3 entries equally; PIVOT enforces at synthesis time.
 - **Stops — the principal's guideline (2026-09-23).** Default: a stop order at the broker at entry on ETF and stock positions. Where volatility argues against one, a daily-close stop is written in the position's notes instead. Either way the invalidation is written on the row.
 - **No averaging down.** An add to a losing position needs either an add planned at entry, or a named change in market conditions written on the row before the add.
@@ -722,11 +805,44 @@ These additional rules apply only to agents that recommend specific trade entrie
   NOT EVALUABLE is returned for any row whose justifying timeframe the hub cannot
   read — today, every intraday row. It is not a FAIL and not a pass. The next-
   session's-close clock applies regardless. [§ Z2 trend gate]
-- **X10 — flow confirms, it does not originate.** On B1 and B2 trades, an options-flow read may only *confirm* a thesis that already stands on trend and structure. A trade whose entire reason is "there was flow" is Rule 16 — short-term information flow mistaken for an edge — and does not pass.
 
-Agents that do not recommend trades (PYTHIA, PYTHAGORAS, THALES) do not need to enforce the trade-sizing rules — but their structural / trend / macro reads may inform whether a trade meets these gates when other agents evaluate.
+- **X10 — flow confirms, it does not originate. WITH ITS CEILING, RULED 2026-10-09
+  [R-IV.822(c)4].** On B1 and B2 trades, an options-flow read may only *confirm* a
+  thesis that already stands on trend and structure. A trade whose entire reason is
+  "there was flow" is Rule 16 — short-term information flow mistaken for an edge —
+  and does not pass.
+  **A flow-ORIGINATED signal — one where the flow read is the reason the ticket
+  exists — is capped as follows: B3 with a PYTHIA value-area trigger; or TAIL; or
+  B2 only after a registered forward pass AND a SPINE ruling that cites it; B1
+  never.** The ceiling bounds the eligible set; the principal's intent at entry
+  chooses within it, and the tag is then set at entry (§ Bucket ceilings by signal
+  provenance). Where a thesis stands on its own and flow is read afterwards, the
+  signal is not flow-originated and only X10's first paragraph applies.
 
----
+- **C5 — a signal that fades a move BEFORE the trend breaks is capped at B3 or TAIL.
+  RULED 2026-10-09 [R-IV.822(c)3].** "Breaks" is the 2026-09-23 definition: a daily
+  close through the 50-day average, the average stack turning, and volume
+  confirming. Before all three, the signal is before-the-turn however strong it
+  looks, and B1 and B2 are unavailable to it.
+  **A before-the-turn SHORT carries the no-fly flag "entering parabolic shorts too
+  early" on its face** — in the proposal and on the row. The flag is not a veto; it
+  is a disclosure, and an agent that omits it has not met the rule.
+  **A ticket found after entry to be before-the-turn is NOT retagged to B3.** It is
+  recorded as entered outside its eligible set, with author and reason. The tag is
+  still set at entry.
+
+
+- **A thesis label's example holdings are a TEMPLATE, never an INVENTORY — TA-128,
+  adopted 2026-10-09 [R-IV.806(c)].** The tickers in each entry of § Bias and
+  Thesis Labels describe *how a thesis is typically expressed*. They are not a
+  claim that the household holds them. **No agent states, implies or sizes from a
+  position because a label names it.** What the book holds is read from the book —
+  POSITIONS, or `hub_get_positions` — in the same turn as the claim, and a row the
+  book does not carry as open is not carried as open anywhere else.
+  **This cuts both ways:** a label the book no longer supports is also a label to
+  re-check, and an agent reciting a label's tickers as the current book will report
+  a thesis the principal has already exited.
+  The instance it was ruled on is in § Account Context's retired list.
 
 ## § Asset-Class Routing Framework
 

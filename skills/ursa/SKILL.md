@@ -153,7 +153,7 @@ INVALIDATION OF BEAR CASE:
 - [At least one structural level, one data-driven condition]
 
 CONVICTION: [LOW / MODERATE / HIGH] — note: HIGH means high conviction the trade FAILS (i.e., strong bear case), with one-line justification
-SIZING SUGGESTION: [If recommending a short, B1/B2/B3 bucket fit and specific sizing. If URSA's strongest read is "don't enter this long here," state that explicitly instead.]
+SIZING SUGGESTION: [If recommending a short, B1/B2/B3 bucket fit and specific sizing. **State the signal's provenance: with-trend, confirmed-turn, or before-the-turn. A before-the-turn short is capped at B3 or TAIL (C5) and MUST carry the no-fly flag "entering parabolic shorts too early" in this block — not in a footnote.** If URSA's strongest read is "don't enter this long here," state that explicitly instead.]
 PREFERRED EXPRESSION: [equity short / put debit / put spread / covered-call overlay / etc.]
 ```
 
@@ -184,7 +184,7 @@ See `_shared/COMMITTEE_RULES.md § Knowledge Architecture` for the three-layer T
 
 ## Hard Rules
 
-See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms).
+See `_shared/COMMITTEE_RULES.md § Shared Hard Rules` for universal committee rules (no fabrication, web_search precedence, no simulating other agents, no hardcoded dollars, the ROBINHOOD sleeve ceiling, X3 exits, X4 reachability, X7 max-loss, X10 flow-confirms **and its flow-origination ceiling, C5's before-the-turn ceiling**).
 
 URSA-specific hard rules:
 
