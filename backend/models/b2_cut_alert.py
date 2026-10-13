@@ -181,8 +181,14 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
     under-report the book. The caller owns that sourcing; this function totals what it is given.
     """
     now = now or datetime.now(ET)
+    # The mark trio is attached UP FRONT, so every path carries it -- not only the ones that
+    # happen to reach the gate. A verdict a reader cannot audit against its own mark is the
+    # thing TA-152 is closing, and NOT_YET and EXPIRY_STOPPED are read by people too.
     out: Dict[str, Any] = {"verdict": NOT_YET, "cut_session": None, "total_pnl": None,
-                           "reason": ""}
+                           "reason": "",
+                           "mark": row.get("mark"),
+                           "mark_as_of": row.get("mark_as_of"),
+                           "mark_integrity": row.get("mark_integrity")}
 
     if row.get("b2_cut_alerted_at"):
         out["verdict"] = ALREADY_FIRED
@@ -233,9 +239,6 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
         return out
 
     out["total_pnl"] = str(total)
-    out["mark"] = row.get("mark")
-    out["mark_as_of"] = row.get("mark_as_of")
-    out["mark_integrity"] = row.get("mark_integrity")
     if total > 0:
         out["verdict"] = PASS
         out["reason"] = "total %s is above zero at the cut" % total

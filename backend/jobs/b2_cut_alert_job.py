@@ -69,6 +69,13 @@ SELECT p.position_id,
        p.entry_date,
        p.expiry,
        p.unrealized_pnl,
+       -- TA-152: the run-time mark reader needs the CONTRACT, not just the P&L. Without these
+       -- four it could not price anything and every row read
+       -- "structure None is not priceable" -- which the unit tests could not catch, because
+       -- they hand `decide` a row directly and never go through this query.
+       p.structure,
+       p.long_strike,
+       p.short_strike,
        p.b2_cut_alerted_at,
        COALESCE((SELECT SUM(c.realized) FROM position_lot_closures c
                   WHERE c.position_id = p.position_id), 0)          AS realized_pnl
@@ -162,8 +169,11 @@ async def read_mark_now(row: Dict[str, Any]) -> Dict[str, Any]:
                     raise ValueError("%g: %s" % (strike, why))
                 legs.append(m)
                 w = compute_bid_ask_spread_pct(c)
-                if w is not None:
-                    widths.append(w)
+                q2 = c.get("last_quote") or {}
+                from models.mark_integrity import abs_spread
+                aw = abs_spread(q2.get("bid"), q2.get("ask"))
+                if w is not None and aw is not None:
+                    widths.append((w, aw))
                 q = c.get("last_quote") or {}
                 if out["bid"] is None:
                     out["bid"], out["ask"] = q.get("bid"), q.get("ask")
@@ -172,7 +182,9 @@ async def read_mark_now(row: Dict[str, Any]) -> Dict[str, Any]:
             # THE WORST LEG GOVERNS. A spread is only as tradeable as its less tradeable side,
             # so a tight leg must not average away a leg nobody is quoting.
             if widths:
-                out["worst_leg_spread_pct"] = max(widths)
+                # (pct, abs) for the worst leg BY PERCENTAGE, kept together so the absolute
+                # floor can be applied to the same leg rather than to a different one.
+                out["worst_leg"] = max(widths, key=lambda w: w[0])
     except Exception as exc:                                        # noqa: BLE001
         out["mark_integrity"] = "unknown"
         out["mark_integrity_reason"] = "could not read a mark: %s" % exc
@@ -181,13 +193,14 @@ async def read_mark_now(row: Dict[str, Any]) -> Dict[str, Any]:
     verdict, reason = integrity_of(out["mark"], mark_as_of=read_at,
                                    bid=out.get("bid"), ask=out.get("ask"), now=read_at)
     # A wide leg is `wide` even when the net happens to look sane.
-    worst = out.get("worst_leg_spread_pct")
+    worst = out.get("worst_leg")
     if verdict == "ok" and worst is not None:
-        from models.mark_integrity import WIDE_SPREAD_PCT
-        if worst > WIDE_SPREAD_PCT:
+        from models.mark_integrity import (WIDE_SPREAD_MIN_ABS, WIDE_SPREAD_PCT, is_wide)
+        wp, wa = worst
+        if is_wide(wp, wa):
             verdict = "wide"
-            reason = ("the worst leg's book is %.0f%% of mid wide, over the %.0f%% bound"
-                      % (worst, WIDE_SPREAD_PCT))
+            reason = ("the worst leg's book is %.0f%% of mid and %s wide, over the %.0f%% / %s "
+                      "bounds" % (wp, wa, WIDE_SPREAD_PCT, WIDE_SPREAD_MIN_ABS))
     out["mark_integrity"] = verdict
     out["mark_integrity_reason"] = reason
     return out
