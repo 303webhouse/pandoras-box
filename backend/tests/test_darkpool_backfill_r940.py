@@ -100,9 +100,20 @@ def test_quarantine_is_stored_on_the_row_not_implied():
 # ── the three stops ──────────────────────────────────────────────────────
 
 def test_the_budget_numbers_are_the_ruled_ones():
-    assert bf.CALL_BUDGET_PER_UW_DAY == 2500
+    """R-IV.983(c) raised the allowance from 2,500 to 5,000 from the foreign reserve."""
+    assert bf.CALL_BUDGET_PER_UW_DAY == 5000
     assert bf.ACCOUNT_TOTAL_STOP == 30000
     assert bf.ALLOWANCE_THROUGH == date(2026, 10, 23)
+
+
+def test_the_budget_HAS_ONE_AUTHOR_and_it_is_the_governor():
+    """Raising it under R-IV.983(c) required editing TWO places -- this job's constant and
+    FOREIGN_RESERVE_QUOTAS -- and whichever was lower would have silently capped the other.
+    They are the same fact, so the job now READS the governor."""
+    from integrations.uw_governor import quota_for
+
+    assert bf._budget_from_governor() == quota_for(bf.CALLER)[0]
+    assert quota_for(bf.CALLER)[0] == 5000
 
 
 def test_the_call_budget_actually_stops():
@@ -221,7 +232,7 @@ def test_the_caller_tag_is_its_own():
     assert bf.CALLER == "darkpool_backfill_triton"
     from integrations.uw_governor import FOREIGN_RESERVE_QUOTAS, quota_for
     assert bf.CALLER in FOREIGN_RESERVE_QUOTAS
-    assert quota_for(bf.CALLER)[0] == 2500
+    assert quota_for(bf.CALLER)[0] == 5000      # R-IV.983(c), raised from 2,500
 
 
 def test_the_hubs_own_quota_table_is_untouched():
@@ -299,7 +310,11 @@ def test_the_backfill_is_EXEMPT_from_the_off_hours_haircut():
 
     assert OFF_HOURS_FACTOR_BY_CALLER.get(bf.CALLER) == 1.0
     off_hours = datetime(2026, 10, 12, 19, 30, tzinfo=ZoneInfo("America/New_York"))
-    assert effective_quota(bf.CALLER, off_hours)[0] == 2500
+    # The PROPERTY, not a second copy of the figure: off-hours must equal the full quota.
+    # Asserting a literal here meant R-IV.983(c)'s raise broke this test for a reason that had
+    # nothing to do with the exemption it is about.
+    from integrations.uw_governor import quota_for as _qf
+    assert effective_quota(bf.CALLER, off_hours)[0] == _qf(bf.CALLER)[0]
 
 
 def test_a_normal_STANDARD_caller_still_takes_the_haircut():
