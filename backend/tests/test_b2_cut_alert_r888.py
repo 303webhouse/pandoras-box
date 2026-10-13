@@ -30,11 +30,33 @@ ET = ZoneInfo("America/New_York")
 MON = datetime(2026, 10, 12, 10, 0, tzinfo=ET)
 
 
+def _post_close_mark_for(entry_date):
+    """16:30 ET on the row's OWN cut session -- i.e. after that session's 16:00 close.
+
+    Derived, not fixed: these tests span several entry dates and therefore several cuts, and a
+    single hard-coded instant would be post-close for some rows and pre-close for others. A
+    fixture that silently decides which tests reach their subject is worse than no fixture.
+    """
+    from datetime import datetime
+
+    from models.b2_cut_alert import ET, cut_session
+    cut = cut_session(entry_date)
+    if cut is None:
+        return None
+    return datetime(cut.year, cut.month, cut.day, 16, 30, tzinfo=ET)
+
+
 def _row(**over):
     r = {"bucket": "B2", "open_quantity": 2, "entry_date": MON,
          "expiry": date(2026, 11, 20), "realized_pnl": None, "unrealized_pnl": "50.00",
          "b2_cut_alerted_at": None}
     r.update(over)
+    # TA-152: the gate needs a mark at or after the cut session's close before any P&L is
+    # totalled. Supplied here so these tests keep testing the cut and the total, which is what
+    # they are about. The gate itself is covered by test_b2_post_close_mark_r940.
+    r.setdefault("mark", 0.5)
+    r.setdefault("mark_integrity", "ok")
+    r.setdefault("mark_as_of", _post_close_mark_for(r.get("entry_date")))
     return r
 
 

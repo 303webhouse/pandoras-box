@@ -120,6 +120,59 @@ def total_pnl(realized: Any, unrealized: Any) -> Tuple[Optional[Decimal], Option
     return (r + u), None
 
 
+NO_POST_CLOSE_MARK = "no post-close mark"
+
+
+def post_close_mark(cut: date, mark_as_of: Any, mark_integrity: Any,
+                    mark: Any = None) -> Tuple[bool, str]:
+    """May the cut be evaluated on this mark? (ok, reason) — TA-152, amending TA-141 §7.
+
+    TWO REQUIREMENTS, AND THE FIRST IS NOT "WITHIN 26 HOURS". TA's words: the mark must be
+    "TIMESTAMPED AT OR AFTER THE CUT SESSION'S CLOSE. Not 'within 26 hours,' not 'flagged ok' --
+    at or after the close." A mark taken at 09:17 ET on the cut day is a few hours old and
+    perfectly fresh by any display bound, and it still says nothing about where the position
+    closed. The 26-hour verdict is for display; this is the decision's own requirement
+    (Convention #38).
+
+    WHY THIS IS LOAD-BEARING RATHER THAN BELT-AND-BRACES: the hub's mark refreshes run at 09:17
+    and 16:47 ET, and the alert runs at 16:15 ET -- BETWEEN them. So the stored mark at alert
+    time is always the MORNING one, and without the job reading its own mark at run time every
+    B2 row would return UNDETERMINED every single day.
+
+    The second requirement is TA-151's: a `wide` or `unknown` mark is not evidence. `stale` is
+    not consulted, because the first requirement already subsumes it -- a mark at or after
+    today's close cannot be 26 hours old.
+    """
+    if mark is None:
+        return False, "%s: no mark was read for the cut session %s" % (NO_POST_CLOSE_MARK, cut)
+    if mark_as_of is None:
+        return False, "%s: the mark carries no timestamp, so it cannot be placed relative to "                       "the %s close" % (NO_POST_CLOSE_MARK, cut)
+    ts = mark_as_of
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            return False, "%s: mark timestamp %r is not a timestamp" % (NO_POST_CLOSE_MARK, ts)
+    if not isinstance(ts, datetime):
+        return False, "%s: mark timestamp %r is not a timestamp" % (NO_POST_CLOSE_MARK, ts)
+    if ts.tzinfo is None:
+        return False, "%s: mark timestamp %s has no timezone -- refusing to assume one" % (
+            NO_POST_CLOSE_MARK, ts.isoformat())
+
+    ts_et = ts.astimezone(ET)
+    hh, mm = MARKET_CLOSE_ET
+    close_et = datetime(cut.year, cut.month, cut.day, hh, mm, tzinfo=ET)
+    if ts_et < close_et:
+        return False, ("%s: the mark is from %s, BEFORE the %s close at %02d:%02d ET"
+                       % (NO_POST_CLOSE_MARK, ts_et.isoformat(), cut, hh, mm))
+
+    from models.mark_integrity import is_gateable
+    if not is_gateable(mark_integrity):
+        return False, ("mark or basis under integrity repair: the mark is flagged %r"
+                       % (mark_integrity,))
+    return True, "mark is from %s, at or after the %s close" % (ts_et.isoformat(), cut)
+
+
 def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, Any]:
     """The verdict for one position. Pure: no clock of its own beyond the injected `now`.
 
@@ -160,6 +213,19 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
         out["reason"] = "cut is the close of %s; not reached" % cut
         return out
 
+    # TA-152: the mark gates the evaluation, BEFORE any P&L is totalled. A verdict computed
+    # from a mark that predates the cut close is not a weaker answer -- it is an answer to a
+    # different question, and it would fire or spare a position on the wrong number.
+    ok, why = post_close_mark(cut, row.get("mark_as_of"), row.get("mark_integrity"),
+                              row.get("mark"))
+    if not ok:
+        out["verdict"] = UNDETERMINED
+        out["reason"] = "%s (position %s)" % (why, row.get("position_id") or "unnamed")
+        out["mark"] = row.get("mark")
+        out["mark_as_of"] = row.get("mark_as_of")
+        out["mark_integrity"] = row.get("mark_integrity")
+        return out
+
     total, undet = total_pnl(row.get("realized_pnl"), row.get("unrealized_pnl"))
     if total is None:
         out["verdict"] = UNDETERMINED
@@ -167,6 +233,9 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
         return out
 
     out["total_pnl"] = str(total)
+    out["mark"] = row.get("mark")
+    out["mark_as_of"] = row.get("mark_as_of")
+    out["mark_integrity"] = row.get("mark_integrity")
     if total > 0:
         out["verdict"] = PASS
         out["reason"] = "total %s is above zero at the cut" % total

@@ -2316,8 +2316,12 @@ async def update_position(position_id: str, req: UpdatePositionRequest, _=Depend
         # write zero: a zero P&L is a CLAIM that the position is flat, and it is
         # indistinguishable from a real flat position on every surface downstream.
         # The previous value is left standing, stamped with the reason.
+        # R-IV.935(c)1: the stored timestamp reaches the guard. Until it did, the 26-hour arm
+        # had never once fired -- a mark 18 days old evaluated MARK_OK, because "no timestamp
+        # supplied" is not "stale" and nothing ever supplied one.
         _mark_status, _mark_reason = evaluate_mark(
-            result.get("current_price"), result.get("entry_price"))
+            result.get("current_price"), result.get("entry_price"),
+            price_asof=result.get("price_updated_at"))
         # R-IV.462(b): the recompute belongs to the same request, so it carries the request's
         # actor. It ran after the edit's transaction had closed and was recorded as legacy-ui.
         async with pool.acquire() as conn, conn.transaction():
@@ -3487,8 +3491,12 @@ async def run_mark_to_market() -> dict:
                 # is not a price -- holds for a set whose value cannot change sign. A set that
                 # CAN has the payoff range as floor and ceiling (checked in mark_from_legs):
                 # T1's floor would refuse the very sign R-IV.463(c) keeps.
+                # R-IV.935(c)1. The mark was read in THIS pass, so the instant of the read
+                # is its timestamp. Passing the row's stored value here would judge a brand-new
+                # mark by the age of the one it replaces.
                 _verdict, _why = evaluate_mark(orientation * float(outcome["net_mark"]),
-                                               entry_price)
+                                               entry_price,
+                                               price_asof=datetime.now(timezone.utc))
                 if not mark_is_writable(_verdict):
                     outcome = {"ok": False, "reason": f"T1 mark guard (R-IV.394): {_why}"}
             async with pool.acquire() as conn, conn.transaction():
@@ -3696,7 +3704,8 @@ async def run_mark_to_market() -> dict:
             # spreads for weeks. A mark it rejects writes NOTHING to the price or the P&L: the
             # prior stands, stamped with the reason.
             _verdict, _why = ((MARK_REJECTED, refused) if refused
-                              else evaluate_mark(current_price, entry_price))
+                              else evaluate_mark(current_price, entry_price,
+                                                 price_asof=datetime.now(timezone.utc)))
             async with pool.acquire() as conn, conn.transaction():
                 await name_actor(conn, MARK_TO_MARKET)                       # R-IV.462(b)
                 if mark_is_writable(_verdict):
