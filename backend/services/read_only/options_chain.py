@@ -237,19 +237,45 @@ async def _fetch_and_compose(
     # Sort: strike ascending; calls before puts within same strike.
     contracts_out.sort(key=lambda r: (r["strike"], 0 if r["option_type"] == "call" else 1))
 
-    # uw_timestamp source flag (ATLAS M2) — explicit, not service-warning-only.
-    if uw_ts:
-        ts_source = "last_fill"
-    else:
-        uw_ts = datetime.now(timezone.utc).isoformat()
-        ts_source = "synthetic"
+    # ── spot + timestamp, TA-160 §2 / R-IV.978(c) ────────────────────────────────────────
+    #
+    # THE DEFECT THIS CLOSES: the chain returned spot: null with greeks_source "bs_computed",
+    # so EVERY greek was null, while hub_get_quote returned a live spot in the same minute
+    # (KRE 2026-12-18, HYG 2026-11-20).
+    #
+    # WHY THE OLD FALLBACK DID NOT SAVE IT: it called get_snapshot(), which needs a SECOND UW
+    # call -- /ohlc/1d under caller `ohlc_bars`, for the regular-session change -- and that
+    # caller has been observed governor-BLOCKED at 625/625. The fallback depended on a call
+    # that is frequently refused, while hub_get_quote succeeds on a single /stock-state.
+    #
+    # ONE CALL, BOTH FACTS, SAME INSTANT. /stock-state carries `close` (the spot hub_get_quote
+    # serves) AND `tape_time` (the vendor's own stamp). Reading them from one response means a
+    # spot from one moment can never be stamped with a time from another -- the leg-mismatch
+    # root this register has already closed once.
+    spot_source = "chain" if underlying_price is not None else "unavailable"
+    state = None
+    if underlying_price is None or not uw_ts:
+        try:
+            from integrations.uw_api import _uw_request
+            resp = await _uw_request("/api/stock/%s/stock-state" % tkr, caller="snapshot")
+            if isinstance(resp, dict) and isinstance(resp.get("data"), dict):
+                state = resp["data"]
+        except Exception as exc:                                    # noqa: BLE001
+            logger.debug("options_chain: stock-state unavailable for %s: %s", tkr,
+                         type(exc).__name__)
 
-    # Spot fallback: UW /option-contracts sometimes omits underlying_asset.price
-    # even when the chain itself is healthy (observed 2026-05-29 on SPY). Without
-    # spot, BS Greeks are all-null for every contract — defeating Tier 2. Fall back
-    # to get_snapshot().lastTrade.p (already cached via "quote" TTL in uw_api_cache).
-    spot_source = "chain"
+    if underlying_price is None and state:
+        # EXACTLY hub_get_quote's source: /stock-state field `close`.
+        px = _safe_float(state.get("close"))
+        if px is not None and px > 0:
+            underlying_price = px
+            spot_source = "stock_state"
+            logger.info("options_chain: spot missing from chain for %s — took /stock-state "
+                        "close (%.4f), the same source hub_get_quote serves", tkr, px)
+
     if underlying_price is None:
+        # Last resort, and it may itself be blocked; kept because when it DOES answer it is a
+        # real price, and a chain with a spot beats a chain with none.
         try:
             snap = await get_snapshot(tkr)
             if snap:
@@ -263,6 +289,24 @@ async def _fetch_and_compose(
                     )
         except Exception as exc:
             logger.debug("options_chain: snapshot fallback failed for %s: %s", tkr, exc)
+
+    if underlying_price is None:
+        # HONEST, as the ruling requires: no spot, and the field says which sources were asked.
+        spot_source = "unavailable: chain, /stock-state and snapshot all gave no price"
+        logger.warning("options_chain: NO spot for %s — every BS greek will be null", tkr)
+
+    # uw_timestamp source flag (ATLAS M2), now naming the VENDOR's stamp where one exists
+    # (R-IV.978(c), fix-first #2). "synthetic" is gone: a server clock presented under a name
+    # that does not say so is indistinguishable from a vendor reading, which is the whole
+    # absent-vs-measured collapse this register keeps filing.
+    if uw_ts:
+        ts_source = "last_fill"
+    elif state and state.get("tape_time"):
+        uw_ts = str(state["tape_time"])
+        ts_source = "stock_state.tape_time"
+    else:
+        uw_ts = datetime.now(timezone.utc).isoformat()
+        ts_source = "server_time: NO vendor stamp available (not a vendor reading)"
 
     # Tier 2 — Black-Scholes Greeks. Computed after sort so underlying_price
     # is settled. time_to_expiry uses calendar days / 365 (v1: simplest correct

@@ -127,6 +127,12 @@ def export_bars1m() -> None:
             continue
         all_df = pd.concat(frames)
         all_df = all_df[~all_df.index.duplicated(keep="first")].sort_index()
+        # R-IV.973(c): say WHICH vendor every row came from. yfinance reaches back only ~30
+        # days, so older sessions arrive from UW's /ohlc/1m instead -- two vendors with
+        # different adjustment conventions, and a row that does not name its source cannot be
+        # reconciled against the other. Written here so the README's column list is TRUE of the
+        # files rather than a promise about them.
+        all_df["source"] = "yfinance"
         by_day = {}
         for ts, row in all_df.iterrows():
             by_day.setdefault(ts.date(), []).append((ts, row))
@@ -244,6 +250,49 @@ confirm against the vendor's own documentation before a published figure rests o
 **The two that matter most for a lit-price match:** `B` (average price) is not a price anyone
 traded at, and `Z` / `L` mean the timestamp cannot be trusted as the sequence — so a
 minute-bar join on `executed_at` will put them in the wrong minute.
+
+## `bars1m/` — 1-minute bar Parquet columns (R-IV.978(e))
+
+```
+F:\pandora-data\bars1m\<YYYY-MM-DD>\<TICKER>.parquet
+```
+
+One row per MINUTE. The **index** is a timezone-aware timestamp in **US/Eastern** (not UTC, and
+not naive) — the bar's OPENING minute. Columns, exactly as the source provides them:
+
+| column | meaning |
+|---|---|
+| *(index)* | tz-aware ET timestamp, the minute the bar opens |
+| `Open` / `High` / `Low` / `Close` | the minute's OHLC |
+| `Adj Close` | split/dividend-adjusted close |
+| `Volume` | shares in the minute |
+| `Dividends` | dividend on that bar, usually 0.0 |
+| `Stock Splits` | split factor on that bar, usually 0.0 |
+| `Capital Gains` | fund capital gains, usually 0.0 (present for ETFs) |
+| `source` | **`yfinance`** or **`uw`** — which vendor the bar came from |
+
+**EXTENDED HOURS ARE INCLUDED: 04:00–19:59 ET**, not just the regular session. A session is
+about 675 rows (≈275 pre-market, 390 regular, ≈10 after-hours), not 390. That matters because
+the dark-pool prints these are matched against run to 19:59 ET, so an RTH-only archive would
+leave every after-hours print with no lit price.
+
+**`source` is why this column exists.** yfinance reaches back only ~30 days, so older sessions
+come from UW's `/ohlc/1m` instead (R-IV.973(c)). The two are different vendors with different
+adjustment conventions, and a row that does not say which it came from cannot be reconciled
+against the other.
+
+## `bars1d/` — daily bar Parquet columns
+
+```
+F:\pandora-data\bars1d\<TICKER>.parquet
+```
+
+One row per CALENDAR DAY, seven days a week for crypto. Same OHLC columns as above, plus an
+explicit **`ticker`** column so a reader never has to infer which series a file holds.
+
+- `BTC-USD`: from **2017-01-01**
+- `ETH-USD`: from **2017-11-09** — yfinance holds nothing earlier, so this is not the same start
+  date as BTC and should not be assumed to be.
 
 ## 1-minute lit prices — READ THIS BEFORE PLANNING D5
 
