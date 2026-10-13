@@ -395,6 +395,118 @@ async def run(call_budget: int = CALL_BUDGET_PER_UW_DAY,
     return {"ok": True, "run_id": run_id, **summary}
 
 
+# ── R-IV.950(c): the nightly trigger ────────────────────────────────────────────────────────
+
+#: 20:30 ET, half an hour after the vendor's own day rolls at 20:00, so the fresh allowance is
+#: certainly available and the evening is not shared with the close-time collectors.
+NIGHTLY_START_ET = (20, 30)
+#: Retried until this hour, for the reason the nightly recompute records: a one-shot window
+#: loses a session permanently if the single attempt fails, and these sessions are unrepairable.
+NIGHTLY_RETRY_UNTIL_HOUR_ET = 23
+NIGHTLY_TICK_SECONDS = 60
+
+ALL_SECURED_SQL = """
+    SELECT count(*) AS secured
+      FROM darkpool_backfill_sessions
+     WHERE exhausted = TRUE AND prints_received > 0
+       AND ticker = ANY($1::text[]) AND session_date = ANY($2::date[])
+"""
+
+
+async def remaining_work(pool, names=CORE_NAMES, until_session: Optional[date] = None) -> dict:
+    """How much of the vendor's remaining window is NOT yet secured.
+
+    R-IV.950(c): the job stops itself once every session the vendor still holds is secured. That
+    has to be a MEASUREMENT, not a date arithmetic guess -- the vendor drops its oldest session
+    daily, so "every session it still holds" moves every night.
+    """
+    end = until_session or (datetime.now(timezone.utc).date() - timedelta(days=1))
+    sessions = trading_sessions(OLDEST_KNOWN_SESSION, end)
+    wanted = len(sessions) * len(names)
+    async with pool.acquire() as conn:
+        for stmt in DDL:
+            await conn.execute(stmt)
+        secured = await conn.fetchval(ALL_SECURED_SQL, list(names), sessions)
+    secured = int(secured or 0)
+    return {"wanted": wanted, "secured": secured, "remaining": max(0, wanted - secured),
+            "sessions": len(sessions), "names": len(names),
+            "complete": secured >= wanted}
+
+
+async def darkpool_backfill_loop() -> None:
+    """One-minute ticker that fires the backfill once per VENDOR day from 20:30 ET.
+
+    NEVER RAISES out of the loop: a collector that dies on one bad night stops collecting for
+    every night after it, and the sessions it would have taken are not recoverable.
+    """
+    from integrations.uw_spend_ledger import uw_day
+
+    try:
+        from database.postgres_client import get_postgres_client
+    except Exception:                                               # noqa: BLE001
+        logger.error("[dp-backfill] cannot import the pool; the nightly will not run",
+                     exc_info=True)
+        return
+
+    fired: set = set()
+    logger.info("[dp-backfill] nightly loop armed for %02d:%02d ET, retry until %02d:00 ET",
+                NIGHTLY_START_ET[0], NIGHTLY_START_ET[1], NIGHTLY_RETRY_UNTIL_HOUR_ET)
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            et = now.astimezone(_ET_ZONE())
+            today = datetime.now(timezone.utc).date()
+            # The allowance lapses on its own date, and the job refuses past it anyway.
+            if today > ALLOWANCE_THROUGH:
+                logger.info("[dp-backfill] allowance lapsed on %s; loop going quiet",
+                            ALLOWANCE_THROUGH.isoformat())
+                return
+            key = uw_day(now).isoformat()
+            in_window = ((et.hour, et.minute) >= NIGHTLY_START_ET
+                         and et.hour <= NIGHTLY_RETRY_UNTIL_HOUR_ET)
+            if in_window and key not in fired:
+                pool = await get_postgres_client()
+                work = await remaining_work(pool)
+                if work["complete"]:
+                    # Stops ITSELF, as ruled -- and says so once per vendor day rather than
+                    # every minute, so "nothing left to do" is visible without being noise.
+                    fired.add(key)
+                    logger.info("[dp-backfill] every session the vendor still holds is secured "
+                                "(%d of %d ticker-sessions); nothing to collect on UW day %s",
+                                work["secured"], work["wanted"], key)
+                else:
+                    logger.info("[dp-backfill] UW day %s: %d of %d ticker-sessions secured, "
+                                "%d remaining -- starting", key, work["secured"],
+                                work["wanted"], work["remaining"])
+                    out = await run()
+                    # SUCCESS IS RECORDED ONLY AFTER A RUN THAT COMPLETED. A failed pass marked
+                    # as fired is one of the two ways the nightly recompute used to lose a
+                    # session, and these sessions cannot be re-collected later.
+                    if out.get("ok"):
+                        fired.add(key)
+                        logger.info("[dp-backfill] UW day %s done: %s", key,
+                                    {k: out.get(k) for k in
+                                     ("oldest_secured", "newest_secured",
+                                      "ticker_sessions_exhausted", "calls_spent",
+                                      "stop_reason")})
+                    else:
+                        logger.error("[dp-backfill] UW day %s run refused: %s -- will retry",
+                                     key, out.get("reason"))
+        except Exception as exc:                                    # noqa: BLE001
+            logger.error("[dp-backfill] nightly tick failed (will retry): %s: %s",
+                         type(exc).__name__, exc)
+        await asyncio.sleep(NIGHTLY_TICK_SECONDS)
+
+
+def _ET_ZONE():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/New_York")
+    except ImportError:                                             # pragma: no cover
+        import pytz
+        return pytz.timezone("America/New_York")
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

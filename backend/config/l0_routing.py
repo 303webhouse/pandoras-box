@@ -227,6 +227,37 @@ def should_divert(decision: Dict[str, Any]) -> bool:
 # ≥2-week "zero keepers lost" shadow window validated. Rows with no tag
 # (pre-gate history — NOT the crypto path, which routes through the chokepoint since the
 # log_signal bypass was demoted; see the corrected scope note above) COALESCE to keep.
+# ── R-IV.950(d): SURFACE NOTHING ────────────────────────────────────────────────────────────
+#
+# THE ONE AUTHOR OF WHAT SURFACES. Empty means no signal type reaches an actionable surface as a
+# trade idea. SPINE names a type here, and nothing else does.
+#
+# WHY AN ALLOWLIST AND NOT A LONGER DENYLIST. A denylist is only ever as complete as the last
+# ruling that extended it, and R-IV.945(c) demonstrated the gap: BEAR_CALL and BULLISH_TRADE
+# kept surfacing because nobody had named them, and the omission was invisible. An allowlist
+# fails the other way -- a type nobody has ruled on does not surface -- which is the disposition
+# the salvage plan asks for.
+#
+# THIS DOES NOT TOUCH STORAGE OR GRADING. Suppression here has only ever been a SURFACE verdict;
+# every type keeps being written and keeps being graded, the registered run-offs included.
+SURFACE_ALLOWLIST: frozenset[str] = frozenset()
+
+
+def _allowlist_sql() -> str:
+    """The SQL arm for the allowlist.
+
+    An EMPTY allowlist cannot be expressed as `signal_type IN ()` -- that is a syntax error, not
+    an empty set -- so it becomes `FALSE`, which is what "nothing surfaces" means. Every literal
+    is a bare identifier from a frozenset in this file; no user input reaches it.
+    """
+    types = sorted(SURFACE_ALLOWLIST)
+    if not types:
+        return "FALSE"
+    for t in types:
+        assert t.replace("_", "").isalnum(), "unsafe signal_type literal: %r" % (t,)
+    return "COALESCE(signal_type, '') IN (%s)" % ", ".join("'%s'" % t for t in types)
+
+
 def _suppressed_types_sql() -> str:
     """A SQL list literal of the currently-suppressed types. Built from SUPPRESS_ALWAYS, which
     is the one author, so a retirement cannot be half-applied. Every member is a bare
@@ -250,9 +281,18 @@ def _suppressed_types_sql() -> str:
 # after gate evaluation, and the tag preserves the verdict made at the time. That argument is
 # about not LOSING a suppression, so an OR cannot violate it -- this can only ever exclude
 # more, never less.
+# R-IV.950(d): the ALLOWLIST is now the governing arm -- a row surfaces only if its type is
+# named. The two older arms are KEPT beneath it rather than deleted, because each closed a real
+# failure and an allowlist that someone later fills must not silently reopen them:
+#   * the tag arm, for a type that DRIFTED after gate evaluation;
+#   * the current-type arm, for the 7,381 already-stored rows a retirement would otherwise miss.
+# With the allowlist empty the first arm decides everything; the rest start mattering the moment
+# SPINE names a type.
 _L0_SUPPRESS_PREDICATE = (
-    "(COALESCE((triggering_factors->'l0_shadow'->>'would_suppress')::boolean, false) = false"
-    " AND COALESCE(signal_type, '') NOT IN (%s))" % _suppressed_types_sql()
+    "(%s"
+    " AND COALESCE((triggering_factors->'l0_shadow'->>'would_suppress')::boolean, false) = false"
+    " AND COALESCE(signal_type, '') NOT IN (%s))"
+    % (_allowlist_sql(), _suppressed_types_sql())
 )
 
 
@@ -275,7 +315,11 @@ def _row_would_suppress(row: Any) -> bool:
     the SQL path about the same row, which is worse than either being wrong alone."""
     if not isinstance(row, dict):
         return False
-    if (row.get("signal_type") or "").strip() in SUPPRESS_ALWAYS:
+    st = (row.get("signal_type") or "").strip()
+    # R-IV.950(d): the allowlist governs. Not named -> does not surface.
+    if st not in SURFACE_ALLOWLIST:
+        return True
+    if st in SUPPRESS_ALWAYS:
         return True
     tf = row.get("triggering_factors")
     if isinstance(tf, str):
