@@ -90,8 +90,10 @@ class TestPhaethonIsShadowed:
         # fact — and it is the copy that would be forgotten: mine said 8 and broke the moment
         # R-IV.855(d)'s two registered types arrived. One author for the set; this test keeps
         # only what it is actually for, which is that PHAETHON's addition disturbed nothing.
-        for t in ("ARTEMIS_SHORT", "TRAPPED_SHORTS", "GOLDEN_TOUCH", "TWO_CLOSE_VOLUME",
-                  "DEATH_CROSS"):
+        # R-IV.945(c) retired FOUR of the five types this control used to name -- ARTEMIS_SHORT,
+        # TRAPPED_SHORTS, GOLDEN_TOUCH and TWO_CLOSE_VOLUME are all suppressed now. A control
+        # asserting the absence of types since retired proves nothing, so it names live ones.
+        for t in ("APIS_CALL", "KODIAK_CALL", "CIRCES_STEW", "DEATH_CROSS"):
             assert t not in SUPPRESS_ALWAYS, t
 
 

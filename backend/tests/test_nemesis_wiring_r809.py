@@ -236,15 +236,30 @@ class TestNemesisIsSuppressed:
         # THE EXACT SET, named in full — R-IV.861(c). LAB's form is better than the count I had
         # and replaces it: a named set fails on an unintended addition exactly as a count does,
         # and it also says WHICH types are suppressed, so the next reader does not have to go
-        # and look. Ten members: the six originals, NEMESIS_LONG (R-IV.809),
-        # BEARISH_BREAKDOWN/PHAETHON (R-IV.857(b)), and the two registered forward tests
-        # (R-IV.855(d)).
+        # and look.
+        #
+        # IT HAS NOW DONE THAT TWICE OVER: R-IV.945(c) added EIGHT members in one ruling and
+        # every one of them failed this assertion rather than slipping through. Eighteen
+        # members, each annotated with the ruling that put it there.
         assert SUPPRESS_ALWAYS == frozenset({
+            # the six originals
             "STRIKE_IB_BREAK", "HOLY_GRAIL_1H", "HOLY_GRAIL_15M", "PULLBACK_ENTRY",
-            "TRAPPED_LONGS", "ARTEMIS_LONG", "NEMESIS_LONG", "BEARISH_BREAKDOWN",
-            "WRR_LONG", "PHOENIX_WASHOUT"})
-        # And the types explicitly kept live stay out of it.
-        for t in ("ARTEMIS_SHORT", "TWO_CLOSE_VOLUME", "GOLDEN_TOUCH", "TRAPPED_SHORTS"):
+            "TRAPPED_LONGS", "ARTEMIS_LONG",
+            "NEMESIS_LONG",                      # R-IV.809
+            "BEARISH_BREAKDOWN",                 # PHAETHON, R-IV.857(b)
+            "WRR_LONG", "PHOENIX_WASHOUT",       # the two registered forward tests, R-IV.855(d)
+            # ── R-IV.945(c), the Olympus salvage retirements: EIGHT more ──────────────────
+            "GOLDEN_TOUCH",                      # MIDAS
+            "SELL_RIP_EMA", "SELL_RIP_VWAP", "SELL_RIP_EARLY",   # ACHILLES
+            "RESISTANCE_REJECTION",              # SISYPHUS, promoted from the conditional set
+            "ARTEMIS_SHORT",                     # a run-off: still stored and graded
+            "TRAPPED_SHORTS",                    # HECTOR
+            "TWO_CLOSE_VOLUME",                  # PERSEPHONE
+        })
+        # And the types still kept live stay out of it. R-IV.945(c) retired all four of the
+        # types this control used to name, so it now names ones that are actually still live --
+        # a control that asserts the absence of things since retired proves nothing.
+        for t in ("APIS_CALL", "KODIAK_CALL", "CIRCES_STEW", "FOOTPRINT_LONG"):
             assert t not in SUPPRESS_ALWAYS, t
 
 
