@@ -14,7 +14,7 @@ Protocol (all stamped before this file existed or was changed):
                                                                    session completeness)
   lab\\triton\\TRITON-FP-v1-AMENDMENT-4c-R-IV.981.md 324d086c...  (D1 adds 6, 9, L; linear quantiles;
                                                                    floor = kept AND D5-matched)
-  Field reference: lab\\triton\\F-README.md 8010d73d... (BUILD)
+  Field reference: lab\\triton\\F-README.md 0478cd78... (BUILD; bars1m columns added, R-IV.978(e))
 
 Modes:
   anchor  A0 (amendment 4 sec. 2): per-name median NBBO spread vs 0.02% x median print price, on the
@@ -25,8 +25,11 @@ Modes:
 
 Guards in code: seal + quarantine dropped first; ONLY 2026-09-01..2026-09-24 is read (the reserve,
 2026-09-25 on, is dropped before anything is computed); outputs refuse price/size/time columns.
-Prints are read in the vendor's own fields (F-README) through `from_vendor`; 1-minute bars through
-BAR_MAP, which stays open until BUILD names the bars1m/ columns.
+Prints are read in the vendor's own fields (F-README) through `from_vendor`. 1-minute bars are read
+as F-README states them (R-IV.985(b)): bars1m/<YYYY-MM-DD>/<TICKER>.parquet, one row per minute,
+a tz-aware US/Eastern index = the minute the bar OPENS, columns Open/High/Low/Close/.../source,
+04:00-19:59 ET included. The ticker comes from the file name. Bars are clipped to 09:30-16:00 ET,
+because the D5/D6 window is clipped to the regular session (amendment 2 sec. 4).
 
 Usage (QUERY):
   python scripts/lab/triton_census.py anchor <prints_glob> <complete_csv> <out_dir>
@@ -63,8 +66,8 @@ WINDOWS = {"T0945": (time(9, 45), time(16, 0)), "T1000": (time(10, 0), time(16, 
 FLOORS = ("F500K", "FADV", "FRUN", "F100K")
 NORMAL_COLUMNS = ("ticker", "t_utc", "price", "size", "nbbo_bid", "nbbo_ask",
                   "canceled", "ext_hours", "excluded_condition")
-BAR_COLUMNS = ("ticker", "t_utc", "high", "low", "close")         # 1-minute bars, t_utc = bar start
-BAR_MAP = None                      # bars1m/ column names: open until BUILD states them
+BAR_COLUMNS = ("ticker", "t_utc", "high", "low", "close", "source")   # normalised; t_utc = bar open
+BAR_COLUMNS_README = ("High", "Low", "Close", "source")     # F-README 0478cd78..., bars1m/
 TAU_PROVENANCE = "print-time NBBO, calibration sessions 09-01 -> 09-24, biased tight; decision at p75"
 VENDOR_FIELDS = ("ticker", "executed_at", "price", "size", "nbbo_bid", "nbbo_ask", "canceled",
                  "sale_cond_codes", "trade_code", "ext_hour_sold_codes", "trade_settlement", "tracking_id")
@@ -171,19 +174,56 @@ def d1_clean(df):
     return df.sort_values(["ticker", "t_et"], kind="stable")
 
 
+def load_bars(globpat):
+    """bars1m/<YYYY-MM-DD>/<TICKER>.parquet (F-README) -> BAR_COLUMNS. The index is tz-aware ET."""
+    files = sorted(glob.glob(globpat))
+    if not files:
+        raise SystemExit(f"no bar files match {globpat}")
+    parts = []
+    for f in files:
+        tk = os.path.splitext(os.path.basename(f))[0]
+        if tk not in CORE8:
+            continue
+        b = pd.read_parquet(f)
+        missing = [c for c in BAR_COLUMNS_README if c not in b.columns]
+        if missing:
+            raise SystemExit(f"{f}: bar columns missing {missing} (F-README 0478cd78...)")
+        idx = pd.DatetimeIndex(b.index)
+        if idx.tz is None:
+            raise SystemExit(f"{f}: bar index is not tz-aware (F-README says US/Eastern)")
+        parts.append(pd.DataFrame({"ticker": tk, "t_utc": idx.tz_convert("UTC"), "high": b["High"].to_numpy(float),
+                                   "low": b["Low"].to_numpy(float), "close": b["Close"].to_numpy(float),
+                                   "source": b["source"].astype(str).to_numpy()}))
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=list(BAR_COLUMNS))
+
+
 def bars_by_session(bars):
-    """{(ticker, session): (start_s, high, low, close)} for calibration sessions only."""
+    """{(ticker, session): (start_s, high, low, close)}: calibration sessions only, bars opening
+    09:30-15:59 ET only (the D5/D6 window is clipped to the regular session)."""
     if bars is None or not len(bars):
         return {}
     b = bars[bars.ticker.isin(CORE8)].copy()
-    b["t_et"], b["session"] = _et(b)
+    b["t_et"] = pd.to_datetime(b.t_utc, utc=True).dt.tz_convert("America/New_York")
+    b["session"] = b.t_et.dt.date
     b = b[in_calibration(b.session)]
+    tod = b.t_et.dt.time
+    b = b[(tod >= time(9, 30)) & (tod < time(16, 0))]
     out = {}
     for k, g in b.groupby(["ticker", "session"]):
         g = g.sort_values("t_et")
-        s = (g.t_et - g.t_et.dt.normalize()).dt.total_seconds().to_numpy()
-        out[k] = (s, g["high"].to_numpy(float), g["low"].to_numpy(float), g["close"].to_numpy(float))
+        s_ = (g.t_et - g.t_et.dt.normalize()).dt.total_seconds().to_numpy()
+        out[k] = (s_, g["high"].to_numpy(float), g["low"].to_numpy(float), g["close"].to_numpy(float))
     return out
+
+
+def bar_sources(bars):
+    """Calibration ticker-sessions with bars, by source (yfinance / uw), for the run metadata."""
+    if bars is None or not len(bars):
+        return {}
+    t = pd.to_datetime(bars.t_utc, utc=True).dt.tz_convert("America/New_York")
+    d = pd.DataFrame({"ticker": bars.ticker, "session": t.dt.date, "source": bars.source})
+    d = d[in_calibration(d.session)].drop_duplicates(["ticker", "session", "source"])
+    return d.groupby("source").size().to_dict()
 
 
 # ── A0: the tau anchor (aggregate only) ──────────────────────────────────────────────────────────
@@ -460,10 +500,9 @@ def run_anchor(prints_glob, complete_csv, out_dir):
 def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_dir):
     if not TAU_FINAL:
         raise SystemExit("tau is not final: run `anchor` first and record SPINE's confirmation (amendment 4/4a)")
-    if BAR_MAP is None:
-        raise SystemExit("BAR_MAP is not set: BUILD names the bars1m/ columns first (amendment 4a sec. 4)")
     df, n_dup, dropped = prepare_prints(_read_parquet(prints_glob), complete_set(complete_csv))
-    bars = bars_by_session(normalise(_read_parquet(bars_glob), BAR_MAP, BAR_COLUMNS))
+    braw = load_bars(bars_glob)
+    bars = bars_by_session(braw)
     adv_df = pd.read_csv(adv_csv, parse_dates=["session"])
     adv = {(r.ticker, r.session.date()): r.adv_dollars for r in adv_df.itertuples()}
     va = {}
@@ -475,7 +514,8 @@ def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_di
     _write(frames, out_dir, {"calibration": CALIBRATION, "tau_pct": TAU_PCT, "tau_provenance": TAU_PROVENANCE,
                              "seed": SEED, "n_shuffles": N_SHUFFLES, "keep_note": KEEP_LINE,
                              "pythia_label": PYTHIA_LABEL, "sessions_read": sorted({str(x) for x in df.session}),
-                             "sessions_with_bars": len(bars), "duplicate_tracking_ids_dropped": n_dup,
+                             "sessions_with_bars": len(bars), "bar_sessions_by_source": bar_sources(braw),
+                             "duplicate_tracking_ids_dropped": n_dup,
                              "incomplete_ticker_sessions_dropped": dropped,
                              "floor_counts": "post-D5 = kept by D4 AND D5-matched at tau "
                                              "(events_m4_d5: arm=real, kept=True, d5_matched); beside it: "
@@ -523,15 +563,32 @@ def _synthetic_vendor(rng):
             for k in range(2):                                # kept: 'F' sweep is not a D1 code
                 add(b0 + pd.Timedelta(minutes=230 + k * 3), 505.0, 5555, 504.99, 505.01, scc="F")
             rows.append(dict(rows[-1]))                       # an exact duplicate tracking_id
-            for m in range(390):
+            src = "uw" if sess < pd.Timestamp("2026-09-12") else "yfinance"
+            for m in range(-330, 630):                         # 04:00-19:59 ET, as F-README states
                 ts = b0 + pd.Timedelta(minutes=m)
                 if m in (92, 95):
-                    brows.append((tk, ts, 501.60, 501.25, 501.40))
+                    brows.append((tk, ts, 501.60, 501.25, 501.40, src))
                 elif 80 <= m <= 110:
-                    brows.append((tk, ts, 501.70, 501.35, 501.50))
+                    brows.append((tk, ts, 501.70, 501.35, 501.50, src))
+                elif -12 <= m < 0:                            # pre-market bars that would break D6
+                    brows.append((tk, ts, 501.30, 499.00, 499.00, src))
                 else:
-                    brows.append((tk, ts, 500.5, 499.5, 500.0))
+                    brows.append((tk, ts, 500.5, 499.5, 500.0, src))
     return pd.DataFrame(rows), pd.DataFrame(brows, columns=list(BAR_COLUMNS)), sessions
+
+
+def _write_readme_bars(braw, root):
+    """Write synthetic bars exactly in the F-README layout: <root>/<YYYY-MM-DD>/<TICKER>.parquet,
+    tz-aware ET index, Open/High/Low/Close/Adj Close/Volume/Dividends/Stock Splits/Capital Gains/source."""
+    t = pd.to_datetime(braw.t_utc, utc=True).dt.tz_convert("America/New_York")
+    b = braw.assign(t_et=t, d=t.dt.strftime("%Y-%m-%d"))
+    for (d, tk), g in b.groupby(["d", "ticker"]):
+        os.makedirs(os.path.join(root, d), exist_ok=True)
+        out = pd.DataFrame({"Open": g.close.values, "High": g.high.values, "Low": g.low.values,
+                            "Close": g.close.values, "Adj Close": g.close.values, "Volume": 1000.0,
+                            "Dividends": 0.0, "Stock Splits": 0.0, "Capital Gains": 0.0,
+                            "source": g.source.values}, index=pd.DatetimeIndex(g.t_et).tz_convert("America/New_York"))
+        out.to_parquet(os.path.join(root, d, f"{tk}.parquet"))
 
 
 def selftest():
@@ -620,6 +677,52 @@ def selftest():
         checks["end-to-end anchor via Parquet: runs, reads calibration only, writes aggregates"] = \
             meta["sessions_read"] == ["2026-09-02", "2026-09-03"] and os.path.exists(os.path.join(td, "out", "code_census.csv"))
     checks["`run` refuses while tau is not final"] = not TAU_FINAL
+    # bars read in the README layout; extended hours present on disk but clipped to RTH
+    with tempfile.TemporaryDirectory() as td:
+        _write_readme_bars(braw, os.path.join(td, "bars1m"))
+        lb = load_bars(os.path.join(td, "bars1m", "*", "*.parquet"))
+        checks["README bars: ticker from file name, tz-aware ET index read, XYZ skipped"] = \
+            set(lb.ticker) == {"SPY", "NVDA"} and len(lb) > 0
+        bs = bars_by_session(lb)
+        k = ("SPY", date(2026, 9, 2))
+        checks["README bars: extended hours on disk (~960 rows), clipped to 390 RTH bars"] = \
+            (lb[(lb.ticker == "SPY")].shape[0] // 4 >= 900) and len(bs[k][0]) == 390
+        checks["README bars: source tally exact (2 names x 2 calibration sessions, all uw)"] = \
+            bar_sources(lb) == {"uw": 4}
+        # an event at 09:31 ET with L = 499.00: only the clipped-off pre-market bars (09:18-09:29)
+        # have lows at 499.00; the RTH bars' lows are 499.50. With the clip, D5 must NOT match.
+        d5, d6 = lit(bs[k], 9 * 3600 + 31 * 60, 499.00, 0.10)
+        checks["pre-market bars cannot reach the D5/D6 window (clip holds)"] = d5 is False
+        s_, hi, lo, cl = bs[k]
+        checks["no bar before 09:30 ET survives the clip"] = float(s_.min()) >= 9.5 * 3600
+        # end to end: `run` through Parquet with tau forced final inside the test only
+        for tk, g in raw.groupby("ticker"):
+            os.makedirs(os.path.join(td, "dp", tk), exist_ok=True)
+            g.to_parquet(os.path.join(td, "dp", tk, "202609.parquet"), index=False)
+        pd.DataFrame([{"ticker": t_, "session": str(x.date()), "complete": (t_, x.date()) in complete}
+                      for t_ in CORE8 for x in sessions]).to_csv(os.path.join(td, "complete.csv"), index=False)
+        pd.DataFrame([{"ticker": t_, "session": str(x.date()), "adv_dollars": 2.5e9}
+                      for t_ in CORE8 for x in sessions]).to_csv(os.path.join(td, "adv.csv"), index=False)
+        pd.DataFrame([{"ticker": t_, "session": str(x.date()), "vah": 502.0, "val": 501.0}
+                      for t_ in CORE8 for x in sessions]).to_csv(os.path.join(td, "va.csv"), index=False)
+        pd.DataFrame({"date": ["2026-09-03"], "event": ["initial_claims"], "source": ["test"]}).to_csv(
+            os.path.join(td, "macro.csv"), index=False)
+        g_ = globals()
+        saved = (g_["TAU_FINAL"], g_["N_SHUFFLES"])
+        g_["TAU_FINAL"], g_["N_SHUFFLES"] = True, 100
+        try:
+            run(os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "bars1m", "*", "*.parquet"),
+                os.path.join(td, "adv.csv"), os.path.join(td, "va.csv"), os.path.join(td, "complete.csv"),
+                os.path.join(td, "macro.csv"), os.path.join(td, "out"))
+        finally:
+            g_["TAU_FINAL"], g_["N_SHUFFLES"] = saved
+        meta = json.load(open(os.path.join(td, "out", "meta.json")))
+        files = set(os.listdir(os.path.join(td, "out")))
+        checks["end-to-end `run` via Parquet: all outputs written, calibration only"] = \
+            {"per_ticker_session.csv", "events_m4_d5.csv", "d6_direction.csv", "pythia_loc.csv",
+             "macro_day.csv"} <= files and meta["sessions_read"] == ["2026-09-02", "2026-09-03"]
+        checks["end-to-end `run`: bar sessions by source recorded"] = bool(meta["bar_sessions_by_source"])
+        checks["tau gate restored after the test"] = TAU_FINAL is False
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
     return 0 if all(checks.values()) else 1
