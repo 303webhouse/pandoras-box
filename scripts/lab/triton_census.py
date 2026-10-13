@@ -12,6 +12,8 @@ Protocol (all stamped before this file existed or was changed):
                                                                    p75; floor counts post-D5 events;
                                                                    README field map, D1 codes, dedup,
                                                                    session completeness)
+  lab\\triton\\TRITON-FP-v1-AMENDMENT-4c-R-IV.981.md 324d086c...  (D1 adds 6, 9, L; linear quantiles;
+                                                                   floor = kept AND D5-matched)
   Field reference: lab\\triton\\F-README.md 8010d73d... (BUILD)
 
 Modes:
@@ -66,10 +68,10 @@ BAR_MAP = None                      # bars1m/ column names: open until BUILD sta
 TAU_PROVENANCE = "print-time NBBO, calibration sessions 09-01 -> 09-24, biased tight; decision at p75"
 VENDOR_FIELDS = ("ticker", "executed_at", "price", "size", "nbbo_bid", "nbbo_ask", "canceled",
                  "sale_cond_codes", "trade_code", "ext_hour_sold_codes", "trade_settlement", "tracking_id")
-# amendment 4a sec. 3: D1 exclusions -- CTA/UTP single-letter codes and vendor word forms
-D1_LETTERS = {"T", "U", "Z", "B", "P", "V", "4", "7"}
+# amendments 4a sec. 3 + 4c sec. 1: D1 exclusions -- CTA/UTP single-letter codes and vendor word forms
+D1_LETTERS = {"T", "U", "Z", "B", "P", "V", "4", "7", "6", "9", "L"}
 D1_WORDS = ("extended_hours", "out_of_sequence", "average_price", "prior_reference", "contingent",
-            "derivative", "qualified_contingent")
+            "derivative", "qualified_contingent", "corrected", "sold_last", "late_report")
 PYTHIA_LABEL = "PYTHIA v2.5 levels, binning under review"
 KEEP_LINE = "per-run keep admits about 29% of chance runs in synthetic noise"
 VA_EDGE_FRACTION = 0.25             # PYTHIA-LOC v1 (0b406425...): gate v2's directional location
@@ -195,8 +197,8 @@ def anchor(df):
         spr = pd.Series((ask - bid)[ok])
         med_px = float(np.median(px))
         has = len(spr) > 0
-        med_spr = float(spr.quantile(0.5)) if has else float("nan")
-        p75_spr = float(spr.quantile(0.75)) if has else float("nan")
+        med_spr = float(spr.quantile(0.5, interpolation="linear")) if has else float("nan")    # 4c sec. 2
+        p75_spr = float(spr.quantile(0.75, interpolation="linear")) if has else float("nan")
         rows.append({"ticker": tk, "n_prints": int(len(g)), "n_with_nbbo": int(ok.sum()),
                      "median_spread": round(med_spr, 6), "p75_spread": round(p75_spr, 6),
                      "median_print_price": round(med_px, 4), "tau_pct_x_median": round(TAU_PCT * med_px, 6),
@@ -476,7 +478,9 @@ def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_di
                              "sessions_with_bars": len(bars), "duplicate_tracking_ids_dropped": n_dup,
                              "incomplete_ticker_sessions_dropped": dropped,
                              "floor_counts": "post-D5 = kept by D4 AND D5-matched at tau "
-                                             "(events_m4_d5: arm=real, kept=True, d5_matched)"})
+                                             "(events_m4_d5: arm=real, kept=True, d5_matched); beside it: "
+                                             "D5-matched over all real runs (kept True + False) and the "
+                                             "post-D4 kept count (per_ticker_session)"})
 
 
 # ── self-test on SYNTHETIC data only ────────────────────────────────────────────────────────────
@@ -512,6 +516,10 @@ def _synthetic_vendor(rng):
                 add(b0 + pd.Timedelta(minutes=210 + k), 503.0, 9999, 0, 0, tc="qualified_contingent_trade")
             for k in range(3):                                # D1: extended-hours code
                 add(b0 + pd.Timedelta(minutes=220 + k), 504.0, 6666, 0, 0, ext="extended_hours_trade")
+            add(b0 + pd.Timedelta(minutes=240), 506.0, 4444, 0, 0, scc="6")      # 4c: correction
+            add(b0 + pd.Timedelta(minutes=241), 506.0, 4445, 0, 0, scc="@ 9")    # 4c: correction
+            add(b0 + pd.Timedelta(minutes=242), 506.0, 4446, 0, 0, scc="L")      # 4c: sold last
+            add(b0 + pd.Timedelta(minutes=243), 506.0, 4447, 0, 0, tc="sold_last")
             for k in range(2):                                # kept: 'F' sweep is not a D1 code
                 add(b0 + pd.Timedelta(minutes=230 + k * 3), 505.0, 5555, 504.99, 505.01, scc="F")
             rows.append(dict(rows[-1]))                       # an exact duplicate tracking_id
@@ -544,6 +552,11 @@ def selftest():
     checks["D1: word form 'qualified_contingent_trade' dropped"] = not (df["size"] == 9999).any()
     checks["D1: ext_hour_sold_codes non-empty dropped"] = not (df["size"] == 6666).any()
     checks["non-D1 code 'F' (sweep) kept"] = bool((df["size"] == 5555).any())
+    checks["4c: corrections 6 / 9 and sold-last L (letter and word) dropped"] = \
+        not df["size"].isin([4444, 4445, 4446, 4447]).any()
+    checks["4c: quantiles are linear (median of 1,2,3,10 = 2.5; p75 = 4.75)"] = \
+        pd.Series([1.0, 2, 3, 10]).quantile(0.5, interpolation="linear") == 2.5 and \
+        pd.Series([1.0, 2, 3, 10]).quantile(0.75, interpolation="linear") == 4.75
     checks["reserve bars dropped at load"] = not any(k[1] == date(2026, 9, 28) for k in bars_by_session(braw))
     A0, dec = anchor(df)
     checks["A0: exact median and p75 present"] = {"median_spread", "p75_spread"} <= set(A0.columns)
@@ -569,6 +582,9 @@ def selftest():
     M = out["events_m4_d5"]
     full = M[(M.arm == "real") & (M.kept == True) & (M.floor == "FADV") & (M.window == "NOGATE")]  # noqa: E712
     checks["post-D5 (kept AND D5-matched) count available for the floor"] = bool(len(full) and full.d5_matched.sum() >= 1)
+    allr = M[(M.arm == "real") & (M.floor == "FADV") & (M.window == "NOGATE")]
+    checks["beside it: D5-matched over ALL real runs (kept and not kept)"] = \
+        bool(len(allr) and allr.d5_matched.sum() >= full.d5_matched.sum())
     D6 = out["d6_direction"]
     b = D6[(D6.arm == "real") & (D6.floor == "FADV") & (D6.window == "NOGATE") & (D6.tolerance == "tau")]
     checks["D6 = BUYER on the planted run"] = bool(len(b) and (b[b.d6 == "BUYER"].events.sum() >= 1))
