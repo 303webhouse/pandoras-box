@@ -115,6 +115,30 @@ async def cache_set(endpoint_type: str, key: str, data: Any) -> None:
         logger.debug("Cache set failed for %s: %s", key, e)
 
 
+def _vendor_day_str() -> str:
+    """The VENDOR's day for the counter keys — R-IV.950(b). Resets 20:00 America/New_York,
+    DST-aware, whatever timezone the calling machine runs in.
+
+    NOT `date.today()`, which is what every counter key used to use. That is the LOCAL calendar
+    date of the calling process, so one budget had three boundaries: UTC on Railway, Mountain on
+    a local run, and 20:00 ET in the spend ledger. A local batch at 18:30 MT read the 10-12
+    bucket -- already full -- while the app had rolled to 10-13 two and a half hours earlier.
+
+    `uw_spend_ledger.uw_day` is the ONE author of this boundary; this asks it rather than
+    restating the rule. Deferred import, as `record` already is below, so no cycle.
+
+    Fails back to the UTC date rather than raising: a counter key that cannot be built would
+    take the governor's whole instrument down, and an unmeasured budget must not become an
+    outage of its own.
+    """
+    try:
+        from integrations.uw_spend_ledger import uw_day
+        return uw_day().isoformat()
+    except Exception:                                               # noqa: BLE001
+        from datetime import datetime as _dt, timezone as _tz
+        return _dt.now(_tz.utc).date().isoformat()
+
+
 async def increment_daily_counter(caller: str = "untagged") -> int:
     """Increment daily request counter. Returns current count.
 
@@ -133,7 +157,7 @@ async def increment_daily_counter(caller: str = "untagged") -> int:
         return 0
     try:
         from datetime import date
-        today_str = date.today().isoformat()
+        today_str = _vendor_day_str()
         day_key = f"uw:daily_requests:{today_str}"
         caller_key = f"uw:daily_requests_by_caller:{today_str}"
         count = await redis.incr(day_key)
@@ -192,7 +216,7 @@ async def increment_429_counter(caller: str = "untagged") -> None:
         return
     try:
         from datetime import date
-        today_str = date.today().isoformat()
+        today_str = _vendor_day_str()
         key = f"uw:daily_429s_by_caller:{today_str}"
         await redis.hincrby(key, caller, 1)
         # Expire is idempotent in Redis — setting it on every increment is
@@ -221,7 +245,7 @@ async def get_caller_count_or_none(caller: str) -> Optional[int]:
         return None
     try:
         from datetime import date
-        key = f"uw:daily_requests_by_caller:{date.today().isoformat()}"
+        key = f"uw:daily_requests_by_caller:{_vendor_day_str()}"
         v = await redis.hget(key, caller)
         return int(v) if v else 0
     except Exception:
@@ -240,7 +264,7 @@ async def get_caller_count(caller: str) -> int:
         return 0
     try:
         from datetime import date
-        key = f"uw:daily_requests_by_caller:{date.today().isoformat()}"
+        key = f"uw:daily_requests_by_caller:{_vendor_day_str()}"
         v = await redis.hget(key, caller)
         return int(v) if v else 0
     except Exception:
@@ -259,7 +283,7 @@ async def get_counts_by_caller() -> dict:
         return empty
     try:
         from datetime import date
-        today_str = date.today().isoformat()
+        today_str = _vendor_day_str()
         req_key = f"uw:daily_requests_by_caller:{today_str}"
         err_key = f"uw:daily_429s_by_caller:{today_str}"
         req = await redis.hgetall(req_key) or {}
@@ -290,8 +314,10 @@ async def get_daily_count() -> int:
     if not redis:
         return 0
     try:
-        from datetime import date
-        day_key = f"uw:daily_requests:{date.today().isoformat()}"
+        # R-IV.950(b): the VENDOR's day, like every other counter key. This one was missed on
+        # the first pass because its assignment form differs from the rest -- which is exactly
+        # how a budget ends up with two boundaries again.
+        day_key = f"uw:daily_requests:{_vendor_day_str()}"
         val = await redis.get(day_key)
         return int(val) if val else 0
     except Exception:

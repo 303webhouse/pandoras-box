@@ -921,6 +921,18 @@ async def lifespan(app: FastAPI):
     from jobs.qqq_sma_watch import qqq_sma_watch_loop
     qqq_sma_task = asyncio.create_task(qqq_sma_watch_loop())  # R-IV.193 D1 pause rule: QQQ vs computed 200-SMA
 
+    # Dark-pool BACKFILL for the TRITON census (R-IV.950(c)). Nightly at 20:30 ET, half an hour
+    # after the vendor's own day rolls at 20:00 so the fresh allowance is certainly there.
+    # Logged at ERROR on failure, like Hermes below and for the same reason: the vendor drops
+    # its oldest session every trading day, so a collector that silently failed to START is the
+    # one failure nobody would notice until the data was already gone.
+    try:
+        from jobs.darkpool_backfill import darkpool_backfill_loop
+        darkpool_backfill_task = asyncio.create_task(darkpool_backfill_loop())
+        logger.info("✅ dark-pool backfill nightly armed (20:30 ET)")
+    except Exception as e:
+        logger.error("❌ dark-pool backfill nightly did NOT start: %s", e, exc_info=True)
+
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
     # strip (yfinance, zero UW).
     try:

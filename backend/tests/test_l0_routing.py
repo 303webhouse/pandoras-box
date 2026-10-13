@@ -2,6 +2,7 @@
 
 import importlib
 
+import ast
 import pytest
 
 import config.l0_routing as l0
@@ -172,12 +173,17 @@ def test_should_divert_true_only_under_enforce(monkeypatch):
 
 # --- a retirement must reach rows that ALREADY EXIST ---------------------
 
-def test_the_filter_excludes_a_retired_type_even_with_a_KEEP_tag():
+def test_the_filter_excludes_a_retired_type_even_with_a_KEEP_tag(monkeypatch):
     """MEASURED, not reasoned. After R-IV.945(c) added eight types, all eight STILL surfaced on
     /api/trade-ideas: 7,381 active rows carried no suppress tag -- pre-gate rows COALESCE to
     keep by design -- and `expires_at` was NULL for four of the types, so those rows would have
     surfaced for ever. A retirement that only reaches rows created after it is not a
     retirement."""
+    # The allowlist is pinned OPEN for these types, because R-IV.950(d) emptied it and with it
+    # empty every row is excluded -- which would make this test pass while measuring nothing.
+    # What is under test is the RETIREMENT arm, so the allowlist must not be what decides.
+    monkeypatch.setattr(l0, "SURFACE_ALLOWLIST", frozenset({
+        "SELL_RIP_EMA", "TRAPPED_SHORTS", "ARTEMIS_SHORT", "CIRCES_STEW"}))
     rows = [
         {"signal_type": "SELL_RIP_EMA", "triggering_factors": {}},
         {"signal_type": "TRAPPED_SHORTS", "triggering_factors": None},
@@ -220,3 +226,67 @@ def test_the_type_list_in_the_sql_is_built_from_the_one_author():
     assert sorted(x.strip().strip("'") for x in clause.split(",")) == sorted(l0.SUPPRESS_ALWAYS)
     for t in l0.SUPPRESS_ALWAYS:
         assert t.replace("_", "").isalnum(), t
+
+
+# --- R-IV.950(d) SURFACE NOTHING: an empty allowlist ---------------------
+
+def test_the_surface_allowlist_is_EMPTY():
+    """R-IV.950(d). SPINE names a type here and nothing else does."""
+    assert l0.SURFACE_ALLOWLIST == frozenset()
+
+
+@pytest.mark.parametrize("st", [
+    "CIRCES_STEW", "APIS_CALL", "KODIAK_CALL", "FOOTPRINT_LONG",
+    "BEAR_CALL", "BULLISH_TRADE", "SCOUT_ALERT",     # the ones a denylist kept missing
+    "GOLDEN_TOUCH", "ARTEMIS_SHORT", "SOME_BRAND_NEW_TYPE",
+])
+def test_NOTHING_surfaces_including_types_nobody_ruled_on(st):
+    """WHY THE INVERSION. A denylist is only ever as complete as the last ruling that extended
+    it, and R-IV.945(c) showed the gap: BEAR_CALL and BULLISH_TRADE kept surfacing because
+    nobody had named them. They are not even strategies -- they are the direction labels
+    `process_sniper_signal` and `process_generic_signal` assign, so the generic handler would
+    mint them for ANY unrecognised TradingView alert. No denylist could anticipate that."""
+    assert l0._row_would_suppress({"signal_type": st}) is True
+    assert l0.l0_enforce_filter_rows([{"signal_type": st, "triggering_factors": {}}]) == []
+
+
+def test_an_empty_allowlist_becomes_FALSE_and_not_broken_sql():
+    """`signal_type IN ()` is a SYNTAX ERROR, not an empty set. An allowlist that emitted it
+    would take down every actionable read rather than emptying it."""
+    where = l0.l0_enforce_where_clause()
+    assert where.startswith("(FALSE AND ")
+    assert "IN ()" not in where
+
+
+def test_a_named_type_WOULD_surface_once_SPINE_names_one(monkeypatch):
+    """The control. An allowlist that could never admit anything is not an allowlist, and
+    nothing here would detect the difference while it is empty."""
+    monkeypatch.setattr(l0, "SURFACE_ALLOWLIST", frozenset({"CIRCES_STEW"}))
+    assert l0._row_would_suppress({"signal_type": "CIRCES_STEW"}) is False
+    assert l0._row_would_suppress({"signal_type": "APIS_CALL"}) is True
+
+
+def test_a_named_type_is_STILL_refused_if_its_own_tag_says_suppress(monkeypatch):
+    """The older arms are kept BENEATH the allowlist, so filling the allowlist cannot silently
+    reopen what they closed: a drifted tag still suppresses."""
+    monkeypatch.setattr(l0, "SURFACE_ALLOWLIST", frozenset({"APIS_CALL"}))
+    drifted = {"signal_type": "APIS_CALL",
+               "triggering_factors": {"l0_shadow": {"would_suppress": True}}}
+    assert l0._row_would_suppress(drifted) is True
+
+
+def test_a_named_type_that_is_ALSO_retired_is_still_refused(monkeypatch):
+    """Same reason: the retirement arm survives underneath."""
+    monkeypatch.setattr(l0, "SURFACE_ALLOWLIST", frozenset({"ARTEMIS_SHORT"}))
+    assert l0._row_would_suppress({"signal_type": "ARTEMIS_SHORT"}) is True
+
+
+def test_storage_and_grading_are_untouched():
+    """R-IV.950(d) is explicit: storage and grading are unchanged and the run-offs keep being
+    graded. The gate still never drops, and suppression remains a SURFACE verdict only."""
+    import inspect
+    doc = inspect.getsource(l0)
+    assert "actionable READ surfaces exclude" in doc
+    # the gate itself returns a decision; it has no path that discards a signal
+    tree = ast.parse(inspect.getsource(l0.evaluate_l0_gate))
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.Raise)]
