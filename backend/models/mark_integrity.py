@@ -49,6 +49,16 @@ from api.mark_guard import MARK_MAX_AGE  # noqa: E402
 #: allowed to be less liquid than an entry before it stops being evidence.
 WIDE_SPREAD_PCT = 50.0
 
+#: ...AND the book must be wider than this in absolute terms before `wide` is returned.
+#:
+#: WHY BOTH. A percentage alone is meaningless at tick-level prices: a 0.01/0.02 quote is the
+#: TIGHTEST book obtainable and still reads as 67% of its 1.5-cent mid. IBIT 980's short leg is
+#: exactly that, and a percentage-only rule flagged the spread `wide` -- holding the one cut
+#: TA-152's own fallback calls valid. Measured separation: the three real offenders are 0.35,
+#: 0.73 and 0.37 wide; the tick-level cases are 0.01. This sits 7x below the narrowest offender
+#: and 5x above the tick cases.
+WIDE_SPREAD_MIN_ABS = 0.05
+
 REASON_NO_MARK = "no mark recorded"
 REASON_NO_TIMESTAMP = "mark has no timestamp, so its age cannot be established"
 REASON_NAIVE = "mark timestamp has no timezone -- refusing to assume one"
@@ -89,6 +99,25 @@ def spread_pct(bid: Any, ask: Any) -> Optional[float]:
     return (a - b) / mid * 100.0
 
 
+def abs_spread(bid: Any, ask: Any) -> Optional[float]:
+    """ask - bid, or None when it cannot be computed."""
+    try:
+        b, a = float(bid), float(ask)
+    except (TypeError, ValueError):
+        return None
+    if b <= 0 or a <= 0 or a < b:
+        return None
+    return round(a - b, 6)
+
+
+def is_wide(width_pct: Optional[float], abs_width: Optional[float]) -> bool:
+    """BOTH bounds must be breached. The one author for this question, so the job's worst-leg
+    check and this module's own check cannot drift apart."""
+    if width_pct is None or abs_width is None:
+        return False
+    return width_pct > WIDE_SPREAD_PCT and abs_width > WIDE_SPREAD_MIN_ABS
+
+
 def evaluate(mark: Any, *, mark_as_of: Any = None, bid: Any = None, ask: Any = None,
              now: Optional[datetime] = None) -> Tuple[str, str]:
     """(verdict, reason). Pure, and NEVER raises.
@@ -105,10 +134,11 @@ def evaluate(mark: Any, *, mark_as_of: Any = None, bid: Any = None, ask: Any = N
         return UNKNOWN, "mark %r is not a number" % (mark,)
 
     width = spread_pct(bid, ask)
-    if width is not None and width > WIDE_SPREAD_PCT:
-        return WIDE, ("the book is %.0f%% of mid wide (bid %s / ask %s), over the %.0f%% bound "
-                      "-- not a price anyone could trade at" % (width, bid, ask,
-                                                                WIDE_SPREAD_PCT))
+    if width is not None and is_wide(width, abs_spread(bid, ask)):
+        return WIDE, ("the book is %.0f%% of mid wide and %s wide absolutely (bid %s / ask %s), "
+                      "over the %.0f%% / %s bounds -- not a price anyone could trade at"
+                      % (width, abs_spread(bid, ask), bid, ask, WIDE_SPREAD_PCT,
+                         WIDE_SPREAD_MIN_ABS))
 
     ts, err = _aware(mark_as_of)
     if err:

@@ -271,3 +271,51 @@ def test_the_run_time_mark_is_STORED_and_the_write_NAMES_ITSELF():
     assert "mark_as_of = $3" in src and "mark_integrity = $4" in src
     assert "set_config('app.actor'" in src
     assert "mark_as_of TIMESTAMPTZ" in job.DDL_MARK
+
+
+# ── a one-cent book is not a wide book ──────────────────────────────────
+
+def test_the_absolute_floor_exists_and_is_5_cents():
+    assert mi.WIDE_SPREAD_MIN_ABS == 0.05
+
+
+def test_IBITs_SHORT_LEG_IS_NOT_WIDE_and_this_is_why_the_floor_exists():
+    """FOUND BY RUNNING IT AGAINST THE BOOK, not by a test. IBIT 980's short leg quotes
+    0.01/0.02 -- one cent, the tightest book obtainable -- which is 67% of a 1.5-cent mid. A
+    percentage-only rule flagged the whole spread `wide` and would have held the one cut
+    TA-152's own fallback calls valid."""
+    assert mi.spread_pct(0.01, 0.02) > mi.WIDE_SPREAD_PCT      # the percentage DOES breach
+    assert mi.abs_spread(0.01, 0.02) == 0.01                   # ...but one tick
+    assert mi.is_wide(mi.spread_pct(0.01, 0.02), mi.abs_spread(0.01, 0.02)) is False
+
+
+@pytest.mark.parametrize("bid,ask,wide", [
+    (0.11, 0.46, True),    # ORCL 65P, zero volume: 123%, 0.35 absolute
+    (0.40, 1.13, True),    # KRE 60P:  95%, 0.73
+    (0.20, 0.57, True),    # HYG 76P:  96%, 0.37
+    (0.06, 0.07, False),   # IBIT 43P: 15%, 0.01
+    (0.01, 0.02, False),   # IBIT 38P: 67%, 0.01 -- one tick
+    (0.01, 0.09, True),    # a genuinely bad cheap book: 160%, 0.08
+])
+def test_both_bounds_must_breach(bid, ask, wide):
+    """The measured separation. The three real offenders are 0.35-0.73 wide; the tick cases are
+    0.01. The last row is the one that keeps the floor honest: a CHEAP book can still be wide,
+    so the floor must not amount to "cheap options are exempt"."""
+    assert mi.is_wide(mi.spread_pct(bid, ask), mi.abs_spread(bid, ask)) is wide
+
+
+def test_is_wide_is_the_ONE_author_of_the_question():
+    """The job's worst-leg check and this module's own check must not drift apart, so both ask
+    `is_wide`. Read from the parsed tree."""
+    from jobs import b2_cut_alert_job as job
+
+    src = inspect.getsource(job.read_mark_now)
+    assert "is_wide(" in src
+    # ...and the comparison is not re-implemented with a bare `>` beside it. (An earlier draft
+    # of this test ended in `or True`, which asserted nothing at all.)
+    assert "> WIDE_SPREAD_PCT" not in src
+
+
+def test_an_unmeasurable_book_is_not_wide():
+    assert mi.is_wide(None, 0.5) is False
+    assert mi.is_wide(99.0, None) is False
