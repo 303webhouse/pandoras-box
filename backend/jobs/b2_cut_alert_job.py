@@ -132,11 +132,17 @@ async def read_mark_now(row: Dict[str, Any]) -> Dict[str, Any]:
         if not ticker:
             raise ValueError("no ticker")
         if structure == "stock":
-            from integrations.uw_api import get_snapshot
-            snap = await get_snapshot(ticker)
-            if isinstance(snap, dict) and snap:
-                v = (snap.get("lastTrade") or {}).get("p")
-                out["mark"] = float(v) if v is not None else None
+            # R-IV.983: via the ONE author of "the current spot". This path used
+            # get_snapshot(), which needs a SECOND UW call (/ohlc/1d, caller `ohlc_bars`) that
+            # has been seen governor-BLOCKED -- and on 2026-10-13 that returned NO mark for
+            # TSLQ, so `mark_integrity` read "unknown" and under TA-161 the cut could not be
+            # evaluated at all. /stock-state answers in one call.
+            from integrations.spot_price import spot_now
+            px, src, vendor_ts = await spot_now(ticker)
+            out["mark"] = px
+            out["spot_source"] = src
+            if vendor_ts:
+                out["vendor_timestamp"] = vendor_ts
         elif "+" in structure:
             # A composite row holds two structures; pricing it as one would invent a contract.
             out["mark_integrity"] = "unknown"

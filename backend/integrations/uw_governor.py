@@ -649,7 +649,7 @@ async def account_shed(tier: str, now=None) -> Optional[str]:
 #: These entries are TEMPORARY by ruling: the allowance lapses after 2026-10-23 and the job
 #: refuses to run past it on its own (darkpool_backfill.ALLOWANCE_THROUGH).
 FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
-    "darkpool_backfill_triton": (2500, TIER_STANDARD),   # R-IV.921(b)3, through 2026-10-23
+    "darkpool_backfill_triton": (5000, TIER_STANDARD),   # R-IV.983(c), raised from 2,500; through 2026-10-23
 }
 
 

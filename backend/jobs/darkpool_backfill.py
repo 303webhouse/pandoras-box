@@ -45,7 +45,30 @@ PROVIDER = "unusual_whales"
 CORE_NAMES = ("SPY", "QQQ", "IWM", "SMH", "NVDA", "AAPL", "MSFT", "TSLA")
 
 #: R-IV.921(b)3. Enforced by this job; see the module docstring on why not via QUOTAS.
-CALL_BUDGET_PER_UW_DAY = 2500
+def _budget_from_governor() -> int:
+    """The per-vendor-day allowance, READ from the governor rather than restated here.
+
+    R-IV.983(c) raised it from 2,500 to 5,000, and raising it meant editing TWO places: this
+    job's own constant and `FOREIGN_RESERVE_QUOTAS`. Those are the SAME FACT -- how many calls
+    this caller may make in a vendor day -- and whichever of the two was lower would silently
+    cap the other. So the governor is the one author and this asks it.
+
+    Falls back to 5,000 only if the governor cannot be read, which would itself mean the job
+    cannot run.
+    """
+    try:
+        from integrations.uw_governor import quota_for
+        q, _tier = quota_for(CALLER)
+        return int(q)
+    except Exception:                                               # noqa: BLE001
+        return 5000
+
+
+#: Read at call time, not import time, so a governor change does not need a redeploy of this
+#: module to take effect. R-IV.983(c): 5,000 from the foreign reserve, through 2026-10-23,
+#: because only 3 of 17 calibration sessions were complete for all 8 names while the oldest
+#: roll off daily. Measured hub use is ~14,373/day, so the account stays near 19,400 of 40,000.
+CALL_BUDGET_PER_UW_DAY = 5000
 ACCOUNT_TOTAL_STOP = 30000
 ALLOWANCE_THROUGH = date(2026, 10, 23)
 
@@ -328,7 +351,7 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
             "quarantined": quarantined}
 
 
-async def run(call_budget: int = CALL_BUDGET_PER_UW_DAY,
+async def run(call_budget: Optional[int] = None,
               until_session: Optional[date] = None,
               names: Tuple[str, ...] = CORE_NAMES) -> dict:
     from database.postgres_client import get_postgres_client
@@ -339,6 +362,8 @@ async def run(call_budget: int = CALL_BUDGET_PER_UW_DAY,
         return {"ok": False, "reason": "the R-IV.921(b)3 allowance lapsed on %s"
                 % ALLOWANCE_THROUGH.isoformat()}
 
+    if call_budget is None:
+        call_budget = _budget_from_governor()
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         for stmt in DDL:

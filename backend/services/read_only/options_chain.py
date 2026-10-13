@@ -252,46 +252,22 @@ async def _fetch_and_compose(
     # serves) AND `tape_time` (the vendor's own stamp). Reading them from one response means a
     # spot from one moment can never be stamped with a time from another -- the leg-mismatch
     # root this register has already closed once.
+    # Via the ONE author of "the current spot" (R-IV.983). My first version of this fix
+    # inlined the /stock-state call here -- which made this a SECOND author of the same
+    # question while the B2 cut's stock path still had the old broken one. Same root cause,
+    # two call sites, one fixed: exactly the shape this register keeps filing.
     spot_source = "chain" if underlying_price is not None else "unavailable"
-    state = None
+    vendor_ts: Optional[str] = None
     if underlying_price is None or not uw_ts:
-        try:
-            from integrations.uw_api import _uw_request
-            resp = await _uw_request("/api/stock/%s/stock-state" % tkr, caller="snapshot")
-            if isinstance(resp, dict) and isinstance(resp.get("data"), dict):
-                state = resp["data"]
-        except Exception as exc:                                    # noqa: BLE001
-            logger.debug("options_chain: stock-state unavailable for %s: %s", tkr,
-                         type(exc).__name__)
-
-    if underlying_price is None and state:
-        # EXACTLY hub_get_quote's source: /stock-state field `close`.
-        px = _safe_float(state.get("close"))
-        if px is not None and px > 0:
+        from integrations.spot_price import spot_now
+        px, src, vendor_ts = await spot_now(tkr)
+        if underlying_price is None and px is not None:
             underlying_price = px
-            spot_source = "stock_state"
-            logger.info("options_chain: spot missing from chain for %s — took /stock-state "
-                        "close (%.4f), the same source hub_get_quote serves", tkr, px)
+            spot_source = src
+            logger.info("options_chain: spot missing from chain for %s — took %s (%.4f)",
+                        tkr, src, px)
 
     if underlying_price is None:
-        # Last resort, and it may itself be blocked; kept because when it DOES answer it is a
-        # real price, and a chain with a spot beats a chain with none.
-        try:
-            snap = await get_snapshot(tkr)
-            if snap:
-                snap_price = (snap.get("lastTrade") or {}).get("p")
-                if snap_price is not None:
-                    underlying_price = float(snap_price)
-                    spot_source = "snapshot_fallback"
-                    logger.info(
-                        "options_chain: spot missing from chain for %s — fell back to snapshot (%.2f)",
-                        tkr, underlying_price,
-                    )
-        except Exception as exc:
-            logger.debug("options_chain: snapshot fallback failed for %s: %s", tkr, exc)
-
-    if underlying_price is None:
-        # HONEST, as the ruling requires: no spot, and the field says which sources were asked.
         spot_source = "unavailable: chain, /stock-state and snapshot all gave no price"
         logger.warning("options_chain: NO spot for %s — every BS greek will be null", tkr)
 
@@ -301,8 +277,8 @@ async def _fetch_and_compose(
     # absent-vs-measured collapse this register keeps filing.
     if uw_ts:
         ts_source = "last_fill"
-    elif state and state.get("tape_time"):
-        uw_ts = str(state["tape_time"])
+    elif vendor_ts:
+        uw_ts = vendor_ts
         ts_source = "stock_state.tape_time"
     else:
         uw_ts = datetime.now(timezone.utc).isoformat()
