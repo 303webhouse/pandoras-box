@@ -179,8 +179,23 @@ def test_the_job_writes_only_the_flag_column():
                      for i, l in enumerate(src.split("\n")))
 
     updates = re.findall(r"UPDATE\s+(\w+)", code, re.I)
-    assert updates == ["unified_positions"], updates
+    # TA-152 adds a SECOND write: the alert now reads its own post-close mark and stores it.
+    # So the guard polices the COLUMNS rather than the statement count -- which is the stronger
+    # question anyway, because the thing that must never happen is a write that could close a
+    # position, not a write that exists.
+    assert set(updates) == {"unified_positions"}, updates
+    assert len(updates) == 2, "expected the flag write and the mark write, found %d" % len(updates)
     assert "SET b2_cut_alerted_at" in code
+
+    # Only the flag and the four mark columns may be assigned, and nothing that could close,
+    # resize or re-price a position.
+    assigned = set(re.findall(r"(?:SET|,)\s*(\w+)\s*=\s*(?:\$\d+|NOW\(\))", code))
+    allowed = {"b2_cut_alerted_at", "mark", "mark_as_of", "mark_integrity",
+               "mark_integrity_reason"}
+    assert assigned <= allowed, "the job assigns columns it may not: %s" % (assigned - allowed)
+    for forbidden in ("status", "closed_at", "quantity", "open_quantity", "entry_price",
+                      "current_price", "realized_pnl", "unrealized_pnl"):
+        assert "SET %s" % forbidden not in code and ", %s =" % forbidden not in code, forbidden
     for verb in ("DELETE FROM", "INSERT INTO", "DROP "):
         assert verb not in code.upper(), verb
 

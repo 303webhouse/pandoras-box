@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -78,6 +78,121 @@ SELECT p.position_id,
 """
 
 
+#: TA-152 columns. The mark the ALERT read, the instant it read it, and what that mark is worth
+#: as evidence. Stored so the verdict can be audited against the number it was taken on.
+DDL_MARK = """
+    ALTER TABLE unified_positions
+        ADD COLUMN IF NOT EXISTS mark NUMERIC,
+        ADD COLUMN IF NOT EXISTS mark_as_of TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS mark_integrity TEXT,
+        ADD COLUMN IF NOT EXISTS mark_integrity_reason TEXT
+"""
+
+#: The mark UPDATE is INLINED at its call site, not held here. The audit guard walks string
+#: constants containing a write and requires an enclosing named transaction; a module-level
+#: constant has none, so it reads as unnamed however carefully the call site is wrapped. The
+#: flag write at the bottom of this file follows the same convention.
+
+_OPT_TYPE = {"put_debit_spread": "put", "put_credit_spread": "put", "long_put": "put",
+             "call_debit_spread": "call", "call_credit_spread": "call", "long_call": "call"}
+
+
+async def read_mark_now(row: Dict[str, Any]) -> Dict[str, Any]:
+    """THE ALERT'S OWN MARK, read now and stamped with now. NEVER raises.
+
+    TA-152 requires the alert to read its own mark at run time rather than trust the stored one,
+    and the reason is arithmetic rather than caution: the hub's mark refreshes run at 09:17 and
+    16:47 ET while this alert runs at 16:15 ET -- BETWEEN them. The stored mark at alert time is
+    therefore always the MORNING one, which is never "at or after the cut session's close".
+    Without this read every B2 row would return UNDETERMINED every single day.
+
+    ONE CHAIN FETCH PER ROW, so the mark and the width of the book it came from are measured
+    from the SAME data at the SAME instant. Taking them from two calls would allow a mark from
+    one moment to be judged by a book from another, which is the leg-mismatch root
+    DEF-NEGATIVE-SPREAD-MARK already closed once.
+
+    The strict `compute_mark` rule is used, not the wider mid fallback: a mark is a claim about
+    what the principal holds right now.
+    """
+    from models.mark_integrity import evaluate as integrity_of
+
+    read_at = datetime.now(timezone.utc)
+    out = {"mark": None, "mark_as_of": read_at, "mark_integrity": None,
+           "mark_integrity_reason": None, "bid": None, "ask": None}
+    ticker = (row.get("ticker") or "").upper()
+    structure = (row.get("structure") or "").strip().lower()
+    try:
+        if not ticker:
+            raise ValueError("no ticker")
+        if structure == "stock":
+            from integrations.uw_api import get_snapshot
+            snap = await get_snapshot(ticker)
+            if isinstance(snap, dict) and snap:
+                v = (snap.get("lastTrade") or {}).get("p")
+                out["mark"] = float(v) if v is not None else None
+        elif "+" in structure:
+            # A composite row holds two structures; pricing it as one would invent a contract.
+            out["mark_integrity"] = "unknown"
+            out["mark_integrity_reason"] = (
+                "composite structure %r: two structures in one row, so there is no single "
+                "contract to price" % row.get("structure"))
+            return out
+        else:
+            opt = _OPT_TYPE.get(structure)
+            ls, ss = row.get("long_strike"), row.get("short_strike")
+            expiry = row.get("expiry")
+            if not opt or ls is None or not expiry:
+                raise ValueError("structure %r is not priceable" % row.get("structure"))
+            from integrations.uw_api import _find_contract, get_options_snapshot
+            from utils.options_math import compute_bid_ask_spread_pct, compute_mark
+            strikes = [float(ls)] + ([float(ss)] if ss is not None else [])
+            chain = await get_options_snapshot(
+                ticker, expiration_date=str(expiry)[:10],
+                strike_gte=min(strikes) - 0.5, strike_lte=max(strikes) + 0.5,
+                contract_type=opt)
+            if not chain:
+                raise ValueError("the vendor returned no chain")
+            legs, widths = [], []
+            for strike in strikes:
+                c = _find_contract(chain, strike, str(expiry)[:10], opt)
+                if not c:
+                    raise ValueError("strike %g not in the vendor's chain" % strike)
+                m, why = compute_mark(c)
+                if m is None:
+                    raise ValueError("%g: %s" % (strike, why))
+                legs.append(m)
+                w = compute_bid_ask_spread_pct(c)
+                if w is not None:
+                    widths.append(w)
+                q = c.get("last_quote") or {}
+                if out["bid"] is None:
+                    out["bid"], out["ask"] = q.get("bid"), q.get("ask")
+            net = legs[0] - legs[1] if len(legs) == 2 else legs[0]
+            out["mark"] = round(float(net), 4)
+            # THE WORST LEG GOVERNS. A spread is only as tradeable as its less tradeable side,
+            # so a tight leg must not average away a leg nobody is quoting.
+            if widths:
+                out["worst_leg_spread_pct"] = max(widths)
+    except Exception as exc:                                        # noqa: BLE001
+        out["mark_integrity"] = "unknown"
+        out["mark_integrity_reason"] = "could not read a mark: %s" % exc
+        return out
+
+    verdict, reason = integrity_of(out["mark"], mark_as_of=read_at,
+                                   bid=out.get("bid"), ask=out.get("ask"), now=read_at)
+    # A wide leg is `wide` even when the net happens to look sane.
+    worst = out.get("worst_leg_spread_pct")
+    if verdict == "ok" and worst is not None:
+        from models.mark_integrity import WIDE_SPREAD_PCT
+        if worst > WIDE_SPREAD_PCT:
+            verdict = "wide"
+            reason = ("the worst leg's book is %.0f%% of mid wide, over the %.0f%% bound"
+                      % (worst, WIDE_SPREAD_PCT))
+    out["mark_integrity"] = verdict
+    out["mark_integrity_reason"] = reason
+    return out
+
+
 def is_enabled() -> bool:
     """Empty-safe: Railway returns '' for an unset reference, so `or ""` then compare."""
     return (os.getenv(FLAG) or "").strip().lower() in ("1", "true", "yes", "on")
@@ -95,6 +210,7 @@ async def evaluate(now: Optional[datetime] = None, *, pool=None) -> List[Dict[st
             pool = await get_postgres_client()
         async with pool.acquire() as conn:
             await conn.execute(DDL_FLAG)
+            await conn.execute(DDL_MARK)
             rows = [dict(r) for r in await conn.fetch(SELECT_SQL)]
             # The one author for "what is still open", one lot query for the whole list.
             from services.open_quantity import stamp_open_quantity
@@ -106,7 +222,37 @@ async def evaluate(now: Optional[datetime] = None, *, pool=None) -> List[Dict[st
     for row in rows:
         if not is_in_scope(row):
             continue
+        # TA-152: the alert reads its OWN mark, now, and stores it before deciding on it.
+        fresh = await read_mark_now(row)
+        row["mark"] = fresh["mark"]
+        row["mark_as_of"] = fresh["mark_as_of"]
+        row["mark_integrity"] = fresh["mark_integrity"]
+        row["mark_integrity_reason"] = fresh["mark_integrity_reason"]
+        try:
+            async with pool.acquire() as conn:
+                # NAMED, in its own transaction. SET LOCAL only takes effect inside one, and an
+                # unnamed UPDATE is recorded by the audit as `legacy-ui` -- the attribution
+                # failure R-IV.462(b) exists to prevent. The audit guard caught this write
+                # exactly as it caught the flag write under R-IV.892.
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.actor', $1, true)", AUDIT_ACTOR)
+                    await conn.execute(
+                        "SELECT set_config('app.reason', $1, true)",
+                        "TA-152: the alert's own post-close mark read for the cut session")
+                    await conn.execute(
+                        "UPDATE unified_positions "
+                        "   SET mark = $2, mark_as_of = $3, mark_integrity = $4, "
+                        "       mark_integrity_reason = $5 "
+                        " WHERE position_id = $1",
+                        row.get("position_id"), fresh["mark"], fresh["mark_as_of"],
+                        fresh["mark_integrity"], fresh["mark_integrity_reason"])
+        except Exception as exc:                                    # noqa: BLE001
+            # A mark that could not be STORED was still READ; the verdict stands on it and the
+            # failure is recorded rather than turning into a missing mark.
+            logger.warning("[b2.cut_alert] could not store the mark for %s: %s",
+                           row.get("position_id"), exc)
         verdict = decide(row, now=now)
+        verdict["mark_integrity_reason"] = fresh["mark_integrity_reason"]
         verdict["position_id"] = row.get("position_id")
         verdict["ticker"] = row.get("ticker")
         out.append(verdict)
@@ -146,6 +292,17 @@ async def run(now: Optional[datetime] = None, *, pool=None) -> Dict[str, Any]:
             "enabled": is_enabled(), "rows_touched": fired}
 
 
+def _describe_mark(v: Dict[str, Any]) -> str:
+    """R-IV.935(c)3: the mark, its timestamp and its flag, printed in the alert body.
+
+    A verdict about money should be auditable from the message that carries it, without going
+    to the database to find out which number it was taken on.
+    """
+    from models.mark_integrity import describe
+    return describe(v.get("mark_integrity"), v.get("mark_integrity_reason"),
+                    v.get("mark"), v.get("mark_as_of"))
+
+
 async def _deliver(v: Dict[str, Any]) -> bool:
     """One message. Returns True only on a delivered alert; NEVER RAISES."""
     import httpx
@@ -158,8 +315,10 @@ async def _deliver(v: Dict[str, Any]) -> bool:
     content = (
         "**B2 three-day cut — %s**\n"
         "Total P&L %s at the close of the 3rd full trading session (%s).\n"
+        "%s\n"
         "This is a prompt, not an action: nothing has been closed."
-        % (v.get("ticker"), v.get("total_pnl"), v.get("cut_session"))
+        % (v.get("ticker"), v.get("total_pnl"), v.get("cut_session"),
+           _describe_mark(v))
     )
     try:
         async with httpx.AsyncClient(timeout=6.0) as client:
