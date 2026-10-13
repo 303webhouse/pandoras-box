@@ -20,8 +20,11 @@ will reshape it.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import os
+import re
 import sys
 import tempfile
 import warnings
@@ -172,7 +175,7 @@ def export_bars1d() -> None:
 
 # ── the dark-pool README LAB needs ──────────────────────────────────────
 
-README = """# Dark-pool export — field reference and condition-code map
+README = r"""# Dark-pool export — field reference and condition-code map
 
 Written by `scripts/f_export.py`. **Generated, not hand-maintained** — if it disagrees with the
 data, the data is right and this file is stale.
@@ -180,7 +183,7 @@ data, the data is right and this file is stale.
 ## Where the data is
 
 ```
-F:\\pandora-data\\darkpool\\<TICKER>\\<YYYYMM>.parquet
+F:\pandora-data\darkpool\<TICKER>\<YYYYMM>.parquet
 ```
 
 One row per PRINT. The hub also keeps the raw vendor pages in Postgres
@@ -321,6 +324,94 @@ def export_readme() -> None:
     print("  identical: %s" % (r1["sha256"] == r2["sha256"]))
 
 
+# ── the dark-pool rows ──────────────────────────────────────────────────
+
+#: COMPLETE SESSIONS ONLY (R-IV.955). `exhausted` alone is not enough: a session the vendor
+#: served empty is also "exhausted", and an empty Parquet on the permanent archive reads as a
+#: session with no prints rather than one never collected.
+COMPLETE_SESSIONS_SQL = """
+    SELECT ticker, session_date, prints_received, pages_fetched, quarantined
+      FROM darkpool_backfill_sessions
+     WHERE exhausted = TRUE AND prints_received > 0
+     ORDER BY session_date, ticker
+"""
+
+PAGES_SQL = """
+    SELECT page_no, payload, quarantined
+      FROM darkpool_backfill_pages
+     WHERE ticker = $1 AND session_date = $2
+     ORDER BY page_no
+"""
+
+
+def _pg_dsn() -> str:
+    """The write URL from the gitignored .mcp.json. NEVER printed."""
+    raw = open(r"C:\trading-hub\.mcp.json", encoding="utf-8").read()
+    for m in re.finditer(r"postgres(?:ql)?://[^\"\s]+", raw):
+        if "railway.internal" not in m.group(0):
+            return m.group(0)
+    raise RuntimeError("no usable postgres URL in .mcp.json")
+
+
+async def export_darkpool() -> None:
+    """One Parquet per (TICKER, YYYYMM), one ROW PER PRINT, vendor fields only.
+
+    Grouped by ticker-month rather than per session because that is the house layout, and
+    written per ticker-month rather than all at once because a single SPY session is ~55,000
+    prints and the whole archive is over a million.
+    """
+    import asyncpg
+
+    print("=== darkpool rows: complete sessions only ===")
+    conn = await asyncpg.connect(_pg_dsn())
+    try:
+        sessions = [dict(r) for r in await conn.fetch(COMPLETE_SESSIONS_SQL)]
+        if not sessions:
+            print("  no COMPLETE ticker-sessions yet; nothing exported")
+            return
+        # group by (ticker, YYYYMM)
+        groups: dict = {}
+        for s in sessions:
+            key = (s["ticker"], s["session_date"].strftime("%Y%m"))
+            groups.setdefault(key, []).append(s)
+        print("  %d complete ticker-sessions -> %d ticker-month files"
+              % (len(sessions), len(groups)))
+
+        for (ticker, ym), rows in sorted(groups.items()):
+            prints = []
+            for s in rows:
+                pages = await conn.fetch(PAGES_SQL, ticker, s["session_date"])
+                for pg in pages:
+                    payload = pg["payload"]
+                    if isinstance(payload, str):
+                        try:
+                            payload = json.loads(payload)
+                        except ValueError:
+                            continue
+                    data = (payload or {}).get("data")
+                    if not isinstance(data, list):
+                        continue
+                    for rec in data:
+                        if not isinstance(rec, dict):
+                            continue
+                        rec = dict(rec)
+                        # provenance the vendor does not supply, kept explicit
+                        rec["session_date"] = s["session_date"].isoformat()
+                        rec["quarantined"] = bool(pg["quarantined"])
+                        prints.append(rec)
+            if not prints:
+                print("  %-5s %s  no prints flattened" % (ticker, ym))
+                continue
+            df = pd.DataFrame(prints)
+            path = os.path.join(ROOT, "darkpool", ticker, "%s.parquet" % ym)
+            row = write_parquet(df, path)
+            q = df["quarantined"].any() if "quarantined" in df.columns else False
+            print("  %-5s %s  %7d prints  %9d bytes%s"
+                  % (ticker, ym, len(df), row["bytes"], "  [QUARANTINED]" if q else ""))
+    finally:
+        await conn.close()
+
+
 def write_manifest() -> None:
     os.makedirs(ROOT, exist_ok=True)
     lines = ["path\trows_written\trows_read_back\tbytes\tsha256\tnote"]
@@ -352,6 +443,13 @@ def main() -> int:
     export_bars1d()
     print()
     export_bars1m()
+    print()
+    try:
+        asyncio.run(export_darkpool())
+    except Exception as exc:                                        # noqa: BLE001
+        # The bars and the README are already on disk and verified; a database failure must not
+        # discard them or skip the manifest that proves they are there.
+        print("  darkpool export FAILED: %s: %s" % (type(exc).__name__, exc))
     write_manifest()
     print()
     print("done in %.1fs" % (datetime.now(timezone.utc) - started).total_seconds())
