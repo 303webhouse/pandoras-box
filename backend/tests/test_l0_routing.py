@@ -168,3 +168,55 @@ def test_should_divert_true_only_under_enforce(monkeypatch):
     assert l0.should_divert(keeper) is False
     monkeypatch.delenv("L0_ENFORCE", raising=False)
     importlib.reload(l0)
+
+
+# --- a retirement must reach rows that ALREADY EXIST ---------------------
+
+def test_the_filter_excludes_a_retired_type_even_with_a_KEEP_tag():
+    """MEASURED, not reasoned. After R-IV.945(c) added eight types, all eight STILL surfaced on
+    /api/trade-ideas: 7,381 active rows carried no suppress tag -- pre-gate rows COALESCE to
+    keep by design -- and `expires_at` was NULL for four of the types, so those rows would have
+    surfaced for ever. A retirement that only reaches rows created after it is not a
+    retirement."""
+    rows = [
+        {"signal_type": "SELL_RIP_EMA", "triggering_factors": {}},
+        {"signal_type": "TRAPPED_SHORTS", "triggering_factors": None},
+        {"signal_type": "ARTEMIS_SHORT",
+         "triggering_factors": {"l0_shadow": {"would_suppress": False}}},
+        {"signal_type": "CIRCES_STEW", "triggering_factors": {}},
+    ]
+    kept = l0.l0_enforce_filter_rows(rows)
+    assert [r["signal_type"] for r in kept] == ["CIRCES_STEW"]
+
+
+def test_the_SQL_and_PYTHON_paths_name_the_same_types():
+    """The two arms must not disagree about one row -- a surface that hid a row the other
+    showed would be worse than either being wrong alone."""
+    where = l0.l0_enforce_where_clause()
+    for t in l0.SUPPRESS_ALWAYS:
+        assert "'%s'" % t in where, t
+        assert l0._row_would_suppress({"signal_type": t}) is True, t
+
+
+def test_the_tag_arm_SURVIVES_so_a_drifted_type_stays_suppressed():
+    """THE CONTROL for the change. The tag is kept as the first arm because `signal_type` can
+    DRIFT after gate evaluation -- a Holy_Grail row relabelled APIS_CALL keeps its correct
+    SUPPRESS tag. The new arm may only ever exclude MORE, never less."""
+    drifted = {"signal_type": "APIS_CALL",          # a live type today...
+               "triggering_factors": {"l0_shadow": {"would_suppress": True}}}  # ...tagged then
+    assert l0._row_would_suppress(drifted) is True
+    assert l0.l0_enforce_filter_rows([drifted]) == []
+
+
+def test_the_type_list_in_the_sql_is_built_from_the_one_author():
+    """Not a second hand-maintained list: it is generated from SUPPRESS_ALWAYS, so a retirement
+    cannot be half-applied, and every literal is asserted to be a bare identifier."""
+    where = l0.l0_enforce_where_clause()
+    # Count inside the NOT IN clause only. The predicate has its own literals
+    # ('l0_shadow', 'would_suppress', '') and an earlier version of this test counted every
+    # quote in the fragment, which simply measured the wrong thing.
+    clause = where.split("NOT IN (", 1)[1].rstrip(")")
+    assert clause.count("'") == 2 * len(l0.SUPPRESS_ALWAYS), clause
+    assert sorted(x.strip().strip("'") for x in clause.split(",")) == sorted(l0.SUPPRESS_ALWAYS)
+    for t in l0.SUPPRESS_ALWAYS:
+        assert t.replace("_", "").isalnum(), t

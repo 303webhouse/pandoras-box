@@ -227,8 +227,32 @@ def should_divert(decision: Dict[str, Any]) -> bool:
 # ≥2-week "zero keepers lost" shadow window validated. Rows with no tag
 # (pre-gate history — NOT the crypto path, which routes through the chokepoint since the
 # log_signal bypass was demoted; see the corrected scope note above) COALESCE to keep.
+def _suppressed_types_sql() -> str:
+    """A SQL list literal of the currently-suppressed types. Built from SUPPRESS_ALWAYS, which
+    is the one author, so a retirement cannot be half-applied. Every member is a bare
+    upper-case identifier from a frozenset in this file -- no user input reaches it -- and it is
+    asserted below, so the concatenation stays safe."""
+    types = sorted(SUPPRESS_ALWAYS)
+    for t in types:
+        assert t.replace("_", "").isalnum(), "unsafe signal_type literal: %r" % (t,)
+    return ", ".join("'%s'" % t for t in types)
+
+
+# A ROW IS EXCLUDED IF ITS TAG SAYS SO *OR* ITS CURRENT TYPE IS RETIRED.
+#
+# The tag alone was not enough, and this was measured rather than reasoned: after R-IV.945(c)
+# added eight types, all eight still surfaced. 7,381 active rows carried no suppress tag --
+# pre-gate rows COALESCE to keep by design -- and `expires_at` was NULL for four of the types,
+# so those rows would have surfaced forever. A retirement that only reaches rows created after
+# it is not a retirement.
+#
+# The tag is KEPT as the first arm for the reason the note below gives: `signal_type` can drift
+# after gate evaluation, and the tag preserves the verdict made at the time. That argument is
+# about not LOSING a suppression, so an OR cannot violate it -- this can only ever exclude
+# more, never less.
 _L0_SUPPRESS_PREDICATE = (
-    "COALESCE((triggering_factors->'l0_shadow'->>'would_suppress')::boolean, false) = false"
+    "(COALESCE((triggering_factors->'l0_shadow'->>'would_suppress')::boolean, false) = false"
+    " AND COALESCE(signal_type, '') NOT IN (%s))" % _suppressed_types_sql()
 )
 
 
@@ -243,9 +267,16 @@ def _row_would_suppress(row: Any) -> bool:
     """True iff a signal dict carries an l0_shadow tag with would_suppress=true.
     Tolerates triggering_factors as a dict OR a JSON string (Redis payloads
     serialize it as text). Mirrors _L0_SUPPRESS_PREDICATE's keep/drop logic:
-    a missing tag/field COALESCEs to keep (returns False)."""
+    a missing tag/field COALESCEs to keep (returns False).
+
+    SECOND ARM, matching the SQL: a row whose CURRENT signal_type is in SUPPRESS_ALWAYS is
+    suppressed whatever its stored tag says. Without it, a retirement reached only rows created
+    after the deploy -- measured, 7,381 rows -- and the Python path would have disagreed with
+    the SQL path about the same row, which is worse than either being wrong alone."""
     if not isinstance(row, dict):
         return False
+    if (row.get("signal_type") or "").strip() in SUPPRESS_ALWAYS:
+        return True
     tf = row.get("triggering_factors")
     if isinstance(tf, str):
         try:
