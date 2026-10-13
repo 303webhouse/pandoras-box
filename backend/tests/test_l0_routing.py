@@ -19,27 +19,39 @@ def test_unconditional_suppress(st):
     assert d["would_suppress"] is True
 
 
-# --- RESISTANCE_REJECTION: liquid-conditional ---------------------------
+# --- the liquid-conditional MECHANISM, which is still live code ----------
+# RESISTANCE_REJECTION (SISYPHUS) was this rule's only member until R-IV.945(c)1 promoted it to
+# the unconditional set, leaving SUPPRESS_IF_NON_LIQUID empty. The mechanism itself is NOT
+# retired -- `evaluate_l0_gate` still implements it and a future type can be added -- so it is
+# exercised here against a stand-in rather than losing its only coverage along with its member.
 @pytest.mark.parametrize("ticker", ["SPY", "QQQ", "NVDA", "META"])
-def test_resistance_rejection_liquid_kept(ticker):
-    d = _decide("RESISTANCE_REJECTION", ticker=ticker)
+def test_the_conditional_rule_keeps_a_liquid_ticker(ticker, monkeypatch):
+    monkeypatch.setattr(l0, "SUPPRESS_IF_NON_LIQUID", frozenset({"STANDIN_TYPE"}))
+    d = _decide("STANDIN_TYPE", ticker=ticker)
     assert d["rule"] == l0.RULE_SUPPRESS_IF_NON_LIQUID
     assert d["is_liquid"] is True
     assert d["would_suppress"] is False
 
 
 @pytest.mark.parametrize("ticker", ["AON", "VRTX", "RIVN", "DOCU"])
-def test_resistance_rejection_non_liquid_suppressed(ticker):
-    d = _decide("RESISTANCE_REJECTION", ticker=ticker)
+def test_the_conditional_rule_suppresses_a_non_liquid_ticker(ticker, monkeypatch):
+    monkeypatch.setattr(l0, "SUPPRESS_IF_NON_LIQUID", frozenset({"STANDIN_TYPE"}))
+    d = _decide("STANDIN_TYPE", ticker=ticker)
     assert d["is_liquid"] is False
     assert d["would_suppress"] is True
 
 
+def test_the_conditional_set_is_now_empty_and_that_is_deliberate():
+    assert l0.SUPPRESS_IF_NON_LIQUID == frozenset()
+
+
 # --- keepers untouched --------------------------------------------------
+# R-IV.945(c) RETIRED FIVE OF THE ORIGINAL NINE from this list: GOLDEN_TOUCH (MIDAS),
+# TRAPPED_SHORTS (HECTOR), TWO_CLOSE_VOLUME (PERSEPHONE), SELL_RIP_EMA (ACHILLES) and
+# ARTEMIS_SHORT. They are asserted as suppressed in test_the_r945_retirements_are_suppressed
+# below. What remains here is what is genuinely still kept.
 @pytest.mark.parametrize("st", [
-    "GOLDEN_TOUCH", "TRAPPED_SHORTS", "TWO_CLOSE_VOLUME", "APIS_CALL",
-    "SELL_RIP_EMA", "ARTEMIS_SHORT", "FOOTPRINT_LONG",
-    "KODIAK_CALL", "SOME_UNKNOWN_TYPE",
+    "APIS_CALL", "FOOTPRINT_LONG", "KODIAK_CALL", "CIRCES_STEW", "SOME_UNKNOWN_TYPE",
 ])
 def test_keepers_never_suppressed(st):
     # keepers must never be flagged would_suppress, regardless of ticker liquidity
@@ -47,6 +59,38 @@ def test_keepers_never_suppressed(st):
         d = _decide(st, ticker=ticker)
         assert d["rule"] == l0.RULE_KEEP
         assert d["would_suppress"] is False
+
+
+@pytest.mark.parametrize("st", [
+    "GOLDEN_TOUCH",          # MIDAS
+    "SELL_RIP_EMA",          # ACHILLES
+    "SELL_RIP_VWAP",         # ACHILLES
+    "SELL_RIP_EARLY",        # ACHILLES
+    "RESISTANCE_REJECTION",  # SISYPHUS, promoted from the conditional set
+    "ARTEMIS_SHORT",         # a RUN-OFF: still stored and graded, surface withdrawn
+    "TRAPPED_SHORTS",        # HECTOR
+    "TWO_CLOSE_VOLUME",      # PERSEPHONE
+])
+def test_the_r945_retirements_are_suppressed(st):
+    """R-IV.945(c)1 and (c)2. On BOTH asset classes and whatever the ticker's liquidity: this
+    set is keyed on signal_type alone and is consulted before any ticker test, which is what
+    makes (c)2's "both asset classes" true by construction rather than by a second entry."""
+    for ticker in ("AON", "SPY", "BTC-USD", "ETH-USD", None):
+        d = _decide(st, ticker=ticker)
+        assert d["rule"] == l0.RULE_SUPPRESS, (st, ticker, d)
+        assert d["would_suppress"] is True, (st, ticker, d)
+
+
+def test_suppression_is_a_SURFACE_verdict_and_not_a_kill():
+    """The property that makes this the right instrument for a run-off, and the reason
+    ARTEMIS_SHORT can be listed at all: the module's own contract is that suppressed rows are
+    still persisted and still graded, and only actionable READ surfaces exclude them."""
+    import inspect
+
+    doc = inspect.getsource(l0)
+    assert "actionable READ surfaces exclude" in doc
+    # the gate itself never drops: should_divert is the only thing that could, and it is gated
+    assert l0.should_divert({"would_suppress": False}) is False
 
 
 # --- robustness ---------------------------------------------------------
@@ -118,7 +162,9 @@ def test_should_divert_true_only_under_enforce(monkeypatch):
     importlib.reload(l0)
     d = l0.evaluate_l0_gate({"signal_type": "HOLY_GRAIL_1H", "ticker": "AAPL"})
     assert l0.should_divert(d) is True
-    keeper = l0.evaluate_l0_gate({"signal_type": "GOLDEN_TOUCH", "ticker": "AAPL"})
+    # APIS_CALL, not GOLDEN_TOUCH: R-IV.945(c)1 retired MIDAS, so the old "keeper" here is now
+    # suppressed and the test would have asserted the opposite of the rule it is about.
+    keeper = l0.evaluate_l0_gate({"signal_type": "APIS_CALL", "ticker": "AAPL"})
     assert l0.should_divert(keeper) is False
     monkeypatch.delenv("L0_ENFORCE", raising=False)
     importlib.reload(l0)

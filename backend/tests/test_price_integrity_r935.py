@@ -135,20 +135,37 @@ def test_an_unknown_row_also_sets_would_suppress():
     assert d["would_suppress"] is True
 
 
-def test_a_clean_row_is_NOT_suppressed():
-    d = l0.evaluate_l0_gate({"signal_type": "ARTEMIS_SHORT", "ticker": "HAL"},
+def test_a_clean_row_is_NOT_suppressed_BY_THE_PRICE_CHECK():
+    """Uses a type the salvage plan left live, so this tests the PRICE CHECK rather than
+    ARTEMIS's retirement. Pointed at ARTEMIS_SHORT it would now pass for the wrong reason --
+    suppressed by the type, not by the price -- which is a test that has stopped measuring
+    what it is named for."""
+    d = l0.evaluate_l0_gate({"signal_type": "CIRCES_STEW", "ticker": "HAL"},
                             price_integrity={"status": "ok", "reason": "within 2%"})
     assert d["would_suppress"] is False
     assert d["price_integrity"]["status"] == "ok"
 
 
-def test_ARTEMIS_SHORT_THE_TYPE_IS_STILL_LIVE():
-    """R-IV.935(b): do NOT suppress the type. It is QUERY's only |t| above 2, so switching it
-    off to stop two tickers would hide the strongest signal we have. Only the ROW goes."""
-    assert "ARTEMIS_SHORT" not in l0.SUPPRESS_ALWAYS
-    clean = l0.evaluate_l0_gate({"signal_type": "ARTEMIS_SHORT", "ticker": "NVDA"},
-                                price_integrity={"status": "ok", "reason": "fine"})
-    assert clean["would_suppress"] is False
+def test_the_price_check_still_flags_a_ROW_even_though_the_TYPE_is_now_retired():
+    """SUPERSEDED IN PART, and the part that survives is the point.
+
+    R-IV.935(b) forbade suppressing ARTEMIS_SHORT as a TYPE, because it was QUERY's only
+    |t| above 2 and switching it off to stop two tickers would have hidden the strongest signal
+    we had. R-IV.945(c)1 then retired its surface anyway, under the Olympus salvage plan -- a
+    different decision on different grounds, and it overrides the conclusion without touching
+    the reasoning.
+
+    What must NOT be lost is the row-level mechanism: the price check still has to mark an
+    individual implausible row, with its own reason, independently of the type's standing. A
+    type-wide retirement that quietly absorbed the per-row verdict would leave nothing to count
+    for (b)3 and nothing to point at when the principal's chart is repointed."""
+    assert "ARTEMIS_SHORT" in l0.SUPPRESS_ALWAYS          # retired by R-IV.945(c)1
+    d = l0.evaluate_l0_gate({"signal_type": "ARTEMIS_SHORT", "ticker": "HAL"},
+                            price_integrity={"status": "implausible", "reason": "HAL 4500"})
+    assert d["would_suppress"] is True
+    # the ROW's own verdict is still recorded and still says why
+    assert d["price_integrity"]["status"] == "implausible"
+    assert "price integrity implausible" in d["reason"]
 
 
 def test_omitting_the_verdict_changes_nothing_for_existing_callers():

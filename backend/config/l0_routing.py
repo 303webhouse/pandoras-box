@@ -81,15 +81,48 @@ SUPPRESS_ALWAYS: frozenset[str] = frozenset({
                           # persisting would stop accumulating the record the review needs.
     "WRR_LONG",        # R-IV.855(d): NEMESIS long, registered forward test (nemesis-long-v1) — SHADOW.
     "PHOENIX_WASHOUT", # R-IV.855(d): PHOENIX washout, registered forward test (phoenix-washout-v1) — SHADOW.
+
+    # ── R-IV.945(c), the Olympus salvage plan: STOP SURFACING ──────────────────────────────
+    # Suppression here is a SURFACE verdict and never a kill. Every type below keeps being
+    # WRITTEN and keeps being GRADED, which is why it is the right instrument for a run-off and
+    # exactly what (c)1 asks for ARTEMIS_SHORT.
+    "GOLDEN_TOUCH",         # MIDAS — R-IV.945(c)1.
+    "SELL_RIP_EMA",         # ACHILLES — R-IV.945(c)1.
+    "SELL_RIP_VWAP",        # ACHILLES — R-IV.945(c)1.
+    "SELL_RIP_EARLY",       # ACHILLES — R-IV.945(c)1.
+    "RESISTANCE_REJECTION",  # SISYPHUS — R-IV.945(c)1. PROMOTED from SUPPRESS_IF_NON_LIQUID
+                             # below: a type suppressed unconditionally must not also sit in a
+                             # conditional set, or two rules answer one question and the reader
+                             # cannot tell which applied.
+    "ARTEMIS_SHORT",        # Artemis — R-IV.945(c)1. A RUN-OFF, NOT A RETIREMENT: it keeps
+                            # being stored and graded, and this entry withdraws only its
+                            # surface. This SUPERSEDES R-IV.935(b), which forbade suppressing
+                            # the type to stop two tickers; that reasoning stands on its own
+                            # terms and the salvage plan overrides the conclusion.
+    "TRAPPED_SHORTS",       # HECTOR — R-IV.945(c)2, on BOTH asset classes.
+    "TWO_CLOSE_VOLUME",     # PERSEPHONE — R-IV.945(c)2, on BOTH asset classes.
+    # (c)2's "both asset classes" is satisfied BY CONSTRUCTION: this set is keyed on
+    # signal_type alone and consulted before any ticker or asset-class test, so equities and
+    # crypto are covered by the one entry. R-IV.892(c) told me to STOP and report if the
+    # mechanism could only key on signal type -- it can only key on signal type, and (c)2 now
+    # rules that this is the intended behaviour rather than an accident.
 })
 
 # signal_types suppressed ONLY when the ticker is not in the liquid universe.
-SUPPRESS_IF_NON_LIQUID: frozenset[str] = frozenset({
-    "RESISTANCE_REJECTION",  # +0.73 liquid (KEEP) / -1.76 single-name (SUPPRESS)
-})
+#
+# EMPTY SINCE R-IV.945(c)1. Its one member, RESISTANCE_REJECTION (SISYPHUS, +0.73 liquid /
+# -1.76 single-name), moved into the unconditional set above. The set is KEPT rather than
+# deleted because the conditional MECHANISM is still live and tested -- `evaluate_l0_gate`
+# still implements it, and a future type can be added here without rebuilding the rule.
+SUPPRESS_IF_NON_LIQUID: frozenset[str] = frozenset()
 
-# Everything not named above is KEPT untouched (GOLDEN_TOUCH, TRAPPED_SHORTS,
-# TWO_CLOSE_VOLUME, APIS_CALL, sell_the_rip*, ARTEMIS_SHORT, footprint, etc.).
+# Everything not named above is KEPT untouched.
+#
+# THIS COMMENT DELIBERATELY NAMES NOTHING. It used to list the kept types -- "GOLDEN_TOUCH,
+# TRAPPED_SHORTS, TWO_CLOSE_VOLUME, APIS_CALL, sell_the_rip*, ARTEMIS_SHORT, footprint" -- and
+# R-IV.945(c) retired SIX of those seven in one ruling, which would have left a comment
+# confidently listing as live the very types the set above suppresses. A second author of one
+# fact is the defect this register keeps finding; the set is the author, so read the set.
 
 
 def _enforce_enabled() -> bool:
