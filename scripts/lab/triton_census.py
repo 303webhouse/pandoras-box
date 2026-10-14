@@ -16,6 +16,10 @@ Protocol (all stamped before this file existed or was changed):
                                                                    floor = kept AND D5-matched)
   lab\\triton\\TRITON-FP-v1-AMENDMENT-5-R-IV.989.md  822c84c5...  (group by EXECUTED date; dedup across
                                                                    all files; completeness by walk)
+  lab\\triton\\TRITON-FP-v1-AMENDMENT-6-FINAL-R-IV.1012.md 0a4f116d...  (b1 / b2 / SUSPECT; D1 drops
+                                                                   non-regular settlement)
+  R-IV.1019(b): BUILD's reached_floor is the completeness source of record; this script cross-checks
+  it and REFUSES on any per-ticker-session disagreement.
   Field reference: lab\\triton\\F-README.md e72ea5b9... (BUILD)
 
 Modes:
@@ -79,9 +83,11 @@ TAU_PROVENANCE = "print-time NBBO, calibration sessions 09-01 -> 09-24, biased t
 VENDOR_FIELDS = ("ticker", "executed_at", "price", "size", "nbbo_bid", "nbbo_ask", "canceled",
                  "sale_cond_codes", "trade_code", "ext_hour_sold_codes", "trade_settlement", "tracking_id")
 # amendments 4a sec. 3 + 4c sec. 1: D1 exclusions -- CTA/UTP single-letter codes and vendor word forms
-D1_LETTERS = {"T", "U", "Z", "B", "P", "V", "4", "7", "6", "9", "L"}
+D1_LETTERS = {"T", "U", "Z", "B", "P", "V", "4", "7", "6", "9", "L", "C", "N", "R"}   # + 6-final: C N R
 D1_WORDS = ("extended_hours", "out_of_sequence", "average_price", "prior_reference", "contingent",
-            "derivative", "qualified_contingent", "corrected", "sold_last", "late_report")
+            "derivative", "qualified_contingent", "corrected", "sold_last", "late_report",
+            "cash", "next_day", "seller")
+B2_GUARD = "04:15"                                       # amendment 6-final: b2 needs R <= E 04:15 ET
 PYTHIA_LABEL = "PYTHIA v2.5 levels, binning under review"
 KEEP_LINE = "per-run keep admits about 29% of chance runs in synthetic noise"
 VA_EDGE_FRACTION = 0.25             # PYTHIA-LOC v1 (0b406425...): gate v2's directional location
@@ -117,6 +123,12 @@ def _d1_codes_hit(text):
     return any(w in low for w in D1_WORDS)
 
 
+def _settlement_bad(x):
+    """Amendment 6-final sec. 2: a non-blank trade_settlement that is not regular. 'regular' is matched
+    as a substring, case-insensitive, so 'regular' and 'regular_settlement' are both regular."""
+    return (not _blank(x)) and "regular" not in str(x).strip().lower()
+
+
 def from_vendor(raw):
     """F-README fields -> NORMAL_COLUMNS. Dedup on tracking_id (first kept). Returns (df, n_dup)."""
     missing = [c for c in VENDOR_FIELDS if c not in raw.columns]
@@ -132,7 +144,8 @@ def from_vendor(raw):
                        "nbbo_ask": pd.to_numeric(raw.nbbo_ask, errors="coerce"),
                        "canceled": raw.canceled.map(_truthy).astype(bool),
                        "ext_hours": raw.ext_hour_sold_codes.map(lambda x: not _blank(x)).astype(bool),
-                       "excluded_condition": codes.map(_d1_codes_hit).astype(bool)})
+                       "excluded_condition": (codes.map(_d1_codes_hit) |
+                                              raw.trade_settlement.map(_settlement_bad)).astype(bool)})
     return df[list(NORMAL_COLUMNS)].reset_index(drop=True), int(n0 - len(raw))
 
 
@@ -142,7 +155,9 @@ def code_census(raw):
     for f in ("sale_cond_codes", "trade_code", "ext_hour_sold_codes", "trade_settlement"):
         vals = raw[f].map(lambda x: "<null>" if _blank(x) else str(x))
         for v, n in vals.value_counts().items():
-            hit = (not _blank(v.replace("<null>", ""))) if f == "ext_hour_sold_codes" else _d1_codes_hit(v.replace("<null>", ""))
+            vv = v.replace("<null>", "")
+            hit = (not _blank(vv)) if f == "ext_hour_sold_codes" else \
+                _settlement_bad(vv) if f == "trade_settlement" else _d1_codes_hit(vv)
             out.append({"field": f, "value": v, "prints": int(n), "d1_excluded": bool(hit)})
     return pd.DataFrame(out)
 
@@ -251,10 +266,13 @@ def _instant(x):
 
 
 def walk_reach(pages):
-    """pages of one (ticker, query_date), any order. Returns (reach_utc or None, n_unbroken_pages)."""
+    """One (ticker, query_date) walk. Returns a dict: reach (oldest print of the unbroken prefix, UTC),
+    n_ok, n_pages, last_rc (row count of the prefix's final page), cap (MAX(row_count) over the walk's
+    stored pages -- READ, never hardcoded), exhausted (the prefix is the whole walk and its final page
+    is below the cap)."""
     g = pages.sort_values("page_no")
     first = int(g.page_no.iloc[0])
-    oldest, n_ok = None, 0
+    oldest, n_ok, last_rc = None, 0, None
     for j, r in enumerate(g.itertuples()):
         if int(r.page_no) != first + j or not (r.row_count and r.row_count > 0):
             break
@@ -267,32 +285,78 @@ def walk_reach(pages):
                 break
         oldest = lo if oldest is None else min(oldest, lo)
         n_ok += 1
-    return oldest, n_ok
+        last_rc = int(r.row_count)
+    cap = int(pd.to_numeric(g.row_count, errors="coerce").max())
+    exhausted = bool(n_ok and n_ok == len(g) and last_rc is not None and last_rc < cap)
+    return {"reach": oldest, "n_ok": n_ok, "n_pages": int(len(g)), "last_rc": last_rc, "cap": cap,
+            "exhausted": exhausted}
+
+
+def _route(w, e):
+    """b1 / b2 / SUSPECT / None for one walk w and executed date e (amendment 6-final sec. 1)."""
+    r = w["reach"]
+    if r is None:
+        return None
+    t0400 = pd.Timestamp(e.isoformat() + " 04:00", tz="America/New_York").tz_convert("UTC")
+    tguard = pd.Timestamp(e.isoformat() + " " + B2_GUARD, tz="America/New_York").tz_convert("UTC")
+    if r < t0400:
+        return "b1"
+    if w["exhausted"] and r <= tguard:
+        return "b2"
+    if w["exhausted"] and r.tz_convert("America/New_York").date() == e:
+        return "SUSPECT"
+    return None
 
 
 def build_complete(wp):
-    """walk_pages -> complete.csv rows for CORE8 x CALIBRATION_DATES, plus the anchor-trigger count."""
-    reach = {}
+    """walk_pages -> complete.csv rows for CORE8 x CALIBRATION_DATES (route b1 / b2 / SUSPECT / none),
+    plus the anchor-trigger count. complete = route in {b1, b2}; SUSPECT is NOT complete."""
+    walks = {}
     for (tk, q), g in wp.groupby(["ticker", "query_date"]):
-        r, n_ok = walk_reach(g)
-        if r is not None:
-            reach.setdefault(tk, []).append((pd.Timestamp(q).date(), r, n_ok))
+        walks.setdefault(tk, []).append((pd.Timestamp(q).date(), walk_reach(g)))
+    order = {"b1": 0, "b2": 1, "SUSPECT": 2}
     rows = []
     for tk in CORE8:
         for e in CALIBRATION_DATES:
-            start = pd.Timestamp(e.isoformat() + " 04:00", tz="America/New_York").tz_convert("UTC")
-            ok = [(q, r) for q, r, _ in reach.get(tk, []) if q >= e and r < start]
-            best = min(ok, key=lambda x: x[0]) if ok else None
-            rows.append({"ticker": tk, "session": e.isoformat(), "complete": bool(ok),
-                         "n_walks": int(sum(1 for q, _, _ in reach.get(tk, []) if q >= e)),
-                         "best_query_date": best[0].isoformat() if best else "",
-                         "best_reach_et": best[1].tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M:%S")
-                         if best else ""})
+            cands = [(order[rt], q, w) for q, w in walks.get(tk, []) if q >= e
+                     for rt in [_route(w, e)] if rt]
+            best = min(cands, key=lambda x: (x[0], x[1])) if cands else None
+            route = {v: k for k, v in order.items()}[best[0]] if best else "none"
+            rows.append({"ticker": tk, "session": e.isoformat(), "complete": route in ("b1", "b2"),
+                         "route": route, "n_walks": int(sum(1 for q, _ in walks.get(tk, []) if q >= e)),
+                         "best_query_date": best[1].isoformat() if best else "",
+                         "best_reach_et": best[2]["reach"].tz_convert("America/New_York").strftime(
+                             "%Y-%m-%d %H:%M:%S") if best else "",
+                         "cap_used": best[2]["cap"] if best else ""})
     C = pd.DataFrame(rows)
     per_date = C.groupby("session").complete.all()
     return C, {"calibration_dates": len(CALIBRATION_DATES),
                "dates_complete_for_all_8": int(per_date.sum()),
-               "anchor_trigger_met_12_of_17": bool(per_date.sum() >= 12)}
+               "anchor_trigger_met_12_of_17": bool(per_date.sum() >= 12),
+               "suspect_ticker_sessions": int((C.route == "SUSPECT").sum())}
+
+
+def build_complete_set(raw):
+    """BUILD's source of record (R-IV.1019(b)): the export writes ONLY complete sessions
+    (exhausted AND reached_floor AND prints_received > 0) and stamps each print with its session_date,
+    so the exported (ticker, session_date) pairs ARE BUILD's complete set. Calibration x CORE8 only."""
+    if "session_date" not in raw.columns:
+        raise SystemExit("the export carries no session_date column: BUILD's completeness cannot be read; refusing")
+    sd = pd.to_datetime(raw.session_date).dt.date
+    keys = set(zip(raw.ticker.astype(str), sd))
+    return {(t, d) for t, d in keys if t in CORE8 and d in set(CALIBRATION_DATES)}
+
+
+def cross_check(lab_complete, build_set):
+    """REFUSE on any per-ticker-session disagreement between LAB's cross-check and BUILD's record."""
+    lab = {(r.ticker, pd.Timestamp(r.session).date()): _truthy(r.complete) for r in lab_complete.itertuples()}
+    dis = []
+    for tk in CORE8:
+        for e in CALIBRATION_DATES:
+            a, b = lab.get((tk, e), False), (tk, e) in build_set
+            if a != b:
+                dis.append(f"{tk} {e}: LAB={a} BUILD={b}")
+    return dis
 
 
 def run_build_complete(walk_csv, out_csv):
@@ -580,7 +644,13 @@ def run_anchor(prints_glob, complete_csv, out_dir):
 def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_dir):
     if not TAU_FINAL:
         raise SystemExit("tau is not final: run `anchor` first and record SPINE's confirmation (amendment 4/4a)")
-    df, n_dup, dropped = prepare_prints(_read_parquet(prints_glob), complete_set(complete_csv))
+    raw = _read_parquet(prints_glob)
+    build_set = build_complete_set(raw)
+    lab_c = pd.read_csv(complete_csv)
+    dis = cross_check(lab_c, build_set)
+    if dis:
+        raise SystemExit(f"completeness DISAGREES with BUILD on {len(dis)} ticker-session(s); refusing: {dis[:10]}")
+    df, n_dup, dropped = prepare_prints(raw, build_set)         # BUILD's set is the source of record
     braw = load_bars(bars_glob)
     bars = bars_by_session(braw)
     adv_df = pd.read_csv(adv_csv, parse_dates=["session"])
@@ -617,7 +687,8 @@ def _synthetic_vendor(rng):
                 rows.append({"ticker": tk, "executed_at": ts.isoformat(), "price": px, "size": sz,
                              "premium": px * sz, "nbbo_bid": bid, "nbbo_ask": ask, "canceled": canceled,
                              "sale_cond_codes": scc, "trade_code": tc, "ext_hour_sold_codes": ext,
-                             "trade_settlement": "regular_settlement", "tracking_id": f"t{tid}"})
+                             "trade_settlement": "regular_settlement", "tracking_id": f"t{tid}",
+                             "session_date": sess.strftime("%Y-%m-%d")})
             n = 1500
             tt = np.sort(rng.uniform(0, 6.5 * 3600, n))
             px = 500 + np.cumsum(rng.normal(0, 0.02, n))
@@ -757,6 +828,61 @@ def selftest():
         checks["end-to-end anchor via Parquet: runs, reads calibration only, writes aggregates"] = \
             meta["sessions_read"] == ["2026-09-02", "2026-09-03"] and os.path.exists(os.path.join(td, "out", "code_census.csv"))
     checks["`run` refuses while tau is not final"] = not TAU_FINAL
+    # amendment 6-final: b2 / SUSPECT / settlement / BUILD cross-check
+    def walk(q, first_utc, n, step_min, last_rows, cap=500, gap_at=None):
+        out, oldest, hi = [], None, pd.Timestamp(first_utc, tz="UTC")
+        for j in range(n):
+            lo = hi - pd.Timedelta(minutes=step_min)
+            cur = "" if j == 0 else (oldest + pd.Timedelta(minutes=30 if j == gap_at else 0)).isoformat()
+            out.append({"ticker": "SPY", "query_date": q, "page_no": j + 1, "older_than_cursor": cur,
+                        "row_count": last_rows if j == n - 1 else cap,
+                        "min_executed_at": lo.isoformat(), "max_executed_at": hi.isoformat()})
+            oldest = lo if oldest is None else min(oldest, lo)
+            hi = lo
+        return out
+    # 09-15: walk ends SHORT with earliest print 08:00:16 UTC = 04:00:16 ET -> b2 (complete)
+    w_b2 = walk("2026-09-15", "2026-09-15 23:59:00", 4, 958.733333 / 4, 137)   # reach 08:00:16 UTC
+    # 09-21 shape (synthetic; the real 09-21 was a deficient EXPORT, R-IV.1019(c)): short final page,
+    # earliest print 15:20:57 ET -> SUSPECT, NOT complete
+    w_sus = walk("2026-09-21", "2026-09-21 23:59:00", 2, 278.05 / 2, 53)      # reach 19:20:57 UTC = 15:20:57 ET
+    # 09-22: a short page but the prefix BREAKS before it (cursor gap) -> not exhausted -> none
+    w_brk = walk("2026-09-22", "2026-09-22 23:59:00", 6, 240, 90, gap_at=3)
+    # 09-23: the cap is READ: pages of 300 with a final page of 200 is exhaustion even though 300 < 500
+    w_cap = walk("2026-09-23", "2026-09-23 23:59:00", 4, 958.733333 / 4, 200, cap=300)
+    C6, info6 = build_complete(pd.DataFrame(w_b2 + w_sus + w_brk + w_cap))
+    r6 = C6[C6.ticker == "SPY"].set_index("session")
+    checks["A6: exhausted walk reaching 04:00:16 ET is complete via b2"] = \
+        bool(r6.loc["2026-09-15", "complete"]) and r6.loc["2026-09-15", "route"] == "b2"
+    checks["A6: 09-21-shaped walk (short page, starts 15:20 ET) is SUSPECT, not complete"] = \
+        r6.loc["2026-09-21", "route"] == "SUSPECT" and not bool(r6.loc["2026-09-21", "complete"])
+    checks["A6: a cursor gap before the short page is not exhaustion (route none)"] = \
+        r6.loc["2026-09-22", "route"] == "none"
+    checks["A6: the cap is read from stored pages (300-row pages, 200 final -> b2)"] = \
+        r6.loc["2026-09-23", "route"] == "b2" and int(r6.loc["2026-09-23", "cap_used"]) == 300
+    checks["A6: SUSPECT counted separately"] = info6["suspect_ticker_sessions"] == 1
+    st = raw.copy()
+    st.loc[st.index[:5], "trade_settlement"] = "seller"
+    st.loc[st.index[5:8], "trade_settlement"] = "cash"
+    nv, _ = from_vendor(st[st.ticker.isin(CORE8)])
+    checks["A6: non-regular settlement (seller / cash) is excluded by D1"] = \
+        int(nv.excluded_condition.sum()) - int(from_vendor(raw[raw.ticker.isin(CORE8)])[0].excluded_condition.sum()) \
+        == int(st.loc[st.index[:8]].ticker.isin(CORE8).sum())
+    cc6 = code_census(st)
+    checks["A6: code census flags seller / cash, keeps regular"] = \
+        bool(cc6[(cc6.field == "trade_settlement") & cc6.value.isin(["seller", "cash"])].d1_excluded.all()) and \
+        not bool(cc6[(cc6.field == "trade_settlement") & (cc6.value == "regular_settlement")].d1_excluded.any())
+    bset = {("SPY", date(2026, 9, 2))}
+    lab_ok = pd.DataFrame([{"ticker": "SPY", "session": "2026-09-02", "complete": True}])
+    lab_bad = pd.DataFrame([{"ticker": "SPY", "session": "2026-09-02", "complete": True},
+                            {"ticker": "QQQ", "session": "2026-09-02", "complete": True}])
+    checks["A6: cross-check agrees when LAB and BUILD match"] = cross_check(lab_ok, bset) == []
+    checks["A6: cross-check lists a disagreement (run REFUSES on it)"] = \
+        cross_check(lab_bad, bset) == ["QQQ 2026-09-02: LAB=True BUILD=False"]
+    try:
+        build_complete_set(raw.drop(columns="session_date"))
+        checks["A6: no session_date in the export -> refuse"] = False
+    except SystemExit:
+        checks["A6: no session_date in the export -> refuse"] = True
     checks["17 calibration executed dates (Labor Day excluded)"] = len(CALIBRATION_DATES) == 17
     # amendment 5: files that cross session boundaries the way BUILD found
     base = []
@@ -834,10 +960,12 @@ def selftest():
         s_, hi, lo, cl = bs[k]
         checks["no bar before 09:30 ET survives the clip"] = float(s_.min()) >= 9.5 * 3600
         # end to end: `run` through Parquet with tau forced final inside the test only
-        for tk, g in raw.groupby("ticker"):
+        complete_e2e = {k for k in complete if k[0] in set(raw.ticker)}   # only names the export holds
+        exp = raw[[(t_, pd.Timestamp(d_).date()) in complete_e2e for t_, d_ in zip(raw.ticker, raw.session_date)]]
+        for tk, g in exp.groupby("ticker"):                  # BUILD exports complete sessions only
             os.makedirs(os.path.join(td, "dp", tk), exist_ok=True)
             g.to_parquet(os.path.join(td, "dp", tk, "202609.parquet"), index=False)
-        pd.DataFrame([{"ticker": t_, "session": str(x.date()), "complete": (t_, x.date()) in complete}
+        pd.DataFrame([{"ticker": t_, "session": str(x.date()), "complete": (t_, x.date()) in complete_e2e}
                       for t_ in CORE8 for x in sessions]).to_csv(os.path.join(td, "complete.csv"), index=False)
         pd.DataFrame([{"ticker": t_, "session": str(x.date()), "adv_dollars": 2.5e9}
                       for t_ in CORE8 for x in sessions]).to_csv(os.path.join(td, "adv.csv"), index=False)
