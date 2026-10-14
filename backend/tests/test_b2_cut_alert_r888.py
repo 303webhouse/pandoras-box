@@ -47,7 +47,12 @@ def _post_close_mark_for(entry_date):
 
 
 def _row(**over):
-    r = {"bucket": "B2", "open_quantity": 2, "entry_date": MON,
+    # TA-161 (R-IV.983(b)): the verdict is computed from the gated mark, so `structure`,
+    # `entry_price` and `open_quantity` are now its INPUTS and `unrealized_pnl` is not read for
+    # it at all. One share at a basis of 0.25 keeps the arithmetic at $1 per unit, so every
+    # figure below reads directly: cut_pnl = mark - 0.25.
+    r = {"bucket": "B2", "structure": "stock", "entry_price": "0.25",
+         "open_quantity": 1, "quantity": 1, "entry_date": MON,
          "expiry": date(2026, 11, 20), "realized_pnl": None, "unrealized_pnl": "50.00",
          "b2_cut_alerted_at": None}
     r.update(over)
@@ -97,13 +102,13 @@ def test_a_utc_entry_timestamp_is_read_as_its_ET_session():
 
 def test_the_cut_is_not_reached_during_the_third_session():
     """AT the close, not during it. 15:00 on the cut day is still NOT_YET."""
-    d = decide(_row(unrealized_pnl="-10.00"),
+    d = decide(_row(mark="0.15"),
                now=datetime(2026, 10, 15, 15, 0, tzinfo=ET))
     assert d["verdict"] == NOT_YET, d
 
 
 def test_the_cut_IS_reached_at_the_close_of_the_third_session():
-    d = decide(_row(unrealized_pnl="-10.00"),
+    d = decide(_row(mark="0.15"),
                now=datetime(2026, 10, 15, 16, 0, tzinfo=ET))
     assert d["verdict"] == FIRE, d
 
@@ -114,26 +119,43 @@ AT_CUT = datetime(2026, 10, 15, 16, 0, tzinfo=ET)
 
 
 def test_a_profitable_position_passes():
-    assert decide(_row(unrealized_pnl="0.01"), now=AT_CUT)["verdict"] == PASS
+    assert decide(_row(mark="0.26"), now=AT_CUT)["verdict"] == PASS
 
 
 def test_a_losing_position_fires():
-    assert decide(_row(unrealized_pnl="-0.01"), now=AT_CUT)["verdict"] == FIRE
+    assert decide(_row(mark="0.24"), now=AT_CUT)["verdict"] == FIRE
 
 
 def test_EXACTLY_FLAT_FIRES():
     """The rule most easily coded as `< 0`. The bar is "> 0", so zero does not pass."""
-    d = decide(_row(unrealized_pnl="0.00"), now=AT_CUT)
+    d = decide(_row(mark="0.25"), now=AT_CUT)
     assert d["verdict"] == FIRE, d
     assert "flat fires" in d["reason"]
 
 
-def test_realized_is_included_in_the_total():
-    """A partial exit's realized stays on an OPEN row, so a position down on the mark can still
-    be up overall — and must then pass."""
-    d = decide(_row(realized_pnl="120.00", unrealized_pnl="-50.00"), now=AT_CUT)
-    assert d["verdict"] == PASS, d
-    assert d["total_pnl"] == "70.00"
+def test_realized_is_NOT_included_in_the_cut_verdict_under_ta161():
+    """TA-161 REVERSES what this test used to assert, and that is a question for SPINE.
+
+    R-IV.888 established -- with this test and its own rationale -- that a partial exit's
+    realized P&L counts toward the cut, so a position up overall but down on the remainder
+    PASSES. TA-161's formula has no realized term:
+
+        cut_pnl = orientation x (mark_gated - entry_basis_per_unit) x multiplier x open_quantity
+
+    So the same position now FIRES. Implemented exactly as ruled, because the ruling states the
+    formula explicitly; RAISED rather than reconciled, because reversing a property an earlier
+    ruling deliberately established is not a call this lane should make silently.
+
+    `total_pnl` is still reported beside the verdict, so the booked figure is not lost -- it
+    simply no longer decides anything.
+    """
+    d = decide(_row(realized_pnl="120.00", unrealized_pnl="-50.00", mark="0.15"), now=AT_CUT)
+    # The contrast, in one row: UP 70.00 overall, DOWN 0.10 on what is still held.
+    assert d["total_pnl"] == "70.00", d        # reported, not consulted
+    assert d["cut_pnl"] == "-0.10", d          # the remainder alone, on the gated mark
+    assert d["verdict"] == FIRE, d             # R-IV.888 would have said PASS
+    # And the disagreement between the two writers is recorded rather than resolved here.
+    assert d["pnl_divergence"] is not None, d
 
 
 def test_a_cent_is_not_lost_to_float():
@@ -148,7 +170,7 @@ def test_a_cent_is_not_lost_to_float():
 # ── 3 · a null mark is UNDETERMINED ─────────────────────────────────────────
 
 def test_a_null_mark_is_undetermined():
-    d = decide(_row(unrealized_pnl=None), now=AT_CUT)
+    d = decide(_row(mark=None), now=AT_CUT)
     assert d["verdict"] == UNDETERMINED, d
     assert "no mark" in d["reason"]
 
@@ -156,8 +178,8 @@ def test_a_null_mark_is_undetermined():
 def test_a_null_mark_is_not_treated_as_zero():
     """The pair for the flat rule. Zero FIRES; absent must not, or an unpriceable position gets
     reported as flat and the alert cries wolf about something nobody can value."""
-    assert decide(_row(unrealized_pnl="0.00"), now=AT_CUT)["verdict"] == FIRE
-    assert decide(_row(unrealized_pnl=None), now=AT_CUT)["verdict"] == UNDETERMINED
+    assert decide(_row(mark="0.25"), now=AT_CUT)["verdict"] == FIRE
+    assert decide(_row(mark=None), now=AT_CUT)["verdict"] == UNDETERMINED
 
 
 def test_a_null_REALIZED_is_a_known_zero_not_an_unknown():
@@ -171,39 +193,39 @@ def test_a_null_REALIZED_is_a_known_zero_not_an_unknown():
 # ── 4 · EXPIRY-STOPPED ─────────────────────────────────────────────────────
 
 def test_expiry_before_the_cut_stops_it():
-    d = decide(_row(expiry=date(2026, 10, 14), unrealized_pnl="-99.00"), now=AT_CUT)
+    d = decide(_row(expiry=date(2026, 10, 14), mark="0.15"), now=AT_CUT)
     assert d["verdict"] == EXPIRY_STOPPED, d
 
 
 def test_expiry_EXACTLY_ON_the_cut_stops_it():
     """"On or after", so `>=`. A cut landing on expiry day is the expiry's business."""
-    d = decide(_row(expiry=date(2026, 10, 15), unrealized_pnl="-99.00"), now=AT_CUT)
+    d = decide(_row(expiry=date(2026, 10, 15), mark="0.15"), now=AT_CUT)
     assert d["verdict"] == EXPIRY_STOPPED, d
 
 
 def test_expiry_one_day_after_the_cut_does_NOT_stop_it():
     """The pair. Without this, an off-by-one that stopped everything would pass the two above."""
-    d = decide(_row(expiry=date(2026, 10, 16), unrealized_pnl="-99.00"), now=AT_CUT)
+    d = decide(_row(expiry=date(2026, 10, 16), mark="0.15"), now=AT_CUT)
     assert d["verdict"] == FIRE, d
 
 
 def test_a_position_with_no_expiry_is_not_expiry_stopped():
     """Shares have no expiry; a null must not read as "expiry already passed"."""
-    d = decide(_row(expiry=None, unrealized_pnl="-99.00"), now=AT_CUT)
+    d = decide(_row(expiry=None, mark="0.15"), now=AT_CUT)
     assert d["verdict"] == FIRE, d
 
 
 # ── 5 · fires once, then flags ─────────────────────────────────────────────
 
 def test_once_flagged_it_does_not_fire_again():
-    d = decide(_row(unrealized_pnl="-99.00", b2_cut_alerted_at="2026-10-15T16:00:00Z"),
+    d = decide(_row(mark="0.15", b2_cut_alerted_at="2026-10-15T16:00:00Z"),
                now=AT_CUT)
     assert d["verdict"] == ALREADY_FIRED, d
 
 
 def test_the_flag_wins_even_if_the_position_later_turns_profitable():
     """It fires once. A later recovery does not un-fire it, and must not re-arm it either."""
-    d = decide(_row(unrealized_pnl="500.00", b2_cut_alerted_at="2026-10-15T16:00:00Z"),
+    d = decide(_row(mark="5.00", b2_cut_alerted_at="2026-10-15T16:00:00Z"),
                now=AT_CUT)
     assert d["verdict"] == ALREADY_FIRED, d
 
@@ -245,7 +267,7 @@ def test_cut_session_cannot_see_the_current_time():
 def test_the_cut_stays_put_however_late_the_check_runs(later):
     """A missed day, a redeploy, a weekend outage: the verdict arrives late but the cut does
     not move, so a position that was flat at its cut is still reported against THAT session."""
-    d = decide(_row(unrealized_pnl="-1.00"), now=later)
+    d = decide(_row(mark="0.24"), now=later)
     assert d["cut_session"] == "2026-10-15", d
     assert d["verdict"] == FIRE
 
@@ -254,8 +276,8 @@ def test_a_later_add_does_not_move_the_cut():
     """The clock is a function of the ENTRY session alone. Adding size changes quantity, not the
     entry, so the cut is unchanged -- and this is asserted rather than assumed because "the
     clock never resets" is the rule most easily broken by a well-meaning recalculation."""
-    base = decide(_row(unrealized_pnl="-1.00"), now=AT_CUT)
-    added = decide(_row(unrealized_pnl="-1.00", open_quantity=10), now=AT_CUT)
+    base = decide(_row(mark="0.24"), now=AT_CUT)
+    added = decide(_row(mark="0.24", open_quantity=10), now=AT_CUT)
     assert base["cut_session"] == added["cut_session"] == "2026-10-15"
 
 

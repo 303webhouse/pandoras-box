@@ -69,6 +69,13 @@ SELECT p.position_id,
        p.entry_date,
        p.expiry,
        p.unrealized_pnl,
+       -- TA-161 (R-IV.983(b)): the verdict is now computed from the gated mark, so the
+       -- ENTRY BASIS PER UNIT is an input to it rather than something `unrealized_pnl` had
+       -- already folded in. Gross of fees, as ruled. `open_quantity` is NOT selected here on
+       -- purpose: `services.open_quantity.stamp_open_quantity` is the one author of it
+       -- (R-IV.660(b)2) and is already applied to these rows below.
+       p.entry_price,
+       p.quantity,
        -- TA-152: the run-time mark reader needs the CONTRACT, not just the P&L. Without these
        -- four it could not price anything and every row read
        -- "structure None is not priceable" -- which the unit tests could not catch, because
@@ -280,7 +287,7 @@ async def evaluate(now: Optional[datetime] = None, *, pool=None) -> List[Dict[st
 
 async def run(now: Optional[datetime] = None, *, pool=None) -> Dict[str, Any]:
     """Evaluate, alert on each FIRE, flag only what was delivered. NEVER RAISES."""
-    from models.b2_cut_alert import FIRE, UNDETERMINED
+    from models.b2_cut_alert import FIRE, NOT_EVALUABLE, UNDETERMINED
 
     verdicts = await evaluate(now, pool=pool)
     counts: Dict[str, int] = {}
@@ -289,10 +296,28 @@ async def run(now: Optional[datetime] = None, *, pool=None) -> Dict[str, Any]:
 
     # UNDETERMINED is logged at WARNING every pass, deliberately: a position nobody can price at
     # its cut is a gap in the alert's coverage, and a silent gap looks exactly like a pass.
+    #
+    # NOT_EVALUABLE (TA-161) is logged the same way and for the same reason, but it is a
+    # DIFFERENT gap: UNDETERMINED means retry tomorrow, NOT_EVALUABLE means this row cannot be
+    # evaluated under the definition at all. Collapsing the two would turn a permanent hole in
+    # the coverage into one that merely looks transient.
     for v in verdicts:
-        if v["verdict"] == UNDETERMINED:
-            logger.warning("[b2.cut_alert] %s (%s) UNDETERMINED at its cut: %s",
-                           v.get("ticker"), v.get("position_id"), v.get("reason"))
+        if v["verdict"] in (UNDETERMINED, NOT_EVALUABLE):
+            logger.warning("[b2.cut_alert] %s (%s) %s at its cut: %s%s",
+                           v.get("ticker"), v.get("position_id"), v["verdict"],
+                           v.get("reason"),
+                           " [%s]" % v["stop_code"] if v.get("stop_code") else "")
+
+    # The divergence between the two writers of the same fact is reported wherever it is
+    # found, on any verdict -- it is the finding TA-161 exists to surface.
+    for v in verdicts:
+        if v.get("pnl_divergence"):
+            d = v["pnl_divergence"]
+            logger.warning("[b2.cut_alert] %s (%s) PNL DIVERGENCE: cut_pnl %s @ %s vs "
+                           "unrealized_pnl %s @ %s (difference %s)",
+                           v.get("ticker"), v.get("position_id"), d.get("cut_pnl"),
+                           d.get("cut_pnl_as_of"), d.get("unrealized_pnl"),
+                           d.get("unrealized_pnl_as_of"), d.get("difference"))
 
     fired = 0
     for v in verdicts:

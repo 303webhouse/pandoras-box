@@ -1,0 +1,311 @@
+"""TA-161: the cut verdict is computed from the GATED MARK — R-IV.983(b), ordered by 988(f).
+
+    cut_pnl = orientation x (mark_gated - entry_basis_per_unit) x multiplier x open_quantity
+
+The two live B2 rows are the worked examples, and `max_loss` -- written by a DIFFERENT writer --
+independently confirms each multiplier:
+
+    IBIT  put_debit_spread  0.19       x 2  x 100 = 38.00    == max_loss 38
+    TSLQ  stock             18.968875  x 80 x   1 = 1517.51  == max_loss 1517.51
+
+That cross-check is the whole reason the structure map is allowed to stand in for a multiplier
+column this book does not have.
+"""
+from __future__ import annotations
+
+import ast
+import inspect
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+from models import b2_cut_alert as b2
+
+ET = ZoneInfo("America/New_York")
+
+
+def _post_close(cut: date) -> datetime:
+    return datetime(cut.year, cut.month, cut.day, 16, 1, tzinfo=ET)
+
+
+def _row(**kw):
+    """A row that PASSES every gate, so each test changes exactly one thing."""
+    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    base = {"position_id": "POS_TEST", "bucket": "B2", "structure": "put_debit_spread",
+            "entry_price": "0.19", "open_quantity": 2, "quantity": 2,
+            "mark": "0.03", "mark_integrity": "ok",
+            "mark_as_of": _post_close(cut), "expiry": cut + timedelta(days=60),
+            "realized_pnl": None, "unrealized_pnl": None, "b2_cut_alerted_at": None}
+    base.update(kw)
+    return base
+
+
+def _entry_for_cut(cut: date) -> date:
+    """An entry date whose 3rd trading session is `cut`."""
+    from stable_engine.market_calendar import add_trading_days
+    d = cut
+    while True:
+        d -= timedelta(days=1)
+        try:
+            if add_trading_days(d, b2.SESSIONS_TO_CUT) == cut:
+                return d
+        except Exception:                                           # noqa: BLE001
+            continue
+
+
+# -- the seventh verdict ---------------------------------------------------------------
+
+def test_there_are_exactly_seven_verdicts_and_they_are_distinct():
+    assert len(b2.VERDICTS) == 7, b2.VERDICTS
+    assert len(set(b2.VERDICTS)) == 7
+    assert b2.NOT_EVALUABLE in b2.VERDICTS
+    # NOT_EVALUABLE and UNDETERMINED are different answers and must not collapse.
+    assert b2.NOT_EVALUABLE != b2.UNDETERMINED
+
+
+# -- the formula ------------------------------------------------------------------------
+
+def test_ibit_worked_example_matches_max_loss_cross_check():
+    """IBIT: 1 x (0.03 - 0.19) x 100 x 2 = -32.00, and the basis leg is max_loss 38."""
+    pnl, why, w = b2.cut_pnl(_row(), "0.03")
+    assert why is None, why
+    assert pnl == Decimal("-32.00"), pnl
+    assert w["multiplier"] == 100
+    assert w["orientation"] == 1
+    # The independent confirmation: basis x multiplier x qty is the recorded max_loss.
+    assert Decimal(w["entry_basis_per_unit"]) * 100 * 2 == Decimal("38.00")
+
+
+def test_tslq_worked_example_is_shares_with_multiplier_one():
+    row = _row(structure="stock", entry_price="18.968875", open_quantity=80, mark="17.19")
+    pnl, why, w = b2.cut_pnl(row, "17.19")
+    assert why is None, why
+    assert w["multiplier"] == 1, w
+    # 1 x (17.19 - 18.968875) x 1 x 80 = -142.31, HALF-UP to the cent (convention #27).
+    assert pnl == Decimal("-142.31"), pnl
+    assert Decimal(w["entry_basis_per_unit"]) * 1 * 80 == Decimal("1517.51000")
+
+
+def test_a_profitable_mark_gives_a_positive_pnl():
+    """THE SIGN CONTROL. Without it every assertion above passes for a formula that always
+    returns a loss."""
+    pnl, why, _ = b2.cut_pnl(_row(), "0.40")
+    assert why is None, why
+    assert pnl == Decimal("42.00"), pnl
+
+
+def test_money_is_half_up_to_the_cent_not_bankers_rounding():
+    row = _row(structure="stock", entry_price="0", open_quantity=1)
+    pnl, why, _ = b2.cut_pnl(row, "0.125")
+    assert why is None, why
+    assert pnl == Decimal("0.13"), pnl        # HALF-UP; bankers' rounding gives 0.12
+
+
+# -- open_quantity, never quantity (convention #29) ------------------------------------
+
+def test_the_size_is_open_quantity_and_never_quantity():
+    """A partially exited row: opened 5, 3 still held. Sizing off `quantity` would overstate
+    the cut P&L by two thirds -- exactly what HYG's row is for."""
+    row = _row(entry_price="0.136", quantity=5, open_quantity=3, mark="0.29")
+    pnl, why, w = b2.cut_pnl(row, "0.29")
+    assert why is None, why
+    assert w["open_quantity"] == "3"
+    assert pnl == Decimal("46.20"), pnl       # 1 x 0.154 x 100 x 3; off `quantity` it is 77.00
+
+
+def test_a_null_open_quantity_is_unknown_not_flat():
+    pnl, why, _ = b2.cut_pnl(_row(open_quantity=None), "0.03")
+    assert pnl is None
+    assert "unknown size" in why, why
+
+
+def test_cut_pnl_source_never_mentions_quantity_on_its_own():
+    """A PARSED check, prose stripped: the docstring names `quantity` while explaining why it
+    is the wrong field, so a substring scan of the raw source fails on its own explanation.
+    Fourth time this trap has been hit here -- including once by this very assertion."""
+    src = inspect.getsource(b2.cut_pnl)
+    fn = ast.parse(src).body[0]
+    doc = fn.body[0].value if fn.body and isinstance(fn.body[0], ast.Expr) else None
+    code = chr(10).join(ast.unparse(n) for n in fn.body
+                        if not (isinstance(n, ast.Expr) and n.value is doc))
+    assert len(code) > 400, "the docstring stripper ate the body"
+    assert "'quantity'" not in code, "cut_pnl reads `quantity`"
+    assert "open_quantity" in code
+    # THE CENTRAL INVARIANT OF TA-161.
+    assert "unrealized" not in code, "cut_pnl reads unrealized_pnl"
+
+
+# -- orientation ------------------------------------------------------------------------
+
+def test_orientation_comes_from_an_explicit_field_not_a_price_sign():
+    assert b2.orientation({"position_orientation": "CREDIT"})[0] == -1
+    assert b2.orientation({"position_orientation": "DEBIT"})[0] == 1
+    # The explicit column WINS over the structure, so this function stops being the author
+    # the moment the column arrives.
+    sign, why = b2.orientation({"position_orientation": "CREDIT",
+                                "structure": "put_debit_spread"})
+    assert sign == -1, why
+
+
+def test_credit_structures_are_not_evaluated_yet():
+    """R-IV.983(b): DEBIT-opened rows only until a position_orientation column exists."""
+    pnl, why, _ = b2.cut_pnl(_row(structure="put_credit_spread"), "0.03")
+    assert pnl is None
+    assert "credit-opened" in why, why
+
+
+def test_an_unknown_structure_is_not_given_a_default_orientation():
+    pnl, why, _ = b2.cut_pnl(_row(structure="iron_condor_butterfly_thing"), "0.03")
+    assert pnl is None
+    assert "orientation" in why or "contract map" in why, why
+
+
+# -- the multiplier ---------------------------------------------------------------------
+
+def test_an_unrecognised_structure_yields_no_multiplier_rather_than_100():
+    """A guessed multiplier is wrong by 100x in one direction or the other."""
+    m, why = b2.contract_multiplier({"structure": "wheat_future"})
+    assert m is None, (m, why)
+
+
+def test_a_multiplier_column_would_win_if_it_existed():
+    m, why = b2.contract_multiplier({"structure": "stock", "multiplier": 50})
+    assert m == 50, why
+    assert "multiplier column" in why
+
+
+def test_a_structure_mixing_shares_and_contracts_is_refused():
+    m, why = b2.contract_multiplier({"structure": "stock+long_call"})
+    assert m is None
+    assert "different" in why, why
+
+
+# -- composites -------------------------------------------------------------------------
+
+def test_a_composite_needs_a_single_net_mark():
+    pnl, why, _ = b2.cut_pnl(_row(structure="put_debit_spread+long_put"), "0.08")
+    assert pnl is None
+    assert "net mark" in why, why
+
+
+def test_a_composite_with_a_net_mark_is_evaluated():
+    """THE CONTROL for the test above: the refusal must be about the MARK, not about
+    composites being unsupported outright."""
+    row = _row(structure="put_debit_spread+long_put", entry_price="0.14",
+               open_quantity=5, mark_is_net=True)
+    pnl, why, _ = b2.cut_pnl(row, "0.08")
+    assert why is None, why
+    assert pnl == Decimal("-30.00"), pnl
+
+
+# -- divergence -------------------------------------------------------------------------
+
+def test_divergence_records_both_figures_and_both_timestamps():
+    t1 = datetime(2026, 10, 13, 20, 15, 1, tzinfo=ET)
+    t2 = datetime(2026, 10, 13, 16, 47, 0, tzinfo=ET)
+    d = b2.pnl_divergence(Decimal("-32.00"), "-13.00", t1, t2)
+    assert d is not None
+    assert d["cut_pnl"] == "-32.00"
+    assert d["unrealized_pnl"] == "-13.00"
+    assert d["cut_pnl_as_of"] == t1.isoformat()
+    assert d["unrealized_pnl_as_of"] == t2.isoformat()
+    assert d["difference"] == "-19.00"
+
+
+def test_agreement_within_a_cent_records_nothing():
+    """IBIT's two writers agreed on 2026-10-13 and disagreed on 10-12. Agreement must not
+    manufacture a divergence record, or every row would carry one."""
+    assert b2.pnl_divergence(Decimal("-32.00"), "-32.00", None, None) is None
+    assert b2.pnl_divergence(Decimal("-32.00"), "-32.01", None, None) is None
+    assert b2.pnl_divergence(Decimal("-32.00"), "-32.02", None, None) is not None
+
+
+# -- S10 --------------------------------------------------------------------------------
+
+def test_s10_holds_back_a_cut_that_precedes_the_deploy():
+    """TSLQ's case: a cut session of 2026-10-05 fired on 10-12 under the old path."""
+    cut = b2.TA161_DEPLOYED_ON - timedelta(days=8)
+    row = _row(entry_price="18.968875", structure="stock", open_quantity=80,
+               mark="17.19", mark_as_of=_post_close(cut),
+               expiry=None)
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut) + timedelta(days=1))
+    assert out["verdict"] == b2.NOT_EVALUABLE, out
+    assert out["stop_code"] == b2.S10_CUT_SESSION_PRECEDES_DEPLOY, out
+    # The mark is still carried, because an S10 row is exactly the one someone audits.
+    assert out["mark"] == "17.19"
+
+
+def test_s10_does_NOT_hold_back_a_cut_on_or_after_the_deploy():
+    """THE CONTROL. An S10 that fired on everything would pass the test above while silencing
+    the alert entirely."""
+    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    row = _row(mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] in (b2.PASS, b2.FIRE), out
+    assert out["stop_code"] is None, out
+
+
+# -- the verdict comes from the mark ----------------------------------------------------
+
+def test_the_verdict_follows_the_MARK_not_the_stored_unrealized_pnl():
+    """THE POINT OF TA-161. The stored figure says +500; the gated mark says the position is
+    down. The verdict must follow the mark, and must RECORD the disagreement."""
+    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    row = _row(mark="0.03", unrealized_pnl="500.00", mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] == b2.FIRE, out
+    assert out["cut_pnl"] == "-32.00", out
+    assert out["pnl_divergence"] is not None
+    assert out["pnl_divergence"]["unrealized_pnl"] == "500.00"
+
+
+def test_and_the_reverse_a_stored_loss_does_not_force_a_fire():
+    """The mirror control: stored says -500, the mark says the position is up. PASS."""
+    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    row = _row(mark="0.40", unrealized_pnl="-500.00", mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] == b2.PASS, out
+    assert out["cut_pnl"] == "42.00", out
+
+
+def test_flat_still_fires_on_the_computed_figure():
+    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    row = _row(mark="0.19", mark_as_of=_post_close(cut))     # exactly the entry basis
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["cut_pnl"] == "0.00", out
+    assert out["verdict"] == b2.FIRE, out
+
+
+def test_the_mark_gate_still_runs_before_any_pnl_is_computed():
+    """A mark from BEFORE the cut close must not reach the arithmetic at all (TA-152)."""
+    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    morning = datetime(cut.year, cut.month, cut.day, 9, 17, tzinfo=ET)
+    row = _row(mark_as_of=morning)
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] == b2.UNDETERMINED, out
+    assert out["cut_pnl"] is None, out
+
+
+def test_it_fires_once_and_never_closes_anything():
+    row = _row(b2_cut_alerted_at="2026-10-12T20:15:00Z")
+    out = b2.decide(row, now=datetime(2026, 10, 20, 16, 1, tzinfo=ET))
+    assert out["verdict"] == b2.ALREADY_FIRED, out
+
+
+def test_every_path_carries_the_ta161_keys():
+    """NOT_YET is read by people too. A payload whose shape depends on the verdict makes a
+    reader check whether a key is absent or the value is null."""
+    cut = b2.TA161_DEPLOYED_ON + timedelta(days=30)
+    row = _row(mark_as_of=None)
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=datetime(cut.year, cut.month, cut.day, 9, 0, tzinfo=ET))
+    assert out["verdict"] == b2.NOT_YET, out
+    for key in ("cut_pnl", "stop_code", "pnl_divergence", "workings",
+                "mark", "mark_as_of", "mark_integrity", "cut_session"):
+        assert key in out, key
