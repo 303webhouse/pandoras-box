@@ -104,16 +104,19 @@ def alert_first_deploy_session() -> date:
 #: NOT_EVALUABLE, because a guessed multiplier is wrong by 100x in one direction or the other.
 STOCK_MULTIPLIER = 1
 OPTION_MULTIPLIER = 100
-#: TA-161 §1.5 as amended (R-IV.1010(d)): a CLOSED whitelist, matched EXACTLY, and nothing
-#: else. Until `position_orientation` exists these two values are the only ones from which
-#: orientation may be read; every other value is UNDETERMINED and the row is held.
+#: TA-168 / R-IV.1017(d): THE one named constant. Orientation may be read from `structure`
+#: only by EXACT match of the WHOLE value against this set, until `position_orientation`
+#: exists. Everything else -- including every composite -- is UNDETERMINED and held.
 #:
-#: THIS SET USED TO BE WIDER -- it admitted `stock`, `long_call` and `long_put`. Measured over
-#: the book's 688 positions, narrowing it moves 430 rows to UNDETERMINED, 326 of them `stock`.
-#: TSLQ is one of them. That is the ruled behaviour: a long_put IS debit-opened in ordinary
-#: usage, but "ordinary usage" is an inference about a field, and the whole point of §1.5 is
-#: that orientation stops being inferred.
-ORIENTATION_WHITELIST_DEBIT = frozenset({"put_debit_spread", "call_debit_spread"})
+#: NO `+` SPLITTING (TA-161 §1.6). An earlier version of this matched each part of a composite
+#: and called the whole DEBIT when every part passed, which classified five rows that way
+#: (`put_debit_spread+call_debit_spread` x4, `put_debit_spread+put_debit_spread` x1). A
+#: composite's orientation is not the conjunction of its legs' orientations -- a spread
+#: against a long put is a different position from either -- so the whole value is matched and
+#: any `+` falls outside the set by construction.
+DEBIT_WHITELIST = frozenset({
+    "put_debit_spread", "call_debit_spread", "long_put", "long_call",
+})
 
 #: Recorded for the REASON STRING only -- never to decide an orientation. A row whose structure
 #: is a known credit shape is held for the same reason as an unknown one, but a reader is owed
@@ -283,21 +286,22 @@ def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     if explicit:
         return None, "position_orientation %r is not a known orientation" % explicit
 
-    parts = _structure_parts(row)
-    if not parts:
+    # THE WHOLE VALUE, normalised for case and surrounding space and nothing else. No `+`
+    # split: a composite is held by TA-161 §1.6, and matching the whole string is how that
+    # happens by construction rather than by a separate rule someone can forget.
+    whole = (row.get("structure") or "").strip().lower()
+    if not whole:
         return None, "no structure recorded, and no position_orientation column to fall back on"
-    # EXACT match against the closed whitelist, every part of a composite. Not a substring:
-    # `put_debit_spread+long_put` contains "debit" and is NOT whitelisted.
-    if all(p in ORIENTATION_WHITELIST_DEBIT for p in parts):
-        return 1, ("structure %s is on the closed DEBIT whitelist (exact match)"
-                   % "+".join(parts))
-    outside = [p for p in parts if p not in ORIENTATION_WHITELIST_DEBIT]
-    if any(p in _KNOWN_CREDIT_SHAPES for p in outside):
-        return None, ("structure %s is credit-opened and so is not on the DEBIT whitelist; "
-                      "held until position_orientation exists (TA-161 §1.5)" % "+".join(parts))
-    return None, ("structure %s is not on the closed DEBIT whitelist %s -- %s is outside it; "
-                  "orientation is UNDETERMINED and the row is held (TA-161 §1.5)"
-                  % ("+".join(parts), sorted(ORIENTATION_WHITELIST_DEBIT), ", ".join(outside)))
+    if whole in DEBIT_WHITELIST:
+        return 1, "structure %r is on DEBIT_WHITELIST (exact match, whole value)" % whole
+    if "+" in whole:
+        return None, ("structure %r is a COMPOSITE, held by TA-161 §1.6 whatever its legs are; "
+                      "orientation is UNDETERMINED" % whole)
+    if whole in _KNOWN_CREDIT_SHAPES:
+        return None, ("structure %r is credit-opened and so is not on DEBIT_WHITELIST; held "
+                      "until position_orientation exists" % whole)
+    return None, ("structure %r is not on DEBIT_WHITELIST %s; orientation is UNDETERMINED and "
+                  "the row is held (TA-168)" % (whole, sorted(DEBIT_WHITELIST)))
 
 
 def contract_multiplier(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
@@ -320,8 +324,7 @@ def contract_multiplier(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     # The multiplier map is SEPARATE from the orientation whitelist: `long_put` is a contract
     # whose multiplier is perfectly knowable even though its orientation is now held. Collapsing
     # the two would have made "I cannot say which way this points" mean "I cannot price it".
-    _PRICEABLE = (ORIENTATION_WHITELIST_DEBIT | _KNOWN_CREDIT_SHAPES | _STOCK_STRUCTURES
-                  | frozenset({"long_call", "long_put"}))
+    _PRICEABLE = (DEBIT_WHITELIST | _KNOWN_CREDIT_SHAPES | _STOCK_STRUCTURES)
     unknown = [p for p in parts if p not in _PRICEABLE]
     if unknown:
         return None, "structure %s is not in the contract map" % "+".join(unknown)

@@ -86,7 +86,7 @@ SESSION_PRINTS_SQL = """
 #: Per page: extent and TIMING. `fetched_at` is what answers "was this fetched after QUERY's
 #: snapshot", which is the difference between staleness and a defect.
 SESSION_PAGES_SQL = """
-    SELECT p.ticker, p.page_no, p.row_count, p.fetched_at,
+    SELECT p.ticker, p.page_no, p.row_count, p.fetched_at, p.walk_id,
            (SELECT MIN((rec->>'executed_at')::timestamptz)
               FROM jsonb_array_elements(
                    CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
@@ -278,6 +278,9 @@ async def session_detail(
         by_ticker.setdefault(p["ticker"], {"pages": [], "session_row": None})["pages"].append({
             "page_no": p["page_no"],
             "row_count": p["row_count"],
+            # R-IV.1017(f). NULL on pages written before the column existed -- a stated gap,
+            # never back-filled from fetch-time clustering.
+            "walk_id": p["walk_id"],
             "fetched_at_utc": (p["fetched_at"].astimezone(timezone.utc)
                                .strftime("%Y-%m-%dT%H:%M:%SZ") if p["fetched_at"] else None),
             "fetched_at_et": (p["fetched_at"].astimezone(ET).isoformat()
@@ -299,8 +302,10 @@ async def session_detail(
         "session_date": session,
         "basis": ("RTH is 09:30-16:00 America/New_York on each print's own executed_at; "
                   "the earliest print is by EXECUTED time, not by which query returned it "
-                  "(convention #39). There is NO per-page run id stored, so walk identity is "
-                  "inferable only by clustering fetched_at."),
+                  "(convention #39). `walk_id` identifies the walk that fetched each page "
+                  "(R-IV.1017(f)); it is NULL on pages written before that column existed, "
+                  "and for those walk identity remains inferable only by clustering "
+                  "fetched_at."),
         "tickers": dict(sorted(by_ticker.items())),
     }
 

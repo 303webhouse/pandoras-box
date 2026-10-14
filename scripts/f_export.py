@@ -37,6 +37,7 @@ warnings.filterwarnings("ignore")
 import pandas as pd  # noqa: E402
 import yfinance as yf  # noqa: E402
 
+HERE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = r"F:\pandora-data"
 LAB_COPY = r"C:\temp\cc-query-handoff\lab\triton\F-README.md"
 
@@ -168,7 +169,14 @@ def export_bars1d() -> None:
         df = df.copy()
         df["ticker"] = ticker          # EXPLICIT, as ruled
         path = os.path.join(ROOT, "bars1d", "%s.parquet" % ticker)
-        row = write_parquet(df, path)
+        gap = _assert_daily_continuity(df, ticker)
+        if gap:
+            # Recorded on the manifest row, so the archive carries its own defect rather than
+            # leaving it to whoever reads the file next.
+            row = write_parquet(df, path)
+            row["MISMATCH"] = gap
+        else:
+            row = write_parquet(df, path)
         days = len({ts.date() for ts in df.index})
         print("  %-8s %5d daily bars (%s .. %s), %d distinct dates, %d bytes"
               % (ticker, len(df), df.index.min().date(), df.index.max().date(), days,
@@ -449,27 +457,205 @@ def _archive_rows() -> list:
     return out
 
 
-def write_manifest() -> None:
+#: MANIFEST.tsv v2 — R-IV.1017(b)/(c). THE HEADER CHANGED; readers must key on it.
+#:
+#: `kind` discriminates FILE rows from DATE rows, because R-IV.1017(b) requires every exported
+#: DATE to carry its completeness status and a date is not a file.
+#: `rows_written` is EMPTY when this process did not write the file. It is NEVER -1: a count
+#: column holding a magic number is a lie told in the column's own type, and it cost QUERY 56
+#: round-trip failures across 57 rows.
+#: `status` carries what the sentinel used to smuggle.
+MANIFEST_COLUMNS = ("kind", "path", "rows_written", "rows_read_back", "bytes", "sha256",
+                    "status", "note")
+
+ST_WRITTEN = "WRITTEN"            # written and read back by this run, counts agree
+ST_CARRIED = "CARRIED"            # present on F:, not written this run, hash verified
+ST_MISMATCH = "MISMATCH"          # wrote N, read back M
+ST_UNREADABLE = "UNREADABLE"      # on disk but could not be opened
+ST_PARTIAL = "PARTIAL"            # a DATE whose own ticker-session is NOT complete
+#: DISTINCT FROM PARTIAL, deliberately. "I could not reach the hub to ask" is not "this date
+#: is partial"; collapsing them would let an expired CLI token relabel a whole archive as
+#: broken. Same reason the export gate separates GATE_ERROR from RUN_IN_PROGRESS.
+ST_UNKNOWN = "COMPLETENESS_UNKNOWN"
+
+
+def _assert_daily_continuity(df, label: str) -> str:
+    """Crypto trades every calendar day, so bars1d must have NO interior gap — R-IV.1016.
+
+    WHY THIS EXISTS: the LAB ferry copies taken 2026-10-14T03:4xZ were missing 2026-10-13 while
+    HAVING 2026-10-14 -- a hole in the middle, which happens when yfinance's daily crypto
+    series is mid-roll. Every check this script had looked at the row COUNT and the LAST date,
+    and an interior gap passes both. A count that matches and a tail that looks current is
+    exactly the fake-healthy reading this register keeps finding.
+
+    Returns a note for the manifest: "" when continuous, otherwise the missing dates.
+    """
+    import datetime as _dt
+    dates = sorted(set(pd.to_datetime(df.index).date))
+    if len(dates) < 2:
+        return ""
+    want = {dates[0] + _dt.timedelta(days=i) for i in range((dates[-1] - dates[0]).days + 1)}
+    missing = sorted(want - set(dates))
+    if not missing:
+        return ""
+    shown = ", ".join(str(d) for d in missing[:8])
+    print("  %s: GAP -- %d missing calendar date(s): %s%s"
+          % (label, len(missing), shown, " ..." if len(missing) > 8 else ""))
+    return "GAP: %d missing date(s): %s" % (len(missing), shown)
+
+
+def _completeness_map() -> dict:
+    """{(ticker, executed_date): route} from the hub's OWN reached_floor — R-IV.1017(e).
+
+    BUILD's `reached_floor` is the source of record, so the export asks the hub rather than
+    recomputing: a second author of "complete" is the fault R-IV.993(d) closed. Keyed by the
+    session date, which is what the hub decides about; `_date_rows` looks each EXECUTED date up
+    in it and labels anything unmatched PARTIAL.
+    """
+    import subprocess
+    import urllib.request
+    # PIVOT_API_KEY is not in .mcp.json and not in the local environment; it lives only on
+    # Railway, so it comes from the CLI (whose token expires -- a known fragility). Captured
+    # into a variable and never printed, and the header is built apart from any output.
+    key = os.environ.get("PIVOT_API_KEY")
+    if not key:
+        cli = os.path.join(os.environ.get("APPDATA", ""), "npm", "railway.cmd")
+        if os.path.isfile(cli):
+            try:
+                out = subprocess.run([cli, "variables", "--service", "pandoras-box", "--kv"],
+                                     capture_output=True, text=True, timeout=120)
+                for line in (out.stdout or "").splitlines():
+                    if line.startswith("PIVOT_API_KEY="):
+                        key = line.split("=", 1)[1].strip()
+                        break
+            except Exception:                                       # noqa: BLE001
+                key = None
+    if not key:
+        print("  completeness map: PIVOT_API_KEY unavailable (Railway CLI token may have "
+              "expired; `railway login` is interactive). DATE rows will read "
+              "COMPLETENESS_UNKNOWN -- NOT 'partial'.")
+        return {}
+    url = ("https://pandoras-box-production.up.railway.app"
+           "/api/darkpool-backfill/completeness")
+    req = urllib.request.Request(url)
+    req.add_header("X-API-Key", key)            # built apart from anything printed
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            d = json.loads(r.read().decode("utf-8"))
+    except Exception as exc:                                        # noqa: BLE001
+        print("  completeness map FAILED (%s); DATE rows will read COMPLETENESS_UNKNOWN "
+              "-- not 'partial'" % type(exc).__name__)
+        return {}
+    out = {}
+    for sd, routes in (d.get("by_session_date") or {}).items():
+        for route, tickers in routes.items():
+            for t in tickers:
+                out[(t, sd)] = route
+    print("  completeness map: %d ticker-sessions from the hub's reached_floor" % len(out))
+    return out
+
+
+def _date_rows(status_by: dict) -> list:
+    """One manifest row per (TICKER, EXECUTED DATE) on F:, carrying its completeness status.
+
+    BY EXECUTED DATE, which is the whole point. The export is PARTITIONED by queried session,
+    and a backward walk puts prints from earlier dates into a later session's file -- so an
+    executed date can be present in the archive without its own session ever having been
+    exported. That is exactly how export #1 wrote a 2,053-row 2026-09-21 starting 15:20:57 ET
+    while the 09-21 pages held 76,656. A reader asking "is this date whole" must get an answer
+    about the date, not about the file it happens to sit in.
+    """
+    out = []
+    for path in sorted(glob.glob(os.path.join(ROOT, "darkpool", "*", "*.parquet"))):
+        ticker = os.path.basename(os.path.dirname(path))
+        try:
+            df = pd.read_parquet(path, columns=["executed_at"])
+        except Exception:                                           # noqa: BLE001
+            continue
+        et = pd.to_datetime(df["executed_at"], format="mixed", utc=True) \
+               .dt.tz_convert("America/New_York")
+        for d, n in et.dt.date.astype(str).value_counts().items():
+            if not status_by:
+                status, route = ST_UNKNOWN, None
+            else:
+                route = status_by.get((ticker, d))
+                # No status WHEN THE MAP IS POPULATED means this date's own session was never
+                # completed for this ticker -- the rows present came from another session's
+                # overrun. That is PARTIAL, and it is exactly export #1's 2026-09-21.
+                status = (ST_PARTIAL
+                          if route in (None, "incomplete", "SUSPECT", "broken_chain")
+                          else route)
+            note = ("completeness of (%s, executed %s) at export time: %s"
+                    % (ticker, d,
+                       route if route else ("not asked" if status == ST_UNKNOWN
+                                            else "its own session is not complete")))
+            out.append({"kind": "DATE", "path": "darkpool/%s/%s" % (ticker, d),
+                        "rows_written": int(n), "rows_read_back": int(n),
+                        "bytes": -1, "sha256": "", "status": status, "note": note})
+    return out
+
+
+def write_manifest(status_by: dict = None) -> None:
     os.makedirs(ROOT, exist_ok=True)
-    rows = list(_manifest_rows) + _archive_rows()
-    rows.sort(key=lambda r: os.path.normcase(r["path"]))
-    lines = ["path\trows_written\trows_read_back\tbytes\tsha256\tnote"]
+    rows = []
+    for r in _manifest_rows:
+        rows.append({"kind": "FILE", "path": r["path"], "rows_written": r["rows_written"],
+                     "rows_read_back": r["rows_read_back"], "bytes": r["bytes"],
+                     "sha256": r["sha256"],
+                     "status": ST_MISMATCH if "MISMATCH" in r else ST_WRITTEN,
+                     "note": r.get("MISMATCH", "")})
+    for r in _archive_rows():
+        rows.append({"kind": "FILE", "path": r["path"],
+                     # EMPTY, not -1. This process did not write it, which is not a count.
+                     "rows_written": None,
+                     "rows_read_back": r["rows_read_back"], "bytes": r["bytes"],
+                     "sha256": r["sha256"],
+                     "status": ST_UNREADABLE if "MISMATCH" in r else ST_CARRIED,
+                     "note": r.get("MISMATCH", r.get("note", ""))})
+    try:
+        rows.extend(_date_rows(status_by or {}))
+    except Exception as exc:                                        # noqa: BLE001
+        print("  date-status rows FAILED: %s: %s" % (type(exc).__name__, exc))
+
+    rows.sort(key=lambda r: (r["kind"], os.path.normcase(r["path"])))
+    lines = ["\t".join(MANIFEST_COLUMNS)]
     for r in rows:
         lines.append("\t".join([
-            r["path"], str(r["rows_written"]), str(r["rows_read_back"]),
-            str(r["bytes"]), r["sha256"], r.get("MISMATCH", r.get("note", ""))]))
+            r["kind"], r["path"],
+            "" if r["rows_written"] is None else str(r["rows_written"]),
+            "" if r["rows_read_back"] is None or r["rows_read_back"] < 0
+            else str(r["rows_read_back"]),
+            "" if r["bytes"] is None or r["bytes"] < 0 else str(r["bytes"]),
+            r["sha256"], r["status"], r["note"]]))
     with open(MANIFEST, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(lines) + "\n")
-    bad = [r for r in rows if "MISMATCH" in r]
-    carried = [r for r in rows if r["rows_written"] == -1]
+
+    files = [r for r in rows if r["kind"] == "FILE"]
+    dates = [r for r in rows if r["kind"] == "DATE"]
+    bad = [r for r in files if r["status"] in (ST_MISMATCH, ST_UNREADABLE)]
+    carried = [r for r in files if r["status"] == ST_CARRIED]
+    partial = [r for r in dates if r["status"] == ST_PARTIAL]
     print()
-    print("=== MANIFEST: %s ===" % MANIFEST)
-    print("  files: %d (%d written this run, %d carried and hash-verified)   total bytes: %s"
-          % (len(rows), len(rows) - len(carried), len(carried),
-             f"{sum(max(r['bytes'], 0) for r in rows):,}"))
+    print("=== MANIFEST: %s  (schema v2: %s) ===" % (MANIFEST, ", ".join(MANIFEST_COLUMNS)))
+    print("  FILE rows: %d (%d written this run, %d carried and hash-verified)  bytes: %s"
+          % (len(files), len(files) - len(carried), len(carried),
+             f"{sum(r['bytes'] for r in files if r['bytes'] and r['bytes'] > 0):,}"))
+    print("  rows_written is EMPTY for carried files -- never -1 (R-IV.1017(c))")
+    print("  DATE rows: %d, by status: %s"
+          % (len(dates), dict(sorted(
+              __import__("collections").Counter(r["status"] for r in dates).items()))))
     print("  read-back mismatches: %s" % (len(bad) if bad else "NONE"))
     for r in bad:
-        print("    %s -> %s" % (r["path"], r["MISMATCH"]))
+        print("    %s -> %s" % (r["path"], r["note"]))
+    unknown = [r for r in dates if r["status"] == ST_UNKNOWN]
+    if unknown:
+        print("  COMPLETENESS_UNKNOWN dates: %d -- the hub was not asked, so NOTHING is "
+              "claimed about these" % len(unknown))
+    if partial:
+        print("  PARTIAL dates (present in the archive, own session NOT complete): %d"
+              % len(partial))
+        for r in partial:
+            print("    %-28s %7s rows  %s" % (r["path"], r["rows_written"], r["note"]))
 
 
 # -- the match report (R-IV.993(d)) -------------------------------------
@@ -586,7 +772,7 @@ def main() -> int:
         # The bars and the README are already on disk and verified; a database failure must not
         # discard them or skip the manifest that proves they are there.
         print("  darkpool export FAILED: %s: %s" % (type(exc).__name__, exc))
-    write_manifest()
+    write_manifest(_completeness_map())
     try:
         mismatches = match_report()
     except Exception as exc:                                        # noqa: BLE001
