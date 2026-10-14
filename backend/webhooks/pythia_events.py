@@ -159,12 +159,17 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
-            # R-IV.1024(c): the script version the payload ACTUALLY carried. Added here
-            # rather than read from raw_payload at query time so a reader never has to parse
-            # JSON to learn which Pine wrote a row.
-            await conn.execute(
-                "ALTER TABLE pythia_events "
-                "ADD COLUMN IF NOT EXISTS script_version TEXT")
+            # R-IV.1024(c): the script version the payload carried, stored as a column for
+            # cheap querying. IT IS A CONVENIENCE, NOT A DEPENDENCY -- the read path takes it
+            # from `raw_payload`, because a reader that needed this column went dark the
+            # moment the writer stopped being reached. Created idempotently here AND at
+            # startup; if neither has run, the INSERT below simply degrades.
+            try:
+                await conn.execute(
+                    "ALTER TABLE pythia_events "
+                    "ADD COLUMN IF NOT EXISTS script_version TEXT")
+            except Exception:                                       # noqa: BLE001
+                logger.warning("could not ensure pythia_events.script_version", exc_info=True)
             row = await conn.fetchrow("""
                 INSERT INTO pythia_events
                     (ticker, alert_type, price, direction, vah, val, poc,
