@@ -39,6 +39,7 @@ because the D5/D6 window is clipped to the regular session (amendment 2 sec. 4).
 
 Usage (QUERY):
   python scripts/lab/triton_census.py build-complete <walk_pages_csv> <complete_csv_out>
+  python scripts/lab/triton_census.py crosscheck <prints_glob> <complete_csv> <crosscheck_csv_out>
   python scripts/lab/triton_census.py anchor <prints_glob> <complete_csv> <out_dir>
   python scripts/lab/triton_census.py run <prints_glob> <bars_glob> <adv_csv> <va_csv|-> <complete_csv> <macro_csv> <out_dir>
   (complete_csv: LAB's cross-check from `build-complete` (ticker, session, complete, route, ...). BUILD's
@@ -361,6 +362,46 @@ def cross_check(lab_complete, build_set):
             if a != b:
                 dis.append(f"{tk} {e}: LAB={a} BUILD={b}")
     return dis
+
+
+def crosscheck_table(lab_complete, build_set):
+    """Per CORE8 x calibration ticker-session: LAB vs BUILD, with the likely cause of a disagreement.
+    BUILD decides reached_floor per (ticker, Q) against Q's OWN 04:00 ET floor, so it credits E only
+    from the walk with Q = E, and its 'unbroken' is page numbering only. Amendment 5 sec. 3 lets LAB
+    credit E from any Q >= E and also requires each cursor within 1 s. Metadata only, no prints."""
+    lab = {(r.ticker, pd.Timestamp(r.session).date()): r for r in lab_complete.itertuples()}
+    rows = []
+    for tk in CORE8:
+        for e in CALIBRATION_DATES:
+            r = lab.get((tk, e))
+            a, b = (_truthy(r.complete) if r is not None else False), (tk, e) in build_set
+            route = str(getattr(r, "route", "")) if r is not None else ""
+            bq = str(getattr(r, "best_query_date", "") or "") if r is not None else ""
+            cause = "" if a == b else \
+                "LAB credits a later query date (Q > E); BUILD credits Q = E only" if a and bq and bq != e.isoformat() else \
+                "LAB complete from Q = E; BUILD not" if a else \
+                f"BUILD complete; LAB route {route or 'none'} (cursor continuity or walk shape)"
+            rows.append({"ticker": tk, "session": e.isoformat(), "lab": a, "build": b, "agree": a == b,
+                         "lab_route": route, "lab_best_query_date": bq, "cause": cause})
+    return pd.DataFrame(rows)
+
+
+def run_crosscheck(prints_glob, complete_csv, out_csv):
+    """Before the overnight `run`: BUILD's set (the export's session_date) vs LAB's complete.csv.
+    Reads only the ticker and session_date columns. Exit 1 on any disagreement (`run` would refuse)."""
+    files = sorted(glob.glob(prints_glob))
+    if not files:
+        raise SystemExit(f"no files match {prints_glob}")
+    try:
+        raw = pd.concat([pd.read_parquet(f, columns=["ticker", "session_date"]) for f in files], ignore_index=True)
+    except Exception:
+        raw = pd.DataFrame({"ticker": []})                  # no session_date -> build_complete_set refuses
+    T = crosscheck_table(pd.read_csv(complete_csv), build_complete_set(raw))
+    T.to_csv(out_csv, index=False)
+    print(json.dumps({"ticker_sessions": int(len(T)), "agree": int(T.agree.sum()),
+                      "disagree": int((~T.agree).sum()),
+                      "by_cause": T[~T.agree].cause.value_counts().to_dict()}, indent=1))
+    return 0 if bool(T.agree.all()) else 1
 
 
 def run_build_complete(walk_csv, out_csv):
@@ -884,6 +925,35 @@ def selftest():
     checks["A6: cross-check agrees when LAB and BUILD match"] = cross_check(lab_ok, bset) == []
     checks["A6: cross-check lists a disagreement (run REFUSES on it)"] = \
         cross_check(lab_bad, bset) == ["QQQ 2026-09-02: LAB=True BUILD=False"]
+    lab_q = pd.DataFrame([{"ticker": "SPY", "session": "2026-09-02", "complete": True, "route": "b1",
+                           "best_query_date": "2026-09-02"},
+                          {"ticker": "QQQ", "session": "2026-09-02", "complete": True, "route": "b1",
+                           "best_query_date": "2026-09-03"},
+                          {"ticker": "IWM", "session": "2026-09-02", "complete": False, "route": "none",
+                           "best_query_date": ""}])
+    xt = crosscheck_table(lab_q, bset | {("IWM", date(2026, 9, 2))}).set_index(["ticker", "session"])
+    checks["A6 crosscheck: one row per CORE8 x calibration date"] = len(xt) == len(CORE8) * len(CALIBRATION_DATES)
+    checks["A6 crosscheck: LAB credited by a later Q is named as the cause"] = \
+        xt.loc[("QQQ", "2026-09-02"), "cause"].startswith("LAB credits a later query date")
+    checks["A6 crosscheck: BUILD-only complete is named with LAB's route"] = \
+        xt.loc[("IWM", "2026-09-02"), "cause"] == "BUILD complete; LAB route none (cursor continuity or walk shape)"
+    checks["A6 crosscheck: agreement carries no cause"] = \
+        bool(xt.loc[("SPY", "2026-09-02"), "agree"]) and xt.loc[("SPY", "2026-09-02"), "cause"] == ""
+    with tempfile.TemporaryDirectory() as tdx:
+        # export holds SPY 09-02 only: LAB's QQQ 09-02 (True) has no BUILD row -> exactly 1 disagreement
+        pd.DataFrame({"ticker": ["SPY", "SPY"], "session_date": ["2026-09-02", "2026-09-02"],
+                      "price": [1.0, 2.0]}).to_parquet(os.path.join(tdx, "a.parquet"), index=False)
+        lab_q.to_csv(os.path.join(tdx, "c.csv"), index=False)
+        rc_ = run_crosscheck(os.path.join(tdx, "*.parquet"), os.path.join(tdx, "c.csv"), os.path.join(tdx, "x.csv"))
+        xo = pd.read_csv(os.path.join(tdx, "x.csv"))
+        checks["A6 crosscheck e2e: reads session_date from Parquet, exit 1, one disagreement, no price out"] = \
+            rc_ == 1 and int((~xo.agree).sum()) == 1 and int(xo.build.sum()) == 1 and "price" not in xo.columns
+        pd.DataFrame({"ticker": ["SPY"], "price": [1.0]}).to_parquet(os.path.join(tdx, "a.parquet"), index=False)
+        try:
+            run_crosscheck(os.path.join(tdx, "*.parquet"), os.path.join(tdx, "c.csv"), os.path.join(tdx, "x.csv"))
+            checks["A6 crosscheck e2e: an export without session_date refuses"] = False
+        except SystemExit:
+            checks["A6 crosscheck e2e: an export without session_date refuses"] = True
     try:
         build_complete_set(raw.drop(columns="session_date"))
         checks["A6: no session_date in the export -> refuse"] = False
@@ -1014,6 +1084,8 @@ if __name__ == "__main__":
         sys.exit(selftest())
     if mode == "build-complete":
         run_build_complete(*sys.argv[2:4])
+    elif mode == "crosscheck":
+        sys.exit(run_crosscheck(*sys.argv[2:5]))
     elif mode == "anchor":
         run_anchor(*sys.argv[2:5])
     elif mode == "run":
