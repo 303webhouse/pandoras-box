@@ -21,6 +21,8 @@ will reshape it.
 from __future__ import annotations
 
 import asyncio
+import csv
+import glob
 import hashlib
 import json
 import os
@@ -332,7 +334,7 @@ def export_readme() -> None:
 COMPLETE_SESSIONS_SQL = """
     SELECT ticker, session_date, prints_received, pages_fetched, quarantined
       FROM darkpool_backfill_sessions
-     WHERE exhausted = TRUE AND prints_received > 0
+     WHERE exhausted = TRUE AND reached_floor = TRUE AND prints_received > 0
      ORDER BY session_date, ticker
 """
 
@@ -431,6 +433,93 @@ def write_manifest() -> None:
         print("    %s -> %s" % (r["path"], r["MISMATCH"]))
 
 
+# -- the match report (R-IV.993(d)) -------------------------------------
+
+#: QUERY's A0 input. Produced by QUERY, not by this script, and read-only here.
+QUERY_COMPLETE_CSV = r"C:\temp\cc-query-handoff\triton-a0\complete.csv"
+
+
+def _read_query_complete():
+    """{session_date: set(tickers marked complete)} from QUERY's file, or {} if absent.
+
+    Absent is reported, never treated as "nothing is complete": the two mean different
+    things, and a missing input that reads as an empty one is how a gap becomes a pass.
+    """
+    if not os.path.isfile(QUERY_COMPLETE_CSV):
+        return None
+    out = {}
+    with open(QUERY_COMPLETE_CSV, newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            if (row.get("complete") or "").strip().lower() == "true":
+                out.setdefault(row["session"], set()).add(row["ticker"])
+    return out
+
+
+def _on_f_by_session():
+    """{session_date: set(tickers)} actually present on F:, by the QUERIED session_date."""
+    out = {}
+    for path in glob.glob(os.path.join(ROOT, "darkpool", "*", "*.parquet")):
+        ticker = os.path.basename(os.path.dirname(path))
+        try:
+            col = pd.read_parquet(path, columns=["session_date"])["session_date"]
+        except Exception:                                           # noqa: BLE001
+            continue
+        for sd in col.astype(str).unique():
+            out.setdefault(sd, set()).add(ticker)
+    return out
+
+
+def match_report() -> int:
+    """Print DB-complete vs on-F:. Returns the number of MISMATCHED dates in the overlap."""
+    print()
+    print("=== R-IV.993(d) MATCH REPORT: dates complete in DB vs dates on F: ===")
+    census = set(CENSUS)
+    q = _read_query_complete()
+    on_f = _on_f_by_session()
+    f_dates = sorted(d for d, t in on_f.items() if census <= t)
+    f_partial = sorted((d, sorted(census - t)) for d, t in on_f.items() if t and not census <= t)
+
+    if q is None:
+        print("  QUERY's complete.csv is ABSENT at %s" % QUERY_COMPLETE_CSV)
+        print("  -> cannot compute the match. This is NOT the same as 'nothing is complete'.")
+        print("  on F:, all %d names: %d dates: %s"
+              % (len(census), len(f_dates), ", ".join(f_dates) or "none"))
+        return -1
+
+    q_dates = sorted(d for d, t in q.items() if census <= t)
+    q_partial = sorted((d, sorted(census - t)) for d, t in q.items() if t and not census <= t)
+
+    # The verdict is computed on the OVERLAP of the two windows, for the reason in the
+    # module docstring: different windows guarantee a mismatch that means nothing.
+    lo, hi = (min(q.keys()), max(q.keys())) if q else (None, None)
+    in_window = [d for d in f_dates if lo <= d <= hi]
+    missing = [d for d in q_dates if d not in f_dates]
+    extra = [d for d in in_window if d not in q_dates]
+    outside = [d for d in f_dates if not (lo <= d <= hi)]
+
+    print("  complete.csv window        : %s .. %s" % (lo, hi))
+    print("  DB-complete, all %d names   : %d dates: %s"
+          % (len(census), len(q_dates), ", ".join(q_dates) or "none"))
+    print("  on F:,       all %d names   : %d dates in window: %s"
+          % (len(census), len(in_window), ", ".join(in_window) or "none"))
+    if outside:
+        print("  on F: but OUTSIDE the window: %s  (not a mismatch)" % ", ".join(outside))
+    for d, miss in q_partial:
+        print("  DB partial  %s: missing %s" % (d, ", ".join(miss)))
+    for d, miss in f_partial:
+        print("  F: partial  %s: missing %s" % (d, ", ".join(miss)))
+
+    if missing:
+        print("  >>> MISMATCH: complete in DB but NOT all-%d on F:: %s"
+              % (len(census), ", ".join(missing)))
+    if extra:
+        print("  >>> on F: all-%d but NOT marked complete in DB: %s"
+              % (len(census), ", ".join(extra)))
+    if not missing and not extra:
+        print("  >>> MATCH: every in-window date agrees. QUERY's A0 may run.")
+    return len(missing) + len(extra)
+
+
 def main() -> int:
     started = datetime.now(timezone.utc)
     print("F: export starting %s UTC" % started.strftime("%Y-%m-%d %H:%M:%S"))
@@ -451,9 +540,16 @@ def main() -> int:
         # discard them or skip the manifest that proves they are there.
         print("  darkpool export FAILED: %s: %s" % (type(exc).__name__, exc))
     write_manifest()
+    try:
+        mismatches = match_report()
+    except Exception as exc:                                        # noqa: BLE001
+        print("  match report FAILED: %s: %s" % (type(exc).__name__, exc))
+        mismatches = -1
     print()
     print("done in %.1fs" % (datetime.now(timezone.utc) - started).total_seconds())
-    return 0
+    # A non-zero exit means the archive and the DB disagree, so a scheduler run that nobody
+    # reads still leaves a signal. 0 only when they MATCH.
+    return 0 if mismatches == 0 else 2
 
 
 if __name__ == "__main__":
