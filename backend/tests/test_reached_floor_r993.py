@@ -182,14 +182,18 @@ def test_b2_requires_an_unbroken_chain_and_an_early_first_print():
     sql = _sql_code(dp.BACKFILL_REACHED_FLOOR_SQL)
     assert "unbroken" in sql, sql
     assert "MAX(page_no) = COUNT(*)" in sql, "a chain with a hole is not a chain"
-    assert "09:30" in sql, "b2 must bound the earliest print at the session open"
+    # R-IV.1010(c): 04:15, not 09:30. Every complete session in the window starts within 20
+    # SECONDS of 04:00 ET, so a 09:30 bound was five and a half hours of slack on a boundary
+    # the data says is twenty seconds wide.
+    assert "04:15" in sql, "b2 must bound the earliest print at 04:15 ET"
+    assert "09:30" not in sql, "the old loose bound is still in the completeness SQL"
 
 
 def test_suspect_is_a_third_state_not_a_flavour_of_complete():
     """A short page at 04:00 ET is exhaustion; at 11:00 on SPY it is truncation. Recording
     them alike is how 09-08 reached a permanent archive unproved."""
     sql = _sql_code(dp.SUSPECT_SESSIONS_SQL)
-    assert "09:30" in sql and "04:00" in sql, sql
+    assert "04:15" in sql and "04:00" in sql, sql
     # SUSPECT rows must NOT be among those the UPDATE sets TRUE.
     upd = _sql_code(dp.BACKFILL_REACHED_FLOOR_SQL)
     assert "earliest_print <=" in upd, upd

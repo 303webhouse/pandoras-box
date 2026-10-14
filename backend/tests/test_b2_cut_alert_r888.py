@@ -51,7 +51,12 @@ def _row(**over):
     # `entry_price` and `open_quantity` are now its INPUTS and `unrealized_pnl` is not read for
     # it at all. One share at a basis of 0.25 keeps the arithmetic at $1 per unit, so every
     # figure below reads directly: cut_pnl = mark - 0.25.
-    r = {"bucket": "B2", "structure": "stock", "entry_price": "0.25",
+    # `position_orientation` is supplied explicitly: since R-IV.1010(d) orientation comes from
+    # a CLOSED whitelist of {put_debit_spread, call_debit_spread}, so `stock` is held. These
+    # tests are about the CUT and the bar, not about orientation, so they state it rather than
+    # leaning on a structure guess the rule has now removed.
+    r = {"bucket": "B2", "structure": "stock", "position_orientation": "DEBIT",
+         "entry_price": "0.25",
          "open_quantity": 1, "quantity": 1, "entry_date": MON,
          "expiry": date(2026, 11, 20), "realized_pnl": None, "unrealized_pnl": "50.00",
          "b2_cut_alerted_at": None}
