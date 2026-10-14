@@ -112,6 +112,11 @@ DDL = (
            collected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
            PRIMARY KEY (ticker, session_date)
        )""",
+    # R-IV.993(d): completeness is "the walk reached a print executed BEFORE the session's
+    # 04:00 ET start". NULL means not yet determined -- which is NOT false, and must not be
+    # read as "incomplete" by anything that gates on it.
+    """ALTER TABLE darkpool_backfill_sessions
+           ADD COLUMN IF NOT EXISTS reached_floor BOOLEAN""",
     """CREATE TABLE IF NOT EXISTS darkpool_backfill_runs (
            id SERIAL PRIMARY KEY,
            started_at TIMESTAMPTZ NOT NULL,
@@ -139,8 +144,8 @@ INSERT_PAGE = """
 UPSERT_SESSION = """
     INSERT INTO darkpool_backfill_sessions
         (ticker, session_date, pages_fetched, prints_received, exhausted, stop_reason,
-         quarantined, calls_spent, collected_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+         quarantined, calls_spent, collected_at, reached_floor)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
     ON CONFLICT (ticker, session_date) DO UPDATE SET
         pages_fetched = EXCLUDED.pages_fetched,
         prints_received = EXCLUDED.prints_received,
@@ -148,7 +153,31 @@ UPSERT_SESSION = """
         stop_reason = EXCLUDED.stop_reason,
         quarantined = EXCLUDED.quarantined,
         calls_spent = EXCLUDED.calls_spent,
-        collected_at = NOW()
+        collected_at = NOW(),
+        -- STICKY: once a walk has proved it crossed the floor, a later resumed run that
+        -- stops for some other reason must not un-prove it.
+        reached_floor = COALESCE(darkpool_backfill_sessions.reached_floor, FALSE)
+                        OR COALESCE(EXCLUDED.reached_floor, FALSE)
+"""
+
+#: Recompute `reached_floor` from the RAW PAGES already stored -- no UW calls. A session
+#: crossed its floor when any stored print was executed before 04:00 ET on the target date.
+BACKFILL_REACHED_FLOOR_SQL = """
+    UPDATE darkpool_backfill_sessions s
+       SET reached_floor = EXISTS (
+             SELECT 1
+               FROM darkpool_backfill_pages p,
+                    LATERAL jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
+                             THEN p.payload->'data' ELSE '[]'::jsonb END) AS rec
+              WHERE p.ticker = s.ticker
+                AND p.session_date = s.session_date
+                AND (rec->>'executed_at') IS NOT NULL
+                AND (rec->>'executed_at')::timestamptz
+                    < (s.session_date::timestamp + time '04:00') AT TIME ZONE 'America/New_York'
+           )
+     WHERE s.reached_floor IS NULL
+       AND s.stop_reason NOT LIKE 'NOT_APPLICABLE%'
 """
 
 #: Already finished, so a resumed run skips it. Only `exhausted` counts as done: a session
@@ -322,6 +351,7 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
     cursor: Optional[str] = None
     pages = prints = spent_here = 0
     exhausted = False
+    reached_floor = False          # proved only by crossing the floor, never by any other stop
     stop = "ran to the page ceiling"
 
     # RESUME where a previous run stopped, rather than re-walking from page 1.
@@ -375,6 +405,10 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
         oldest_seen = _parse_executed(nxt)
         if oldest_seen is not None and oldest_seen < floor_utc:
             exhausted = True
+            # THE ONLY PLACE THIS IS SET TRUE. Every other stop below leaves it False, because
+            # a short page and a stalled cursor prove nothing about coverage -- which is how
+            # 09-08, 09-14 and 09-21 reached the permanent archive unproved.
+            reached_floor = True
             stop = ("reached prints executed before the %s 04:00 ET start (oldest %s)"
                     % (session, oldest_seen.isoformat()))
             break
@@ -399,13 +433,14 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
             "FROM darkpool_backfill_pages WHERE ticker = $1 AND session_date = $2",
             ticker, session)
         await conn.execute(UPSERT_SESSION, ticker, session, int(tot["pages"]),
-                           int(tot["prints"]), exhausted, stop, quarantined, spent_here)
+                           int(tot["prints"]), exhausted, stop, quarantined, spent_here,
+                           reached_floor)
     pages, prints = int(tot["pages"]), int(tot["prints"])
     logger.info("[dp-backfill] %-5s %s pages=%-3d prints=%-6d exhausted=%s (%s)",
                 ticker, session, pages, prints, exhausted, stop)
     return {"ticker": ticker, "session": session.isoformat(), "pages": pages,
             "prints": prints, "exhausted": exhausted, "stop": stop, "calls": spent_here,
-            "quarantined": quarantined}
+            "quarantined": quarantined, "reached_floor": reached_floor}
 
 
 async def run(call_budget: Optional[int] = None,
@@ -439,6 +474,14 @@ async def run(call_budget: Optional[int] = None,
         await mark_closed_sessions(pool, OLDEST_KNOWN_SESSION, end, names)
     except Exception:                                           # noqa: BLE001
         logger.warning("[dp-backfill] could not mark closed sessions", exc_info=True)
+    # R-IV.993(d): decide `reached_floor` for every legacy row from the pages already stored.
+    # Costs no UW calls. Runs before collection so the night's work is chosen against the
+    # ruled definition of complete rather than the permissive one.
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(BACKFILL_REACHED_FLOOR_SQL)
+    except Exception:                                           # noqa: BLE001
+        logger.warning("[dp-backfill] reached_floor backfill failed", exc_info=True)
     results: List[dict] = []
     logger.info("[dp-backfill] run %s: %d candidate sessions %s..%s, %d names, budget %d calls",
                 run_id, len(sessions), sessions[0], sessions[-1], len(names), call_budget)
@@ -496,7 +539,7 @@ NIGHTLY_TICK_SECONDS = 60
 ALL_SECURED_SQL = """
     SELECT count(*) AS secured
       FROM darkpool_backfill_sessions
-     WHERE exhausted = TRUE AND prints_received > 0
+     WHERE exhausted = TRUE AND reached_floor = TRUE AND prints_received > 0
        AND ticker = ANY($1::text[]) AND session_date = ANY($2::date[])
 """
 
