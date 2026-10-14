@@ -240,8 +240,9 @@ def test_s10_holds_back_a_cut_that_precedes_the_deploy():
                expiry=None)
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut) + timedelta(days=1))
-    assert out["verdict"] == b2.NOT_EVALUABLE, out
-    assert out["stop_code"] == b2.S10_CUT_SESSION_PRECEDES_DEPLOY, out
+    # R-IV.1005(b): S10 is its own VERDICT now, not a stop_code riding on NOT_EVALUABLE --
+    # "I cannot evaluate this" and "this predates the alert" are different answers.
+    assert out["verdict"] == b2.CUT_SESSION_PRECEDES_DEPLOY, out
     # The mark is still carried, because an S10 row is exactly the one someone audits.
     assert out["mark"] == "17.19"
 
@@ -253,8 +254,7 @@ def test_s10_does_NOT_hold_back_a_cut_on_or_after_the_deploy():
     row = _row(mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
-    assert out["verdict"] in (b2.PASS, b2.FIRE), out
-    assert out["stop_code"] is None, out
+    assert out["verdict"] in (b2.PROFITABLE, b2.NOT_PROFITABLE), out
 
 
 # -- the verdict comes from the mark ----------------------------------------------------
@@ -266,19 +266,19 @@ def test_the_verdict_follows_the_MARK_not_the_stored_unrealized_pnl():
     row = _row(mark="0.03", unrealized_pnl="500.00", mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
-    assert out["verdict"] == b2.FIRE, out
+    assert out["verdict"] == b2.NOT_PROFITABLE, out
     assert out["cut_pnl"] == "-32.00", out
     assert out["pnl_divergence"] is not None
     assert out["pnl_divergence"]["unrealized_pnl"] == "500.00"
 
 
 def test_and_the_reverse_a_stored_loss_does_not_force_a_fire():
-    """The mirror control: stored says -500, the mark says the position is up. PASS."""
+    """The mirror control: stored says -500, the mark says the position is up. PROFITABLE."""
     cut = b2.alert_first_deploy_session() + timedelta(days=7)
     row = _row(mark="0.40", unrealized_pnl="-500.00", mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
-    assert out["verdict"] == b2.PASS, out
+    assert out["verdict"] == b2.PROFITABLE, out
     assert out["cut_pnl"] == "42.00", out
 
 
@@ -288,7 +288,7 @@ def test_flat_still_fires_on_the_computed_figure():
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
     assert out["cut_pnl"] == "0.00", out
-    assert out["verdict"] == b2.FIRE, out
+    assert out["verdict"] == b2.NOT_PROFITABLE, out
 
 
 def test_the_mark_gate_still_runs_before_any_pnl_is_computed():
@@ -302,10 +302,42 @@ def test_the_mark_gate_still_runs_before_any_pnl_is_computed():
     assert out["cut_pnl"] is None, out
 
 
-def test_it_fires_once_and_never_closes_anything():
-    row = _row(b2_cut_alerted_at="2026-10-12T20:15:00Z")
-    out = b2.decide(row, now=datetime(2026, 10, 20, 16, 1, tzinfo=ET))
-    assert out["verdict"] == b2.ALREADY_FIRED, out
+def test_an_already_alerted_row_still_reports_its_OWN_verdict():
+    """R-IV.1005(b). `ALREADY_FIRED` used to be returned INSTEAD of the P&L verdict, so a row
+    that had been alerted on reported its alert history where its answer belonged -- which is
+    why IBIT 980 read ALREADY_FIRED when the truth was NOT_PROFITABLE.
+
+    The verdict now describes the POSITION, and `already_alerted` carries the history beside
+    it. Alerting is the job's decision, not a verdict."""
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
+    row = _row(mark="0.03", mark_as_of=_post_close(cut),
+               b2_cut_alerted_at="2026-10-12T20:15:00Z")
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] == b2.NOT_PROFITABLE, out
+    assert out["cut_pnl"] == "-32.00", out
+    assert out["already_alerted"] is True, out
+    assert out["b2_cut_alerted_at"] == "2026-10-12T20:15:00Z", out
+
+
+def test_a_never_alerted_row_says_so():
+    """THE CONTROL. A field hardcoded True would pass the test above."""
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
+    row = _row(mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["already_alerted"] is False, out
+    assert out["b2_cut_alerted_at"] is None, out
+
+
+def test_the_verdict_set_is_exactly_ta161s():
+    """R-IV.1005(b): no other labels. Names that were verdicts and are not any more must be
+    GONE from the module, not merely unused -- an importable PASS invites a new caller."""
+    assert set(b2.VERDICTS) == {
+        "NOT_YET", "NOT_EVALUABLE", "UNDETERMINED", "EXPIRY_STOPPED",
+        "CUT_SESSION_PRECEDES_DEPLOY", "NOT_PROFITABLE", "PROFITABLE"}, b2.VERDICTS
+    for gone in ("PASS", "FIRE", "ALREADY_FIRED", "S10_CUT_SESSION_PRECEDES_DEPLOY"):
+        assert not hasattr(b2, gone), "%s is still importable" % gone
 
 
 def test_every_path_carries_the_ta161_keys():
@@ -316,8 +348,8 @@ def test_every_path_carries_the_ta161_keys():
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=datetime(cut.year, cut.month, cut.day, 9, 0, tzinfo=ET))
     assert out["verdict"] == b2.NOT_YET, out
-    for key in ("cut_pnl", "stop_code", "pnl_divergence", "workings",
-                "mark", "mark_as_of", "mark_integrity", "cut_session"):
+    for key in ("cut_pnl", "pnl_divergence", "workings", "already_alerted",
+                "b2_cut_alerted_at", "mark", "mark_as_of", "mark_integrity", "cut_session"):
         assert key in out, key
 
 # -- R-IV.1001(c): the anchor and its clock --------------------------------------------
@@ -353,7 +385,7 @@ def test_the_s10_reason_states_the_clock():
                mark_as_of=_post_close(cut), expiry=None)
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut) + timedelta(days=1))
-    assert out["stop_code"] == b2.S10_CUT_SESSION_PRECEDES_DEPLOY
+    assert out["verdict"] == b2.CUT_SESSION_PRECEDES_DEPLOY
     assert "America/New_York" in out["reason"], out["reason"]
 
 
@@ -364,5 +396,4 @@ def test_a_cut_ON_the_anchor_date_evaluates():
     row = _row(mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
-    assert out["verdict"] in (b2.PASS, b2.FIRE), out
-    assert out["stop_code"] is None, out
+    assert out["verdict"] in (b2.PROFITABLE, b2.NOT_PROFITABLE), out

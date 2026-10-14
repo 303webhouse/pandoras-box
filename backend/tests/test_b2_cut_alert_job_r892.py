@@ -27,7 +27,7 @@ AT_CUT = datetime(2026, 10, 15, 16, 0, tzinfo=ET)
 
 
 def _verdict(**over):
-    v = {"verdict": "FIRE", "position_id": "P1", "ticker": "KNX", "total_pnl": "-12.00",
+    v = {"verdict": "NOT_PROFITABLE", "position_id": "P1", "ticker": "KNX", "total_pnl": "-12.00",
          "cut_session": "2026-10-15", "reason": "flat fires"}
     v.update(over)
     return v
@@ -55,7 +55,7 @@ def test_with_the_flag_off_it_evaluates_but_never_delivers(monkeypatch):
     monkeypatch.setattr(job, "_deliver", fake_deliver)
     out = asyncio.run(job.run(AT_CUT))
     assert out["evaluated"] == 1
-    assert out["by_verdict"] == {"FIRE": 1}
+    assert out["by_verdict"] == {"NOT_PROFITABLE": 1}
     assert out["fired"] == 0
     assert delivered == [], "the flag must gate the PUSH, and it delivered anyway"
 

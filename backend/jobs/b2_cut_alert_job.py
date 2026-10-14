@@ -286,8 +286,13 @@ async def evaluate(now: Optional[datetime] = None, *, pool=None) -> List[Dict[st
 
 
 async def run(now: Optional[datetime] = None, *, pool=None) -> Dict[str, Any]:
-    """Evaluate, alert on each FIRE, flag only what was delivered. NEVER RAISES."""
-    from models.b2_cut_alert import FIRE, NOT_EVALUABLE, UNDETERMINED
+    """Evaluate, alert on each NOT_PROFITABLE, flag only what was delivered. NEVER RAISES.
+
+    R-IV.1005(b): the verdict describes the POSITION and alerting is the action taken on it, so
+    "have we already alerted" is now a separate field rather than a verdict that displaced the
+    P&L answer. This function owns that decision; `decide()` does not.
+    """
+    from models.b2_cut_alert import NOT_EVALUABLE, NOT_PROFITABLE, UNDETERMINED
 
     verdicts = await evaluate(now, pool=pool)
     counts: Dict[str, int] = {}
@@ -306,7 +311,8 @@ async def run(now: Optional[datetime] = None, *, pool=None) -> Dict[str, Any]:
             logger.warning("[b2.cut_alert] %s (%s) %s at its cut: %s%s",
                            v.get("ticker"), v.get("position_id"), v["verdict"],
                            v.get("reason"),
-                           " [%s]" % v["stop_code"] if v.get("stop_code") else "")
+                           " [already alerted %s]" % v["b2_cut_alerted_at"]
+                           if v.get("already_alerted") else "")
 
     # The divergence between the two writers of the same fact is reported wherever it is
     # found, on any verdict -- it is the finding TA-161 exists to surface.
@@ -321,7 +327,14 @@ async def run(now: Optional[datetime] = None, *, pool=None) -> Dict[str, Any]:
 
     fired = 0
     for v in verdicts:
-        if v["verdict"] != FIRE:
+        # NOT_PROFITABLE is the verdict; alerting is the action. A row already alerted on
+        # keeps its verdict and is simply not alerted again -- it fires once.
+        if v["verdict"] != NOT_PROFITABLE:
+            continue
+        if v.get("already_alerted"):
+            logger.info("[b2.cut_alert] %s (%s) is %s but was already alerted at %s; "
+                        "not alerting again", v.get("ticker"), v.get("position_id"),
+                        NOT_PROFITABLE, v.get("b2_cut_alerted_at"))
             continue
         if not is_enabled():
             # The flag gates the PUSH, not the evaluation, so a live book can be watched
