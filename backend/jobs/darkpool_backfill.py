@@ -344,6 +344,59 @@ async def fetch_page(ticker: str, session: date, cursor: Optional[str],
     return resp, None
 
 
+#: R-IV.997(c). A run whose process died without closing its row. Reconciled on startup
+#: because only one process collects at a time, so a null `ended_at` on anything but the
+#: current run means the process that owned it is gone.
+KILLED_BY_DEPLOY = "KILLED_BY_DEPLOY"
+
+RECONCILE_ORPHANED_RUNS_SQL = """
+    UPDATE darkpool_backfill_runs
+       SET ended_at = COALESCE(ended_at, NOW()),
+           stop_reason = COALESCE(stop_reason, $2)
+     WHERE ended_at IS NULL
+       AND id <> $1
+ RETURNING id, started_at
+"""
+
+#: The ACTIVE run, for the deploy guard and the nightly export (R-IV.997(b)/(c)).
+ACTIVE_RUN_SQL = """
+    SELECT id, started_at, uw_day, calls_spent
+      FROM darkpool_backfill_runs
+     WHERE ended_at IS NULL
+     ORDER BY id DESC
+     LIMIT 1
+"""
+
+
+async def reconcile_orphaned_runs(pool, current_run_id: int = -1) -> List[dict]:
+    """Close every run row whose process is gone. Returns what was closed."""
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(RECONCILE_ORPHANED_RUNS_SQL, current_run_id,
+                                    KILLED_BY_DEPLOY)
+    except Exception:                                               # noqa: BLE001
+        logger.warning("[dp-backfill] could not reconcile orphaned runs", exc_info=True)
+        return []
+    out = [dict(r) for r in rows]
+    for r in out:
+        logger.warning("[dp-backfill] run %s had no ended_at and its process is gone -> %s "
+                       "(started %s)", r["id"], KILLED_BY_DEPLOY, r["started_at"])
+    return out
+
+
+async def active_run(pool) -> Optional[dict]:
+    """The run still in progress, or None. The one question (b) and (c) both ask."""
+    try:
+        async with pool.acquire() as conn:
+            for stmt in DDL:
+                await conn.execute(stmt)
+            row = await conn.fetchrow(ACTIVE_RUN_SQL)
+    except Exception:                                               # noqa: BLE001
+        logger.warning("[dp-backfill] could not read the active run", exc_info=True)
+        return None
+    return dict(row) if row else None
+
+
 async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
     """Every page of one ticker-session, oldest-cursor-walked. Stores raw, derives nothing."""
     quarantined = session in QUARANTINED_SESSIONS
@@ -464,6 +517,9 @@ async def run(call_budget: Optional[int] = None,
         run_id = await conn.fetchval(
             "INSERT INTO darkpool_backfill_runs (started_at, uw_day, calls_spent) "
             "VALUES (NOW(), $1, 0) RETURNING id", uw_day())
+    # R-IV.997(c): close any run whose process is gone BEFORE collecting, so a null ended_at
+    # never means two things at once. Repairs run 7, which my own deploy killed.
+    await reconcile_orphaned_runs(pool, run_id)
 
     budget = Budget(call_budget)
     end = until_session or (today - timedelta(days=1))
@@ -488,20 +544,27 @@ async def run(call_budget: Optional[int] = None,
 
     await budget.check_account()
     checked_at = 0
-    for session in sessions:
-        if budget.stopped or budget.remaining <= 0:
-            break
-        for ticker in names:
+    # R-IV.997(c): a deploy cancels this task mid-walk. CancelledError derives from
+    # BaseException, so every `except Exception` in this module was blind to it -- which is
+    # why run 7 is still recorded as though it were in progress.
+    try:
+        for session in sessions:
             if budget.stopped or budget.remaining <= 0:
                 break
-            if (ticker, session) in done:
-                continue
-            results.append(await collect_one(pool, ticker, session, budget))
-            # Re-read the account total every ~200 calls: often enough to stop before 30,000,
-            # rarely enough not to spend the budget on asking.
-            if budget.calls - checked_at >= 200:
-                checked_at = budget.calls
-                await budget.check_account()
+            for ticker in names:
+                if budget.stopped or budget.remaining <= 0:
+                    break
+                if (ticker, session) in done:
+                    continue
+                results.append(await collect_one(pool, ticker, session, budget))
+                # Re-read the account total every ~200 calls: often enough to stop before
+                # 30,000, rarely enough not to spend the budget on asking.
+                if budget.calls - checked_at >= 200:
+                    checked_at = budget.calls
+                    await budget.check_account()
+    except asyncio.CancelledError:
+        await _close_run_as_killed(pool, run_id, budget.calls)
+        raise
 
     secured = sorted({r["session"] for r in results if r["exhausted"] and r["prints"] > 0})
     summary = {
@@ -524,6 +587,29 @@ async def run(call_budget: Optional[int] = None,
             "stop_reason = $2, summary = $3::jsonb WHERE id = $4",
             budget.calls, summary["stop_reason"], json.dumps(summary), run_id)
     return {"ok": True, "run_id": run_id, **summary}
+
+
+async def _close_run_as_killed(pool, run_id: int, calls: int) -> None:
+    """Best-effort: stamp a cancelled run before the loop finishes tearing down.
+
+    SHIELDED AND TIMED OUT, and not relied upon. A write issued while the task is being
+    cancelled may itself be cancelled, which is exactly why `reconcile_orphaned_runs` exists
+    and is the mechanism that actually guarantees the record.
+    """
+    async def _write():
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE darkpool_backfill_runs SET ended_at = NOW(), calls_spent = $1, "
+                "stop_reason = $2 WHERE id = $3 AND ended_at IS NULL",
+                calls, KILLED_BY_DEPLOY, run_id)
+    try:
+        await asyncio.wait_for(asyncio.shield(asyncio.ensure_future(_write())), timeout=5.0)
+        logger.warning("[dp-backfill] run %s cancelled mid-walk -> %s", run_id,
+                       KILLED_BY_DEPLOY)
+    except BaseException:                                           # noqa: BLE001
+        # Deliberately swallowed: startup reconciliation will close it on the next boot.
+        logger.warning("[dp-backfill] run %s cancelled; could not stamp it now, startup "
+                       "reconciliation will", run_id)
 
 
 # ── R-IV.950(c): the nightly trigger ────────────────────────────────────────────────────────
