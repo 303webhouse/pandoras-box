@@ -133,5 +133,9 @@ async def send(ticker: str, alert_type: str, action: str, *,
         logger.error("[ntfy] send failed for %s %s: %s", ticker, alert_type, type(exc).__name__)
         return {"sent": False, "reason": "%s" % type(exc).__name__}
 
-    logger.info("[ntfy] sent %s %s (topic len %d)", ticker, alert_type, len(topic()))
-    return {"sent": True, "body": body}
+    logger.info("[ntfy] sent %s %s -> HTTP %d (topic len %d)",
+                ticker, alert_type, resp.status_code, len(topic()))
+    # The STATUS on success too, not only on failure. A caller asked to report "the HTTP
+    # status" could previously only report it when the send had FAILED, which is the one case
+    # where the status is least interesting.
+    return {"sent": True, "status": resp.status_code, "body": body}
