@@ -414,20 +414,59 @@ async def export_darkpool() -> None:
         await conn.close()
 
 
+def _archive_rows() -> list:
+    """Every file on F: that THIS run did not write, hashed — R-IV.1001(b).
+
+    Without this the manifest described the RUN rather than the archive, so a file written by
+    another process (the Polygon pull, which runs under `railway run` because the key is not
+    on this machine) would be dropped from MANIFEST.tsv by the next nightly export while
+    still sitting on the drive. An archive whose manifest omits part of it is worse than no
+    manifest: it reads as a complete inventory.
+
+    These rows carry `rows_written = -1`, NOT 0: this process did not write them, which is not
+    the same as having written nothing.
+    """
+    written = {os.path.normcase(r["path"]) for r in _manifest_rows}
+    out = []
+    for dirpath, _dirs, files in os.walk(ROOT):
+        for name in sorted(files):
+            path = os.path.join(dirpath, name)
+            if os.path.normcase(path) == os.path.normcase(MANIFEST):
+                continue                       # the manifest does not list itself
+            if os.path.normcase(path) in written:
+                continue
+            try:
+                rows_back = -1
+                if name.endswith(".parquet"):
+                    rows_back = len(pd.read_parquet(path))
+                out.append({"path": path, "rows_written": -1, "rows_read_back": rows_back,
+                            "bytes": os.path.getsize(path), "sha256": sha256_of(path),
+                            "note": "not written this run; hash verified"})
+            except Exception as exc:                                # noqa: BLE001
+                out.append({"path": path, "rows_written": -1, "rows_read_back": -1,
+                            "bytes": os.path.getsize(path) if os.path.exists(path) else -1,
+                            "sha256": "", "MISMATCH": "unreadable: %s" % type(exc).__name__})
+    return out
+
+
 def write_manifest() -> None:
     os.makedirs(ROOT, exist_ok=True)
+    rows = list(_manifest_rows) + _archive_rows()
+    rows.sort(key=lambda r: os.path.normcase(r["path"]))
     lines = ["path\trows_written\trows_read_back\tbytes\tsha256\tnote"]
-    for r in _manifest_rows:
+    for r in rows:
         lines.append("\t".join([
             r["path"], str(r["rows_written"]), str(r["rows_read_back"]),
-            str(r["bytes"]), r["sha256"], r.get("MISMATCH", "")]))
+            str(r["bytes"]), r["sha256"], r.get("MISMATCH", r.get("note", ""))]))
     with open(MANIFEST, "w", encoding="utf-8", newline="\n") as fh:
         fh.write("\n".join(lines) + "\n")
-    bad = [r for r in _manifest_rows if "MISMATCH" in r]
+    bad = [r for r in rows if "MISMATCH" in r]
+    carried = [r for r in rows if r["rows_written"] == -1]
     print()
     print("=== MANIFEST: %s ===" % MANIFEST)
-    print("  files: %d   total bytes: %s" % (len(_manifest_rows),
-                                            f"{sum(r['bytes'] for r in _manifest_rows):,}"))
+    print("  files: %d (%d written this run, %d carried and hash-verified)   total bytes: %s"
+          % (len(rows), len(rows) - len(carried), len(carried),
+             f"{sum(max(r['bytes'], 0) for r in rows):,}"))
     print("  read-back mismatches: %s" % (len(bad) if bad else "NONE"))
     for r in bad:
         print("    %s -> %s" % (r["path"], r["MISMATCH"]))
