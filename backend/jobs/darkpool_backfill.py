@@ -100,6 +100,13 @@ DDL = (
            fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
            PRIMARY KEY (ticker, session_date, page_no)
        )""",
+    # R-IV.1017(f): which WALK fetched this page. Until now the only way to group pages into
+    # a walk was to cluster `fetched_at`, which is an inference, not a record -- and I had to
+    # say so when answering R-IV.1010(b) about 09-21. PAST PAGES STAY NULL: back-filling a
+    # walk id from fetch-time clustering would manufacture exactly the certainty this column
+    # exists to provide.
+    """ALTER TABLE darkpool_backfill_pages
+           ADD COLUMN IF NOT EXISTS walk_id TEXT""",
     """CREATE TABLE IF NOT EXISTS darkpool_backfill_sessions (
            ticker TEXT NOT NULL,
            session_date DATE NOT NULL,
@@ -131,9 +138,10 @@ DDL = (
 INSERT_PAGE = """
     INSERT INTO darkpool_backfill_pages
         (ticker, session_date, page_no, older_than_cursor, row_count, payload, provider,
-         quarantined)
-    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+         quarantined, walk_id)
+    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
     ON CONFLICT (ticker, session_date, page_no) DO UPDATE SET
+        walk_id = EXCLUDED.walk_id,
         older_than_cursor = EXCLUDED.older_than_cursor,
         row_count = EXCLUDED.row_count,
         payload = EXCLUDED.payload,
@@ -576,6 +584,11 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
     """Every page of one ticker-session, oldest-cursor-walked. Stores raw, derives nothing."""
     quarantined = session in QUARANTINED_SESSIONS
     floor_utc = session_start_utc(session)      # R-IV.988(b): the walk's floor
+    # R-IV.1017(f): ONE id per invocation of this function, which is what "a walk" means. It
+    # carries the run, the instrument and the instant, so a page can be traced to the walk
+    # that fetched it without clustering fetch times.
+    walk_id = "%s|%s|%s|%s" % (CALLER, ticker, session.isoformat(),
+                               datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ"))
     cursor: Optional[str] = None
     pages = prints = spent_here = 0
     exhausted = False
@@ -620,7 +633,7 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
             break
         async with pool.acquire() as conn:
             await conn.execute(INSERT_PAGE, ticker, session, page_no, cursor, len(rows),
-                               json.dumps(resp), PROVIDER, quarantined)
+                               json.dumps(resp), PROVIDER, quarantined, walk_id)
         pages += 1
         prints += len(rows)
         nxt = _oldest_cursor(rows)
@@ -668,7 +681,8 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
                 ticker, session, pages, prints, exhausted, stop)
     return {"ticker": ticker, "session": session.isoformat(), "pages": pages,
             "prints": prints, "exhausted": exhausted, "stop": stop, "calls": spent_here,
-            "quarantined": quarantined, "reached_floor": reached_floor}
+            "quarantined": quarantined, "reached_floor": reached_floor,
+            "walk_id": walk_id}
 
 
 async def run(call_budget: Optional[int] = None,

@@ -129,7 +129,15 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
             """
             SELECT ticker, alert_type, price, direction, vah, val, poc,
                    ib_high, ib_low, va_migration, poor_high, poor_low,
-                   volume_quality, interpretation, raw_payload, timestamp
+                   volume_quality, interpretation, raw_payload, timestamp,
+                   -- R-IV.1024(c): the script version the PAYLOAD carried. Read from the
+                   -- column where present, else from raw_payload for rows written before the
+                   -- column existed. NULL when the payload genuinely carried none -- never
+                   -- defaulted to a version.
+                   COALESCE(
+                       NULLIF(script_version, ''),
+                       NULLIF(raw_payload->>'script', '')
+                   ) AS script_version
             FROM pythia_events
             WHERE ticker = $1
             ORDER BY timestamp DESC
@@ -180,6 +188,9 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
 
     age_seconds = int((now_utc - ts).total_seconds())
 
+    # The script version the payload carried, or None. Bound once so the three
+    # fields below cannot disagree about which Pine wrote this row.
+    _script = (row["script_version"] or "").strip() or None
     data = {
         "ticker": tkr,
         "poc": _safe_float(row["poc"]),
@@ -203,15 +214,25 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
         "event_age_seconds": age_seconds,
         # sessions, not seconds: 3,293,950s does not read as 38 days
         "sessions_behind": sessions_behind,
-        # Static tag — the Pine payload carries no version field (verified
-        # 2026-06-10 against a live SPY raw_payload), so this can't read reality
-        # from the data. Reflects the current live Pine (v2.4). For true
-        # provenance, add a "version" field to the Pine comFields (ticketed).
-        "source": "pythia_webhook_v2.4",
-        # Not computed by Pine v2.4 — explicit null, never fabricated
+        # R-IV.1024(c): READ FROM THE DATA. This was the string literal
+        # "pythia_webhook_v2.4" plus a note naming v2.4, written when the payload carried no
+        # version field at all (verified 2026-06-10). PYTHIA v2.6 adds "script", so the label
+        # can and must reflect what produced the row -- and with v2.6 live, a hardcoded v2.4
+        # was simply false. A version a reader cannot distrust is worse than none.
+        "source": ("pythia_webhook_%s" % _script if _script else "pythia_webhook"),
+        "script_version": _script,
+        "script_version_note": (
+            None if _script else
+            "the payload carried no `script` field; this row predates PYTHIA v2.6 or came "
+            "from an alert that omits it. NOT inferred from the deploy date."),
+        # Explicit null, never fabricated. The note now names the version that actually
+        # produced the row instead of asserting one.
         "single_prints": None,
         "day_type": None,
-        "note": "single_prints and day_type are not computed by Pine v2.4",
+        "note": ("single_prints and day_type are not computed by Pine %s" % _script
+                 if _script else
+                 "single_prints and day_type are not computed by the Pine script that wrote "
+                 "this row (its version was not recorded)"),
     }
 
     return {"status": status, "data": data, "staleness_seconds": age_seconds}

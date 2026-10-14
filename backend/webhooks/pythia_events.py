@@ -159,12 +159,18 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
+            # R-IV.1024(c): the script version the payload ACTUALLY carried. Added here
+            # rather than read from raw_payload at query time so a reader never has to parse
+            # JSON to learn which Pine wrote a row.
+            await conn.execute(
+                "ALTER TABLE pythia_events "
+                "ADD COLUMN IF NOT EXISTS script_version TEXT")
             row = await conn.fetchrow("""
                 INSERT INTO pythia_events
                     (ticker, alert_type, price, direction, vah, val, poc,
                      va_migration, poor_high, poor_low, volume_quality,
-                     ib_high, ib_low, interpretation, raw_payload)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                     ib_high, ib_low, interpretation, raw_payload, script_version)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 RETURNING id
             """,
                 ticker, alert_type,
@@ -181,6 +187,10 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
                 ib_low,
                 interpretation,
                 dumps_jsonb(payload),  # secret already stripped above
+                # Whatever the payload said, trimmed and bounded, or NULL. NEVER defaulted to
+                # a version: a guessed version is the defect R-IV.1024(c) is closing.
+                (str(payload.get("script")).strip()[:32]
+                 if payload.get("script") not in (None, "") else None),
             )
             event_id = row["id"] if row else None
     except Exception as e:
