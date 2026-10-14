@@ -130,14 +130,20 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
             SELECT ticker, alert_type, price, direction, vah, val, poc,
                    ib_high, ib_low, va_migration, poor_high, poor_low,
                    volume_quality, interpretation, raw_payload, timestamp,
-                   -- R-IV.1024(c): the script version the PAYLOAD carried. Read from the
-                   -- column where present, else from raw_payload for rows written before the
-                   -- column existed. NULL when the payload genuinely carried none -- never
-                   -- defaulted to a version.
-                   COALESCE(
-                       NULLIF(script_version, ''),
-                       NULLIF(raw_payload->>'script', '')
-                   ) AS script_version
+                   -- R-IV.1024(c): the script version the PAYLOAD carried, read from
+                   -- `raw_payload` ONLY.
+                   --
+                   -- IT USED TO READ THE `script_version` COLUMN FIRST, AND THAT TOOK THIS
+                   -- SURFACE DOWN. The column is created by an ALTER in the webhook's INSERT
+                   -- path, which runs only when a PYTHIA event is ACCEPTED -- and nothing has
+                   -- been accepted since the v2.6 cutover started rejecting every alert. So
+                   -- the reader required a column that only a currently-dead writer creates,
+                   -- and `hub_get_market_profile` returned "column does not exist" for every
+                   -- ticker. A READ must never depend on a WRITER having run.
+                   --
+                   -- `raw_payload` is NOT NULL on every row and carries `script` verbatim, so
+                   -- this answers for old and new rows alike with no migration ordering.
+                   NULLIF(raw_payload->>'script', '') AS script_version
             FROM pythia_events
             WHERE ticker = $1
             ORDER BY timestamp DESC

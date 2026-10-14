@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI):
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
             await conn.execute("ALTER TABLE lightning_cards ADD COLUMN IF NOT EXISTS confirmations JSONB DEFAULT '[]'")
+            # R-IV.1024(c): migrations belong at STARTUP, not in a writer's hot path. Putting
+            # this ALTER only in the PYTHIA webhook's INSERT meant the column was created just
+            # when an event was ACCEPTED -- and with v2.6 rejecting every alert, nothing was.
+            # The read path no longer needs it, but a migration that depends on traffic is
+            # wrong whatever reads it.
+            await conn.execute("ALTER TABLE pythia_events ADD COLUMN IF NOT EXISTS script_version TEXT")
         logger.info("✅ Lightning cards confirmations column ready")
     except Exception as e:
         logger.debug("Lightning cards column check: %s", e)
