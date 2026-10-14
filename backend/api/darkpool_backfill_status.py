@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 
@@ -27,6 +28,10 @@ from utils.pivot_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/darkpool-backfill", tags=["darkpool-backfill"])
+
+#: Convention #39: every timestamp this module converts is converted to the
+#: EXCHANGE clock, and the zone is named once.
+ET = ZoneInfo("America/New_York")
 
 
 #: Per ticker-session, as the job recorded it. `calls_spent` is the figure R-IV.993(c) wants.
