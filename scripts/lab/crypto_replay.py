@@ -5,6 +5,7 @@ go to QUERY for independent re-computation before they are cited.
 
 Declarations (stamped 2026-10-14 02:12:40 UTC before this file existed):
   lab\\crypto-replay\\01-DECLARATIONS.md  25ee7add...   scope 00-SCOPE-R-IV.995.md  aaed8c0c...
+  lab\\crypto-replay\\03-REPORTING-ADDENDUM-R-IV.1003.md  1dbc36f7...  (pass count vs chance; reporting only)
 
 The crypto path (cta_scanner.analyze_ticker_cta -> analyze_ticker_cta_from_df): trailing 365-day window
 (period="1y"), calculate_cta_indicators on it, candidates in code order GOLDEN_TOUCH(100),
@@ -169,6 +170,26 @@ def verdicts(C):
     return pd.DataFrame(out)
 
 
+P_ONE_SIDED_T2 = 0.0228          # P(Z >= 2), one-sided: the chance bound for one cell's pass (addendum)
+
+
+def pass_summary(V):
+    """Addendum R-IV.1003(b): k passes of the eligible (bear) cells, the chance bound and the label."""
+    from math import comb
+    n = int(len(V))
+    k = int(V.verdict.str.startswith("PASS").sum())
+    p = P_ONE_SIDED_T2
+    tail = sum(comb(n, j) * p ** j * (1 - p) ** (n - j) for j in range(k, n + 1)) if n else None
+    label = "no pass" if k == 0 else "consistent with chance (unless QUERY's re-computation says otherwise)" \
+        if k == 1 else "reported without a label; SPINE reads the count against the bound"
+    return {"passes": k, "eligible_cells": n, "total_cells": 2 * n,
+            "written": f"{k} of {n} eligible ({2 * n} cells)",
+            "chance_expected_upper_bound": round(n * p, 3),
+            "p_at_least_k_binomial": round(float(tail), 4) if tail is not None else None,
+            "binomial_note": "assumes independent cells; the cells are correlated, so this understates the tail",
+            "label": label}
+
+
 def run(btc_path, eth_path, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     meta = {"label": LABEL, "status": STATUS, "inputs": {}}
@@ -186,7 +207,7 @@ def run(btc_path, eth_path, out_dir):
     comps = int(C[C.is_cell & ~C.below_floor].shape[0] * 2)
     crosses = int(sum((C[f"t_hac_{b}"].abs() >= 2).sum() for b in ("B1", "B2")))
     meta.update({"cells": int(C.is_cell.sum()), "comparisons_sufficient": comps, "abs_hac_t_ge_2": crosses,
-                 "chance_expected": round(0.0455 * comps, 1)})
+                 "chance_expected": round(0.0455 * comps, 1), "pass_summary": pass_summary(V)})
     C.to_csv(os.path.join(out_dir, "cells.csv"), index=False)
     V.to_csv(os.path.join(out_dir, "verdicts.csv"), index=False)
     json.dump(meta, open(os.path.join(out_dir, "meta.json"), "w"), indent=1, default=str)
@@ -248,6 +269,19 @@ def selftest():
         lb = load_bars(p)
         checks["load_bars reads the bars1d layout (OHLCV + ticker)"] = len(lb) == len(bars) and list(lb.columns) == \
             ["Open", "High", "Low", "Close", "Volume"]
+    ps = pass_summary(V)
+    checks["addendum: 16 eligible of 32 cells per 2 assets; bound 16 x 0.0228"] = \
+        pass_summary(pd.concat([V, V.assign(asset="ETH-USD")]))["chance_expected_upper_bound"] == round(16 * 0.0228, 3)
+    checks["addendum: k = 0 -> 'no pass'"] = ps["label"] == "no pass" and ps["passes"] == 0
+    one = pd.concat([V, V.assign(asset="ETH-USD")]).reset_index(drop=True)
+    one.loc[0, "verdict"] = "PASS (run-off fact only)"
+    s1 = pass_summary(one)
+    checks["addendum: k = 1 -> 'consistent with chance'"] = s1["passes"] == 1 and s1["label"].startswith("consistent with chance")
+    two = one.copy()
+    two.loc[1, "verdict"] = "PASS (run-off fact only)"
+    s2 = pass_summary(two)
+    checks["addendum: k = 2 -> unlabelled, with P(X >= 2) reported"] = s2["passes"] == 2 and s2["label"].startswith(
+        "reported without a label") and 0 < s2["p_at_least_k_binomial"] < 0.1
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
     return 0 if all(checks.values()) else 1
