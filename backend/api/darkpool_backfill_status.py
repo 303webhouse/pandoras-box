@@ -51,6 +51,25 @@ RUNS_SQL = """
 #: different things at once.
 NOT_APPLICABLE_PREFIX = "NOT_APPLICABLE"
 
+#: The ONE statement of what the export may write. Reported verbatim in the payload, so a
+#: reader never has to trust a prose restatement of it -- the first version of this route
+#: said "exhausted AND prints_received > 0" while actually also requiring reached_floor.
+ELIGIBLE_FILTER = "exhausted = TRUE AND reached_floor = TRUE AND prints_received > 0"
+
+#: The census. A DATE is complete only when every one of these is (R-IV.958(f)).
+CENSUS = ("SPY", "QQQ", "IWM", "SMH", "NVDA", "AAPL", "MSFT", "TSLA")
+
+
+def _by_date(rows: List[Dict[str, Any]]) -> Dict[str, set]:
+    """{session_date: set(tickers)} — so "every census name" is a set comparison, not a count.
+
+    A count would accept eight rows for seven names plus a duplicate.
+    """
+    out: Dict[str, set] = {}
+    for r in rows:
+        out.setdefault(r["session_date"].isoformat(), set()).add(r["ticker"])
+    return out
+
 
 def _percentiles(values: List[int]) -> Dict[str, Optional[float]]:
     """mean / median / max over a list of call counts. None on an empty list, never 0.
@@ -128,10 +147,21 @@ async def progress(
                                       if r.get("calls_spent")]),
             "by_collected_night": {k: _percentiles(v) for k, v in sorted(by_night.items())},
         },
-        "dates_complete_all_names": sorted({
-            r["session_date"].isoformat() for r in done
-            if r.get("prints_received")
-        }),
+        # RENAMED AND CORRECTED. The first version of this field was called
+        # `dates_complete_all_names` and checked NEITHER completeness (reached_floor) nor all
+        # names -- it would have reported 22 dates where 16 are provable and 14 are inside
+        # QUERY's window. A label that answers a different question than it names is how a
+        # confident wrong answer gets made.
+        "dates_proved_complete_every_census_name": sorted(
+            d for d, names in _by_date(
+                [r for r in collected
+                 if r.get("exhausted") and r.get("reached_floor")
+                 and (r.get("prints_received") or 0) > 0]).items()
+            if set(CENSUS) <= names),
+        "dates_exhausted_but_floor_NOT_proved": sorted(
+            d for d, names in _by_date(
+                [r for r in collected
+                 if r.get("exhausted") and not r.get("reached_floor")]).items()),
         "outstanding_ticker_sessions": [
             {"ticker": r["ticker"], "session_date": r["session_date"].isoformat(),
              "pages": r["pages_fetched"], "prints": r["prints_received"],
@@ -171,7 +201,8 @@ async def export_manifest(_auth: Any = Depends(require_api_key)) -> Dict[str, An
         by_date.setdefault(r["session_date"].isoformat(), []).append(r["ticker"])
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "filter": "exhausted = TRUE AND prints_received > 0",
+        # Stated from ONE place so the response cannot misreport the filter it used.
+        "filter": ELIGIBLE_FILTER,
         "ticker_sessions": len(eligible),
         "by_session_date": {k: sorted(v) for k, v in sorted(by_date.items())},
     }
