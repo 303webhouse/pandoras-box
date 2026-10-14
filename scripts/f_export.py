@@ -537,7 +537,11 @@ def match_report() -> int:
     outside = [d for d in f_dates if not (lo <= d <= hi)]
 
     print("  complete.csv window        : %s .. %s" % (lo, hi))
-    print("  DB-complete, all %d names   : %d dates: %s"
+    print("  NOTE: the left-hand side is QUERY's complete.csv, NOT this hub's DB. F: is")
+    print("        written from the DB's `reached_floor`, which since R-IV.1005(d) accepts")
+    print("        the b2 exhaustion route. A disagreement therefore means complete.csv has")
+    print("        not been regenerated under b2 yet -- not that F: is wrong.")
+    print("  per QUERY complete.csv, all %d names: %d dates: %s"
           % (len(census), len(q_dates), ", ".join(q_dates) or "none"))
     print("  on F:,       all %d names   : %d dates in window: %s"
           % (len(census), len(in_window), ", ".join(in_window) or "none"))
@@ -549,11 +553,15 @@ def match_report() -> int:
         print("  F: partial  %s: missing %s" % (d, ", ".join(miss)))
 
     if missing:
-        print("  >>> MISMATCH: complete in DB but NOT all-%d on F:: %s"
+        print("  >>> MISMATCH: complete per complete.csv but NOT all-%d on F:: %s"
               % (len(census), ", ".join(missing)))
+        print("      This direction IS a problem: the archive is missing something QUERY "
+              "considers whole.")
     if extra:
-        print("  >>> on F: all-%d but NOT marked complete in DB: %s"
+        print("  >>> on F: all-%d but NOT marked complete in complete.csv: %s"
               % (len(census), ", ".join(extra)))
+        print("      Expected while QUERY's file predates the b2 route (R-IV.1005(d)): these "
+              "are b2-proved sessions. Regenerate complete.csv under b2 to clear it.")
     if not missing and not extra:
         print("  >>> MATCH: every in-window date agrees. QUERY's A0 may run.")
     return len(missing) + len(extra)

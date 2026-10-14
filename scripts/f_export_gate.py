@@ -68,23 +68,33 @@ async def _active_run():
         latest = await conn.fetchval(
             "SELECT id FROM darkpool_backfill_runs "
             "WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1")
-        return (dict(active) if active else None), latest
+        # THE ELIGIBLE SET, not just the run id. Completeness can change WITHOUT a new run:
+        # R-IV.1005(d)'s b2 route made 40 ticker-sessions newly exportable from pages already
+        # stored, and a gate keyed only on run_id would have reported ALREADY_DONE and left
+        # the archive short until the next night. A stale archive that reports itself current
+        # is the failure this whole gate exists to avoid.
+        eligible = await conn.fetchval(
+            "SELECT COUNT(*) FROM darkpool_backfill_sessions "
+            " WHERE exhausted = TRUE AND reached_floor = TRUE AND prints_received > 0")
+        return (dict(active) if active else None), (latest, int(eligible or 0))
     finally:
         await conn.close()
 
 
-def _last_exported_run():
+def _last_exported():
+    """(run_id, eligible_count) last exported, or (None, None)."""
     try:
         with open(STATE, encoding="utf-8") as fh:
-            return json.load(fh).get("run_id")
+            d = json.load(fh)
+        return d.get("run_id"), d.get("eligible")
     except Exception:                                               # noqa: BLE001
-        return None
+        return None, None
 
 
-def _record(run_id, mismatches: int) -> None:
+def _record(run_id, eligible: int, mismatches: int) -> None:
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     with open(STATE, "w", encoding="utf-8") as fh:
-        json.dump({"run_id": run_id, "mismatches": mismatches,
+        json.dump({"run_id": run_id, "eligible": eligible, "mismatches": mismatches,
                    "exported_at": datetime.now(timezone.utc).isoformat()}, fh, indent=2)
 
 
@@ -102,7 +112,7 @@ def main() -> int:
         return EXIT_F_NOT_MOUNTED
 
     try:
-        active, latest_ended = asyncio.run(_active_run())
+        active, (latest_ended, eligible) = asyncio.run(_active_run())
     except Exception as exc:                                        # noqa: BLE001
         _say("GATE_ERROR: could not read the run ledger (%s: %s). NOT treating this as "
              "'nothing is running'." % (type(exc).__name__, exc))
@@ -118,15 +128,22 @@ def main() -> int:
              "against a ledger with nothing in it.")
         return EXIT_GATE_ERROR
 
-    if _last_exported_run() == latest_ended:
-        _say("ALREADY_DONE: the archive is already current for run %s." % latest_ended)
+    was_run, was_eligible = _last_exported()
+    if was_run == latest_ended and was_eligible == eligible:
+        _say("ALREADY_DONE: the archive is current for run %s (%d eligible ticker-sessions)."
+             % (latest_ended, eligible))
         return EXIT_OK
 
-    _say("run %s has ended and is not yet exported -- exporting." % latest_ended)
+    if was_run == latest_ended:
+        _say("run %s unchanged but the eligible set moved %s -> %d -- exporting."
+             % (latest_ended, was_eligible, eligible))
+    else:
+        _say("run %s has ended and is not yet exported (%d eligible) -- exporting."
+             % (latest_ended, eligible))
     proc = subprocess.run([sys.executable, "-B", os.path.join(HERE, "f_export.py")],
                           cwd=REPO)
     # f_export returns 0 only when DB-complete and F: AGREE on every in-window date.
-    _record(latest_ended, proc.returncode)
+    _record(latest_ended, eligible, proc.returncode)
     if proc.returncode == 0:
         _say("EXPORTED: run %s, and the match report agrees." % latest_ended)
         return EXIT_OK
