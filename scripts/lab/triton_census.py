@@ -14,7 +14,9 @@ Protocol (all stamped before this file existed or was changed):
                                                                    session completeness)
   lab\\triton\\TRITON-FP-v1-AMENDMENT-4c-R-IV.981.md 324d086c...  (D1 adds 6, 9, L; linear quantiles;
                                                                    floor = kept AND D5-matched)
-  Field reference: lab\\triton\\F-README.md 0478cd78... (BUILD; bars1m columns added, R-IV.978(e))
+  lab\\triton\\TRITON-FP-v1-AMENDMENT-5-R-IV.989.md  822c84c5...  (group by EXECUTED date; dedup across
+                                                                   all files; completeness by walk)
+  Field reference: lab\\triton\\F-README.md e72ea5b9... (BUILD)
 
 Modes:
   anchor  A0 (amendment 4 sec. 2): per-name median NBBO spread vs 0.02% x median print price, on the
@@ -32,6 +34,7 @@ a tz-aware US/Eastern index = the minute the bar OPENS, columns Open/High/Low/Cl
 because the D5/D6 window is clipped to the regular session (amendment 2 sec. 4).
 
 Usage (QUERY):
+  python scripts/lab/triton_census.py build-complete <walk_pages_csv> <complete_csv_out>
   python scripts/lab/triton_census.py anchor <prints_glob> <complete_csv> <out_dir>
   python scripts/lab/triton_census.py run <prints_glob> <bars_glob> <adv_csv> <va_csv|-> <complete_csv> <macro_csv> <out_dir>
   (complete_csv: ticker, session, complete -- from darkpool_backfill_sessions: exhausted AND prints_received > 0)
@@ -51,6 +54,10 @@ CORE8 = ("SPY", "QQQ", "IWM", "SMH", "NVDA", "AAPL", "MSFT", "TSLA")
 SEAL = (date(2026, 8, 17), date(2026, 8, 31))
 QUARANTINED = {date(2026, 8, 28), date(2026, 8, 31)}
 CALIBRATION = (date(2026, 9, 1), date(2026, 9, 24))     # amendment 4 sec. 3; reserve = 2026-09-25 on
+NYSE_HOLIDAYS_IN_WINDOW = {date(2026, 9, 7)}             # Labor Day
+CALIBRATION_DATES = [d.date() for d in pd.bdate_range(CALIBRATION[0], CALIBRATION[1])
+                     if d.date() not in NYSE_HOLIDAYS_IN_WINDOW]               # 17 executed dates
+CURSOR_TOL_S = 1.0                                       # amendment 5 sec. 3 (iii)
 TICK = 0.01
 TAU_PCT = 0.0002                    # amendment 4 sec. 1; final only after A0 (and 4b if triggered)
 TAU_FINAL = False                   # set True once A0 is read and SPINE confirms; `run` refuses before
@@ -224,6 +231,75 @@ def bar_sources(bars):
     d = pd.DataFrame({"ticker": bars.ticker, "session": t.dt.date, "source": bars.source})
     d = d[in_calibration(d.session)].drop_duplicates(["ticker", "session", "source"])
     return d.groupby("source").size().to_dict()
+
+
+# ── amendment 5: completeness per (ticker, EXECUTED date), from the walk metadata ────────────────
+def _instant(x):
+    """A cursor / timestamp as a UTC Timestamp. Epoch numbers (s or ms) or ISO strings; None if not."""
+    if x is None or (isinstance(x, float) and np.isnan(x)) or str(x).strip() in ("", "None", "null", "nan"):
+        return None
+    t = str(x).strip()
+    try:
+        v = float(t)
+        return pd.Timestamp(v, unit="ms" if v > 1e11 else "s", tz="UTC")
+    except ValueError:
+        pass
+    try:
+        return pd.Timestamp(t).tz_convert("UTC") if pd.Timestamp(t).tzinfo else pd.Timestamp(t, tz="UTC")
+    except (ValueError, TypeError):
+        return None
+
+
+def walk_reach(pages):
+    """pages of one (ticker, query_date), any order. Returns (reach_utc or None, n_unbroken_pages)."""
+    g = pages.sort_values("page_no")
+    first = int(g.page_no.iloc[0])
+    oldest, n_ok = None, 0
+    for j, r in enumerate(g.itertuples()):
+        if int(r.page_no) != first + j or not (r.row_count and r.row_count > 0):
+            break
+        lo = _instant(r.min_executed_at)
+        if lo is None:
+            break
+        if j >= 1:
+            c = _instant(r.older_than_cursor)
+            if c is None or abs((c - oldest).total_seconds()) > CURSOR_TOL_S:
+                break
+        oldest = lo if oldest is None else min(oldest, lo)
+        n_ok += 1
+    return oldest, n_ok
+
+
+def build_complete(wp):
+    """walk_pages -> complete.csv rows for CORE8 x CALIBRATION_DATES, plus the anchor-trigger count."""
+    reach = {}
+    for (tk, q), g in wp.groupby(["ticker", "query_date"]):
+        r, n_ok = walk_reach(g)
+        if r is not None:
+            reach.setdefault(tk, []).append((pd.Timestamp(q).date(), r, n_ok))
+    rows = []
+    for tk in CORE8:
+        for e in CALIBRATION_DATES:
+            start = pd.Timestamp(e.isoformat() + " 04:00", tz="America/New_York").tz_convert("UTC")
+            ok = [(q, r) for q, r, _ in reach.get(tk, []) if q >= e and r < start]
+            best = min(ok, key=lambda x: x[0]) if ok else None
+            rows.append({"ticker": tk, "session": e.isoformat(), "complete": bool(ok),
+                         "n_walks": int(sum(1 for q, _, _ in reach.get(tk, []) if q >= e)),
+                         "best_query_date": best[0].isoformat() if best else "",
+                         "best_reach_et": best[1].tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M:%S")
+                         if best else ""})
+    C = pd.DataFrame(rows)
+    per_date = C.groupby("session").complete.all()
+    return C, {"calibration_dates": len(CALIBRATION_DATES),
+               "dates_complete_for_all_8": int(per_date.sum()),
+               "anchor_trigger_met_12_of_17": bool(per_date.sum() >= 12)}
+
+
+def run_build_complete(walk_csv, out_csv):
+    wp = pd.read_csv(walk_csv)
+    C, info = build_complete(wp)
+    C.to_csv(out_csv, index=False)
+    print(json.dumps(info, indent=1))
 
 
 # ── A0: the tau anchor (aggregate only) ──────────────────────────────────────────────────────────
@@ -492,6 +568,10 @@ def run_anchor(prints_glob, complete_csv, out_dir):
     raw = raw[raw.ticker.isin(CORE8)]
     t = pd.to_datetime(raw.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date
     A, decision = anchor(df)
+    comp = pd.read_csv(complete_csv, parse_dates=["session"])
+    comp = comp[comp.session.dt.date.isin(CALIBRATION_DATES)]
+    decision["dates_complete_for_all_8"] = int(comp.groupby("session").complete.apply(
+        lambda x: all(_truthy(v) for v in x) and len(x) == len(CORE8)).sum())
     _write({"anchor_tau": A, "code_census": code_census(raw[in_calibration(t)])}, out_dir,
            {"calibration": CALIBRATION, "sessions_read": sorted({str(x) for x in df.session}),
             "duplicate_tracking_ids_dropped": n_dup, "incomplete_ticker_sessions_dropped": dropped, **decision})
@@ -677,6 +757,64 @@ def selftest():
         checks["end-to-end anchor via Parquet: runs, reads calibration only, writes aggregates"] = \
             meta["sessions_read"] == ["2026-09-02", "2026-09-03"] and os.path.exists(os.path.join(td, "out", "code_census.csv"))
     checks["`run` refuses while tau is not final"] = not TAU_FINAL
+    checks["17 calibration executed dates (Labor Day excluded)"] = len(CALIBRATION_DATES) == 17
+    # amendment 5: files that cross session boundaries the way BUILD found
+    base = []
+    days = [date(2026, 8, 27), date(2026, 8, 28), date(2026, 8, 31), date(2026, 9, 1), date(2026, 9, 2),
+            date(2026, 9, 3)]
+    for d in days:
+        b0 = pd.Timestamp(d.isoformat() + " 13:30", tz="UTC")
+        for k in range(50):
+            base.append({"ticker": "SPY", "executed_at": (b0 + pd.Timedelta(minutes=5 * k)).isoformat(),
+                         "price": 500.0, "size": 100 + k, "premium": 5e4, "nbbo_bid": 499.99, "nbbo_ask": 500.01,
+                         "canceled": "f", "sale_cond_codes": None, "trade_code": None,
+                         "ext_hour_sold_codes": None, "trade_settlement": "regular_settlement",
+                         "tracking_id": f"{d}-{k}"})
+    B = pd.DataFrame(base)
+    B["E"] = pd.to_datetime(B.executed_at, utc=True).dt.tz_convert("America/New_York").dt.date
+    files = []
+    for qi, q in enumerate(days[2:], start=2):          # each query file holds its date + the 2 before
+        files.append(B[B.E.isin(days[qi - 2:qi + 1])].drop(columns="E").assign(_q=q))
+    X = pd.concat(files, ignore_index=True)
+    n_dup_expected = len(X) - X.tracking_id.nunique()
+    comp_all = {("SPY", d) for d in days}
+    dfx, ndx, _ = prepare_prints(X.drop(columns="_q"), comp_all)
+    checks["A5: dedup across all files removes exactly the cross-file repeats"] = ndx == n_dup_expected
+    checks["A5: grouping is by EXECUTED date (09-01, 09-02, 09-03 read; not the file's date)"] = \
+        sorted({str(x) for x in dfx.session}) == ["2026-09-01", "2026-09-02", "2026-09-03"]
+    checks["A5: prints executed 08-27..08-31 excluded although they sit in 09-01..09-03 files"] = \
+        not any(x < date(2026, 9, 1) for x in dfx.session)
+    # walk metadata: one good walk, one broken cursor, one that stops short
+    def pg(q, n, first_min, step_min, break_at=None, rows=50):
+        out, oldest = [], None
+        hi = pd.Timestamp(first_min, tz="UTC")
+        for j in range(n):
+            lo = hi - pd.Timedelta(minutes=step_min)
+            cur = "" if j == 0 else (oldest + pd.Timedelta(minutes=30 if j == break_at else 0)).isoformat()
+            out.append({"ticker": "SPY", "query_date": q, "page_no": j + 1, "older_than_cursor": cur,
+                        "row_count": rows, "min_executed_at": lo.isoformat(), "max_executed_at": hi.isoformat()})
+            oldest = lo if oldest is None else min(oldest, lo)
+            hi = lo
+        return out
+    wp = pd.DataFrame(
+        pg("2026-09-03", 40, "2026-09-03 23:59", 120)                 # 80 h back: 08-31 19:59 UTC, before 09-01 04:00 ET
+        + pg("2026-09-10", 30, "2026-09-10 23:59", 120, break_at=3)   # broken at page 3: reach only ~09-10 20:00
+        + pg("2026-09-16", 3, "2026-09-16 23:59", 60))                # stops short: never before 09-16 04:00
+    C, info = build_complete(wp)
+    spy = C[C.ticker == "SPY"].set_index("session").complete
+    short = build_complete(pd.DataFrame(pg("2026-09-03", 30, "2026-09-03 23:59", 120)))[0]
+    checks["A5: a 60-h walk (30 pages) stops at 09-01 07:59 ET, so 09-01 is INCOMPLETE, 09-02 complete"] = \
+        bool(not short.set_index(["ticker", "session"]).complete[("SPY", "2026-09-01")]
+             and short.set_index(["ticker", "session"]).complete[("SPY", "2026-09-02")])
+    checks["A5: an unbroken walk from 09-03 completes 09-01, 09-02, 09-03"] = \
+        bool(spy["2026-09-01"] and spy["2026-09-02"] and spy["2026-09-03"])
+    checks["A5: a cursor gap breaks the walk (09-08..09-10 not complete)"] = \
+        not (spy["2026-09-08"] or spy["2026-09-09"] or spy["2026-09-10"])
+    checks["A5: a walk that never reaches 04:00 ET leaves the date incomplete (09-16)"] = not spy["2026-09-16"]
+    checks["A5: other names without walks are incomplete; trigger counts all-8 dates (0)"] = \
+        not C[C.ticker == "QQQ"].complete.any() and info["dates_complete_for_all_8"] == 0
+    checks["A5: cursor parsing accepts epoch ms and ISO"] = \
+        _instant("1789000000000") is not None and _instant("2026-09-03T12:00:00+00:00") is not None
     # bars read in the README layout; extended hours present on disk but clipped to RTH
     with tempfile.TemporaryDirectory() as td:
         _write_readme_bars(braw, os.path.join(td, "bars1m"))
@@ -732,7 +870,9 @@ if __name__ == "__main__":
     mode = sys.argv[1]
     if mode == "selftest":
         sys.exit(selftest())
-    if mode == "anchor":
+    if mode == "build-complete":
+        run_build_complete(*sys.argv[2:4])
+    elif mode == "anchor":
         run_anchor(*sys.argv[2:5])
     elif mode == "run":
         run(*sys.argv[2:9])
