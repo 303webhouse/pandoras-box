@@ -64,7 +64,9 @@ CALIBRATION_DATES = [d.date() for d in pd.bdate_range(CALIBRATION[0], CALIBRATIO
 CURSOR_TOL_S = 1.0                                       # amendment 5 sec. 3 (iii)
 TICK = 0.01
 TAU_PCT = 0.0002                    # amendment 4 sec. 1; final only after A0 (and 4b if triggered)
-TAU_FINAL = False                   # set True once A0 is read and SPINE confirms; `run` refuses before
+TAU_FINAL = True                    # A0: tau STANDS (QUERY R-IV.1002); confirmed by SPINE R-IV.1015 (relayed R-IV.1019(a))
+TAU_CONFIRMATION = {"ruling": "R-IV.1015 (relayed in R-IV.1019(a))", "covers_p75": "5 of 8",
+                    "flagged_names": ["MSFT", "SMH", "TSLA"]}
 MAX_GAP_S = 600
 REPRO_WINDOW_S = 600
 N_SHUFFLES, KEEP_MAX_SHARE = 1000, 0.05
@@ -662,6 +664,7 @@ def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_di
     macro = set(pd.read_csv(macro_csv, parse_dates=["date"]).date.dt.date)
     frames = census(df, adv, bars, va, macro=macro)
     _write(frames, out_dir, {"calibration": CALIBRATION, "tau_pct": TAU_PCT, "tau_provenance": TAU_PROVENANCE,
+                             "tau_confirmation": TAU_CONFIRMATION,
                              "seed": SEED, "n_shuffles": N_SHUFFLES, "keep_note": KEEP_LINE,
                              "pythia_label": PYTHIA_LABEL, "sessions_read": sorted({str(x) for x in df.session}),
                              "sessions_with_bars": len(bars), "bar_sessions_by_source": bar_sources(braw),
@@ -827,7 +830,8 @@ def selftest():
         meta = json.load(open(os.path.join(td, "out", "meta.json")))
         checks["end-to-end anchor via Parquet: runs, reads calibration only, writes aggregates"] = \
             meta["sessions_read"] == ["2026-09-02", "2026-09-03"] and os.path.exists(os.path.join(td, "out", "code_census.csv"))
-    checks["`run` refuses while tau is not final"] = not TAU_FINAL
+    checks["tau is final and its confirmation recorded (R-IV.1015)"] = TAU_FINAL is True and \
+        TAU_CONFIRMATION["flagged_names"] == ["MSFT", "SMH", "TSLA"]
     # amendment 6-final: b2 / SUSPECT / settlement / BUILD cross-check
     def walk(q, first_utc, n, step_min, last_rows, cap=500, gap_at=None):
         out, oldest, hi = [], None, pd.Timestamp(first_utc, tz="UTC")
@@ -988,7 +992,15 @@ def selftest():
             {"per_ticker_session.csv", "events_m4_d5.csv", "d6_direction.csv", "pythia_loc.csv",
              "macro_day.csv"} <= files and meta["sessions_read"] == ["2026-09-02", "2026-09-03"]
         checks["end-to-end `run`: bar sessions by source recorded"] = bool(meta["bar_sessions_by_source"])
-        checks["tau gate restored after the test"] = TAU_FINAL is False
+        checks["tau gate restored after the test"] = TAU_FINAL is True
+        g_["TAU_FINAL"] = False
+        try:
+            run(*["unused"] * 7)
+            checks["`run` still refuses when tau is not final (gate intact)"] = False
+        except SystemExit as e_:
+            checks["`run` still refuses when tau is not final (gate intact)"] = "tau is not final" in str(e_)
+        finally:
+            g_["TAU_FINAL"] = saved[0]
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
     return 0 if all(checks.values()) else 1
