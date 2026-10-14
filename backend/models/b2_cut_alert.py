@@ -29,7 +29,7 @@ noise. `>=` and not `>`: a cut landing exactly on expiry day is the expiry's bus
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -45,6 +45,39 @@ UNDETERMINED = "UNDETERMINED"
 PASS = "PASS"
 FIRE = "FIRE"
 ALREADY_FIRED = "ALREADY_FIRED"
+#: TA-161's 7th verdict. DISTINCT FROM UNDETERMINED ON PURPOSE: UNDETERMINED means the inputs
+#: were not good enough THIS run and the row should be retried; NOT_EVALUABLE means the row
+#: cannot be evaluated under this definition at all, so retrying it every day is noise.
+NOT_EVALUABLE = "NOT_EVALUABLE"
+
+VERDICTS = (NOT_YET, EXPIRY_STOPPED, UNDETERMINED, NOT_EVALUABLE, PASS, FIRE, ALREADY_FIRED)
+
+#: S10 (R-IV.983(b)). A cut session that fell BEFORE this definition was deployed was never
+#: evaluated under it, and firing on it now would alert on a three-session verdict reached by
+#: arithmetic nobody reviewed. TSLQ is the case: its cut session was 2026-10-05 and the stale
+#: path fired it on 2026-10-12.
+S10_CUT_SESSION_PRECEDES_DEPLOY = "CUT_SESSION_PRECEDES_DEPLOY"
+TA161_DEPLOYED_ON = date(2026, 10, 13)
+
+#: The contract record, as this book actually holds it. There is NO multiplier column on
+#: `unified_positions`, so `structure` is the contract record and this map is the reading of
+#: it. Verified against `max_loss`, which is computed by a different writer:
+#:   IBIT  put_debit_spread  0.19       x 2  x 100 = 38.00     == max_loss 38
+#:   TSLQ  stock             18.968875  x 80 x   1 = 1517.51   == max_loss 1517.51
+#: An unrecognised structure is NOT given a default: it returns None and the row is
+#: NOT_EVALUABLE, because a guessed multiplier is wrong by 100x in one direction or the other.
+STOCK_MULTIPLIER = 1
+OPTION_MULTIPLIER = 100
+_DEBIT_STRUCTURES = frozenset({
+    "stock", "long_call", "long_put", "call_debit_spread", "put_debit_spread",
+})
+_CREDIT_STRUCTURES = frozenset({
+    "call_credit_spread", "put_credit_spread", "short_call", "short_put",
+})
+_STOCK_STRUCTURES = frozenset({"stock"})
+
+#: Beyond a cent, the two writers disagree and the verdict says so (R-IV.983(b)).
+DIVERGENCE_TOLERANCE = Decimal("0.01")
 
 # The close, in ET. The cut is evaluated AT the close of the third session, so a check at 15:00
 # on that day is still NOT_YET.
@@ -134,10 +167,15 @@ def post_close_mark(cut: date, mark_as_of: Any, mark_integrity: Any,
     closed. The 26-hour verdict is for display; this is the decision's own requirement
     (Convention #38).
 
-    WHY THIS IS LOAD-BEARING RATHER THAN BELT-AND-BRACES: the hub's mark refreshes run at 09:17
-    and 16:47 ET, and the alert runs at 16:15 ET -- BETWEEN them. So the stored mark at alert
-    time is always the MORNING one, and without the job reading its own mark at run time every
-    B2 row would return UNDETERMINED every single day.
+    WHY THIS IS LOAD-BEARING RATHER THAN BELT-AND-BRACES: the stored mark is written by a
+    different job on its own schedule, so at alert time it may predate the cut close by hours.
+    The alert therefore reads its own mark at run time and gates on THAT.
+
+    (An earlier version of this docstring said the refreshes run "at 09:17 and 16:47 ET", and
+    concluded every B2 row would read UNDETERMINED every day. That was wrong: `main.py:158`
+    fires at :02/:17/:32/:47 from 09:00-17:00 ET plus a forced 16:17 ET closing-bell run, so
+    16:02 ET is already post-close. The schedule had been generalised from a sample of two
+    timestamps. The gate is still load-bearing, but not for that reason.)
 
     The second requirement is TA-151's: a `wide` or `unknown` mark is not evidence. `stale` is
     not consulted, because the first requirement already subsumes it -- a mark at or after
@@ -173,6 +211,166 @@ def post_close_mark(cut: date, mark_as_of: Any, mark_integrity: Any,
     return True, "mark is from %s, at or after the %s close" % (ts_et.isoformat(), cut)
 
 
+def _structure_parts(row: Dict[str, Any]) -> Tuple[str, ...]:
+    """The structure, split on `+`. A composite row stores "a+b" in one column."""
+    raw = (row.get("structure") or "").strip().lower()
+    if not raw:
+        return ()
+    return tuple(p.strip() for p in raw.split("+") if p.strip())
+
+
+def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
+    """(+1 for a DEBIT-opened position, -1 for CREDIT, None if not stated) + the reason.
+
+    FROM AN EXPLICIT FIELD, NEVER FROM THE SIGN OF A PRICE. R-IV.983(b) allows only
+    DEBIT-opened rows to be evaluated until a `position_orientation` column exists, because
+    inferring "we paid for this" from a positive entry price is exactly the sort of default
+    that turns "I was not told" into a confident claim. `position_orientation` is honoured
+    first so this function stops being the author the moment the column arrives.
+    """
+    explicit = (row.get("position_orientation") or "").strip().upper()
+    if explicit in ("DEBIT", "LONG"):
+        return 1, "position_orientation = %s" % explicit
+    if explicit in ("CREDIT", "SHORT"):
+        return -1, "position_orientation = %s" % explicit
+    if explicit:
+        return None, "position_orientation %r is not a known orientation" % explicit
+
+    parts = _structure_parts(row)
+    if not parts:
+        return None, "no structure recorded, and no position_orientation column to fall back on"
+    if all(p in _DEBIT_STRUCTURES for p in parts):
+        return 1, "structure %s is debit-opened" % "+".join(parts)
+    if any(p in _CREDIT_STRUCTURES for p in parts):
+        return None, ("structure %s is credit-opened; R-IV.983(b) evaluates DEBIT-opened rows "
+                      "only until a position_orientation column exists" % "+".join(parts))
+    return None, "structure %s is not a known orientation" % "+".join(parts)
+
+
+def contract_multiplier(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
+    """(multiplier, reason). None when the contract record does not say -- NOT a default."""
+    explicit = row.get("multiplier")
+    if explicit is not None and str(explicit).strip() != "":
+        try:
+            m = int(Decimal(str(explicit)))
+        except Exception:                                           # noqa: BLE001
+            return None, "multiplier %r is unreadable" % (explicit,)
+        if m <= 0:
+            return None, "multiplier %r is not positive" % (explicit,)
+        return m, "multiplier column = %d" % m
+
+    parts = _structure_parts(row)
+    if not parts:
+        return None, "no structure and no multiplier recorded"
+    if all(p in _STOCK_STRUCTURES for p in parts):
+        return STOCK_MULTIPLIER, "structure %s: shares" % "+".join(parts)
+    unknown = [p for p in parts if p not in _DEBIT_STRUCTURES and p not in _CREDIT_STRUCTURES]
+    if unknown:
+        return None, "structure %s is not in the contract map" % "+".join(unknown)
+    if any(p in _STOCK_STRUCTURES for p in parts):
+        return None, ("structure %s mixes shares and contracts, which have different "
+                      "multipliers" % "+".join(parts))
+    return OPTION_MULTIPLIER, "structure %s: option contracts" % "+".join(parts)
+
+
+def _decimal(value: Any) -> Optional[Decimal]:
+    """Decimal(str(x)), or None. Decimal(0.19) is 0.1900000000000000078..."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:                                               # noqa: BLE001
+        return None
+
+
+def cut_pnl(row: Dict[str, Any], mark: Any) -> Tuple[Optional[Decimal], Optional[str], Dict]:
+    """(pnl, not_evaluable_reason, workings) -- R-IV.983(b)'s definition, and nothing else.
+
+        cut_pnl = orientation x (mark_gated - entry_basis_per_unit) x multiplier x open_quantity
+
+    `unrealized_pnl` IS NOT READ HERE AND MUST NOT BE. It is a different writer's figure; the
+    whole point of TA-161 is that the verdict owns its own arithmetic.
+
+    `open_quantity`, NEVER `quantity` (convention #29). `quantity` is the size the position was
+    OPENED at and does not shrink on a partial exit, so a cut verdict computed from it would
+    size the P&L to a position that is no longer held. A NULL `open_quantity` is UNKNOWN, not
+    zero, and returns NOT_EVALUABLE rather than a flat verdict.
+
+    The basis is GROSS OF FEES, as ruled: `entry_price` is the per-unit price paid.
+    """
+    w: Dict[str, Any] = {}
+
+    parts = _structure_parts(row)
+    if len(parts) > 1:
+        # Composites are evaluable only on ONE NET MARK for the whole structure. A single
+        # `mark` column cannot be attributed to two legs, and halving it is not a measurement.
+        w["structure_parts"] = list(parts)
+        if not (row.get("net_mark") or row.get("mark_is_net")):
+            return None, ("composite structure %s: evaluable only on a single net mark, and "
+                          "this row carries a per-leg mark" % "+".join(parts)), w
+
+    sign, why_sign = orientation(row)
+    w["orientation"] = sign
+    w["orientation_basis"] = why_sign
+    if sign is None:
+        return None, "orientation not established: %s" % why_sign, w
+
+    mult, why_mult = contract_multiplier(row)
+    w["multiplier"] = mult
+    w["multiplier_basis"] = why_mult
+    if mult is None:
+        return None, "multiplier not established: %s" % why_mult, w
+
+    basis = _decimal(row.get("entry_price"))
+    w["entry_basis_per_unit"] = str(basis) if basis is not None else None
+    if basis is None:
+        return None, "entry basis per unit is not readable from entry_price %r" % (
+            row.get("entry_price"),), w
+
+    qty = _decimal(row.get("open_quantity"))
+    w["open_quantity"] = str(qty) if qty is not None else None
+    if qty is None:
+        return None, ("open_quantity is NULL, which is unknown size rather than a flat "
+                      "position -- convention #29"), w
+    if qty <= 0:
+        return None, "open_quantity %s is not positive; nothing is held" % qty, w
+
+    m = _decimal(mark)
+    w["mark_gated"] = str(m) if m is not None else None
+    if m is None:
+        return None, "the gated mark %r is not readable" % (mark,), w
+
+    pnl = (Decimal(sign) * (m - basis) * Decimal(mult) * qty).quantize(Decimal("0.01"),
+                                                                      rounding=ROUND_HALF_UP)
+    w["cut_pnl"] = str(pnl)
+    return pnl, None, w
+
+
+def pnl_divergence(computed: Decimal, stored: Any, mark_as_of: Any,
+                   stored_as_of: Any) -> Optional[Dict[str, Any]]:
+    """BOTH figures and BOTH timestamps when the two writers disagree beyond a cent.
+
+    Recorded rather than reconciled: which is right is not this function's call, and a verdict
+    that silently preferred one would hide exactly the disagreement worth seeing.
+    """
+    s = _decimal(stored)
+    if s is None:
+        return None
+    if abs(computed - s) <= DIVERGENCE_TOLERANCE:
+        return None
+    return {"cut_pnl": str(computed),
+            "cut_pnl_as_of": mark_as_of.isoformat() if hasattr(mark_as_of, "isoformat")
+                             else (str(mark_as_of) if mark_as_of is not None else None),
+            "unrealized_pnl": str(s),
+            "unrealized_pnl_as_of": stored_as_of.isoformat()
+                                    if hasattr(stored_as_of, "isoformat")
+                                    else (str(stored_as_of) if stored_as_of is not None
+                                          else None),
+            "difference": str((computed - s).quantize(Decimal("0.01"),
+                                                      rounding=ROUND_HALF_UP)),
+            "note": "two writers of the same fact disagree; neither is preferred here"}
+
+
 def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, Any]:
     """The verdict for one position. Pure: no clock of its own beyond the injected `now`.
 
@@ -188,7 +386,14 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
                            "reason": "",
                            "mark": row.get("mark"),
                            "mark_as_of": row.get("mark_as_of"),
-                           "mark_integrity": row.get("mark_integrity")}
+                           "mark_integrity": row.get("mark_integrity"),
+                           # TA-161 keys, attached UP FRONT for the same reason the mark trio
+                           # is: a verdict a reader cannot audit against its own arithmetic is
+                           # the thing being closed, and NOT_YET is read by people too.
+                           "cut_pnl": None,
+                           "stop_code": None,
+                           "pnl_divergence": None,
+                           "workings": None}
 
     if row.get("b2_cut_alerted_at"):
         out["verdict"] = ALREADY_FIRED
@@ -232,20 +437,43 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
         out["mark_integrity"] = row.get("mark_integrity")
         return out
 
-    total, undet = total_pnl(row.get("realized_pnl"), row.get("unrealized_pnl"))
-    if total is None:
-        out["verdict"] = UNDETERMINED
-        out["reason"] = undet or "total not computable"
+    # ── S10 (R-IV.983(b)): a cut that fell before this definition shipped ──────────────
+    # Checked AFTER the mark gate so the payload still carries the mark and the workings: a
+    # row held back by S10 is exactly the row someone will want to audit.
+    if cut < TA161_DEPLOYED_ON:
+        out["verdict"] = NOT_EVALUABLE
+        out["stop_code"] = S10_CUT_SESSION_PRECEDES_DEPLOY
+        out["reason"] = ("%s: the cut session %s precedes the TA-161 deploy (%s), so it was "
+                         "never evaluated under this definition and will not be fired on now"
+                         % (S10_CUT_SESSION_PRECEDES_DEPLOY, cut, TA161_DEPLOYED_ON))
         return out
 
-    out["total_pnl"] = str(total)
-    if total > 0:
+    # ── TA-161: the verdict's OWN arithmetic, from the mark that passed the gate ───────
+    pnl, not_evaluable, workings = cut_pnl(row, row.get("mark"))
+    out["workings"] = workings
+    if pnl is None:
+        out["verdict"] = NOT_EVALUABLE
+        out["reason"] = not_evaluable or "cut P&L not computable"
+        return out
+
+    out["cut_pnl"] = str(pnl)
+    # `total_pnl` is still reported, because a reader wants the booked figure beside the
+    # verdict -- but it does NOT decide anything any more.
+    total, _ = total_pnl(row.get("realized_pnl"), row.get("unrealized_pnl"))
+    out["total_pnl"] = str(total) if total is not None else None
+    out["pnl_divergence"] = pnl_divergence(pnl, row.get("unrealized_pnl"),
+                                           row.get("mark_as_of"),
+                                           row.get("unrealized_pnl_as_of"))
+
+    if pnl > 0:
         out["verdict"] = PASS
-        out["reason"] = "total %s is above zero at the cut" % total
+        out["reason"] = ("cut P&L %s is above zero on the gated mark %s at the close of the "
+                         "3rd session (%s)" % (pnl, workings.get("mark_gated"), cut))
     else:
         out["verdict"] = FIRE
-        out["reason"] = ("total %s is not above zero at the close of the 3rd session (%s) — "
-                         "flat fires" % (total, cut))
+        out["reason"] = ("cut P&L %s is not above zero on the gated mark %s at the close of "
+                         "the 3rd session (%s) — flat fires"
+                         % (pnl, workings.get("mark_gated"), cut))
     return out
 
 

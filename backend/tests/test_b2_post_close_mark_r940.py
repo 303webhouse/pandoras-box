@@ -102,7 +102,12 @@ def test_no_mark_at_all_is_refused():
 # ── decide() returns UNDETERMINED and NAMES the row ─────────────────────
 
 def _row(**kw):
+    # TA-161 (R-IV.983(b)): `structure` and `entry_price` are now INPUTS to the verdict, which
+    # is computed from the gated mark rather than inherited from `unrealized_pnl`. These are
+    # IBIT 980's real values, and they give the same -28.00 this file already asserted:
+    # 1 x (0.05 - 0.19) x 100 x 2.
     row = {"position_id": "POS_IBIT_20261008_172311", "ticker": "IBIT", "bucket": "B2",
+           "structure": "put_debit_spread", "entry_price": "0.19",
            "open_quantity": 2, "entry_date": date(2026, 10, 8), "expiry": date(2026, 10, 16),
            "realized_pnl": None, "unrealized_pnl": "-28.00",
            "mark": 0.05, "mark_as_of": POST_CLOSE, "mark_integrity": mi.OK}
