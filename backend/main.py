@@ -1941,6 +1941,7 @@ from api.flow_summary import router as flow_summary_router
 from api.flow_ingestion import router as flow_ingestion_router
 from api.flow_radar import router as flow_radar_router
 from api.darkpool_backfill_status import router as darkpool_backfill_status_router
+from api.b2_cut_status import router as b2_cut_status_router
 from api.regime import router as regime_router
 from api.catalyst_calendar import router as catalyst_router
 from api.ticker_profile import router as ticker_profile_router
@@ -2000,6 +2001,7 @@ app.include_router(sectors_router, prefix="/api", tags=["sectors"])
 app.include_router(flow_summary_router, prefix="/api", tags=["flow-summary"])
 app.include_router(flow_radar_router, prefix="/api", tags=["flow-radar"])
 app.include_router(darkpool_backfill_status_router, prefix="/api", tags=["darkpool-backfill"])
+app.include_router(b2_cut_status_router, prefix="/api", tags=["b2-cut"])
 app.include_router(flow_ingestion_router, prefix="/api", tags=["uw-flow"])
 app.include_router(regime_router, prefix="/api", tags=["regime"])
 app.include_router(catalyst_router, prefix="/api", tags=["catalyst"])

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ast
 import inspect
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -30,7 +30,7 @@ def _post_close(cut: date) -> datetime:
 
 def _row(**kw):
     """A row that PASSES every gate, so each test changes exactly one thing."""
-    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
     base = {"position_id": "POS_TEST", "bucket": "B2", "structure": "put_debit_spread",
             "entry_price": "0.19", "open_quantity": 2, "quantity": 2,
             "mark": "0.03", "mark_integrity": "ok",
@@ -41,16 +41,25 @@ def _row(**kw):
 
 
 def _entry_for_cut(cut: date) -> date:
-    """An entry date whose 3rd trading session is `cut`."""
+    """An entry date whose 3rd trading session is `cut`.
+
+    BOUNDED. The first version searched backwards without a limit, so when `cut` was handed a
+    WEEKEND -- which `add_trading_days` can never return -- it walked back to year 1 and died
+    of OverflowError. An unbounded search that fails by arithmetic overflow tells you nothing;
+    this one names the actual problem.
+    """
     from stable_engine.market_calendar import add_trading_days
     d = cut
-    while True:
+    for _ in range(30):
         d -= timedelta(days=1)
         try:
             if add_trading_days(d, b2.SESSIONS_TO_CUT) == cut:
                 return d
         except Exception:                                           # noqa: BLE001
             continue
+    raise AssertionError(
+        "%s is not reachable as a 3rd trading session -- it is probably not a trading day "
+        "(weekday %d)" % (cut, cut.weekday()))
 
 
 # -- the seventh verdict ---------------------------------------------------------------
@@ -224,7 +233,8 @@ def test_agreement_within_a_cent_records_nothing():
 
 def test_s10_holds_back_a_cut_that_precedes_the_deploy():
     """TSLQ's case: a cut session of 2026-10-05 fired on 10-12 under the old path."""
-    cut = b2.TA161_DEPLOYED_ON - timedelta(days=8)
+    cut = date(2026, 10, 5)          # TSLQ's actual cut session, a Monday
+    assert cut < b2.alert_first_deploy_session()
     row = _row(entry_price="18.968875", structure="stock", open_quantity=80,
                mark="17.19", mark_as_of=_post_close(cut),
                expiry=None)
@@ -239,7 +249,7 @@ def test_s10_holds_back_a_cut_that_precedes_the_deploy():
 def test_s10_does_NOT_hold_back_a_cut_on_or_after_the_deploy():
     """THE CONTROL. An S10 that fired on everything would pass the test above while silencing
     the alert entirely."""
-    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
     row = _row(mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
@@ -252,7 +262,7 @@ def test_s10_does_NOT_hold_back_a_cut_on_or_after_the_deploy():
 def test_the_verdict_follows_the_MARK_not_the_stored_unrealized_pnl():
     """THE POINT OF TA-161. The stored figure says +500; the gated mark says the position is
     down. The verdict must follow the mark, and must RECORD the disagreement."""
-    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
     row = _row(mark="0.03", unrealized_pnl="500.00", mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
@@ -264,7 +274,7 @@ def test_the_verdict_follows_the_MARK_not_the_stored_unrealized_pnl():
 
 def test_and_the_reverse_a_stored_loss_does_not_force_a_fire():
     """The mirror control: stored says -500, the mark says the position is up. PASS."""
-    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
     row = _row(mark="0.40", unrealized_pnl="-500.00", mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
@@ -273,7 +283,7 @@ def test_and_the_reverse_a_stored_loss_does_not_force_a_fire():
 
 
 def test_flat_still_fires_on_the_computed_figure():
-    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
     row = _row(mark="0.19", mark_as_of=_post_close(cut))     # exactly the entry basis
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
@@ -283,7 +293,7 @@ def test_flat_still_fires_on_the_computed_figure():
 
 def test_the_mark_gate_still_runs_before_any_pnl_is_computed():
     """A mark from BEFORE the cut close must not reach the arithmetic at all (TA-152)."""
-    cut = b2.TA161_DEPLOYED_ON + timedelta(days=7)
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
     morning = datetime(cut.year, cut.month, cut.day, 9, 17, tzinfo=ET)
     row = _row(mark_as_of=morning)
     row["entry_date"] = _entry_for_cut(cut)
@@ -301,7 +311,7 @@ def test_it_fires_once_and_never_closes_anything():
 def test_every_path_carries_the_ta161_keys():
     """NOT_YET is read by people too. A payload whose shape depends on the verdict makes a
     reader check whether a key is absent or the value is null."""
-    cut = b2.TA161_DEPLOYED_ON + timedelta(days=30)
+    cut = b2.alert_first_deploy_session() + timedelta(days=30)
     row = _row(mark_as_of=None)
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=datetime(cut.year, cut.month, cut.day, 9, 0, tzinfo=ET))
@@ -309,3 +319,50 @@ def test_every_path_carries_the_ta161_keys():
     for key in ("cut_pnl", "stop_code", "pnl_divergence", "workings",
                 "mark", "mark_as_of", "mark_integrity", "cut_session"):
         assert key in out, key
+
+# -- R-IV.1001(c): the anchor and its clock --------------------------------------------
+
+def test_the_anchor_is_the_FIRST_deploy_and_does_not_move():
+    """R-IV.1001(c)2. The old anchor was the day TA-161 shipped, so it advanced with the work
+    and would have re-excluded another day's cuts on every later deploy."""
+    assert b2.alert_first_deploy_session() == date(2026, 10, 12), b2.ALERT_FIRST_DEPLOY_UTC
+    # The module must no longer carry the moving anchor at all -- one author, one value.
+    assert not hasattr(b2, "TA161_DEPLOYED_ON")
+
+
+def test_the_anchor_is_converted_to_new_york_not_read_off_utc():
+    """R-IV.1001(c)1 + convention #39. Taking .date() off the UTC instant is right for THIS
+    anchor by luck (03:32 ET) and wrong for any deploy between 20:00 and 24:00 ET -- which is
+    when four of five deploys on 2026-10-13 landed. The pair below is the proof: a 23:30 ET
+    instant is the NEXT day in UTC."""
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    late = datetime(2026, 10, 13, 23, 30, tzinfo=et)       # 2026-10-14 03:30Z
+    assert late.astimezone(timezone.utc).date() == date(2026, 10, 14)
+    assert late.astimezone(et).date() == date(2026, 10, 13)
+    # And the real anchor carries a timezone, so no reader has to assume one.
+    assert b2.ALERT_FIRST_DEPLOY_UTC.tzinfo is not None
+    assert b2.ALERT_FIRST_DEPLOY_UTC.astimezone(et).date() == b2.alert_first_deploy_session()
+
+
+def test_the_s10_reason_states_the_clock():
+    """Convention #39: a comparison between two fields states their common basis."""
+    cut = date(2026, 10, 5)          # a Monday, and before the anchor
+    assert cut < b2.alert_first_deploy_session()
+    row = _row(structure="stock", entry_price="18.97", open_quantity=80, mark="17.19",
+               mark_as_of=_post_close(cut), expiry=None)
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut) + timedelta(days=1))
+    assert out["stop_code"] == b2.S10_CUT_SESSION_PRECEDES_DEPLOY
+    assert "America/New_York" in out["reason"], out["reason"]
+
+
+def test_a_cut_ON_the_anchor_date_evaluates():
+    """The boundary is inclusive: the alert was live that session, so it judges it. Without
+    this pair an off-by-one that excluded the anchor day would pass every test above."""
+    cut = b2.alert_first_deploy_session()
+    row = _row(mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] in (b2.PASS, b2.FIRE), out
+    assert out["stop_code"] is None, out

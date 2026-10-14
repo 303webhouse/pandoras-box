@@ -28,7 +28,7 @@ noise. `>=` and not `>`: a cut landing exactly on expiry day is the expiry's bus
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -52,12 +52,35 @@ NOT_EVALUABLE = "NOT_EVALUABLE"
 
 VERDICTS = (NOT_YET, EXPIRY_STOPPED, UNDETERMINED, NOT_EVALUABLE, PASS, FIRE, ALREADY_FIRED)
 
-#: S10 (R-IV.983(b)). A cut session that fell BEFORE this definition was deployed was never
-#: evaluated under it, and firing on it now would alert on a three-session verdict reached by
-#: arithmetic nobody reviewed. TSLQ is the case: its cut session was 2026-10-05 and the stale
-#: path fired it on 2026-10-12.
+#: S10 (R-IV.983(b), corrected by R-IV.1001(c)). A cut session that fell before the ALERT
+#: first reached production was never evaluated by it, and firing on one now would alert on a
+#: three-session verdict reached by arithmetic nobody reviewed. TSLQ is the case: its cut
+#: session was 2026-10-05 and the stale path fired it on 2026-10-12.
 S10_CUT_SESSION_PRECEDES_DEPLOY = "CUT_SESSION_PRECEDES_DEPLOY"
-TA161_DEPLOYED_ON = date(2026, 10, 13)
+
+#: THE ALERT'S FIRST PRODUCTION DEPLOY. Recorded ONCE here and NEVER advanced by a later
+#: deploy -- that is the whole point of the field. The previous anchor was the day TA-161
+#: shipped (2026-10-13), which moved with the work and so would have re-excluded another day's
+#: cuts on every subsequent deploy.
+#:
+#: EVIDENCE, not assumption: commit 022d1c07 both created `jobs/b2_cut_alert_job.py` and wired
+#: it into `main.py`, authored 2026-10-12T01:32:37-06:00 = 2026-10-12T07:32:37Z. A Railway
+#: deploy follows its push within minutes, and 03:32 ET is nowhere near a day boundary, so the
+#: ET DATE -- which is all the comparison uses -- is robust to the push/deploy gap.
+#:
+#: Kept as a UTC instant ON THE WIRE, per R-IV.1001(c)1; the comparison converts.
+ALERT_FIRST_DEPLOY_UTC = datetime(2026, 10, 12, 7, 32, 37, tzinfo=timezone.utc)
+
+
+def alert_first_deploy_session() -> date:
+    """The anchor as an EXCHANGE SESSION DATE — America/New_York. Convention #39.
+
+    A comparison between two fields states their common basis, and for sessions that basis is
+    the exchange's clock. Taking `.date()` off the UTC instant instead would be wrong for any
+    deploy between 20:00 and 24:00 ET; four of this register's five deploys on 2026-10-13
+    landed inside that window, so the difference is not hypothetical.
+    """
+    return ALERT_FIRST_DEPLOY_UTC.astimezone(ET).date()
 
 #: The contract record, as this book actually holds it. There is NO multiplier column on
 #: `unified_positions`, so `structure` is the contract record and this map is the reading of
@@ -440,12 +463,15 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
     # ── S10 (R-IV.983(b)): a cut that fell before this definition shipped ──────────────
     # Checked AFTER the mark gate so the payload still carries the mark and the workings: a
     # row held back by S10 is exactly the row someone will want to audit.
-    if cut < TA161_DEPLOYED_ON:
+    anchor = alert_first_deploy_session()
+    if cut < anchor:
         out["verdict"] = NOT_EVALUABLE
         out["stop_code"] = S10_CUT_SESSION_PRECEDES_DEPLOY
-        out["reason"] = ("%s: the cut session %s precedes the TA-161 deploy (%s), so it was "
-                         "never evaluated under this definition and will not be fired on now"
-                         % (S10_CUT_SESSION_PRECEDES_DEPLOY, cut, TA161_DEPLOYED_ON))
+        out["reason"] = ("%s: the cut session %s precedes the alert's first production deploy "
+                         "(%s America/New_York), so it was never evaluated by this alert and "
+                         "will not be fired on now — both dates are exchange sessions in "
+                         "America/New_York (convention #39)"
+                         % (S10_CUT_SESSION_PRECEDES_DEPLOY, cut, anchor))
         return out
 
     # ── TA-161: the verdict's OWN arithmetic, from the mark that passed the gate ───────
