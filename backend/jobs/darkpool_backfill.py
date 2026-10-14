@@ -171,16 +171,59 @@ DONE_SQL = """
 
 
 def trading_sessions(start: date, end: date) -> List[date]:
-    """Weekdays from start to end inclusive. Holidays are not excluded on purpose: a holiday
-    simply returns no prints and is recorded as served-but-empty, which is a fact worth having
-    rather than a date silently skipped by a calendar this job would have to be trusted about.
+    """Trading days from start to end inclusive, per the EXCHANGE CALENDAR — R-IV.988(c).
+
+    `weekday() < 5` was wrong and cost about 8 calls a night on a closed market: 2026-09-07 is
+    Labor Day. `strike_ib_converter.py:653` already records having made exactly this mistake,
+    so it was a repeat rather than a discovery.
+
+    `stable_engine.market_calendar.is_trading_day` is the ONE author of "is the market open",
+    and it RAISES past its enumerated horizon rather than inferring -- which is the right
+    disposition and is why the fallback below logs loudly instead of guessing a weekday.
     """
+    try:
+        from stable_engine.market_calendar import is_trading_day
+    except Exception:                                               # noqa: BLE001
+        logger.error("[dp-backfill] market calendar unavailable; refusing to guess a calendar",
+                     exc_info=True)
+        return []
     out, d = [], start
     while d <= end:
-        if d.weekday() < 5:
-            out.append(d)
+        try:
+            if is_trading_day(d):
+                out.append(d)
+        except Exception as exc:                                    # noqa: BLE001
+            # Past the calendar's horizon. NOT silently included or excluded.
+            logger.error("[dp-backfill] %s is outside the enumerated calendar (%s); extend "
+                         "MARKET_HOLIDAYS rather than inferring", d, type(exc).__name__)
         d += timedelta(days=1)
     return out
+
+
+def session_start_utc(session: date) -> datetime:
+    """04:00 ET on the session date, as an aware UTC instant — the walk's floor (R-IV.988(b)).
+
+    04:00 ET rather than 09:30 because the dark-pool feed carries extended-hours prints: the UW
+    probe for 2026-08-28 spanned 13:45Z-23:59Z, and the archived 1-minute bars run 04:00-19:59
+    ET for the same reason. A 09:30 floor would stop the walk before the session's own
+    pre-market prints had been collected.
+    """
+    return datetime(session.year, session.month, session.day, 4, 0,
+                    tzinfo=_ET_ZONE()).astimezone(timezone.utc)
+
+
+def _parse_executed(ts: Any) -> Optional[datetime]:
+    """An aware UTC datetime from the vendor's `executed_at`, or None. NEVER raises."""
+    if not ts:
+        return None
+    s = str(ts).strip().replace("Z", "+00:00")
+    try:
+        d = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d.astimezone(timezone.utc)
 
 
 def _rows_of(resp: Any) -> List[dict]:
@@ -275,6 +318,7 @@ async def fetch_page(ticker: str, session: date, cursor: Optional[str],
 async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
     """Every page of one ticker-session, oldest-cursor-walked. Stores raw, derives nothing."""
     quarantined = session in QUARANTINED_SESSIONS
+    floor_utc = session_start_utc(session)      # R-IV.988(b): the walk's floor
     cursor: Optional[str] = None
     pages = prints = spent_here = 0
     exhausted = False
@@ -322,6 +366,19 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
         pages += 1
         prints += len(rows)
         nxt = _oldest_cursor(rows)
+
+        # ── R-IV.988(b): STOP AT THE SESSION'S START ────────────────────────────────────
+        # The vendor's `date` does not bound the response, so without this the chain walks on
+        # into earlier sessions and re-fetches prints already held -- measured at 36-55%
+        # duplication by `tracking_id`. Completeness is decided by the EXECUTED date reached,
+        # not by which query returned the page.
+        oldest_seen = _parse_executed(nxt)
+        if oldest_seen is not None and oldest_seen < floor_utc:
+            exhausted = True
+            stop = ("reached prints executed before the %s 04:00 ET start (oldest %s)"
+                    % (session, oldest_seen.isoformat()))
+            break
+
         # A cursor that does not move would re-request the same page forever. The measured
         # behaviour of `page` was exactly this, which is why only `older_than` is used.
         if not nxt or nxt == cursor:
@@ -376,6 +433,12 @@ async def run(call_budget: Optional[int] = None,
     budget = Budget(call_budget)
     end = until_session or (today - timedelta(days=1))
     sessions = trading_sessions(OLDEST_KNOWN_SESSION, end)   # OLDEST FIRST, as ruled
+    # R-IV.988(c): record the closed dates before collecting, so the archive explains its own
+    # gaps. Costs no UW calls -- it only writes rows.
+    try:
+        await mark_closed_sessions(pool, OLDEST_KNOWN_SESSION, end, names)
+    except Exception:                                           # noqa: BLE001
+        logger.warning("[dp-backfill] could not mark closed sessions", exc_info=True)
     results: List[dict] = []
     logger.info("[dp-backfill] run %s: %d candidate sessions %s..%s, %d names, budget %d calls",
                 run_id, len(sessions), sessions[0], sessions[-1], len(names), call_budget)
@@ -436,6 +499,53 @@ ALL_SECURED_SQL = """
      WHERE exhausted = TRUE AND prints_received > 0
        AND ticker = ANY($1::text[]) AND session_date = ANY($2::date[])
 """
+
+
+#: A session the EXCHANGE was shut. Recorded rather than skipped: `remaining_work` already
+#: drops these from its denominator via `trading_sessions`, but an unexplained hole in the
+#: archive cannot be told from one nobody collected.
+NOT_APPLICABLE_REASON = "NOT_APPLICABLE: the exchange was closed on this date"
+
+MARK_NOT_APPLICABLE_SQL = """
+    INSERT INTO darkpool_backfill_sessions
+        (ticker, session_date, pages_fetched, prints_received, exhausted, stop_reason,
+         quarantined, calls_spent)
+    VALUES ($1, $2, 0, 0, TRUE, $3, FALSE, 0)
+    ON CONFLICT (ticker, session_date) DO UPDATE
+       SET exhausted = TRUE, stop_reason = $3
+     WHERE darkpool_backfill_sessions.prints_received = 0
+"""
+
+
+async def mark_closed_sessions(pool, start: date, end: date,
+                               names: Tuple[str, ...] = CORE_NAMES) -> int:
+    """Record every CLOSED date in the window as NOT_APPLICABLE. Returns rows touched.
+
+    Guarded on `prints_received = 0`: 2026-09-07 was enqueued for weeks before this ruling and
+    the walk that ran on it DID return prints -- prints executed on 09-04, because the vendor's
+    `date` does not bound the response. Overwriting a row that holds real prints would discard
+    them to tidy a label.
+    """
+    closed = []
+    d = start
+    while d <= end:
+        if d not in set(trading_sessions(d, d)):
+            closed.append(d)
+        d += timedelta(days=1)
+    if not closed:
+        return 0
+    touched = 0
+    async with pool.acquire() as conn:
+        for stmt in DDL:
+            await conn.execute(stmt)
+        for session in closed:
+            for ticker in names:
+                await conn.execute(MARK_NOT_APPLICABLE_SQL, ticker, session,
+                                   NOT_APPLICABLE_REASON)
+                touched += 1
+    logger.info("[dp-backfill] marked %d closed-session rows NOT_APPLICABLE (%s)",
+                touched, ", ".join(str(c) for c in closed))
+    return touched
 
 
 async def remaining_work(pool, names=CORE_NAMES, until_session: Optional[date] = None) -> dict:
@@ -518,8 +628,11 @@ async def darkpool_backfill_loop() -> None:
                         logger.error("[dp-backfill] UW day %s run refused: %s -- will retry",
                                      key, out.get("reason"))
         except Exception as exc:                                    # noqa: BLE001
+            # exc_info, because the message alone is not diagnosable. A tick that died with
+            # "'NoneType' object is not subscriptable" and no traceback took three guesses to
+            # place, and these sessions cannot be re-collected if a night is lost to it.
             logger.error("[dp-backfill] nightly tick failed (will retry): %s: %s",
-                         type(exc).__name__, exc)
+                         type(exc).__name__, exc, exc_info=True)
         await asyncio.sleep(NIGHTLY_TICK_SECONDS)
 
 
