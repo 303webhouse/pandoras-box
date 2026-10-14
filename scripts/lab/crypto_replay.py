@@ -57,8 +57,14 @@ def plain_t(x):
     return float(x.mean() / (x.std(ddof=1) / np.sqrt(len(x)))) if len(x) >= 3 and x.std(ddof=1) > 0 else None
 
 
-def load_bars(path):
-    """bars1d Parquet (F-README e72ea5b9...): Open/High/Low/Close/Volume (+ ticker). Daily, 7 days."""
+CLOCK = "UTC calendar day (bars1d DatetimeIndex, tz=UTC, stamped 00:00); converted explicitly"
+
+
+def load_bars(path, today_utc=None):
+    """bars1d Parquet (F-README e72ea5b9...): Open/High/Low/Close/Volume (+ ticker), one bar per UTC
+    calendar day, 7 days a week. The DatetimeIndex is converted explicitly to its UTC date (no date
+    column exists). Completed bars only: any bar dated on or after today's UTC date is dropped as
+    unfinished. Returns (bars, n_unfinished_dropped)."""
     b = pd.read_parquet(path)
     if not isinstance(b.index, pd.DatetimeIndex):
         for c in ("Date", "date", "Datetime"):
@@ -68,7 +74,11 @@ def load_bars(path):
     idx = pd.DatetimeIndex(b.index)
     idx = (idx.tz_convert("UTC").tz_localize(None) if idx.tz is not None else idx).normalize()
     b = b.set_axis(idx)[["Open", "High", "Low", "Close", "Volume"]].astype(float)
-    return b[~b.index.duplicated(keep="last")].sort_index().dropna(subset=["Open", "Close"])
+    b = b[~b.index.duplicated(keep="last")].sort_index().dropna(subset=["Open", "Close"])
+    if today_utc is None:
+        today_utc = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
+    unfinished = b.index >= today_utc
+    return b[~unfinished], int(unfinished.sum())
 
 
 def candidates(ind, ticker, checks):
@@ -196,8 +206,9 @@ def run(btc_path, eth_path, out_dir):
     allrows = []
     for asset, path in (("BTC-USD", btc_path), ("ETH-USD", eth_path)):
         meta["inputs"][asset] = {"file": path, "sha256": hashlib.sha256(open(path, "rb").read()).hexdigest()}
-        bars = load_bars(path)
-        meta["inputs"][asset].update({"first": str(bars.index.min().date()), "last": str(bars.index.max().date()),
+        bars, n_unf = load_bars(path)
+        meta["inputs"][asset].update({"clock": CLOCK, "unfinished_bars_dropped": n_unf,
+                                      "first": str(bars.index.min().date()), "last": str(bars.index.max().date()),
                                       "rows": int(len(bars))})
         F = fires(bars, asset)
         meta["inputs"][asset]["first_evaluable"] = str(F.t.min().date()) if len(F) else None
@@ -265,10 +276,12 @@ def selftest():
     checks["below floor -> 'cannot pass'"] = (verdicts(tiny).verdict == "below floor - cannot pass").all()
     with tempfile.TemporaryDirectory() as td:
         p = os.path.join(td, "BTC-USD.parquet")
-        bars.assign(ticker="BTC-USD").to_parquet(p)
-        lb = load_bars(p)
-        checks["load_bars reads the bars1d layout (OHLCV + ticker)"] = len(lb) == len(bars) and list(lb.columns) == \
-            ["Open", "High", "Low", "Close", "Volume"]
+        bars.assign(ticker="BTC-USD").set_axis(bars.index.tz_localize("UTC")).to_parquet(p)   # tz=UTC index
+        lb, nu = load_bars(p, today_utc=pd.Timestamp("2023-12-31"))
+        checks["load_bars reads the bars1d layout (tz-aware UTC index + OHLCV + ticker)"] = \
+            list(lb.columns) == ["Open", "High", "Low", "Close", "Volume"] and lb.index.tz is None
+        checks["unfinished bar (today's UTC day) dropped and counted"] = \
+            nu == 1 and lb.index.max() == pd.Timestamp("2023-12-30")
     ps = pass_summary(V)
     checks["addendum: 16 eligible of 32 cells per 2 assets; bound 16 x 0.0228"] = \
         pass_summary(pd.concat([V, V.assign(asset="ETH-USD")]))["chance_expected_upper_bound"] == round(16 * 0.0228, 3)
