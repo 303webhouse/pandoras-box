@@ -104,10 +104,21 @@ def alert_first_deploy_session() -> date:
 #: NOT_EVALUABLE, because a guessed multiplier is wrong by 100x in one direction or the other.
 STOCK_MULTIPLIER = 1
 OPTION_MULTIPLIER = 100
-_DEBIT_STRUCTURES = frozenset({
-    "stock", "long_call", "long_put", "call_debit_spread", "put_debit_spread",
-})
-_CREDIT_STRUCTURES = frozenset({
+#: TA-161 §1.5 as amended (R-IV.1010(d)): a CLOSED whitelist, matched EXACTLY, and nothing
+#: else. Until `position_orientation` exists these two values are the only ones from which
+#: orientation may be read; every other value is UNDETERMINED and the row is held.
+#:
+#: THIS SET USED TO BE WIDER -- it admitted `stock`, `long_call` and `long_put`. Measured over
+#: the book's 688 positions, narrowing it moves 430 rows to UNDETERMINED, 326 of them `stock`.
+#: TSLQ is one of them. That is the ruled behaviour: a long_put IS debit-opened in ordinary
+#: usage, but "ordinary usage" is an inference about a field, and the whole point of §1.5 is
+#: that orientation stops being inferred.
+ORIENTATION_WHITELIST_DEBIT = frozenset({"put_debit_spread", "call_debit_spread"})
+
+#: Recorded for the REASON STRING only -- never to decide an orientation. A row whose structure
+#: is a known credit shape is held for the same reason as an unknown one, but a reader is owed
+#: the difference between "this is credit-opened" and "nobody knows what this is".
+_KNOWN_CREDIT_SHAPES = frozenset({
     "call_credit_spread", "put_credit_spread", "short_call", "short_put",
 })
 _STOCK_STRUCTURES = frozenset({"stock"})
@@ -275,12 +286,18 @@ def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     parts = _structure_parts(row)
     if not parts:
         return None, "no structure recorded, and no position_orientation column to fall back on"
-    if all(p in _DEBIT_STRUCTURES for p in parts):
-        return 1, "structure %s is debit-opened" % "+".join(parts)
-    if any(p in _CREDIT_STRUCTURES for p in parts):
-        return None, ("structure %s is credit-opened; R-IV.983(b) evaluates DEBIT-opened rows "
-                      "only until a position_orientation column exists" % "+".join(parts))
-    return None, "structure %s is not a known orientation" % "+".join(parts)
+    # EXACT match against the closed whitelist, every part of a composite. Not a substring:
+    # `put_debit_spread+long_put` contains "debit" and is NOT whitelisted.
+    if all(p in ORIENTATION_WHITELIST_DEBIT for p in parts):
+        return 1, ("structure %s is on the closed DEBIT whitelist (exact match)"
+                   % "+".join(parts))
+    outside = [p for p in parts if p not in ORIENTATION_WHITELIST_DEBIT]
+    if any(p in _KNOWN_CREDIT_SHAPES for p in outside):
+        return None, ("structure %s is credit-opened and so is not on the DEBIT whitelist; "
+                      "held until position_orientation exists (TA-161 §1.5)" % "+".join(parts))
+    return None, ("structure %s is not on the closed DEBIT whitelist %s -- %s is outside it; "
+                  "orientation is UNDETERMINED and the row is held (TA-161 §1.5)"
+                  % ("+".join(parts), sorted(ORIENTATION_WHITELIST_DEBIT), ", ".join(outside)))
 
 
 def contract_multiplier(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
@@ -300,7 +317,12 @@ def contract_multiplier(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
         return None, "no structure and no multiplier recorded"
     if all(p in _STOCK_STRUCTURES for p in parts):
         return STOCK_MULTIPLIER, "structure %s: shares" % "+".join(parts)
-    unknown = [p for p in parts if p not in _DEBIT_STRUCTURES and p not in _CREDIT_STRUCTURES]
+    # The multiplier map is SEPARATE from the orientation whitelist: `long_put` is a contract
+    # whose multiplier is perfectly knowable even though its orientation is now held. Collapsing
+    # the two would have made "I cannot say which way this points" mean "I cannot price it".
+    _PRICEABLE = (ORIENTATION_WHITELIST_DEBIT | _KNOWN_CREDIT_SHAPES | _STOCK_STRUCTURES
+                  | frozenset({"long_call", "long_put"}))
+    unknown = [p for p in parts if p not in _PRICEABLE]
     if unknown:
         return None, "structure %s is not in the contract map" % "+".join(unknown)
     if any(p in _STOCK_STRUCTURES for p in parts):

@@ -51,6 +51,56 @@ RUNS_SQL = """
 #: different things at once.
 NOT_APPLICABLE_PREFIX = "NOT_APPLICABLE"
 
+#: One session, per name: totals, RTH count, and the earliest/latest print by EXECUTED time.
+SESSION_PRINTS_SQL = """
+    SELECT p.ticker,
+           COUNT(*)                                                AS total_rows,
+           MIN((rec->>'executed_at')::timestamptz)                 AS earliest,
+           MAX((rec->>'executed_at')::timestamptz)                 AS latest,
+           COUNT(*) FILTER (
+               WHERE ((rec->>'executed_at')::timestamptz AT TIME ZONE 'America/New_York')::time
+                     >= time '09:30'
+                 AND ((rec->>'executed_at')::timestamptz AT TIME ZONE 'America/New_York')::time
+                     <  time '16:00'
+                 AND ((rec->>'executed_at')::timestamptz AT TIME ZONE 'America/New_York')::date
+                     = p.session_date
+           )                                                       AS rth_prints,
+           ARRAY_AGG(DISTINCT
+               (((rec->>'executed_at')::timestamptz AT TIME ZONE 'America/New_York')::date)
+               ::text)                                             AS exec_dates
+      FROM darkpool_backfill_pages p,
+           LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
+                    THEN p.payload->'data' ELSE '[]'::jsonb END) AS rec
+     WHERE p.session_date = $1
+       AND (rec->>'executed_at') IS NOT NULL
+     GROUP BY p.ticker
+     ORDER BY p.ticker
+"""
+
+#: Per page: extent and TIMING. `fetched_at` is what answers "was this fetched after QUERY's
+#: snapshot", which is the difference between staleness and a defect.
+SESSION_PAGES_SQL = """
+    SELECT p.ticker, p.page_no, p.row_count, p.fetched_at,
+           (SELECT MIN((rec->>'executed_at')::timestamptz)
+              FROM jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
+                        THEN p.payload->'data' ELSE '[]'::jsonb END) AS rec
+             WHERE (rec->>'executed_at') IS NOT NULL)                AS page_min
+      FROM darkpool_backfill_pages p
+     WHERE p.session_date = $1
+     ORDER BY p.ticker, p.page_no
+"""
+
+SESSION_ROWS_SQL = """
+    SELECT ticker, pages_fetched, prints_received, exhausted, reached_floor,
+           calls_spent, stop_reason, collected_at
+      FROM darkpool_backfill_sessions
+     WHERE session_date = $1
+     ORDER BY ticker
+"""
+
+
 #: The ONE statement of what the export may write. Reported verbatim in the payload, so a
 #: reader never has to trust a prose restatement of it -- the first version of this route
 #: said "exhausted AND prints_received > 0" while actually also requiring reached_floor.
@@ -176,6 +226,77 @@ async def progress(
              "calls_spent": r["calls_spent"], "stop_reason": r["stop_reason"]}
             for r in run_rows
         ],
+    }
+
+
+@router.get("/session-detail")
+async def session_detail(
+    session: str = Query(..., description="session_date, YYYY-MM-DD"),
+    _auth: Any = Depends(require_api_key),
+) -> Dict[str, Any]:
+    """Everything stored about one session, per name — R-IV.1010(b).
+
+    WHAT IS AND IS NOT RECORDED, stated plainly: pages carry `page_no`, `row_count` and
+    `fetched_at`, so a walk's extent and timing are recoverable. THERE IS NO per-page run id,
+    so "which walk fetched this page" can only be INFERRED by clustering `fetched_at`. That is
+    a gap in the instrument, not a fact about the data, and it is named here rather than
+    papered over with a confident-looking id.
+
+    RTH is 09:30-16:00 America/New_York, counted from each print's own `executed_at`. The
+    earliest print is reported by EXECUTED time, never by which query returned the page --
+    that distinction is the one that made "sessions secured" wrong in both directions.
+    """
+    try:
+        sd = date.fromisoformat(session)
+    except ValueError:
+        return {"error": "session must be YYYY-MM-DD", "got": session}
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        prints = [dict(r) for r in await conn.fetch(SESSION_PRINTS_SQL, sd)]
+        pages = [dict(r) for r in await conn.fetch(SESSION_PAGES_SQL, sd)]
+        srows = [dict(r) for r in await conn.fetch(SESSION_ROWS_SQL, sd)]
+
+    by_ticker: Dict[str, Any] = {}
+    for r in prints:
+        by_ticker[r["ticker"]] = {
+            "total_rows": int(r["total_rows"] or 0),
+            "rth_prints": int(r["rth_prints"] or 0),
+            "earliest_print_et": (r["earliest"].astimezone(ET).isoformat()
+                                  if r["earliest"] else None),
+            "latest_print_et": (r["latest"].astimezone(ET).isoformat()
+                                if r["latest"] else None),
+            "executed_dates": sorted(set((r["exec_dates"] or []))),
+            "pages": [], "session_row": None,
+        }
+    for p in pages:
+        by_ticker.setdefault(p["ticker"], {"pages": [], "session_row": None})["pages"].append({
+            "page_no": p["page_no"],
+            "row_count": p["row_count"],
+            "fetched_at_utc": (p["fetched_at"].astimezone(timezone.utc)
+                               .strftime("%Y-%m-%dT%H:%M:%SZ") if p["fetched_at"] else None),
+            "fetched_at_et": (p["fetched_at"].astimezone(ET).isoformat()
+                              if p["fetched_at"] else None),
+            "page_earliest_et": (p["page_min"].astimezone(ET).isoformat()
+                                 if p["page_min"] else None),
+        })
+    for s_ in srows:
+        by_ticker.setdefault(s_["ticker"], {"pages": []})["session_row"] = {
+            "pages_fetched": s_["pages_fetched"], "prints_received": s_["prints_received"],
+            "exhausted": s_["exhausted"], "reached_floor": s_["reached_floor"],
+            "calls_spent": s_["calls_spent"], "stop_reason": s_["stop_reason"],
+            "collected_at_utc": (s_["collected_at"].astimezone(timezone.utc)
+                                 .strftime("%Y-%m-%dT%H:%M:%SZ")
+                                 if s_["collected_at"] else None),
+        }
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "session_date": session,
+        "basis": ("RTH is 09:30-16:00 America/New_York on each print's own executed_at; "
+                  "the earliest print is by EXECUTED time, not by which query returned it "
+                  "(convention #39). There is NO per-page run id stored, so walk identity is "
+                  "inferable only by clustering fetched_at."),
+        "tickers": dict(sorted(by_ticker.items())),
     }
 
 

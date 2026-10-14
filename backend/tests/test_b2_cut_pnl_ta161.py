@@ -86,7 +86,11 @@ def test_ibit_worked_example_matches_max_loss_cross_check():
 
 
 def test_tslq_worked_example_is_shares_with_multiplier_one():
-    row = _row(structure="stock", entry_price="18.968875", open_quantity=80, mark="17.19")
+    # `position_orientation` supplied explicitly: since R-IV.1010(d) `stock` is NOT on the
+    # closed DEBIT whitelist, so the arithmetic is exercised through the column that will
+    # eventually carry orientation for real, not through a structure guess.
+    row = _row(structure="stock", entry_price="18.968875", open_quantity=80, mark="17.19",
+               position_orientation="DEBIT")
     pnl, why, w = b2.cut_pnl(row, "17.19")
     assert why is None, why
     assert w["multiplier"] == 1, w
@@ -104,7 +108,8 @@ def test_a_profitable_mark_gives_a_positive_pnl():
 
 
 def test_money_is_half_up_to_the_cent_not_bankers_rounding():
-    row = _row(structure="stock", entry_price="0", open_quantity=1)
+    row = _row(structure="stock", entry_price="0", open_quantity=1,
+               position_orientation="DEBIT")      # `stock` is held without it (R-IV.1010(d))
     pnl, why, _ = b2.cut_pnl(row, "0.125")
     assert why is None, why
     assert pnl == Decimal("0.13"), pnl        # HALF-UP; bankers' rounding gives 0.12
@@ -200,7 +205,9 @@ def test_a_composite_needs_a_single_net_mark():
 def test_a_composite_with_a_net_mark_is_evaluated():
     """THE CONTROL for the test above: the refusal must be about the MARK, not about
     composites being unsupported outright."""
-    row = _row(structure="put_debit_spread+long_put", entry_price="0.14",
+    # Every part whitelisted: `put_debit_spread+long_put` is HELD since R-IV.1010(d), so the
+    # composite rule is now exercised with a composite that can actually reach it.
+    row = _row(structure="put_debit_spread+call_debit_spread", entry_price="0.14",
                open_quantity=5, mark_is_net=True)
     pnl, why, _ = b2.cut_pnl(row, "0.08")
     assert why is None, why
@@ -397,3 +404,71 @@ def test_a_cut_ON_the_anchor_date_evaluates():
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
     assert out["verdict"] in (b2.PROFITABLE, b2.NOT_PROFITABLE), out
+
+
+# -- R-IV.1010(d): orientation by CLOSED whitelist, exact match ------------------------
+
+def test_orientation_is_a_closed_whitelist_of_exactly_two_values():
+    """TA-161 §1.5 as amended. Measured over the book's 688 positions, narrowing from the
+    previous wider set moves 430 rows to UNDETERMINED, 326 of them `stock`."""
+    assert b2.ORIENTATION_WHITELIST_DEBIT == {"put_debit_spread", "call_debit_spread"}
+    assert not hasattr(b2, "_DEBIT_STRUCTURES"), "the wider set is still importable"
+
+
+def test_the_two_whitelisted_values_are_debit():
+    assert b2.orientation({"structure": "put_debit_spread"})[0] == 1
+    assert b2.orientation({"structure": "call_debit_spread"})[0] == 1
+
+
+def test_every_other_structure_in_the_book_is_held():
+    """The real census, from hub_get_positions status=ALL: 17 distinct values over 688 rows.
+    Each one outside the whitelist must be UNDETERMINED -- including `stock`, which the
+    previous set admitted and which is 326 of the book."""
+    held = ["stock", "vertical", "long_put", "long_call", "long_single", "call_spread",
+            "put_spread", "three_leg", "iron_condor", "put", "put_credit_spread",
+            "put_debit_spread+long_put", "call_debit_spread+long_call"]
+    for structure in held:
+        sign, why = b2.orientation({"structure": structure})
+        assert sign is None, "%s was classified %s: %s" % (structure, sign, why)
+    # POSITIVE CONTROL: composites made ONLY of whitelisted parts still read DEBIT, so the
+    # test above is not passing because everything is held.
+    for structure in ("put_debit_spread+call_debit_spread", "put_debit_spread+put_debit_spread"):
+        assert b2.orientation({"structure": structure})[0] == 1, structure
+
+
+def test_matching_is_EXACT_never_a_substring():
+    """`put_debit_spread+long_put` CONTAINS "debit" and is not whitelisted. A substring test
+    would have passed it -- which is the question TA asked."""
+    sign, why = b2.orientation({"structure": "put_debit_spread+long_put"})
+    assert sign is None, why
+    assert "whitelist" in why, why
+    for invented in ("put_debit_spread_v2", "xput_debit_spread", "debit"):
+        assert b2.orientation({"structure": invented})[0] is None, invented
+    # Case and surrounding whitespace ARE normalised, and that is not a substring match --
+    # `_structure_parts` lowercases and strips. Asserted so the distinction stays deliberate.
+    assert b2.orientation({"structure": "  PUT_DEBIT_SPREAD "})[0] == 1
+
+
+def test_a_held_structure_is_still_PRICEABLE():
+    """The multiplier map is separate from the orientation whitelist on purpose: a long_put's
+    multiplier is knowable even though its orientation is held. Collapsing the two would make
+    "I cannot say which way this points" mean "I cannot price it"."""
+    assert b2.contract_multiplier({"structure": "long_put"})[0] == 100
+    assert b2.contract_multiplier({"structure": "stock"})[0] == 1
+
+
+def test_the_explicit_column_still_overrides_the_whitelist():
+    """So the whitelist stops being the author the moment position_orientation arrives."""
+    assert b2.orientation({"structure": "stock", "position_orientation": "DEBIT"})[0] == 1
+    assert b2.orientation({"structure": "put_debit_spread",
+                           "position_orientation": "CREDIT"})[0] == -1
+
+
+def test_a_held_row_is_NOT_EVALUABLE_and_names_the_rule():
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
+    row = _row(structure="stock", entry_price="18.97", open_quantity=80, mark="17.19",
+               mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] == b2.NOT_EVALUABLE, out
+    assert "whitelist" in out["reason"], out["reason"]

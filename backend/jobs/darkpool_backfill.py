@@ -165,7 +165,12 @@ UPSERT_SESSION = """
 #:
 #:   b1  an unbroken prefix reached a print executed BEFORE E 04:00 ET
 #:   b2  the prefix ENDED BY EXHAUSTION -- the last page's row count is below the cap OBSERVED
-#:       for that ticker-session -- and its earliest print is at or before E 09:30 ET
+#:       for that ticker-session -- and its earliest print is at or before E 04:15 ET
+#:
+#: 04:15, NOT 09:30 (R-IV.1010(c)). Every complete session in the window starts within TWENTY
+#: SECONDS of 04:00 ET, so a 09:30 bound allowed five and a half hours of slack on a boundary
+#: the data says is twenty seconds wide -- and slack on a completeness test is precisely how an
+#: unproved session comes to be recorded as whole.
 #:
 #: The cap is MEASURED per ticker-session (`max(row_count)`), never the job's own PAGE_LIMIT:
 #: 500 is what this job REQUESTS, not what the vendor promises, and a hardcoded cap would make
@@ -211,8 +216,12 @@ BACKFILL_REACHED_FLOOR_SQL = """
              -- b2: exhausted, and early enough to be the session's own start.
              WHEN a.last_row_count < a.observed_cap
               AND a.earliest_print <=
-                  (s.session_date::timestamp + time '09:30') AT TIME ZONE 'America/New_York'
+                  (s.session_date::timestamp + time '04:15') AT TIME ZONE 'America/New_York'
              THEN TRUE
+             -- Everything else is FALSE here, including SUSPECT. The COLUMN is binary; the
+             -- THREE-WAY distinction lives in COMPLETENESS_ROUTE_SQL and is reported, never
+             -- folded into "incomplete" -- those are different claims and only one of them
+             -- asks for a human.
              ELSE FALSE
            END
       FROM agg a
@@ -256,7 +265,7 @@ SUSPECT_SESSIONS_SQL = """
        AND a.last_row_count < a.observed_cap
        AND a.earliest_print >= (a.session_date::timestamp + time '04:00')
                                AT TIME ZONE 'America/New_York'
-       AND a.earliest_print > (a.session_date::timestamp + time '09:30')
+       AND a.earliest_print > (a.session_date::timestamp + time '04:15')
                               AT TIME ZONE 'America/New_York'
        AND s.stop_reason NOT LIKE 'NOT_APPLICABLE%'
      ORDER BY a.session_date, a.ticker
@@ -290,7 +299,7 @@ COMPLETENESS_ROUTE_SQL = """
              WHEN a.earliest_print < (a.session_date::timestamp + time '04:00')
                                      AT TIME ZONE 'America/New_York' THEN 'b1'
              WHEN a.last_row_count < a.observed_cap
-              AND a.earliest_print <= (a.session_date::timestamp + time '09:30')
+              AND a.earliest_print <= (a.session_date::timestamp + time '04:15')
                                       AT TIME ZONE 'America/New_York' THEN 'b2'
              WHEN a.last_row_count < a.observed_cap THEN 'SUSPECT'
              ELSE 'incomplete'
