@@ -41,7 +41,9 @@ Usage (QUERY):
   python scripts/lab/triton_census.py build-complete <walk_pages_csv> <complete_csv_out>
   python scripts/lab/triton_census.py anchor <prints_glob> <complete_csv> <out_dir>
   python scripts/lab/triton_census.py run <prints_glob> <bars_glob> <adv_csv> <va_csv|-> <complete_csv> <macro_csv> <out_dir>
-  (complete_csv: ticker, session, complete -- from darkpool_backfill_sessions: exhausted AND prints_received > 0)
+  (complete_csv: LAB's cross-check from `build-complete` (ticker, session, complete, route, ...). BUILD's
+   export is the source of record (R-IV.1019(b)): `run` reads BUILD's set from the prints' session_date
+   and REFUSES on any per-ticker-session disagreement with complete_csv.)
   python scripts/lab/triton_census.py selftest
 """
 import glob
