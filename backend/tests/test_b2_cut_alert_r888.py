@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, __file__.rsplit("tests", 1)[0])
 
 from models.b2_cut_alert import (  # noqa: E402
-    ALREADY_FIRED, EXPIRY_STOPPED, FIRE, NOT_YET, PASS, SESSIONS_TO_CUT, UNDETERMINED,
+    EXPIRY_STOPPED, NOT_PROFITABLE, NOT_YET, PROFITABLE, SESSIONS_TO_CUT, UNDETERMINED,
     cut_session, decide, is_in_scope, total_pnl,
 )
 
@@ -110,7 +110,7 @@ def test_the_cut_is_not_reached_during_the_third_session():
 def test_the_cut_IS_reached_at_the_close_of_the_third_session():
     d = decide(_row(mark="0.15"),
                now=datetime(2026, 10, 15, 16, 0, tzinfo=ET))
-    assert d["verdict"] == FIRE, d
+    assert d["verdict"] == NOT_PROFITABLE, d
 
 
 # ── 2 · the bar, and FLAT FIRES ─────────────────────────────────────────────
@@ -119,18 +119,19 @@ AT_CUT = datetime(2026, 10, 15, 16, 0, tzinfo=ET)
 
 
 def test_a_profitable_position_passes():
-    assert decide(_row(mark="0.26"), now=AT_CUT)["verdict"] == PASS
+    assert decide(_row(mark="0.26"), now=AT_CUT)["verdict"] == PROFITABLE
 
 
 def test_a_losing_position_fires():
-    assert decide(_row(mark="0.24"), now=AT_CUT)["verdict"] == FIRE
+    assert decide(_row(mark="0.24"), now=AT_CUT)["verdict"] == NOT_PROFITABLE
 
 
-def test_EXACTLY_FLAT_FIRES():
-    """The rule most easily coded as `< 0`. The bar is "> 0", so zero does not pass."""
+def test_EXACTLY_FLAT_IS_NOT_PROFITABLE():
+    """The rule most easily coded as `< 0`. The bar is "> 0", so zero lands on NOT_PROFITABLE."""
     d = decide(_row(mark="0.25"), now=AT_CUT)
-    assert d["verdict"] == FIRE, d
-    assert "flat fires" in d["reason"]
+    assert d["cut_pnl"] == "0.00", d
+    assert d["verdict"] == NOT_PROFITABLE, d
+    assert "flat is not profitable" in d["reason"], d["reason"]
 
 
 def test_realized_is_NOT_included_in_the_cut_verdict_under_ta161():
@@ -153,7 +154,7 @@ def test_realized_is_NOT_included_in_the_cut_verdict_under_ta161():
     # The contrast, in one row: UP 70.00 overall, DOWN 0.10 on what is still held.
     assert d["total_pnl"] == "70.00", d        # reported, not consulted
     assert d["cut_pnl"] == "-0.10", d          # the remainder alone, on the gated mark
-    assert d["verdict"] == FIRE, d             # R-IV.888 would have said PASS
+    assert d["verdict"] == NOT_PROFITABLE, d             # R-IV.888 would have said PROFITABLE
     # And the disagreement between the two writers is recorded rather than resolved here.
     assert d["pnl_divergence"] is not None, d
 
@@ -178,7 +179,7 @@ def test_a_null_mark_is_undetermined():
 def test_a_null_mark_is_not_treated_as_zero():
     """The pair for the flat rule. Zero FIRES; absent must not, or an unpriceable position gets
     reported as flat and the alert cries wolf about something nobody can value."""
-    assert decide(_row(mark="0.25"), now=AT_CUT)["verdict"] == FIRE
+    assert decide(_row(mark="0.25"), now=AT_CUT)["verdict"] == NOT_PROFITABLE
     assert decide(_row(mark=None), now=AT_CUT)["verdict"] == UNDETERMINED
 
 
@@ -206,28 +207,32 @@ def test_expiry_EXACTLY_ON_the_cut_stops_it():
 def test_expiry_one_day_after_the_cut_does_NOT_stop_it():
     """The pair. Without this, an off-by-one that stopped everything would pass the two above."""
     d = decide(_row(expiry=date(2026, 10, 16), mark="0.15"), now=AT_CUT)
-    assert d["verdict"] == FIRE, d
+    assert d["verdict"] == NOT_PROFITABLE, d
 
 
 def test_a_position_with_no_expiry_is_not_expiry_stopped():
     """Shares have no expiry; a null must not read as "expiry already passed"."""
     d = decide(_row(expiry=None, mark="0.15"), now=AT_CUT)
-    assert d["verdict"] == FIRE, d
+    assert d["verdict"] == NOT_PROFITABLE, d
 
 
 # ── 5 · fires once, then flags ─────────────────────────────────────────────
 
-def test_once_flagged_it_does_not_fire_again():
-    d = decide(_row(mark="0.15", b2_cut_alerted_at="2026-10-15T16:00:00Z"),
-               now=AT_CUT)
-    assert d["verdict"] == ALREADY_FIRED, d
+def test_once_flagged_the_row_is_not_alerted_again():
+    """R-IV.1005(b): the verdict still describes the POSITION; `already_alerted` is what stops
+    a second alert, and the JOB owns that decision."""
+    d = decide(_row(mark="0.15", b2_cut_alerted_at="2026-10-15T16:00:00Z"), now=AT_CUT)
+    assert d["verdict"] == NOT_PROFITABLE, d
+    assert d["already_alerted"] is True, d
 
 
-def test_the_flag_wins_even_if_the_position_later_turns_profitable():
-    """It fires once. A later recovery does not un-fire it, and must not re-arm it either."""
-    d = decide(_row(mark="5.00", b2_cut_alerted_at="2026-10-15T16:00:00Z"),
-               now=AT_CUT)
-    assert d["verdict"] == ALREADY_FIRED, d
+def test_a_later_recovery_does_not_re_arm_the_alert():
+    """It fires once. The verdict honestly flips to PROFITABLE on a recovered mark -- that is
+    the position's state -- but `already_alerted` stays set, so the job does not alert again
+    and cannot be re-armed by a price move."""
+    d = decide(_row(mark="5.00", b2_cut_alerted_at="2026-10-15T16:00:00Z"), now=AT_CUT)
+    assert d["verdict"] == PROFITABLE, d
+    assert d["already_alerted"] is True, d
 
 
 def test_nothing_in_the_module_closes_anything():
@@ -269,7 +274,7 @@ def test_the_cut_stays_put_however_late_the_check_runs(later):
     not move, so a position that was flat at its cut is still reported against THAT session."""
     d = decide(_row(mark="0.24"), now=later)
     assert d["cut_session"] == "2026-10-15", d
-    assert d["verdict"] == FIRE
+    assert d["verdict"] == NOT_PROFITABLE
 
 
 def test_a_later_add_does_not_move_the_cut():

@@ -19,6 +19,22 @@ from datetime import date, datetime, timezone
 from jobs import darkpool_backfill as dp
 
 
+def _sql_code(sql: str) -> str:
+    """SQL with its `--` line comments stripped.
+
+    FIFTH OCCURRENCE OF THE SAME TRAP. A scan of raw SQL for `reached_floor IS NULL` matched
+    the COMMENT explaining why that clause was wrong. `ast` strips prose from Python; nothing
+    did for SQL, so this does. A comment documenting a fix must never fail the test asserting
+    the fix.
+    """
+    out = []
+    for line in sql.splitlines():
+        i = line.find("--")
+        out.append(line if i < 0 else line[:i])
+    return chr(10).join(out)
+
+
+
 class _FakeConn:
     def __init__(self):
         self.stored = []
@@ -133,21 +149,54 @@ def test_there_is_exactly_one_place_that_sets_it_true():
 
 def test_secured_and_the_export_filter_both_require_the_column():
     """The two readers that disagreed must now ask the same question."""
-    assert "reached_floor = TRUE" in dp.ALL_SECURED_SQL, dp.ALL_SECURED_SQL
-    assert "exhausted = TRUE" in dp.ALL_SECURED_SQL
+    assert "reached_floor = TRUE" in _sql_code(dp.ALL_SECURED_SQL), dp.ALL_SECURED_SQL
+    assert "exhausted = TRUE" in _sql_code(dp.ALL_SECURED_SQL)
 
 
-def test_the_backfill_sql_only_touches_undetermined_rows():
-    """NULL means not yet determined, which is NOT false. Recomputing a decided row would let
-    a later empty page un-prove a session that had already crossed."""
-    sql = dp.BACKFILL_REACHED_FLOOR_SQL
-    assert "reached_floor IS NULL" in sql, sql
+def test_the_backfill_sql_never_un_proves_a_session():
+    """A PROVED session must never be revisited, or a later empty page could un-prove it.
+
+    R-IV.1005(d) widened the scope from "undecided rows" to "every row not yet proved",
+    because the b1-only pass had already written FALSE to 09-08, 09-14 and 09-21 -- so
+    `reached_floor IS NULL` would have shut b2 out of exactly the sessions it exists for.
+    TRUE is still never touched, so the protection is identical by a different clause.
+    """
+    sql = _sql_code(dp.BACKFILL_REACHED_FLOOR_SQL)
+    assert "COALESCE(s.reached_floor, FALSE) = FALSE" in sql, sql
+    assert "reached_floor IS NULL" not in sql, "b2 cannot reach rows already written FALSE"
     assert "NOT_APPLICABLE%" in sql, "closed sessions must be left alone"
     assert "04:00" in sql and "America/New_York" in sql, "the floor must be 04:00 ET"
 
 
+def test_the_vendor_cap_is_READ_not_hardcoded():
+    """R-IV.1005(d). PAGE_LIMIT is what this job REQUESTS, not what the vendor promises; a
+    hardcoded cap would make every final page look short -- and so every session look
+    exhausted -- the moment the vendor served fewer per page."""
+    sql = _sql_code(dp.BACKFILL_REACHED_FLOOR_SQL)
+    assert "MAX(row_count)" in sql, sql
+    assert "observed_cap" in sql, sql
+    assert "500" not in sql, "a literal page cap appears in the completeness SQL"
+
+
+def test_b2_requires_an_unbroken_chain_and_an_early_first_print():
+    sql = _sql_code(dp.BACKFILL_REACHED_FLOOR_SQL)
+    assert "unbroken" in sql, sql
+    assert "MAX(page_no) = COUNT(*)" in sql, "a chain with a hole is not a chain"
+    assert "09:30" in sql, "b2 must bound the earliest print at the session open"
+
+
+def test_suspect_is_a_third_state_not_a_flavour_of_complete():
+    """A short page at 04:00 ET is exhaustion; at 11:00 on SPY it is truncation. Recording
+    them alike is how 09-08 reached a permanent archive unproved."""
+    sql = _sql_code(dp.SUSPECT_SESSIONS_SQL)
+    assert "09:30" in sql and "04:00" in sql, sql
+    # SUSPECT rows must NOT be among those the UPDATE sets TRUE.
+    upd = _sql_code(dp.BACKFILL_REACHED_FLOOR_SQL)
+    assert "earliest_print <=" in upd, upd
+
+
 def test_the_upsert_keeps_a_proved_session_proved():
     """STICKY. A resumed run that stops on a short page must not clear an earlier proof."""
-    sql = dp.UPSERT_SESSION
+    sql = _sql_code(dp.UPSERT_SESSION)
     assert "COALESCE(darkpool_backfill_sessions.reached_floor, FALSE)" in sql, sql
     assert "OR COALESCE(EXCLUDED.reached_floor, FALSE)" in sql, sql

@@ -160,24 +160,146 @@ UPSERT_SESSION = """
                         OR COALESCE(EXCLUDED.reached_floor, FALSE)
 """
 
-#: Recompute `reached_floor` from the RAW PAGES already stored -- no UW calls. A session
-#: crossed its floor when any stored print was executed before 04:00 ET on the target date.
+#: R-IV.1005(d). ONE definition of complete, asked by BUILD and QUERY alike, decided from the
+#: RAW PAGES already stored -- no UW calls.
+#:
+#:   b1  an unbroken prefix reached a print executed BEFORE E 04:00 ET
+#:   b2  the prefix ENDED BY EXHAUSTION -- the last page's row count is below the cap OBSERVED
+#:       for that ticker-session -- and its earliest print is at or before E 09:30 ET
+#:
+#: The cap is MEASURED per ticker-session (`max(row_count)`), never the job's own PAGE_LIMIT:
+#: 500 is what this job REQUESTS, not what the vendor promises, and a hardcoded cap would make
+#: every final page look short the moment the vendor served fewer.
+#:
+#: `SUSPECT` is a THIRD state, not a flavour of complete: a short page at 04:00 ET is
+#: exhaustion, a short page at 11:00 on SPY is truncation, and recording them alike is how
+#: 09-08 came to sit on a permanent archive unproved.
+SESSION_FLOOR_SQL = """
+    (s.session_date::timestamp + time '04:00') AT TIME ZONE 'America/New_York'
+"""
+
 BACKFILL_REACHED_FLOOR_SQL = """
+    WITH prints AS (
+        SELECT p.ticker, p.session_date, p.page_no, p.row_count,
+               MIN((rec->>'executed_at')::timestamptz) AS page_min
+          FROM darkpool_backfill_pages p,
+               LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
+                        THEN p.payload->'data' ELSE '[]'::jsonb END) AS rec
+         WHERE (rec->>'executed_at') IS NOT NULL
+         GROUP BY p.ticker, p.session_date, p.page_no, p.row_count
+    ),
+    agg AS (
+        SELECT ticker, session_date,
+               MIN(page_min)                                   AS earliest_print,
+               MAX(row_count)                                  AS observed_cap,
+               COUNT(*)                                        AS pages_held,
+               MAX(page_no)                                    AS last_page,
+               -- The UNBROKEN PREFIX: pages 1..n with no gap. If the highest page number
+               -- exceeds the count of pages held, a page is missing and neither route may be
+               -- claimed -- a chain with a hole is not a chain.
+               (MAX(page_no) = COUNT(*))                       AS unbroken,
+               (ARRAY_AGG(row_count ORDER BY page_no DESC))[1] AS last_row_count
+          FROM prints
+         GROUP BY ticker, session_date
+    )
     UPDATE darkpool_backfill_sessions s
-       SET reached_floor = EXISTS (
-             SELECT 1
-               FROM darkpool_backfill_pages p,
-                    LATERAL jsonb_array_elements(
-                        CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
-                             THEN p.payload->'data' ELSE '[]'::jsonb END) AS rec
-              WHERE p.ticker = s.ticker
-                AND p.session_date = s.session_date
-                AND (rec->>'executed_at') IS NOT NULL
-                AND (rec->>'executed_at')::timestamptz
-                    < (s.session_date::timestamp + time '04:00') AT TIME ZONE 'America/New_York'
-           )
-     WHERE s.reached_floor IS NULL
+       SET reached_floor = CASE
+             WHEN a.ticker IS NULL OR NOT a.unbroken THEN FALSE
+             -- b1: crossed the floor.
+             WHEN a.earliest_print < """ + SESSION_FLOOR_SQL.strip() + """ THEN TRUE
+             -- b2: exhausted, and early enough to be the session's own start.
+             WHEN a.last_row_count < a.observed_cap
+              AND a.earliest_print <=
+                  (s.session_date::timestamp + time '09:30') AT TIME ZONE 'America/New_York'
+             THEN TRUE
+             ELSE FALSE
+           END
+      FROM agg a
+     WHERE a.ticker = s.ticker AND a.session_date = s.session_date
+       -- EVERY ROW NOT YET PROVED, not only undecided ones. The b1-only pass had already
+       -- written FALSE to 09-08, 09-14 and 09-21, so `reached_floor IS NULL` would have shut
+       -- b2 out of exactly the sessions it exists for. TRUE is still never revisited, so a
+       -- proved session can no more be un-proved than before -- the protection is the same,
+       -- by a different clause.
+       AND COALESCE(s.reached_floor, FALSE) = FALSE
        AND s.stop_reason NOT LIKE 'NOT_APPLICABLE%'
+"""
+
+#: The THIRD state. Reported, never silently folded into complete or incomplete: a short page
+#: mid-morning on a liquid name suggests truncation, not exhaustion, and wants a human.
+SUSPECT_SESSIONS_SQL = """
+    WITH prints AS (
+        SELECT p.ticker, p.session_date, p.page_no, p.row_count,
+               MIN((rec->>'executed_at')::timestamptz) AS page_min
+          FROM darkpool_backfill_pages p,
+               LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
+                        THEN p.payload->'data' ELSE '[]'::jsonb END) AS rec
+         WHERE (rec->>'executed_at') IS NOT NULL
+         GROUP BY p.ticker, p.session_date, p.page_no, p.row_count
+    ),
+    agg AS (
+        SELECT ticker, session_date, MIN(page_min) AS earliest_print,
+               MAX(row_count) AS observed_cap, COUNT(*) AS pages_held,
+               MAX(page_no) AS last_page,
+               (MAX(page_no) = COUNT(*)) AS unbroken,
+               (ARRAY_AGG(row_count ORDER BY page_no DESC))[1] AS last_row_count
+          FROM prints GROUP BY ticker, session_date
+    )
+    SELECT a.ticker, a.session_date, a.earliest_print, a.observed_cap, a.last_row_count,
+           a.pages_held, a.unbroken
+      FROM agg a
+      JOIN darkpool_backfill_sessions s
+        ON s.ticker = a.ticker AND s.session_date = a.session_date
+     WHERE a.unbroken
+       AND a.last_row_count < a.observed_cap
+       AND a.earliest_print >= (a.session_date::timestamp + time '04:00')
+                               AT TIME ZONE 'America/New_York'
+       AND a.earliest_print > (a.session_date::timestamp + time '09:30')
+                              AT TIME ZONE 'America/New_York'
+       AND s.stop_reason NOT LIKE 'NOT_APPLICABLE%'
+     ORDER BY a.session_date, a.ticker
+"""
+
+#: Which ROUTE proved each complete session, so a report can say b1 or b2 rather than just
+#: "complete". The same CASE as the UPDATE, read back rather than re-derived by a caller.
+COMPLETENESS_ROUTE_SQL = """
+    WITH prints AS (
+        SELECT p.ticker, p.session_date, p.page_no, p.row_count,
+               MIN((rec->>'executed_at')::timestamptz) AS page_min
+          FROM darkpool_backfill_pages p,
+               LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(p.payload->'data') = 'array'
+                        THEN p.payload->'data' ELSE '[]'::jsonb END) AS rec
+         WHERE (rec->>'executed_at') IS NOT NULL
+         GROUP BY p.ticker, p.session_date, p.page_no, p.row_count
+    ),
+    agg AS (
+        SELECT ticker, session_date, MIN(page_min) AS earliest_print,
+               MAX(row_count) AS observed_cap, COUNT(*) AS pages_held,
+               MAX(page_no) AS last_page,
+               (MAX(page_no) = COUNT(*)) AS unbroken,
+               (ARRAY_AGG(row_count ORDER BY page_no DESC))[1] AS last_row_count
+          FROM prints GROUP BY ticker, session_date
+    )
+    SELECT a.ticker, a.session_date, a.earliest_print, a.observed_cap, a.last_row_count,
+           a.unbroken, s.reached_floor, s.prints_received,
+           CASE
+             WHEN NOT a.unbroken THEN 'broken_chain'
+             WHEN a.earliest_print < (a.session_date::timestamp + time '04:00')
+                                     AT TIME ZONE 'America/New_York' THEN 'b1'
+             WHEN a.last_row_count < a.observed_cap
+              AND a.earliest_print <= (a.session_date::timestamp + time '09:30')
+                                      AT TIME ZONE 'America/New_York' THEN 'b2'
+             WHEN a.last_row_count < a.observed_cap THEN 'SUSPECT'
+             ELSE 'incomplete'
+           END AS route
+      FROM agg a
+      JOIN darkpool_backfill_sessions s
+        ON s.ticker = a.ticker AND s.session_date = a.session_date
+     WHERE s.stop_reason NOT LIKE 'NOT_APPLICABLE%'
+     ORDER BY a.session_date, a.ticker
 """
 
 #: Already finished, so a resumed run skips it. Only `exhausted` counts as done: a session
@@ -397,6 +519,50 @@ async def active_run(pool) -> Optional[dict]:
     return dict(row) if row else None
 
 
+async def refresh_completeness(pool) -> dict:
+    """Apply the b1/b2 completeness definition and report what it decided. ZERO UW calls.
+
+    Run at loop STARTUP as well as per-run, because the definition changes with rulings while
+    the stored pages do not: a session that became provable under b2 should not have to wait
+    for the next nightly window to be recorded as such.
+    """
+    out = {"updated": 0, "routes": {}, "suspect": [], "complete_by_date_route": {}}
+    try:
+        async with pool.acquire() as conn:
+            for stmt in DDL:
+                await conn.execute(stmt)
+            tag = await conn.execute(BACKFILL_REACHED_FLOOR_SQL)
+            try:
+                out["updated"] = int(str(tag).rsplit(" ", 1)[-1])
+            except (ValueError, IndexError):
+                out["updated"] = -1
+            routes = [dict(r) for r in await conn.fetch(COMPLETENESS_ROUTE_SQL)]
+            suspect = [dict(r) for r in await conn.fetch(SUSPECT_SESSIONS_SQL)]
+    except Exception:                                               # noqa: BLE001
+        logger.warning("[dp-backfill] completeness refresh failed", exc_info=True)
+        return out
+
+    for r in routes:
+        out["routes"][r["route"]] = out["routes"].get(r["route"], 0) + 1
+        if r["route"] in ("b1", "b2"):
+            key = r["session_date"].isoformat()
+            out["complete_by_date_route"].setdefault(key, {}).setdefault(
+                r["route"], []).append(r["ticker"])
+    out["suspect"] = [
+        {"ticker": r["ticker"], "session_date": r["session_date"].isoformat(),
+         "earliest_print": r["earliest_print"].isoformat() if r["earliest_print"] else None,
+         "observed_cap": r["observed_cap"], "last_row_count": r["last_row_count"]}
+        for r in suspect]
+    logger.info("[dp-backfill] completeness: %d rows decided, routes %s, %d SUSPECT",
+                out["updated"], out["routes"], len(out["suspect"]))
+    for sx in out["suspect"]:
+        logger.warning("[dp-backfill] SUSPECT %s %s: exhausted (last page %s of cap %s) but "
+                       "earliest print %s is after 09:30 ET -- truncation, not exhaustion?",
+                       sx["ticker"], sx["session_date"], sx["last_row_count"],
+                       sx["observed_cap"], sx["earliest_print"])
+    return out
+
+
 async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
     """Every page of one ticker-session, oldest-cursor-walked. Stores raw, derives nothing."""
     quarantined = session in QUARANTINED_SESSIONS
@@ -533,11 +699,7 @@ async def run(call_budget: Optional[int] = None,
     # R-IV.993(d): decide `reached_floor` for every legacy row from the pages already stored.
     # Costs no UW calls. Runs before collection so the night's work is chosen against the
     # ruled definition of complete rather than the permissive one.
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute(BACKFILL_REACHED_FLOOR_SQL)
-    except Exception:                                           # noqa: BLE001
-        logger.warning("[dp-backfill] reached_floor backfill failed", exc_info=True)
+    await refresh_completeness(pool)
     results: List[dict] = []
     logger.info("[dp-backfill] run %s: %d candidate sessions %s..%s, %d names, budget %d calls",
                 run_id, len(sessions), sessions[0], sessions[-1], len(names), call_budget)
@@ -713,6 +875,15 @@ async def darkpool_backfill_loop() -> None:
         return
 
     fired: set = set()
+    # R-IV.1005(d): apply the completeness definition at startup. It costs no UW calls, and a
+    # ruling that changes the definition should not have to wait for the next nightly window
+    # before the archive reflects it.
+    try:
+        pool0 = await get_postgres_client()
+        await reconcile_orphaned_runs(pool0)
+        await refresh_completeness(pool0)
+    except Exception:                                               # noqa: BLE001
+        logger.warning("[dp-backfill] startup completeness refresh failed", exc_info=True)
     logger.info("[dp-backfill] nightly loop armed for %02d:%02d ET, retry until %02d:00 ET",
                 NIGHTLY_START_ET[0], NIGHTLY_START_ET[1], NIGHTLY_RETRY_UNTIL_HOUR_ET)
     while True:

@@ -134,7 +134,7 @@ def test_a_post_close_mark_lets_the_cut_be_decided():
     """The pair. IBIT 980's real numbers: entry 0.19, mark 0.05, 2 contracts -> -28.00, a loss,
     so the cut FIRES -- and legitimately, because the mark is post-close and tight."""
     out = decide(_row(), now=datetime(2026, 10, 16, 16, 20, tzinfo=ET))
-    assert out["verdict"] == "FIRE"
+    assert out["verdict"] == "NOT_PROFITABLE"
     assert out["total_pnl"] == "-28.00"
 
 

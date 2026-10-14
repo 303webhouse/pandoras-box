@@ -15,12 +15,15 @@ the session after entry. An entry at 15:58 gets the same three sessions as one a
 the entry session is excluded rather than prorated — that is what "after the entry session"
 settles, and it is also why no intraday time enters this calculation.
 
-FLAT FIRES. The bar is "total P&L > 0 on the mark", so exactly zero does NOT pass. A position
-that has gone nowhere in three sessions is the case the alert is for.
+FLAT IS NOT PROFITABLE. The bar is "cut P&L > 0 on the gated mark", so exactly zero lands on
+NOT_PROFITABLE. A position that has gone nowhere in three sessions is the case the alert is for.
 
-A NULL MARK IS **UNDETERMINED**, NOT A FIRE AND NOT A PASS. Without a mark there is no total,
-and guessing in either direction is worse than saying so: a fabricated pass hides a dead
-position, a fabricated fire cries wolf about one nobody can price.
+A NULL MARK IS **UNDETERMINED**, NEITHER NOT_PROFITABLE NOR PROFITABLE. Without a mark there is
+no figure, and guessing in either direction is worse than saying so: a fabricated PROFITABLE
+hides a dead position, a fabricated NOT_PROFITABLE cries wolf about one nobody can price.
+
+THE VERDICT DESCRIBES THE POSITION; ALERTING IS AN ACTION TAKEN ON IT (R-IV.1005(b)). This
+module decides, and never alerts. `already_alerted` says whether the action has been taken.
 
 EXPIRY-STOPPED WHEN THE THIRD SESSION FALLS ON OR AFTER EXPIRY. On that path the position's own
 expiry arrives first and governs; a three-day prompt about something expiring in two days is
@@ -38,38 +41,48 @@ ET = ZoneInfo("America/New_York")
 SESSIONS_TO_CUT = 3
 BUCKET = "B2"
 
-# Verdicts.
+# ── Verdicts — TA-161's set, EXACTLY, and no other labels (R-IV.1005(b)) ──────────────
+#
+# A VERDICT DESCRIBES THE POSITION. "Fire" is the action taken on a verdict, not a verdict,
+# so `ALREADY_FIRED` is gone: it made a position report its ALERT HISTORY where its P&L
+# belonged, and IBIT 980 read `ALREADY_FIRED` when the true answer was NOT_PROFITABLE.
+# Whether we have already alerted is `already_alerted`, a separate field.
 NOT_YET = "NOT_YET"
-EXPIRY_STOPPED = "EXPIRY_STOPPED"
-UNDETERMINED = "UNDETERMINED"
-PASS = "PASS"
-FIRE = "FIRE"
-ALREADY_FIRED = "ALREADY_FIRED"
-#: TA-161's 7th verdict. DISTINCT FROM UNDETERMINED ON PURPOSE: UNDETERMINED means the inputs
-#: were not good enough THIS run and the row should be retried; NOT_EVALUABLE means the row
-#: cannot be evaluated under this definition at all, so retrying it every day is noise.
 NOT_EVALUABLE = "NOT_EVALUABLE"
-
-VERDICTS = (NOT_YET, EXPIRY_STOPPED, UNDETERMINED, NOT_EVALUABLE, PASS, FIRE, ALREADY_FIRED)
-
-#: S10 (R-IV.983(b), corrected by R-IV.1001(c)). A cut session that fell before the ALERT
-#: first reached production was never evaluated by it, and firing on one now would alert on a
-#: three-session verdict reached by arithmetic nobody reviewed. TSLQ is the case: its cut
-#: session was 2026-10-05 and the stale path fired it on 2026-10-12.
-S10_CUT_SESSION_PRECEDES_DEPLOY = "CUT_SESSION_PRECEDES_DEPLOY"
+UNDETERMINED = "UNDETERMINED"
+EXPIRY_STOPPED = "EXPIRY_STOPPED"
+#: Promoted from a `stop_code` riding on NOT_EVALUABLE to a verdict of its own: "I cannot
+#: evaluate this" and "this predates the alert" are different answers and were reported as one.
+CUT_SESSION_PRECEDES_DEPLOY = "CUT_SESSION_PRECEDES_DEPLOY"
+NOT_PROFITABLE = "NOT_PROFITABLE"
+PROFITABLE = "PROFITABLE"
+#: NOT_EVALUABLE is DISTINCT FROM UNDETERMINED on purpose: UNDETERMINED means the inputs were
+#: not good enough THIS run and the row should be retried; NOT_EVALUABLE means the row cannot
+#: be evaluated under this definition at all, so retrying it every day is noise.
+VERDICTS = (NOT_YET, NOT_EVALUABLE, UNDETERMINED, EXPIRY_STOPPED,
+            CUT_SESSION_PRECEDES_DEPLOY, NOT_PROFITABLE, PROFITABLE)
 
 #: THE ALERT'S FIRST PRODUCTION DEPLOY. Recorded ONCE here and NEVER advanced by a later
 #: deploy -- that is the whole point of the field. The previous anchor was the day TA-161
 #: shipped (2026-10-13), which moved with the work and so would have re-excluded another day's
 #: cuts on every subsequent deploy.
 #:
-#: EVIDENCE, not assumption: commit 022d1c07 both created `jobs/b2_cut_alert_job.py` and wired
-#: it into `main.py`, authored 2026-10-12T01:32:37-06:00 = 2026-10-12T07:32:37Z. A Railway
-#: deploy follows its push within minutes, and 03:32 ET is nowhere near a day boundary, so the
-#: ET DATE -- which is all the comparison uses -- is robust to the push/deploy gap.
+#: EVIDENCE: the RAILWAY DEPLOYMENT RECORD, not the commit's authored time -- R-IV.1005(c).
+#: An authored time is not a deploy time; the previous value (07:32:37Z) was when 022d1c07 was
+#: written, and a commit can sit unpushed for any length of time.
+#:
+#:   deployment  67faa057-391d-4d20-af05-dea1d23ac24b
+#:   commit      022d1c078eea38d5a8f1436642e02c68c6566f23  (created the job AND wired main.py)
+#:   createdAt   2026-10-12T07:35:50.673Z  =  2026-10-12T03:35:50.673-04:00
+#:
+#: `createdAt` is when Railway CREATED the deployment; the record carries no "became live"
+#: stamp, so the process went live some minutes later. That does not move the ET DATE -- which
+#: is all the comparison uses -- because 03:35 ET is nowhere near a day boundary. Corroborated
+#: independently: the alert's first observed production run was TSLQ's own
+#: `b2_cut_alerted_at` = 2026-10-12T20:15:00Z (16:15 ET), the same ET session.
 #:
 #: Kept as a UTC instant ON THE WIRE, per R-IV.1001(c)1; the comparison converts.
-ALERT_FIRST_DEPLOY_UTC = datetime(2026, 10, 12, 7, 32, 37, tzinfo=timezone.utc)
+ALERT_FIRST_DEPLOY_UTC = datetime(2026, 10, 12, 7, 35, 50, 673000, tzinfo=timezone.utc)
 
 
 def alert_first_deploy_session() -> date:
@@ -414,20 +427,22 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
                            # is: a verdict a reader cannot audit against its own arithmetic is
                            # the thing being closed, and NOT_YET is read by people too.
                            "cut_pnl": None,
-                           "stop_code": None,
                            "pnl_divergence": None,
-                           "workings": None}
-
-    if row.get("b2_cut_alerted_at"):
-        out["verdict"] = ALREADY_FIRED
-        out["reason"] = "already fired at %s; it fires once and then flags" % (
-            row.get("b2_cut_alerted_at"),)
-        return out
+                           "workings": None,
+                           # R-IV.1005(b): alert HISTORY, not a verdict. The verdict describes
+                           # the position; this says whether we have already acted on it, and
+                           # the JOB decides what to do with the pair. Previously an alerted
+                           # row returned ALREADY_FIRED *instead of* its P&L verdict, so IBIT
+                           # 980 reported its history where NOT_PROFITABLE belonged.
+                           "already_alerted": bool(row.get("b2_cut_alerted_at")),
+                           "b2_cut_alerted_at": row.get("b2_cut_alerted_at")}
 
     cut = cut_session(row.get("entry_date"))
     out["cut_session"] = cut.isoformat() if cut else None
     if cut is None:
-        out["verdict"] = UNDETERMINED
+        # NOT_EVALUABLE, not UNDETERMINED: a cut session that cannot be computed from the
+        # entry date will not become computable tomorrow, so retrying it daily is noise.
+        out["verdict"] = NOT_EVALUABLE
         out["reason"] = "cut session not computable from entry_date %r" % (row.get("entry_date"),)
         return out
 
@@ -465,13 +480,12 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
     # row held back by S10 is exactly the row someone will want to audit.
     anchor = alert_first_deploy_session()
     if cut < anchor:
-        out["verdict"] = NOT_EVALUABLE
-        out["stop_code"] = S10_CUT_SESSION_PRECEDES_DEPLOY
+        out["verdict"] = CUT_SESSION_PRECEDES_DEPLOY
         out["reason"] = ("%s: the cut session %s precedes the alert's first production deploy "
                          "(%s America/New_York), so it was never evaluated by this alert and "
                          "will not be fired on now — both dates are exchange sessions in "
                          "America/New_York (convention #39)"
-                         % (S10_CUT_SESSION_PRECEDES_DEPLOY, cut, anchor))
+                         % (CUT_SESSION_PRECEDES_DEPLOY, cut, anchor))
         return out
 
     # ── TA-161: the verdict's OWN arithmetic, from the mark that passed the gate ───────
@@ -492,13 +506,15 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
                                            row.get("unrealized_pnl_as_of"))
 
     if pnl > 0:
-        out["verdict"] = PASS
+        out["verdict"] = PROFITABLE
         out["reason"] = ("cut P&L %s is above zero on the gated mark %s at the close of the "
                          "3rd session (%s)" % (pnl, workings.get("mark_gated"), cut))
     else:
-        out["verdict"] = FIRE
+        # FLAT IS NOT PROFITABLE. The bar is "> 0", so exactly zero lands here -- a position
+        # that has gone nowhere in three sessions is the case the alert exists for.
+        out["verdict"] = NOT_PROFITABLE
         out["reason"] = ("cut P&L %s is not above zero on the gated mark %s at the close of "
-                         "the 3rd session (%s) — flat fires"
+                         "the 3rd session (%s) — flat is not profitable"
                          % (pnl, workings.get("mark_gated"), cut))
     return out
 

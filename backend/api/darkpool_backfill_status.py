@@ -179,6 +179,53 @@ async def progress(
     }
 
 
+@router.get("/completeness")
+async def completeness(_auth: Any = Depends(require_api_key)) -> Dict[str, Any]:
+    """Which ROUTE proved each ticker-session complete — R-IV.1005(d).
+
+    `b1` the walk reached a print executed before E 04:00 ET.
+    `b2` the walk ENDED BY EXHAUSTION (final page below the cap OBSERVED for that
+         ticker-session, never a hardcoded one) and its earliest print is at or before 09:30 ET.
+    `SUSPECT` exhausted, but the earliest print is AFTER 09:30 ET -- a short page mid-morning
+         on a liquid name suggests truncation, not exhaustion. NOT complete.
+    `broken_chain` a page is missing, so neither route may be claimed.
+
+    Read-only. The routes are read back from the same CASE the job writes, never re-derived
+    here: two authors of "complete" is the fault R-IV.993(d) closed.
+    """
+    from jobs.darkpool_backfill import COMPLETENESS_ROUTE_SQL, CORE_NAMES
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        rows = [dict(r) for r in await conn.fetch(COMPLETENESS_ROUTE_SQL)]
+
+    by_route: Dict[str, int] = {}
+    by_date: Dict[str, Dict[str, list]] = {}
+    for r in rows:
+        by_route[r["route"]] = by_route.get(r["route"], 0) + 1
+        by_date.setdefault(r["session_date"].isoformat(), {}).setdefault(
+            r["route"], []).append(r["ticker"])
+    census = set(CORE_NAMES)
+    complete_dates = sorted(
+        d for d, routes in by_date.items()
+        if census <= set(sum((routes.get(k, []) for k in ("b1", "b2")), [])))
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "definition": ("b1: a print executed before E 04:00 ET. b2: final page below the "
+                       "OBSERVED cap and earliest print at or before E 09:30 ET. Sessions "
+                       "and thresholds are America/New_York (convention #39)."),
+        "by_route": by_route,
+        "dates_complete_every_census_name": complete_dates,
+        "by_session_date": {k: {kk: sorted(vv) for kk, vv in v.items()}
+                            for k, v in sorted(by_date.items())},
+        "suspect": [
+            {"ticker": r["ticker"], "session_date": r["session_date"].isoformat(),
+             "earliest_print": (r["earliest_print"].isoformat()
+                                if r["earliest_print"] else None),
+             "observed_cap": r["observed_cap"], "last_row_count": r["last_row_count"]}
+            for r in rows if r["route"] == "SUSPECT"],
+    }
+
+
 @router.get("/export-manifest")
 async def export_manifest(_auth: Any = Depends(require_api_key)) -> Dict[str, Any]:
     """Which ticker-sessions the F: export is ENTITLED to write — R-IV.993(d).
