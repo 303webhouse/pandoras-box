@@ -216,7 +216,8 @@ def run(btc_path, eth_path, out_dir):
     C = pd.DataFrame(allrows)
     V = verdicts(C)
     comps = int(C[C.is_cell & ~C.below_floor].shape[0] * 2)
-    crosses = int(sum((C[f"t_hac_{b}"].abs() >= 2).sum() for b in ("B1", "B2")))
+    cc = C[C.is_cell]
+    crosses = int(sum((pd.to_numeric(cc[f"t_hac_{b}"], errors="coerce").abs() >= 2).sum() for b in ("B1", "B2")))
     meta.update({"cells": int(C.is_cell.sum()), "comparisons_sufficient": comps, "abs_hac_t_ge_2": crosses,
                  "chance_expected": round(0.0455 * comps, 1), "pass_summary": pass_summary(V)})
     C.to_csv(os.path.join(out_dir, "cells.csv"), index=False)
