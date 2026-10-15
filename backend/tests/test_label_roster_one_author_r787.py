@@ -33,8 +33,8 @@ RULES_NAME = "COMMITTEE_RULES.md"
 # this pair moves with it. The `claude/` prefix is the convention the stamp has always
 # used -- my first application dropped it and these eight tests caught that, which is
 # the point of asserting the stamp rather than merely its presence.
-SOURCE = "claude/account-context-2026-10-09-v5_4.md"
-SOURCE_SHA = "3b7f3ac89bd60defad1ebed032525a27a5153fb0d1405137783ba46c32b5863e"
+SOURCE = "claude/account-context-2026-10-14-v5_5.md"
+SOURCE_SHA = "ee4a5680be03945262a3a284f4ad9d31f63f569d1bf738361caa9a3967f4788f"
 
 
 def _md_files():

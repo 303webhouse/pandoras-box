@@ -35,7 +35,15 @@ logger = logging.getLogger(__name__)
 #: Source labels, returned beside the price so a caller can be honest about provenance.
 SRC_STOCK_STATE = "stock_state"
 SRC_SNAPSHOT = "snapshot_fallback"
-SRC_NONE = "unavailable: /stock-state and snapshot both gave no price"
+#: R-IV.1037(c)1. The quote service, tried LAST and only when the two above gave nothing.
+#: It reads the SAME endpoint and the SAME `close` field as SRC_STOCK_STATE, but under a
+#: DIFFERENT caller tag -- so it has its own quota bucket and its own cache entry. That is why
+#: it answered AAPL with 343.11 six seconds after this function had returned nothing for it
+#: (TA, 2026-10-14T18:29:28Z). It is NOT a retry: a retry under the same tag hits the same
+#: block.
+SRC_QUOTE = "quote_service"
+SRC_NONE = ("unavailable: /stock-state, snapshot and the quote service all gave "
+            "no price")
 
 
 def _num(v: Any) -> Optional[float]:
@@ -82,5 +90,19 @@ async def spot_now(ticker: str, *, caller: str = "snapshot") -> Tuple[Optional[f
     except Exception as exc:                                        # noqa: BLE001
         logger.debug("spot_now: snapshot fallback failed for %s: %s", tkr, type(exc).__name__)
 
-    logger.warning("spot_now: NO spot for %s — both sources gave nothing", tkr)
+    # ── THIRD SOURCE: the quote service — R-IV.1037(c)1 ──────────────────────────────
+    # AAPL's chain served a NULL spot while hub_get_quote returned 343.11 six seconds later,
+    # so the join was ticker-inconsistent. A ticker with NO spot is not a moneyness gap.
+    try:
+        from services.read_only.quote import get_quote
+        q = await get_quote(tkr)
+        px = _num((q or {}).get("spot"))
+        if px is not None:
+            ts = (q or {}).get("uw_timestamp")
+            return px, SRC_QUOTE, (str(ts) if ts else None)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.debug("spot_now: quote-service fallback failed for %s: %s",
+                     tkr, type(exc).__name__)
+
+    logger.warning("spot_now: NO spot for %s — all THREE sources gave nothing", tkr)
     return None, SRC_NONE, None

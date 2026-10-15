@@ -213,3 +213,39 @@ def test_a_contract_with_no_IV_keeps_null_greeks_and_that_is_correct(monkeypatch
     out = _run()
     assert out["spot"] is not None            # the spot is still found
     assert out["contracts"][0].get("delta") is None
+
+
+# -- R-IV.1037(c)1: the quote service as the FOURTH spot source ------------------------
+
+def test_the_quote_service_is_the_third_source_inside_spot_now():
+    """TA, 2026-10-14T18:29:28Z: AAPL chain spot NULL while hub_get_quote returned 343.11 six
+    seconds later. Same endpoint, same field, DIFFERENT caller tag -- so a different quota
+    bucket and a different cache entry, which is why one answered and the other did not.
+    Added inside `spot_now` rather than in the chain, so the B2 mark path gets it too: one
+    author for "the current spot" (R-IV.983(b))."""
+    import ast
+    import inspect
+
+    from integrations import spot_price
+
+    assert spot_price.SRC_QUOTE == "quote_service"
+    src = inspect.getsource(spot_price.spot_now)
+    fn = ast.parse(src).body[0]
+    doc = fn.body[0].value if fn.body and isinstance(fn.body[0], ast.Expr) else None
+    code = chr(10).join(ast.unparse(n) for n in fn.body
+                        if not (isinstance(n, ast.Expr) and n.value is doc))
+    assert "get_quote" in code, "spot_now does not reach the quote service"
+    # ORDER MATTERS: the quote service is the LAST resort, after stock-state and the snapshot.
+    assert code.index("stock-state") < code.index("get_snapshot") < code.index("get_quote")
+
+
+def test_the_unavailable_string_names_ALL_FOUR_sources():
+    """A reader told three sources failed will not know a fourth was tried."""
+    import inspect
+
+    from integrations import spot_price
+    from services.read_only import options_chain
+
+    assert "quote service" in spot_price.SRC_NONE, spot_price.SRC_NONE
+    chain_src = inspect.getsource(options_chain)
+    assert "snapshot and the quote " in chain_src, "the chain's string still names only three"

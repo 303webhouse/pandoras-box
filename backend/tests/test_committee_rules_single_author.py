@@ -61,7 +61,7 @@ APPLIED_MARKERS = (
     # R-IV.873(b): v5.4 supersedes v5.2 and CONTAINS v5.3, so the stamp moves and v5.3 is
     # never applied separately. The stamp is the thing scheduled tasks resolve on, so it is
     # asserted as an exact string rather than a prefix.
-    "RULES VERSION: 2026-10-09/v5.4",
+    "RULES VERSION: 2026-10-14/v5.5",
     "AUTHORITATIVE STAMP",
     "- **Credit-stress thesis.**",            # SECTION C, after the Fed-hawkish bullet
     "- **X4's implied-volatility input",      # SECTION B's fifth bullet, new in v5.2
