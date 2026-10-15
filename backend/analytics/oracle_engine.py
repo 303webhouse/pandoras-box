@@ -307,14 +307,26 @@ async def _compute_options_analytics(pool, days: int) -> Dict:
     # Max loss/profit utilization
     loss_utils = []
     profit_utils = []
+    loss_util_unknown = 0
+    profit_util_unknown = 0
     for p in positions:
         pnl = float(p.get("realized_pnl") or 0)
-        ml = float(p.get("max_loss") or 0)
-        mp = float(p.get("max_profit") or 0)
-        if pnl < 0 and ml != 0:
-            loss_utils.append(abs(pnl / ml) * 100)
-        if pnl > 0 and mp != 0:
-            profit_utils.append(abs(pnl / mp) * 100)
+        # R-IV.1052(e)(c)3. The `or 0` made an UNKNOWN worst case arithmetically identical to
+        # a stored zero. Both are excluded from a utilisation ratio -- you cannot divide by
+        # either -- so the effect here was already right, but the two were indistinguishable
+        # and the next reader of this block would not have known they differ. They are now
+        # separated and the unknowns counted, because "no rows were measurable" and "every
+        # row sat at 0% of its risk" are not the same reading.
+        ml = p.get("max_loss")
+        mp = p.get("max_profit")
+        if ml is None:
+            loss_util_unknown += 1
+        elif pnl < 0 and float(ml) != 0:
+            loss_utils.append(abs(pnl / float(ml)) * 100)
+        if mp is None:
+            profit_util_unknown += 1
+        elif pnl > 0 and float(mp) != 0:
+            profit_utils.append(abs(pnl / float(mp)) * 100)
 
     # Best/worst structure by avg P&L
     sorted_structs = sorted(structure_stats.items(), key=lambda x: x[1]["avg_pnl"], reverse=True)
@@ -327,6 +339,11 @@ async def _compute_options_analytics(pool, days: int) -> Dict:
         "avg_dte_at_entry": round(avg_dte_entry, 1) if avg_dte_entry else None,
         "avg_max_loss_utilization": round(sum(loss_utils) / len(loss_utils), 1) if loss_utils else None,
         "avg_max_profit_utilization": round(sum(profit_utils) / len(profit_utils), 1) if profit_utils else None,
+        # R-IV.1052(e)(c)3: how many rows the two averages above could NOT be computed from.
+        # `None` already says "no rows were measurable"; these say how many were skipped and
+        # why, so a thin average is visible as thin rather than read as the whole book.
+        "max_loss_utilization_unknown_count": loss_util_unknown,
+        "max_profit_utilization_unknown_count": profit_util_unknown,
         "best_structure": best_struct,
         "worst_structure": worst_struct,
     }

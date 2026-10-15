@@ -43,6 +43,7 @@ from models.derived_as_of import (  # R-IV.775(f)/792(b): a derived figure carri
 # unattributed is the same omission in miniature.
 _DRIFT_DERIVED_FIELDS = ("computed_balance", "cash", "position_value", "position_count",
                          "unpriced_count", "capital_at_risk", "capital_at_risk_pct",
+                         "max_loss_unknown_count", "capital_at_risk_is_partial",
                          "net_direction", "stale_positions", "drift_dollars")
 
 # TA-123 / R-IV.794(b)2: read from the taxonomy module, never retyped here. A vocabulary with
@@ -1585,6 +1586,8 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
             "unpriced_count": 0,
             "capital_at_risk": 0.0,
             "capital_at_risk_pct": 0.0,
+            "max_loss_unknown_count": 0,
+            "capital_at_risk_is_partial": False,
             "nearest_expiry": None,
             "nearest_dte": None,
             "net_direction": "FLAT",
@@ -1592,7 +1595,14 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         }
 
     # Calculate summary
-    total_max_loss = sum(p.get("max_loss") or 0 for p in positions)
+    # R-IV.1052(e)(c)3. NOT NAMED IN THE RULING -- the census of readers found it, and it is
+    # the same coalesce on the same column. A NULL max_loss is unknown risk; counting it as 0
+    # understates `capital_at_risk` on the surface the frontend reads. This mirrors
+    # `unpriced_count` immediately below, which already makes exactly this distinction for
+    # market value.
+    total_max_loss = sum(float(p["max_loss"]) for p in positions
+                         if p.get("max_loss") is not None)
+    max_loss_unknown_count = sum(1 for p in positions if p.get("max_loss") is None)
     # Position market value = cost_basis + unrealized_pnl (what positions are currently worth)
     # Exception: short stock is a liability — value = -(current_price * qty)
     # Fallback: if cost_basis is null, compute from entry_price * quantity * 100
@@ -1780,6 +1790,10 @@ async def portfolio_summary(account: Optional[str] = Query(None)):
         "position_count": len(positions),
         "unpriced_count": unpriced_count,
         "capital_at_risk": round(total_max_loss, 2),
+        # R-IV.1052(e)(c)3. Non-zero means `capital_at_risk` is a FLOOR: that many open rows
+        # have no computable worst case, so the true figure is higher by an unknown amount.
+        "max_loss_unknown_count": max_loss_unknown_count,
+        "capital_at_risk_is_partial": max_loss_unknown_count > 0,
         "capital_at_risk_pct": round(total_max_loss / account_balance * 100, 2) if account_balance > 0 else 0.0,
         "nearest_expiry": nearest_expiry,
         "nearest_dte": nearest_dte,
