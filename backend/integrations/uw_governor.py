@@ -458,6 +458,16 @@ OFF_HOURS_FACTOR_BY_CALLER = {
     # collector beside it, for the same reason: a job whose whole window is off-hours cannot
     # be budgeted as though off-hours were its idle time.
     "darkpool_backfill_triton": 1.0,
+    # R-IV.1073(c)'s backfill hit the IDENTICAL haircut, and the entry above predicted it.
+    # MEASURED, not inferred: the governor logged
+    #   "BLOCK caller=iv_term_backfill count=41 limit=41 tier=STANDARD mode=enforce"
+    # and 165 x 0.25 is 41.25 -> 41. The ruled 136-call allowance was unspendable at 03:00 MT,
+    # which is exactly when a calibration backfill over past sessions wants to run.
+    #
+    # This grants the OFF-HOURS QUOTA ONLY. The quota stays 165 and the tier stays STANDARD, so
+    # the backfill is still the first thing shed under account pressure -- which is right: it
+    # reads sessions that already happened and can always wait, unlike a live quote.
+    "iv_term_backfill": 1.0,
 }
 
 NON_RTH_QUOTA_FACTOR = {
@@ -692,6 +702,17 @@ async def account_shed(tier: str, now=None) -> Optional[str]:
 #: refuses to run past it on its own (darkpool_backfill.ALLOWANCE_THROUGH).
 FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
     "darkpool_backfill_triton": (5000, TIER_STANDARD),   # R-IV.983(c), raised from 2,500; through 2026-10-23
+    # R-IV.1073(c): the IV term-structure calibration backfill. 8 census names x 17 sessions
+    # (2026-09-01 -> 09-24) = 136 calls, x1.2 = 164, rounded to 165.
+    #
+    # FROM THE RESERVE, as ruled, and NOT from `iv_snapshot` (250/day, DAILY_BUDGET, measured
+    # peak 208): 136 calls through that tag would have exhausted the nightly IV snapshot, which
+    # is the Hermes failure exactly one tag over. Also explicitly NOT from `darkpool_collector`
+    # or `triton_flow_shadow`, both of which were at their ceilings on 2026-10-14 (R-IV.1071(c)).
+    #
+    # The reserve is 12,000 and the only other claim on it is the 5,000 above, so this is funded
+    # from genuinely unallocated room and takes nothing from anyone.
+    "iv_term_backfill": (165, TIER_STANDARD),
 }
 
 
