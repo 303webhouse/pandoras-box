@@ -249,6 +249,48 @@ QUOTA_SAFETY_BUFFER = 2000  # headroom under the HUB budget, not the account lim
 QUOTAS: Dict[str, Tuple[int, str]] = {
     # ── FOREGROUND (live trading — protected, never clock-gated) ──
     "snapshot": (1100, TIER_FOREGROUND),          # live prices: MTM, quote, macro strip
+    # R-IV.1058(b). THE HERMES ALARM GETS ITS OWN TAG, and this is why.
+    #
+    # `hermes_session_poll` shared `snapshot` and spent the tag out mid-session on two
+    # consecutive days. MEASURED from uw_caller_spend_daily:
+    #
+    #   uw_day       snapshot  429s        quota 1100
+    #   2026-10-12        458     0        (baseline: MTM + quote + strip only)
+    #   2026-10-13       1106     0        OVER by 6
+    #   2026-10-14       1100     0        pinned AT the ceiling
+    #
+    # 429s = 0 on every row: UW's own limiter never fired. The blocking was entirely this
+    # governor, which is correct behaviour on an under-funded tag -- the defect is the funding.
+    # On 10-14 the tag hit 1100 at 17:47:08Z and `hermes_session_poll` then failed 133 times,
+    # once a minute, to the 16:00 ET close, reporting "alarm is blind".
+    #
+    # Demand: 3 symbols, one poll per 60 s, 390 RTH minutes = 1,170 calls. The `quote` cache
+    # TTL is 60 s against a 60 s poll, so nearly every poll is a real call rather than a hit.
+    # 1,170 x 1.2 = 1,404, rounded to 1,400 -- the same max(observed, projected) x ~1.2 rule
+    # the rest of this table was built with.
+    #
+    # WHY A SEPARATE TAG RATHER THAN A BIGGER `snapshot`. Sharing made the alarm's spend
+    # invisible and let it starve MTM, quote and the macro strip -- and MTM marks positions,
+    # so that is the worse failure of the two. It is the same finding this table already
+    # records against `outcome_resolver`, where six consumers behind one name could not be
+    # told apart.
+    # WHERE THE 1,400 CAME FROM. Headroom was ZERO -- this table already summed to exactly
+    # 26,000 = DAILY_BUDGET 28,000 - QUOTA_SAFETY_BUFFER 2,000 -- so a new tag could only be
+    # funded by reallocation, and the sum below is still exactly 26,000. Taken from four tags
+    # with MEASURED slack over 2026-10-08..10-15, none left under this table's own
+    # max(observed) x 1.2 rule:
+    #
+    #   ohlc_bars            2500 -> 1800   peak 1491   1.21x
+    #   ohlc_sector          2500 -> 2220   peak 1850   1.20x
+    #   technical_indicator  2500 -> 2220   peak 1848   1.20x
+    #   chart_indicators      700 ->  560   peak    0   (no call in the window)
+    #
+    # NOT taken from `crypto_bars_outcome_resolver`, which was the obvious source at peak 0 and
+    # 3,350 funded. A test rightly refuses it: that family's measured peak is 2,764 in one day,
+    # and sizing the resolver under it would recreate the exact "blocks the largest consumer on
+    # sight" fault the 2026-09-14 retune was filed to fix. Crypto research being closed
+    # (R-IV.1058(d)3) is not evidence the resolver will never run again.
+    "hermes_session": (1400, TIER_FOREGROUND),    # the session displacement alarm's marks
     "ohlc_quote": (2300, TIER_FOREGROUND),        # measured 1,929 projected — was 800
     "option_contracts": (2100, TIER_FOREGROUND),  # DAEDALUS options chains
     "iv_rank": (250, TIER_FOREGROUND),
@@ -256,7 +298,7 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "greek_exposure": (500, TIER_FOREGROUND),     # GEX — small, and decision-critical
     "flow_recent": (400, TIER_FOREGROUND),        # Flow Radar + wh_accumulation
     "market_tide": (300, TIER_FOREGROUND),
-    "chart_indicators": (700, TIER_FOREGROUND),
+    "chart_indicators": (560, TIER_FOREGROUND),
     # ── STANDARD (scanners / factors) ──
     # ── crypto bars: the rename R-IV.380(b) said was owed — DONE, R-IV.624(b) ──
     # `outcome_resolver` named a JOB, not an endpoint, violating the endpoint-grain
@@ -295,7 +337,7 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "crypto_bars_regime": (200, TIER_STANDARD),             # 72/day scheduled
     "crypto_bars_vp_mcp": (150, TIER_STANDARD),             # on demand, Claude sessions
     "crypto_bars_market_structure": (150, TIER_STANDARD),   # on demand
-    "ohlc_bars": (2500, TIER_STANDARD),
+    "ohlc_bars": (1800, TIER_STANDARD),
     # R-IV.380(b) READ: the poller IS running (main.py:882, every 300 s, RTH-gated)
     # and its output is consumed three ways — flow_radar's build_flow_summary,
     # board_state's uw:flow:{ticker}, and the flow_events feed. The old
@@ -342,8 +384,8 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     # would reserve budget for a failure mode being removed in the same change.
     # If they do hit the ceiling the heatmap goes visibly stale, which is the
     # trade this tier was created to make.
-    "ohlc_sector": (2500, TIER_BACKGROUND),       # sector WK% — heatmap
-    "technical_indicator": (2500, TIER_BACKGROUND),  # sector RSI
+    "ohlc_sector": (2220, TIER_BACKGROUND),       # sector WK% — heatmap
+    "technical_indicator": (2220, TIER_BACKGROUND),  # sector RSI
     "sector_etfs": (300, TIER_BACKGROUND),
     "darkpool_recent": (100, TIER_BACKGROUND),
     "triton_flow_shadow": (450, TIER_BACKGROUND),
