@@ -274,19 +274,29 @@ def walk_reach(pages):
     """One (ticker, query_date) walk. Returns a dict: reach (oldest print of the unbroken prefix, UTC),
     n_ok, n_pages, last_rc (row count of the prefix's final page), cap (MAX(row_count) over the walk's
     stored pages -- READ, never hardcoded), exhausted (the prefix is the whole walk and its final page
-    is below the cap)."""
+    is below the cap), brk (why the prefix stopped short of the whole walk, "" if it did not:
+    page_gap / empty_page / no_executed_at / cursor_missing / cursor_gap) and cursor_gap_s."""
     g = pages.sort_values("page_no")
     first = int(g.page_no.iloc[0])
-    oldest, n_ok, last_rc = None, 0, None
+    oldest, n_ok, last_rc, brk, gap_s = None, 0, None, "", None
     for j, r in enumerate(g.itertuples()):
-        if int(r.page_no) != first + j or not (r.row_count and r.row_count > 0):
+        if int(r.page_no) != first + j:
+            brk = "page_gap"
+            break
+        if not (r.row_count and r.row_count > 0):
+            brk = "empty_page"
             break
         lo = _instant(r.min_executed_at)
         if lo is None:
+            brk = "no_executed_at"
             break
         if j >= 1:
             c = _instant(r.older_than_cursor)
-            if c is None or abs((c - oldest).total_seconds()) > CURSOR_TOL_S:
+            if c is None:
+                brk = "cursor_missing"
+                break
+            if abs((c - oldest).total_seconds()) > CURSOR_TOL_S:
+                brk, gap_s = "cursor_gap", round(abs((c - oldest).total_seconds()), 3)
                 break
         oldest = lo if oldest is None else min(oldest, lo)
         n_ok += 1
@@ -294,7 +304,7 @@ def walk_reach(pages):
     cap = int(pd.to_numeric(g.row_count, errors="coerce").max())
     exhausted = bool(n_ok and n_ok == len(g) and last_rc is not None and last_rc < cap)
     return {"reach": oldest, "n_ok": n_ok, "n_pages": int(len(g)), "last_rc": last_rc, "cap": cap,
-            "exhausted": exhausted}
+            "exhausted": exhausted, "brk": brk, "cursor_gap_s": gap_s}
 
 
 def _route(w, e):
@@ -327,7 +337,12 @@ def build_complete(wp):
                      for rt in [_route(w, e)] if rt]
             best = min(cands, key=lambda x: (x[0], x[1])) if cands else None
             route = {v: k for k, v in order.items()}[best[0]] if best else "none"
+            same = [w for q, w in walks.get(tk, []) if q == e]      # the walk BUILD judges E by (Q = E)
+            sw = same[0] if same else None
             rows.append({"ticker": tk, "session": e.isoformat(), "complete": route in ("b1", "b2"),
+                         "same_date_route": (_route(sw, e) or "none") if sw else "no_walk",
+                         "same_date_break": sw["brk"] if sw else "",
+                         "same_date_cursor_gap_s": sw["cursor_gap_s"] if sw and sw["cursor_gap_s"] is not None else "",
                          "route": route, "n_walks": int(sum(1 for q, _ in walks.get(tk, []) if q >= e)),
                          "best_query_date": best[1].isoformat() if best else "",
                          "best_reach_et": best[2]["reach"].tz_convert("America/New_York").strftime(
@@ -364,6 +379,11 @@ def cross_check(lab_complete, build_set):
     return dis
 
 
+def _cell(x):
+    """A CSV cell as text: NaN / None -> ''."""
+    return "" if x is None or (isinstance(x, float) and np.isnan(x)) else str(x)
+
+
 def crosscheck_table(lab_complete, build_set):
     """Per CORE8 x calibration ticker-session: LAB vs BUILD, with the likely cause of a disagreement.
     BUILD decides reached_floor per (ticker, Q) against Q's OWN 04:00 ET floor, so it credits E only
@@ -375,14 +395,21 @@ def crosscheck_table(lab_complete, build_set):
         for e in CALIBRATION_DATES:
             r = lab.get((tk, e))
             a, b = (_truthy(r.complete) if r is not None else False), (tk, e) in build_set
-            route = str(getattr(r, "route", "")) if r is not None else ""
-            bq = str(getattr(r, "best_query_date", "") or "") if r is not None else ""
+            route = _cell(getattr(r, "route", "")) if r is not None else ""
+            bq = _cell(getattr(r, "best_query_date", "")) if r is not None else ""
+            sroute = _cell(getattr(r, "same_date_route", "")) if r is not None else ""
+            sbrk = _cell(getattr(r, "same_date_break", "")) if r is not None else ""
             cause = "" if a == b else \
-                "LAB credits a later query date (Q > E); BUILD credits Q = E only" if a and bq and bq != e.isoformat() else \
+                ("LAB complete from Q = E; BUILD not" if sroute in ("b1", "b2") else
+                 "LAB credits via a later query date; BUILD does not") if a and bq and bq != e.isoformat() else \
                 "LAB complete from Q = E; BUILD not" if a else \
-                f"BUILD complete; LAB route {route or 'none'} (cursor continuity or walk shape)"
+                "BUILD credits; LAB refuses on cursor continuity (> 1 s)" if sbrk == "cursor_gap" else \
+                f"UNLABELLED: BUILD credits; LAB same-date route {sroute or route or 'none'}, break {sbrk or 'none'}"
             rows.append({"ticker": tk, "session": e.isoformat(), "lab": a, "build": b, "agree": a == b,
-                         "lab_route": route, "lab_best_query_date": bq, "cause": cause})
+                         "lab_route": route, "lab_best_query_date": bq, "lab_same_date_route": sroute,
+                         "lab_same_date_break": sbrk,
+                         "lab_same_date_cursor_gap_s": _cell(getattr(r, "same_date_cursor_gap_s", "")) if r is not None else "",
+                         "cause": cause})
     return pd.DataFrame(rows)
 
 
@@ -907,6 +934,18 @@ def selftest():
     checks["A6: the cap is read from stored pages (300-row pages, 200 final -> b2)"] = \
         r6.loc["2026-09-23", "route"] == "b2" and int(r6.loc["2026-09-23", "cap_used"]) == 300
     checks["A6: SUSPECT counted separately"] = info6["suspect_ticker_sessions"] == 1
+    checks["R-IV.1027: the same-date walk's break is recorded (cursor_gap, 1800 s)"] = \
+        r6.loc["2026-09-22", "same_date_break"] == "cursor_gap" and \
+        float(r6.loc["2026-09-22", "same_date_cursor_gap_s"]) == 1800.0 and \
+        r6.loc["2026-09-15", "same_date_break"] == "" and r6.loc["2026-09-15", "same_date_route"] == "b2"
+    xg = crosscheck_table(C6, {("SPY", date(2026, 9, 22))}).set_index(["ticker", "session"])
+    checks["R-IV.1027: BUILD credits, LAB cursor gap -> labelled cursor continuity"] = \
+        xg.loc[("SPY", "2026-09-22"), "cause"] == "BUILD credits; LAB refuses on cursor continuity (> 1 s)"
+    lab_sd = pd.DataFrame([{"ticker": "SPY", "session": "2026-09-02", "complete": True, "route": "b1",
+                            "best_query_date": "2026-09-03", "same_date_route": "b2", "same_date_break": ""}])
+    checks["R-IV.1027: LAB-only with the same-date walk complete is NOT the later-query-date cause"] = \
+        crosscheck_table(lab_sd, set()).set_index(["ticker", "session"]).loc[
+            ("SPY", "2026-09-02"), "cause"] == "LAB complete from Q = E; BUILD not"
     st = raw.copy()
     st.loc[st.index[:5], "trade_settlement"] = "seller"
     st.loc[st.index[5:8], "trade_settlement"] = "cash"
@@ -934,9 +973,9 @@ def selftest():
     xt = crosscheck_table(lab_q, bset | {("IWM", date(2026, 9, 2))}).set_index(["ticker", "session"])
     checks["A6 crosscheck: one row per CORE8 x calibration date"] = len(xt) == len(CORE8) * len(CALIBRATION_DATES)
     checks["A6 crosscheck: LAB credited by a later Q is named as the cause"] = \
-        xt.loc[("QQQ", "2026-09-02"), "cause"].startswith("LAB credits a later query date")
+        xt.loc[("QQQ", "2026-09-02"), "cause"] == "LAB credits via a later query date; BUILD does not"
     checks["A6 crosscheck: BUILD-only complete is named with LAB's route"] = \
-        xt.loc[("IWM", "2026-09-02"), "cause"] == "BUILD complete; LAB route none (cursor continuity or walk shape)"
+        xt.loc[("IWM", "2026-09-02"), "cause"].startswith("UNLABELLED: BUILD credits")
     checks["A6 crosscheck: agreement carries no cause"] = \
         bool(xt.loc[("SPY", "2026-09-02"), "agree"]) and xt.loc[("SPY", "2026-09-02"), "cause"] == ""
     with tempfile.TemporaryDirectory() as tdx:
