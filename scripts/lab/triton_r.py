@@ -59,6 +59,8 @@ K_CONTROLS = 20
 BOOT_B, BOOT_SEED = 10000, 20261015
 SEED_R = 20261015
 MIN_EVENTS, MIN_SESSIONS = 30, 10
+FREQ_FLOOR_TS = 20                                 # amendment 1: the frequency kill needs >= 20 evaluable ticker-sessions
+AMENDMENT_1 = "TRITON-R-v1-AMENDMENT-1-R-IV.1084.md d8030b4f0602af9c54d2f3b0a393479a954b672ff3f5315f2cb478983c10aa58"
 TUE_THU = {1, 2, 3}
 MACRO_EXCLUDE = {"cpi", "fomc_decision"}
 MONEY_GATE = "money gate: NOT EVALUABLE (backtest; R-IV.1080(g))"
@@ -203,7 +205,9 @@ def d7(seq, sess_mask, prior_b5, t_event, L, side):
 
 
 def ema_at(closes, j):
-    """20-EMA of the session's 5-min closes through index j; seeded with the SMA of the first 20."""
+    """20-EMA of 5-min closes through index j; seeded with the SMA of the first 20. Amendment 1
+    (d8030b4f...): `closes` is the CONTINUOUS readable sequence across sessions (sealed dates never in it),
+    so only the first 19 readable bars are UNEVALUABLE."""
     if j + 1 < EMA_N:
         return None
     a = 2.0 / (EMA_N + 1)
@@ -353,9 +357,7 @@ def evaluate(ctx, tk, d, t, L, side):
     i = info
     S0, t_conf = float(seq.close.iloc[i]), float(seq.t_close.iloc[i])
     res["conf"] = (S0, t_conf)
-    sess_idx = np.flatnonzero(mask)
-    j = int(np.flatnonzero(sess_idx == i)[0])
-    e = ema_at(seq.close.to_numpy()[sess_idx], j)
+    e = ema_at(seq.close.to_numpy(), i)           # amendment 1: continuous across readable sessions
     if e is None:
         res["missing"].append("ema_warmup")
     elif not ((S0 > e) if side == "BUYER" else (S0 < e)):
@@ -553,10 +555,22 @@ def summarize(events, n_eval_ts):
     for e in with_p:
         sides.setdefault(e["side"], []).append(e["z"] - float(np.mean(e["zp"])))
     out["win4_by_side"] = {k: {"n": len(v), "mean_diff": float(np.mean(v))} for k, v in sides.items()}
-    # kills
-    out["kill_under_1_per_week"] = bool(out["rate_per_week"] is not None and out["rate_per_week"] < 1.0)
-    out["kill_L_not_respected"] = bool(hi1 is not None and hi1 <= 0)
-    out["kill_placebo_keeps_pace"] = bool(hi is not None and hi <= 0)
+    # kills -- amendment 1 floors (R-IV.1084(c)): statistical kills only at >= 30 events over >= 10
+    # sessions; the frequency kill only with >= 20 evaluable ticker-sessions. Raw readings kept.
+    stat_floor = len(events) >= MIN_EVENTS and out["sessions"] >= MIN_SESSIONS
+    freq_floor = n_eval_ts >= FREQ_FLOOR_TS
+    raw_week = out["kill_one_week_carries_it"]
+    out["raw_kill_readings"] = {
+        "under_1_per_week": bool(out["rate_per_week"] is not None and out["rate_per_week"] < 1.0),
+        "L_not_respected": bool(hi1 is not None and hi1 <= 0),
+        "placebo_keeps_pace": bool(hi is not None and hi <= 0),
+        "one_week_carries_it": bool(raw_week),
+        "note": "raw readings; below a floor they carry no verdict weight (amendment 1)"}
+    out["stat_kill_floor_met"], out["freq_kill_floor_met"] = stat_floor, freq_floor
+    out["kill_under_1_per_week"] = freq_floor and out["raw_kill_readings"]["under_1_per_week"]
+    out["kill_L_not_respected"] = stat_floor and out["raw_kill_readings"]["L_not_respected"]
+    out["kill_placebo_keeps_pace"] = stat_floor and out["raw_kill_readings"]["placebo_keeps_pace"]
+    out["kill_one_week_carries_it"] = stat_floor and bool(raw_week)
     out["kill_real_approx_shuffled"] = "inherited: satisfied by D4 as frozen (census stop (a) PASS for FRUN); not re-tested"
     out["kills_fired"] = [k for k in ("kill_under_1_per_week", "kill_L_not_respected", "kill_placebo_keeps_pace",
                                       "kill_one_week_carries_it") if out[k] is True]
@@ -697,7 +711,9 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
                          ("claim_events", len(claims))):
             funnel_rows.append({"variant": vname, "stage": stage, "count": n})
     p = result["variants"][PRIMARY]
-    result["verdict"] = "KILL" if p["kills_fired"] else "NO-KILL"
+    result["amendment_1"] = AMENDMENT_1
+    floors_met = p["stat_kill_floor_met"] and p["freq_kill_floor_met"]
+    result["verdict"] = "KILL" if p["kills_fired"] else ("NO-KILL" if floors_met else "NO-KILL (INSUFFICIENT n)")
     result["verdict_note"] = ("BACKTEST: KILL or NO-KILL only (R-IV.1080(d)). A KILL ends TRITON-R v1. "
                               "NO-KILL establishes nothing; the confirmation set stays sealed.")
     F = pd.DataFrame(funnel_rows)
@@ -754,7 +770,8 @@ def _e2e():
         out = os.path.join(td, "out")
         checks["E2E: backtest runs; capture equals the census in both windows"] = \
             all(v["match"] for v in res["capture_check"].values())
-        checks["E2E: verdict is KILL or NO-KILL, read on TG-ON"] = res["verdict"] in ("KILL", "NO-KILL") and \
+        checks["E2E: verdict is NO-KILL (INSUFFICIENT n) on a plumbing-sized run, read on TG-ON"] = \
+            res["verdict"] == "NO-KILL (INSUFFICIENT n)" and res["amendment_1"].startswith("TRITON-R-v1-AMENDMENT-1") and \
             res["variants"]["TG-ON"]["weight"] == "PRIMARY" and res["variants"]["TG-OFF"]["weight"].startswith("SECONDARY")
         F = pd.read_csv(os.path.join(out, "funnel.csv"))
         checks["E2E: outputs written; funnel is counts only"] = os.path.exists(os.path.join(out, "backtest.json")) and \
@@ -890,6 +907,19 @@ def selftest():
     res_s = evaluate(Ctx(o2, tide, ivd, {tk_: (99.5, 98.0)}, set(), ds), "SPY", ds[-1], 11 * 3600 + 15 * 60,
                      100.0, "SELLER")
     checks["EVALUATE: SELLER on a rising tape fails D7 (no break below L)"] = res_s["fails"] == ["D7_unconfirmed"]
+    # amendment 1: the EMA runs continuously -> a 10:10 confirmation is evaluable (it was not under 5.5)
+    o3 = {k: v for k, v in ohlcv.items() if k != tk_}
+    o3[tk_] = sess_b1(jump_at=10 * 3600 + 5 * 60, jump=1.0, vol_at=10 * 3600 + 5 * 60, vmult=3.0)
+    ctx3 = Ctx(o3, tide, ivd, va, set(), ds)
+    r3 = evaluate(ctx3, "SPY", ds[-1], 10 * 3600, 100.0, "BUYER")
+    sess_closes = ctx3.b5[tk_].close.to_numpy()
+    checks["A1 EMA: a 10:10 ET confirmation is evaluable (continuous EMA); the session-only EMA would be None"] = \
+        r3["missing"] == [] and r3["fails"] == [] and r3["z"] is not None and r3["conf"][1] == 10 * 3600 + 10 * 60 \
+        and ema_at(sess_closes, 7) is None
+    first = ctx3.seq["SPY"]
+    checks["A1 EMA: only the first 19 readable bars (from 09-01) are UNEVALUABLE"] = \
+        ema_at(first.close.to_numpy(), 18) is None and ema_at(first.close.to_numpy(), 19) is not None \
+        and first.session.iloc[0] == date(2026, 9, 1)
     res_m = evaluate(Ctx(o2, tide, {}, va, set(), ds), "SPY", ds[-1], 11 * 3600 + 15 * 60, 100.0, "BUYER")
     checks["EVALUATE: no prior-session IV -> UNEVALUABLE (missing), never FAIL"] = \
         "iv_prior_session" in res_m["missing"] and res_m["z"] is None
@@ -903,22 +933,33 @@ def selftest():
     cr2 = controls(ohlcv[tk_], ohlcv[tk_].t_s.to_numpy()[:-1], 0.5, np.random.default_rng(1))
     checks["CONTROLS: K = 20, fixed seed reproduces"] = len(cr) == K_CONTROLS and cr == cr2
     # 4 · statistics, kills, verdict
-    evs = [{"session": date(2026, 9, 15 + (i % 3)), "side": "BUYER", "z": 0.1, "zp": [0.5], "touched_L": True,
-            "held_L": False, "ctrl": [(True, True)] * 20, "mirror": (True, True)} for i in range(12)]
+    days10 = [date(2026, 9, d) for d in (1, 2, 3, 4, 8, 9, 10, 11, 14, 15)]
+    evs = [{"session": days10[i % 10], "side": "BUYER", "z": 0.1, "zp": [0.5], "touched_L": True,
+            "held_L": False, "ctrl": [(True, True)] * 20, "mirror": (True, True)} for i in range(30)]
     sm = summarize(evs, 40)
-    checks["KILL: placebo keeps pace when every event trails its placebo"] = sm["kill_placebo_keeps_pace"] and \
-        sm["win2_hi"] is not None and sm["win2_hi"] <= 0
-    checks["KILL: L not respected when L never holds and controls always do"] = sm["kill_L_not_respected"]
-    checks["RATE: 12 events / 40 evaluable ticker-sessions x 24 = 7.2 per week, no rate kill"] = \
-        abs(sm["rate_per_week"] - 7.2) < 1e-9 and not sm["kill_under_1_per_week"]
-    sm2 = summarize(evs[:1], 40)
-    checks["KILL: 1 event over 40 evaluable ticker-sessions = 0.6 per week < 1 -> KILL"] = sm2["kill_under_1_per_week"]
+    checks["KILL (floor met: 30 events / 10 sessions): placebo keeps pace when every event trails"] = \
+        sm["stat_kill_floor_met"] and sm["kill_placebo_keeps_pace"] and sm["win2_hi"] <= 0
+    checks["KILL (floor met): L not respected when L never holds and controls always do"] = sm["kill_L_not_respected"]
+    checks["RATE: 30 events / 40 evaluable ticker-sessions x 24 = 18 per week, no rate kill"] = \
+        abs(sm["rate_per_week"] - 18.0) < 1e-9 and not sm["kill_under_1_per_week"]
     checks["KILL: one week carries it does NOT fire when every week agrees"] = sm["kill_one_week_carries_it"] is False
-    wk = [dict(e, session=date(2026, 9, 9) if i < 4 else date(2026, 9, 16), z=(3.0 if i < 4 else -0.5), zp=[0.0])
-          for i, e in enumerate(evs)]
+    wk = [dict(e, z=(3.0 if e["session"] <= date(2026, 9, 4) else -0.5), zp=[0.0]) for e in evs]
     sm4 = summarize(wk, 40)
-    checks["KILL: one week carries it (a +3 week over a -0.5 week)"] = sm4["kill_one_week_carries_it"] is True
-    checks["MIN N: 12 events -> min_n_met False"] = sm["min_n_met"] is False
+    checks["KILL (floor met): one week carries it (a +3 week over -0.5 weeks)"] = sm4["kill_one_week_carries_it"] is True
+    sm12 = summarize(evs[:12], 40)
+    checks["FLOOR (amendment 1): 12 events -> statistical kills do NOT fire; raw readings kept"] = \
+        not sm12["stat_kill_floor_met"] and not sm12["kill_placebo_keeps_pace"] and not sm12["kill_L_not_respected"] \
+        and sm12["raw_kill_readings"]["placebo_keeps_pace"] and sm12["raw_kill_readings"]["L_not_respected"]
+    wk12 = summarize(wk[:12], 40)
+    checks["FLOOR: one week carries it does not fire below 30 events / 10 sessions"] = \
+        wk12["raw_kill_readings"]["one_week_carries_it"] and not wk12["kill_one_week_carries_it"]
+    sm2 = summarize(evs[:1], 40)
+    checks["FREQUENCY KILL: 1 event / 40 evaluable ticker-sessions = 0.6 < 1 with >= 20 -> KILL"] = \
+        sm2["freq_kill_floor_met"] and sm2["kill_under_1_per_week"]
+    sm3 = summarize([], 19)                         # rate 0 < 1, but only 19 evaluable ticker-sessions
+    checks["FREQUENCY FLOOR: 0 events / 19 evaluable ticker-sessions -> no frequency kill (raw reading kept)"] = \
+        not sm3["freq_kill_floor_met"] and not sm3["kill_under_1_per_week"] and sm3["raw_kill_readings"]["under_1_per_week"]
+    checks["MIN N: 12 events -> min_n_met False"] = sm12["min_n_met"] is False
     p, lo, hi, _ = boot_ci({1: [1.0, 2.0], 2: [3.0]}, mean_stat, B=500)
     p_, lo_, hi_, _ = boot_ci({1: [1.0, 2.0], 2: [3.0]}, mean_stat, B=500)
     checks["BOOTSTRAP: fixed seed reproduces; lo <= point <= hi"] = (p, lo, hi) == (p_, lo_, hi_) and lo <= p <= hi
