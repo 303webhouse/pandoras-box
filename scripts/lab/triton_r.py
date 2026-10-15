@@ -1,6 +1,7 @@
 """TRITON-R v1 instrument -- the BACKTEST block (R-IV.1080(h)2-3). QUERY runs it read-only; LAB never sees a row.
 
-Claim of record: TRITON-R-v1-STAMPED-R-IV.1080.md (ba9e77df...), = REV 1 (44b98cab...) + R-IV.1080(b)-(g).
+Claim of record: TRITON-R-v1-STAMPED-R-IV.1080.md (ba9e77df...), = REV 1 (44b98cab...) + R-IV.1080(b)-(g);
+amended by TRITON-R-v1-AMENDMENT-1-R-IV.1084.md (d8030b4f...): continuous EMA; small-sample kill floors.
 Source of record: triton-design-of-record-2026-10-12.md (12ecf72c...).
 
 DATE CEILINGS FIRST (R-IV.1072(d), R-IV.1080): this instrument reads ONLY the backtest block
@@ -28,6 +29,10 @@ Outputs are aggregates only (counts, rates, means, intervals); `assert_aggregate
 Usage (QUERY):
   python scripts/lab/triton_r.py backtest <prints_glob> <complete_csv> <bars_glob> <polygon_glob> <adv_csv>
          <va_csv> <macro_csv> <tide_csv> <iv_csv> <fx_csv> <out_dir>
+  python scripts/lab/triton_r.py count <as_of> <prints_glob> <complete_csv> <bars_glob> "<polygon_glob>;<polygon_glob2>" <va_csv>
+         <macro_csv> <tide_csv> <iv_csv> <out_dir>      (COUNT-ONLY, confirmation set 09-25 .. as_of)
+  python scripts/lab/triton_r.py confirmation-complete <as_of> <walk_pages_csv> <complete_csv_out>
+  python scripts/lab/triton_r.py confirmation-crosscheck <as_of> <prints_glob> <complete_csv> <crosscheck_csv_out>
   python scripts/lab/triton_r.py selftest
 """
 import glob
@@ -97,20 +102,53 @@ def read_block_csv(path, date_col, what):
 
 
 # ── 1 · bars with open and volume (same source map as amendment 7) ───────────────────────────────
-def load_ohlcv(polygon_glob, bars_glob, source_map):
+def _globs(spec):
+    """One glob, or several separated by ';' (the backtest Polygon pull plus the dated reserve pull)."""
+    return [g for g in str(spec).split(";") if g]
+
+
+def scope_raw(raw, in_scope):
+    """Prints, filtered the moment they are read: export session_date AND executed ET date in scope."""
+    sd = _dates(raw.session_date)
+    ex = list(pd.to_datetime(raw.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date)
+    return raw[[in_scope(a) and in_scope(b) for a, b in zip(sd, ex)]].reset_index(drop=True)
+
+
+def scope_bars(bars, in_scope):
+    """Bars (BAR_COLUMNS), filtered the moment they are read: ET date of the bar in scope."""
+    if bars is None or not len(bars):
+        return bars
+    d = pd.to_datetime(bars.t_utc, utc=True).dt.tz_convert("America/New_York").dt.date
+    return bars[[in_scope(x) for x in d]].reset_index(drop=True)
+
+
+def load_polygon_multi(spec):
+    parts, info = [], []
+    for g in _globs(spec):
+        b, i = C.load_polygon(g)                                       # amendment 7's refusals, unchanged
+        parts.append(b)
+        info += i
+    return pd.concat(parts, ignore_index=True), info
+
+
+def load_ohlcv(polygon_glob, bars_glob, source_map, in_scope=None):
     """{(ticker, session): DataFrame[t_s, open, high, low, close, volume]} of RTH 1-min bars, chosen per
-    ticker-session by the census's own source map. Only block sessions; asserted."""
-    C.load_polygon(polygon_glob)                                       # amendment 7's refusals, unchanged
-    pf = sorted(f for f in glob.glob(polygon_glob) if os.path.basename(f).endswith("_adjusted_false.parquet"))
+    ticker-session by the census's own source map. Only in-scope sessions (default: the backtest block)."""
+    in_scope = in_scope or in_block
+    load_polygon_multi(polygon_glob)
+    pf = sorted(f for g in _globs(polygon_glob) for f in glob.glob(g)
+                if os.path.basename(f).endswith("_adjusted_false.parquet"))
     poly = {}
     for f in pf:
         tk = os.path.basename(f)[: -len("_adjusted_false.parquet")]
         if tk in C.CORE8:
             b = pd.read_parquet(f)
             t = pd.to_datetime(b.timestamp_utc, utc=True).dt.tz_convert("America/New_York")
-            poly[tk] = pd.DataFrame({"t_et": t, "open": b["open"].astype(float), "high": b["high"].astype(float),
-                                     "low": b["low"].astype(float), "close": b["close"].astype(float),
-                                     "volume": b["volume"].astype(float)})
+            poly.setdefault(tk, []).append(pd.DataFrame({"t_et": t, "open": b["open"].astype(float),
+                                                         "high": b["high"].astype(float), "low": b["low"].astype(float),
+                                                         "close": b["close"].astype(float),
+                                                         "volume": b["volume"].astype(float)}))
+    poly = {k: pd.concat(v, ignore_index=True).drop_duplicates("t_et") for k, v in poly.items()}
     rm = {}
     for f in sorted(glob.glob(bars_glob)):
         tk = os.path.splitext(os.path.basename(f))[0]
@@ -125,7 +163,7 @@ def load_ohlcv(polygon_glob, bars_glob, source_map):
     out = {}
     for r in source_map.itertuples():
         d = date.fromisoformat(r.session)
-        if r.source == "none" or not in_block(d):
+        if r.source == "none" or not in_scope(d):
             continue
         src = poly if r.source == "polygon" else rm
         b = src.get(r.ticker)
@@ -137,7 +175,9 @@ def load_ohlcv(polygon_glob, bars_glob, source_map):
         g = g[m].assign(t_s=s_[m]).sort_values("t_s")
         if len(g):
             out[(r.ticker, d)] = g[["t_s", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
-    assert_block([k[1] for k in out], "1-min bars")
+    bad = [k for k in out if not in_scope(k[1])]
+    if bad:
+        raise SystemExit(f"DATE CEILING: 1-min bars outside scope {bad[:3]}; refusing")
     return out
 
 
@@ -336,8 +376,9 @@ class Ctx:
         return miss
 
 
-def evaluate(ctx, tk, d, t, L, side):
-    """All ingredients for one (tk, d, t, L, side). Returns dict: missing, fails, and if claim, Z inputs."""
+def evaluate(ctx, tk, d, t, L, side, outcome=True):
+    """All ingredients for one (tk, d, t, L, side). Returns dict: missing, fails, and if claim, Z inputs.
+    outcome=False (the COUNT-ONLY job, R-IV.1080(b)): S_close, sigma and Z are never read or computed."""
     res = {"missing": [], "fails": [], "z": None, "conf": None}
     cal = calendar_ok(d, ctx.macro_excl)
     if cal != "OK":
@@ -374,6 +415,8 @@ def evaluate(ctx, tk, d, t, L, side):
         res["fails"].append("PYTHIA")
     elif pp == "MISSING" and "pythia_va" not in res["missing"]:
         res["missing"].append("pythia_va")
+    if not outcome:
+        return res
     if not res["missing"] and not res["fails"]:
         b1 = ctx.ohlcv[(tk, d)]
         s_close = float(b1.close.iloc[-1])
@@ -634,15 +677,16 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
     if C.CALIBRATION != BACKTEST:
         raise SystemExit("the census calibration window is not the backtest block; refusing")
     va, macro_all, macro_excl, tide, iv, fx = load_side_inputs(va_csv, macro_csv, tide_csv, iv_csv, fx_csv)
-    raw = C._read_parquet(prints_glob)
+    raw = scope_raw(C._read_parquet(prints_glob), in_block)          # the ceiling, at the read
     build_set = C.build_complete_set(raw)
     S, excluded, refusals = C.census_set(pd.read_csv(complete_csv), build_set)
     if refusals:
         raise SystemExit(C.refusal_message(refusals))
     df, n_dup, dropped = C.prepare_prints(raw, S)
     assert_block(set(df.session), "prints")
-    praw, poly_info = C.load_polygon(polygon_glob)
-    braw, source_map = C.choose_bars(C.load_bars(bars_glob), praw)
+    praw, poly_info = load_polygon_multi(polygon_glob)
+    praw = scope_bars(praw, in_block)
+    braw, source_map = C.choose_bars(scope_bars(C.load_bars(bars_glob), in_block), praw)
     bars_hl = C.bars_by_session(braw)
     assert_block([k[1] for k in bars_hl], "census bars")
     ohlcv = load_ohlcv(polygon_glob, bars_glob, source_map)
@@ -726,6 +770,130 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
     return result
 
 
+# ── 8 · the weekly COUNT-ONLY job for the CONFIRMATION SET (R-IV.1080(b), R-IV.1084(d)) ─────────
+CONFIRM_FIRST, CONFIRM_LAST = date(2026, 9, 25), date(2026, 12, 31)
+NYSE_HOLIDAYS_CONFIRM = {date(2026, 11, 26), date(2026, 12, 25)}
+COUNT_COLUMNS = ["variant", "weight", "as_of", "window_first", "window_last", "window_sessions",
+                 "evaluable_ticker_sessions", "claim_events", "sessions_with_claim_events", "stop_rule_met"]
+
+
+def confirmation_dates(as_of):
+    return [d.date() for d in pd.bdate_range(CONFIRM_FIRST, as_of) if d.date() not in NYSE_HOLIDAYS_CONFIRM]
+
+
+class census_window:
+    """Point the frozen census readers at `dates` (the date window is the only change), then restore.
+    TRITON-R only: the reserve is sealed FOR TRITON-R (amendment 9); this never computes an outcome."""
+
+    def __init__(self, dates, name):
+        self.dates, self.name = list(dates), name
+
+    def __enter__(self):
+        self.saved = (C.CALIBRATION, C.CALIBRATION_DATES, C.WINDOW_NAME)
+        C.CALIBRATION, C.CALIBRATION_DATES, C.WINDOW_NAME = (min(self.dates), max(self.dates)), self.dates, self.name
+        return self
+
+    def __exit__(self, *exc):
+        C.CALIBRATION, C.CALIBRATION_DATES, C.WINDOW_NAME = self.saved
+        return False
+
+
+def _today_et():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    return datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York")).date()
+
+
+def check_as_of(as_of, today=None):
+    today = today or _today_et()
+    if not (CONFIRM_FIRST <= as_of <= CONFIRM_LAST):
+        raise SystemExit(f"as_of {as_of} outside the confirmation set {CONFIRM_FIRST}..{CONFIRM_LAST}; refusing")
+    if as_of >= today:
+        raise SystemExit(f"as_of {as_of} is not a completed session (today ET {today}); refusing")
+
+
+def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, macro_csv, tide_csv, iv_csv, out_dir,
+          n_shuffles=None, today=None):
+    """Per-variant claim-event and evaluable-session counts for the confirmation set 09-25 .. as_of, and
+    NOTHING else (R-IV.1084(d)). D1-D7, the sec. 5 filters and the calendar only; never S_close, Z, a move or a
+    placebo outcome. History bars 09-01 .. 09-24 are read only for ATR / EMA / slot-median continuity."""
+    as_of = pd.Timestamp(as_of).date()
+    check_as_of(as_of, today)
+    conf = confirmation_dates(as_of)
+    hist = [d for d in C.CALIBRATION_DATES if in_block(d)]             # 09-01 .. 09-24, seal excluded
+    scope = set(conf) | set(hist)
+
+    def in_scope(d):
+        return d in scope
+
+    def read_scoped(path, col, what, allowed):
+        df = pd.read_csv(path)
+        bad = sorted({str(x) for x in _dates(df[col]) if x not in allowed})
+        if bad:
+            raise SystemExit(f"DATE CEILING: {what} carries dates outside its scope: {bad[:5]}. Refusing.")
+        return df
+    va = read_scoped(va_csv, "session", "va_csv", set(conf))
+    va = {(r.ticker, pd.Timestamp(r.session).date()): (r.vah, r.val) for r in va.itertuples()}
+    mac = read_scoped(macro_csv, "date", "macro_csv", set(confirmation_dates(CONFIRM_LAST)))   # public schedule
+    macro_excl = {pd.Timestamp(r.date).date() for r in mac.itertuples() if str(r.event) in MACRO_EXCLUDE}
+    td = read_scoped(tide_csv, "session_date", "tide_csv", set(conf))
+    t = pd.to_datetime(td.tick_at, utc=True).dt.tz_convert("America/New_York")
+    td = td.assign(t_s=(t - t.dt.normalize()).dt.total_seconds(),
+                   net=pd.to_numeric(td.net_call_premium) - pd.to_numeric(td.net_put_premium),
+                   d=pd.to_datetime(td.session_date).dt.date)
+    tide = {d: g.sort_values("t_s")[["t_s", "net"]].reset_index(drop=True) for d, g in td.groupby("d")}
+    ivd = read_scoped(iv_csv, "session_date", "iv_csv", scope)          # presence of the prior session only
+    iv = {(r.ticker, pd.Timestamp(r.session_date).date()): float(r.iv_near) if pd.notna(r.iv_near) else np.nan
+          for r in ivd.itertuples()}
+    praw, _ = load_polygon_multi(polygon_glob)
+    praw = scope_bars(praw, in_scope)                                  # the ceiling, at the read
+    readme = scope_bars(C.load_bars(bars_glob), in_scope)
+    with census_window(hist, "triton-r-history"):
+        _, smap_h = C.choose_bars(readme, praw)
+    with census_window(conf, "triton-r-confirmation-count"):
+        raw = scope_raw(C._read_parquet(prints_glob), lambda d: d in set(conf))   # confirmation prints only
+        build_set = C.build_complete_set(raw)
+        S, _, refusals = C.census_set(pd.read_csv(complete_csv), build_set)
+        if refusals:
+            raise SystemExit(C.refusal_message(refusals))
+        df, _, _ = C.prepare_prints(raw, S)
+        if len(df) and not all(d in set(conf) for d in set(df.session)):
+            raise SystemExit("DATE CEILING: prints outside the confirmation window; refusing")
+        braw, smap_c = C.choose_bars(readme, praw)
+        bars_hl = C.bars_by_session(braw)
+        frames, E = run_census_captured(df, {}, bars_hl, va, set(), n_shuffles)   # F-ADV outside the claim: no ADV
+    cap = capture_matches_census(frames, E)
+    if not all(v["match"] for v in cap.values()):
+        raise SystemExit("captured events do not match the census counts; refusing")
+    ohlcv = load_ohlcv(polygon_glob, bars_glob, pd.concat([smap_h, smap_c], ignore_index=True), in_scope)
+    ctx = Ctx(ohlcv, tide, iv, va, macro_excl, sorted(scope))
+    eval_ts = [(tk, d) for (tk, d) in sorted(S) if d in set(conf) and calendar_ok(d, macro_excl) == "OK"
+               and not ctx.session_missing(tk, d)]
+    rows = []
+    for vname, wname in VARIANTS.items():
+        ev = E[(E.window == wname) & (E.floor == FLOOR) & E.kept] if len(E) else E
+        ev = ev[(ev.d5 == True) & ev.d6.isin(["BUYER", "SELLER"])] if len(ev) else ev  # noqa: E712
+        n, sess = 0, set()
+        for r in ev.itertuples():
+            res = evaluate(ctx, r.ticker, r.session, r.t, r.L, r.d6, outcome=False)
+            if not res["missing"] and not res["fails"]:
+                n += 1
+                sess.add(r.session)
+        primary = vname == PRIMARY
+        rows.append({"variant": vname, "weight": "PRIMARY" if primary else "SECONDARY", "as_of": str(as_of),
+                     "window_first": str(conf[0]), "window_last": str(conf[-1]), "window_sessions": len(conf),
+                     "evaluable_ticker_sessions": len(eval_ts), "claim_events": n,
+                     "sessions_with_claim_events": len(sess),
+                     "stop_rule_met": bool(primary and ((n >= MIN_EVENTS and len(sess) >= MIN_SESSIONS)
+                                                        or as_of >= CONFIRM_LAST)) if primary else ""})
+    out = pd.DataFrame(rows, columns=COUNT_COLUMNS)
+    C.assert_aggregate({"counts": out})
+    os.makedirs(out_dir, exist_ok=True)
+    out.to_csv(os.path.join(out_dir, "counts.csv"), index=False)
+    print(out.to_string(index=False))
+    return out
+
+
 # ── self-test (synthetic only) ───────────────────────────────────────────────────────────────────
 def _e2e():
     """`backtest` end to end on synthetic files in every input's real format."""
@@ -792,6 +960,95 @@ def _e2e():
         except SystemExit as e_:
             checks["E2E: a tide file with one 09-25 row refuses the whole run before any figure"] = \
                 "DATE CEILING" in str(e_) and not os.path.exists(os.path.join(td, "out2"))
+    return checks
+
+
+def _count_tests():
+    """The weekly COUNT-ONLY job: scope, refusals, schema, and that no outcome is ever read."""
+    import tempfile
+    checks = {}
+    today = date(2026, 10, 15)
+    for a, nm in ((date(2026, 9, 24), "before 09-25"), (date(2027, 1, 4), "after 12-31"),
+                  (date(2026, 10, 15), "today (not a completed session)")):
+        try:
+            check_as_of(a, today)
+            checks[f"COUNT: as_of {nm} refuses"] = False
+        except SystemExit:
+            checks[f"COUNT: as_of {nm} refuses"] = True
+    cd = confirmation_dates(date(2026, 11, 30))
+    checks["COUNT: confirmation dates 09-25 .. 11-30 skip Thanksgiving (46 sessions)"] = \
+        date(2026, 11, 26) not in cd and cd[0] == date(2026, 9, 25) and len(cd) == 46
+    saved = (C.CALIBRATION, list(C.CALIBRATION_DATES), C.WINDOW_NAME)
+    with census_window(cd, "x"):
+        inside = (C.CALIBRATION, C.WINDOW_NAME)
+    checks["COUNT: the census window is set inside and restored after"] = inside == ((cd[0], cd[-1]), "x") and \
+        (C.CALIBRATION, list(C.CALIBRATION_DATES), C.WINDOW_NAME) == saved
+    # outcome=False never needs S_close: NaN closes after 12:00 do not change the claim decision
+    ds = [date(2026, 9, d) for d in (1, 2, 3, 4, 8, 9, 10, 11, 14, 15, 16, 17)]
+
+    def flat(base=100.0):
+        t = np.arange(RTH0, RTH1, 60.0)
+        return pd.DataFrame({"t_s": t, "open": base, "high": base + 0.05, "low": base - 0.05, "close": base,
+                             "volume": 1000.0})
+    oh = {("SPY", d): flat() for d in ds[:-1]}
+    last = flat()
+    up = last.t_s >= 10 * 3600 + 5 * 60
+    last.loc[up, ["open", "high", "low", "close"]] += 1.0
+    last.loc[(last.t_s >= 10 * 3600 + 5 * 60) & (last.t_s < 10 * 3600 + 10 * 60), "volume"] *= 3
+    last.loc[last.t_s >= 12 * 3600, ["open", "high", "low", "close"]] = np.nan
+    oh[("SPY", ds[-1])] = last
+    tide = {ds[-1]: pd.DataFrame({"t_s": RTH0 + 300.0 * np.arange(81), "net": np.arange(81, dtype=float)})}
+    ctx = Ctx(oh, tide, {("SPY", ds[-2]): 0.2}, {("SPY", ds[-1]): (102.0, 100.5)}, set(), ds)
+    r0 = evaluate(ctx, "SPY", ds[-1], 10 * 3600, 100.0, "BUYER", outcome=False)
+    r1 = evaluate(ctx, "SPY", ds[-1], 10 * 3600, 100.0, "BUYER", outcome=True)
+    checks["COUNT: outcome=False decides the claim without S_close (closes after 12:00 are NaN)"] = \
+        r0["missing"] == [] and r0["fails"] == [] and r0["z"] is None and r1["z"] is not None and np.isnan(r1["z"])
+    # end to end on synthetic files: schema is exactly the count columns
+    rng = np.random.default_rng(5)
+    raw, braw, sessions = C._synthetic_vendor(rng)
+    with tempfile.TemporaryDirectory() as td:
+        for tk, g in raw.groupby("ticker"):
+            os.makedirs(os.path.join(td, "dp", tk), exist_ok=True)
+            g.to_parquet(os.path.join(td, "dp", tk, "202609.parquet"), index=False)
+        C._write_readme_bars(braw, os.path.join(td, "bars1m"))
+        for d in ("2026-09-02", "2026-09-03"):
+            C._write_polygon(os.path.join(td, "poly_hist"), "SPY", d, {})
+        C._write_polygon(os.path.join(td, "poly_conf"), "SPY", "2026-09-28", {})
+        conf = confirmation_dates(date(2026, 9, 28))
+        bp = {(t, pd.Timestamp(s).date()) for t, s in zip(raw.ticker, raw.session_date)}
+        pd.DataFrame([{"ticker": t, "session": e.isoformat(), "complete": (t, e) in bp}
+                      for t in C.CORE8 for e in conf]).to_csv(os.path.join(td, "complete.csv"), index=False)
+        pd.DataFrame([{"ticker": t, "session": "2026-09-28", "vah": 503.0, "val": 501.5}
+                      for t in C.CORE8]).to_csv(os.path.join(td, "va.csv"), index=False)
+        pd.DataFrame({"date": ["2026-09-28"], "event": ["initial_claims"], "source": ["t"]}).to_csv(
+            os.path.join(td, "macro.csv"), index=False)
+        rows = [{"session_date": "2026-09-28",
+                 "tick_at": (pd.Timestamp("2026-09-28 09:30", tz="America/New_York") + pd.Timedelta(minutes=5 * k))
+                 .tz_convert("UTC").isoformat(), "net_call_premium": 1e6 + k, "net_put_premium": 1e6} for k in range(81)]
+        pd.DataFrame(rows).to_csv(os.path.join(td, "tide.csv"), index=False)
+        pd.DataFrame([{"ticker": t, "session_date": d, "iv_near": 0.2} for t in C.CORE8
+                      for d in ("2026-09-24", "2026-09-25")]).to_csv(os.path.join(td, "iv.csv"), index=False)
+        args = ["2026-09-28", os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "complete.csv"),
+                os.path.join(td, "bars1m", "*", "*.parquet"),
+                os.path.join(td, "poly_hist", "*.parquet") + ";" + os.path.join(td, "poly_conf", "*.parquet"),
+                os.path.join(td, "va.csv"), os.path.join(td, "macro.csv"), os.path.join(td, "tide.csv"),
+                os.path.join(td, "iv.csv"), os.path.join(td, "out")]
+        out = count(*args, n_shuffles=30, today=today)
+        f = pd.read_csv(os.path.join(td, "out", "counts.csv"))
+        checks["COUNT e2e: output schema is EXACTLY the count columns, one row per variant"] = \
+            list(f.columns) == COUNT_COLUMNS and list(f.variant) == ["TG-ON", "TG-OFF"] and len(out) == 2
+        checks["COUNT e2e: window 09-25 .. 09-28 (2 sessions); primary stop rule not met"] = \
+            f.window_sessions.iloc[0] == 2 and str(f.stop_rule_met.iloc[0]) in ("False", "false")
+        t2 = pd.read_csv(os.path.join(td, "tide.csv"))
+        t2.loc[0, "session_date"] = "2026-10-20"
+        t2.to_csv(os.path.join(td, "tide_bad.csv"), index=False)
+        a2 = list(args)
+        a2[7] = os.path.join(td, "tide_bad.csv")
+        try:
+            count(*a2, n_shuffles=30, today=today)
+            checks["COUNT e2e: a tide row after as_of refuses"] = False
+        except SystemExit as e_:
+            checks["COUNT e2e: a tide row after as_of refuses"] = "DATE CEILING" in str(e_)
     return checks
 
 
@@ -969,15 +1226,29 @@ def selftest():
     except RuntimeError:
         checks["AGGREGATE: an output with an L column refuses"] = True
     checks.update(_e2e())
+    checks.update(_count_tests())
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
     return 0 if all(checks.values()) else 1
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "selftest":
+    mode = sys.argv[1]
+    if mode == "selftest":
         sys.exit(selftest())
-    if sys.argv[1] == "backtest":
+    if mode == "backtest":
         backtest(*sys.argv[2:13])
+    elif mode == "count":
+        count(*sys.argv[2:12])
+    elif mode == "confirmation-complete":            # 6b completeness for the confirmation window, metadata only
+        a = pd.Timestamp(sys.argv[2]).date()
+        check_as_of(a)
+        with census_window(confirmation_dates(a), "triton-r-confirmation-count"):
+            C.run_build_complete(*sys.argv[3:5])
+    elif mode == "confirmation-crosscheck":          # reads only ticker and session_date
+        a = pd.Timestamp(sys.argv[2]).date()
+        check_as_of(a)
+        with census_window(confirmation_dates(a), "triton-r-confirmation-count"):
+            sys.exit(C.run_crosscheck(*sys.argv[3:6]))
     else:
-        raise SystemExit("modes: backtest, selftest")
+        raise SystemExit("modes: backtest, count, confirmation-complete, confirmation-crosscheck, selftest")
