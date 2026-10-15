@@ -4,7 +4,10 @@ Claim of record: TRITON-R-v1-STAMPED-R-IV.1080.md (ba9e77df...), = REV 1 (44b98c
 amended by TRITON-R-v1-AMENDMENT-1-R-IV.1084.md (d8030b4f...): continuous EMA; small-sample kill floors;
 and TRITON-R-v1-AMENDMENT-2-R-IV.1090.md (21a2c0e9...): controls from t_r + 1 min; WIN 1 bootstrap 10,000;
 WIN 4 >= 5 claim events per side (named if not met); SUSPECT if > 10% of resamples skipped;
-and TRITON-R-v1-AMENDMENT-3-R-IV.1093.md (c491c196...): a SUSPECT interval carries no verdict weight.
+and TRITON-R-v1-AMENDMENT-3-R-IV.1093.md (c491c196...): a SUSPECT interval carries no verdict weight;
+amendment 4 (6d26a90e..., PYTHIA data note); amendment 5 (8f5931a9..., secondaries, confirmation set only);
+amendment 6 (b8a5ff38...): the slot median counts the 10 most recent prior sessions in which the slot EXISTS.
+LOAD (R-IV.1116(b)2a): run 2's frozen path itself -- _read_parquet -> census_set -> prepare_prints (dedup first).
 Source of record: triton-design-of-record-2026-10-12.md (12ecf72c...).
 
 DATE CEILINGS FIRST (R-IV.1072(d), R-IV.1080): this instrument reads ONLY the backtest block
@@ -82,7 +85,8 @@ AMENDMENT_1 = "TRITON-R-v1-AMENDMENT-1-R-IV.1084.md d8030b4f0602af9c54d2f3b0a393
 AMENDMENT_2 = "TRITON-R-v1-AMENDMENT-2-R-IV.1090.md 21a2c0e93c4db6eadfdbc1695c7d33ae61c5ff37ce4d53fb1877c9f4d784848a"
 AMENDMENT_3 = "TRITON-R-v1-AMENDMENT-3-R-IV.1093.md c491c196ed3bec75b21f91e31956a98b2c0bdad55f52decc74e57909410e483c"
 AMENDMENT_4 = "TRITON-R-v1-AMENDMENT-4-R-IV.1111.md 6d26a90e7a2ae6c7cb20620ca5c15ee7dbae1b3a2a298f1a588f7c93bd630b53 (data note)"
-AMENDMENT_5 = ""                                   # set when amendment 5 is stamped (R-IV.1114(b))
+AMENDMENT_5 = "TRITON-R-v1-AMENDMENT-5-R-IV.1114.md 8f5931a9af4e7c459f4cf77d6dc988703b782e5844783d5011b2914e33fb7b2d"
+AMENDMENT_6 = "TRITON-R-v1-AMENDMENT-6-R-IV.1116.md b8a5ff389ffa796f6b2fc1e37ed37859892dae64c2a5ffc0d483fd3d71b5918d"
 WIN4_MIN_PER_SIDE = 5                              # amendment 2 sec. 4
 SUSPECT_SKIP_SHARE = 0.10                          # amendment 2 sec. 5
 TUE_THU = {1, 2, 3}
@@ -124,15 +128,6 @@ def read_block_csv(path, date_col, what):
 def _globs(spec):
     """One glob, or several separated by ';' (the backtest Polygon pull plus the dated reserve pull)."""
     return [g for g in str(spec).split(";") if g]
-
-
-def scope_raw(raw, in_scope):
-    """Prints, filtered the moment they are read, by EXECUTED ET DATE ONLY -- exactly as census run 2
-    filtered them (R-IV.1112(b)). A walk file fetched on/after 09-25 may be opened, but only so that its
-    out-of-scope rows are dropped here; no row executed outside scope survives the load. Every copy of a
-    print (same tracking_id) carries the same executed_at, so the D1-clean set is run 2's."""
-    ex = pd.to_datetime(raw.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date
-    return raw[[in_scope(b) for b in ex]].reset_index(drop=True)
 
 
 #: The counts and output hashes of record (R-IV.1112(b)): census run 2, `triton-a7\out\` (QUERY R-IV.1057).
@@ -272,16 +267,16 @@ def atr_at(seq, i):
 
 
 def slot_median(prior_b5, slot):
-    """Median volume of `slot` over the 10 prior in-block sessions; None unless all 10 have that slot."""
-    if len(prior_b5) < SLOT_LOOKBACK:
-        return None
+    """Median volume of `slot` over the 10 most recent prior sessions in which that slot EXISTS (amendment 6,
+    b8a5ff38...): a half-day (or any session lacking the slot) is skipped for it. Fewer than 10 -> None."""
     vols = []
-    for b in prior_b5[-SLOT_LOOKBACK:]:
+    for b in reversed(prior_b5):
         v = b.volume[b.slot == slot]
-        if not len(v):
-            return None
-        vols.append(float(v.iloc[0]))
-    return float(np.median(vols))
+        if len(v):
+            vols.append(float(v.iloc[0]))
+            if len(vols) == SLOT_LOOKBACK:
+                return float(np.median(vols))
+    return None
 
 
 def d7(seq, sess_mask, prior_b5, t_event, L, side):
@@ -770,21 +765,21 @@ def fx_state(fx, symbol, d):
 
 
 def backtest_census(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va, macro_all, n_shuffles=None):
-    """The census half of the backtest: load (ceiling at the read), census set, the frozen census captured.
+    """The census half of the backtest. R-IV.1116(b)2a: it calls RUN 2'S OWN frozen load + dedup path
+    (`triton_census.run`, line for line: _read_parquet -> build_complete_set -> census_set -> prepare_prints,
+    whose from_vendor dedups on tracking_id keep='first' over the WHOLE read, then d1_clean drops by executed
+    date). Nothing is re-implemented and nothing is filtered before the frozen dedup. Walk files reaching
+    past the block are opened; no row executed outside the block survives prepare_prints (asserted).
     Returns a dict; no outcome is computed here."""
-    raw = scope_raw(C._read_parquet(prints_glob), in_block)          # the ceiling, at the read (executed date)
-    if len(raw):
-        exd = pd.to_datetime(raw.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date
-        assert_block(set(exd), "prints after the load")
+    raw = C._read_parquet(prints_glob)                               # run 2: the whole read, as is
     build_set = C.build_complete_set(raw)
     S, excluded, refusals = C.census_set(pd.read_csv(complete_csv), build_set)
     if refusals:
         raise SystemExit(C.refusal_message(refusals))
-    df, n_dup, dropped = C.prepare_prints(raw, S)
-    assert_block(set(df.session), "prints")
-    praw, poly_info = load_polygon_multi(polygon_glob)
-    praw = scope_bars(praw, in_block)
-    braw, source_map = C.choose_bars(scope_bars(C.load_bars(bars_glob), in_block), praw)
+    df, n_dup, dropped = C.prepare_prints(raw, S)                    # run 2's dedup, then the executed-date drop
+    assert_block(set(df.session), "prints after the frozen load")    # the ceiling, on what survives the load
+    praw, poly_info = C.load_polygon(polygon_glob)                    # run 2's bar path, line for line
+    braw, source_map = C.choose_bars(C.load_bars(bars_glob), praw)
     bars_hl = C.bars_by_session(braw)
     assert_block([k[1] for k in bars_hl], "census bars")
     ohlcv = load_ohlcv(polygon_glob, bars_glob, source_map)
@@ -880,6 +875,7 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
     from datetime import datetime, timezone
     result["computed_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")   # for the outcome log
     result["amendment_3"] = AMENDMENT_3
+    result["amendments_4_to_6"] = [AMENDMENT_4, AMENDMENT_5, AMENDMENT_6]
     result["verdict"] = verdict_of(p)
     result["verdict_note"] = ("BACKTEST: KILL or NO-KILL only (R-IV.1080(d)). A KILL ends TRITON-R v1. "
                               "NO-KILL establishes nothing; the confirmation set stays sealed.")
@@ -989,7 +985,7 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
     with census_window(hist, "triton-r-history"):
         _, smap_h = C.choose_bars(readme, praw)
     with census_window(conf, "triton-r-confirmation-count"):
-        raw = scope_raw(C._read_parquet(prints_glob), lambda d: d in set(conf))   # confirmation prints only
+        raw = C._read_parquet(prints_glob)                    # the frozen path, as the backtest (R-IV.1116(b))
         build_set = C.build_complete_set(raw)
         S, _, refusals = C.census_set(pd.read_csv(complete_csv), build_set)
         if refusals:
@@ -1046,7 +1042,7 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
     from datetime import datetime, timezone
     meta = {
         "claim": CLAIM,
-        "amendments": [AMENDMENT_1, AMENDMENT_2, AMENDMENT_3, AMENDMENT_4] + ([AMENDMENT_5] if AMENDMENT_5 else []),
+        "amendments": [AMENDMENT_1, AMENDMENT_2, AMENDMENT_3, AMENDMENT_4, AMENDMENT_5, AMENDMENT_6],
         "computed_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "count_scope": ("claim events = FRUN runs kept by D4, D5-matched, D6-sided, D7-confirmed, passing every "
                         "sec. 5 filter, no ingredient missing; CORE8 x confirmation sessions 09-25 .. as_of"),
@@ -1343,19 +1339,39 @@ def selftest():
                       "close": [1, 2, 3]}).to_csv(p, index=False)
         checks["CEILING: fx keeps pre-block history but drops sealed dates"] = \
             sorted(read_fx(p).date) == ["2026-08-14", "2026-09-24"]
+    # R-IV.1116(b)2a: the load is run 2's FROZEN path (prepare_prints: dedup keep='first' over the whole read,
+    # then the executed-date drop). Nothing is filtered before the dedup.
     rng0 = np.random.default_rng(3)
-    raw0, _, _ = C._synthetic_vendor(rng0)
-    late = raw0[raw0.session_date == "2026-09-02"].head(5).copy()
-    late["session_date"] = "2026-09-28"                         # a block print served by a later (sealed) fetch
-    late["tracking_id"] = late.tracking_id + "_late"
-    raw0 = pd.concat([raw0, late], ignore_index=True)
-    kept0 = scope_raw(raw0, in_block)
-    ex0 = pd.to_datetime(kept0.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date
-    checks["CEILING (R-IV.1112(b)): no row with execution date >= 09-25 (or sealed) survives the load"] = \
-        all(in_block(d) for d in ex0) and len(kept0) > 0 and \
-        not any(d >= CEILING for d in ex0)
-    checks["CEILING: like run 2, an in-block print served by a later fetch is KEPT (filter is execution date)"] = \
-        int((kept0.tracking_id.str.endswith("_late")).sum()) == 5
+    raw0, _, sess0 = C._synthetic_vendor(rng0)
+    comp0 = {(tk, s.date()) for tk in C.CORE8 for s in sess0}
+    df0, _, _ = C.prepare_prints(raw0, comp0)
+    checks["CEILING (R-IV.1112(b)): no row executed on/after 09-25 (or sealed) survives the frozen load"] = \
+        len(df0) > 0 and all(in_block(d) for d in set(df0.session)) and not any(d >= CEILING for d in set(df0.session))
+    x = raw0[(raw0.session_date == "2026-09-02") & (raw0.ticker == "SPY")].iloc[[200]].copy()
+    xd = x.copy()
+    xd["executed_at"] = (pd.to_datetime(x.executed_at, utc=True) + pd.Timedelta(days=26)).dt.strftime(
+        "%Y-%m-%dT%H:%M:%S.%f+00:00")                          # the SAME tracking_id, executed 09-28 in this copy
+    xd["session_date"] = "2026-09-28"
+    first_out = pd.concat([xd, raw0], ignore_index=True)       # the out-of-block copy comes FIRST
+    last_out = pd.concat([raw0, xd], ignore_index=True)        # ... or LAST
+    n_first = len(C.prepare_prints(first_out, comp0)[0])
+    n_last = len(C.prepare_prints(last_out, comp0)[0])
+    checks["FROZEN DEDUP (run 2's semantics): keep='first' -- an out-of-block FIRST copy drops the print"] = \
+        n_first == len(df0) - 1
+    checks["FROZEN DEDUP: an out-of-block LATER copy leaves the in-block print in place"] = n_last == len(df0)
+    pre = first_out[[in_block(d) for d in pd.to_datetime(first_out.executed_at, utc=True,
+                                                         format="ISO8601").dt.tz_convert("America/New_York").dt.date]]
+    checks["WHY THE GUARD REFUSED: pre-filtering before the dedup KEEPS that print (differs from run 2)"] = \
+        len(C.prepare_prints(pre, comp0)[0]) == len(df0)
+    # amendment 6: the slot median counts sessions in which the slot EXISTS
+    full = pd.DataFrame({"slot": np.arange(78), "volume": 100.0})
+    half = pd.DataFrame({"slot": np.arange(42), "volume": 999.0})       # a 13:00 close: slots 0..41 only
+    hist11 = [full] * 9 + [half, full]                                  # oldest .. newest; the half-day is 2nd newest
+    checks["A6: an afternoon slot after a half-day uses the 10 most recent sessions that HAVE it"] = \
+        slot_median(hist11, 60) == 100.0
+    checks["A6: a morning slot still counts the half-day's volume (it has the slot)"] = \
+        slot_median(hist11, 10) == float(np.median([100.0] * 9 + [999.0]))
+    checks["A6: fewer than 10 sessions with the slot -> MISSING"] = slot_median([full] * 8 + [half], 60) is None
     checks["CEILING: census window equals the backtest block"] = C.CALIBRATION == BACKTEST and \
         all(in_block(d) for d in C.CALIBRATION_DATES) and len(C.CALIBRATION_DATES) == 17
     # 1 · the frozen census, captured: counts equal the census's own
