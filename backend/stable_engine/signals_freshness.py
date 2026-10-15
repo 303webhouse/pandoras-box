@@ -69,6 +69,26 @@ REGISTERED_CLASSES: frozenset[str] = frozenset({
     "circes_stew", "circes_stew_unsurfaced",
     # R-IV.429(b). The backtest module's grading pass -- a consumer, like the Triton grader.
     "shadow_grader",
+    # R-IV.1059(b). THE TWO CLASSES THAT KEPT /health AT `degraded` WHILE NOTHING WAS WRONG.
+    #
+    # Both were UNREGISTERED and still moved the aggregate, because the loop below unions the
+    # registry with everything observed. Measured 2026-10-15 02:10 MT: these were the ONLY two
+    # classes in flatline and the ONLY two with `registered: false`; every registered class
+    # was `ok`. So `degraded` was being set by classes nobody had declared supervision for.
+    #
+    # Both are once-a-session CONDITIONAL producers, judged against the 4-hour default SLO:
+    #
+    #   lab_registered   a LAB shadow strategy, one morning pass per session, THREE signals in
+    #                    its entire history. Last persist was its own 10-14 11:00Z run.
+    #   wrr_scanner      the WRR countertrend model, 16:20 ET weekdays only, post-close, ONE
+    #                    signal in its entire history. Last persist was its own 10-14 20:21Z
+    #                    run -- i.e. it worked.
+    #
+    # Neither was broken. A once-daily producer measured against a four-hour SLO is stale for
+    # ~20 hours of every 24 by construction, which is the "guaranteed false red" this file
+    # already warns about twice for other weekday-only jobs. They are registered here AND
+    # placed in SESSION_JOB_CLASSES, so the question becomes "was a pass DUE and missing".
+    "lab_registered", "wrr_scanner",
 })
 
 # ── PLUGGABLE AGE SOURCE (T3, R-IV.295(a)) ────────────────────────────────
@@ -111,6 +131,13 @@ AGE_SOURCES: dict[str, str] = {
     "circes_stew": AGE_SOURCE_JOB_RUNS,
     "circes_stew_unsurfaced": AGE_SOURCE_JOB_RUNS,
     "shadow_grader": AGE_SOURCE_JOB_RUNS,
+    # R-IV.1059(b). Judged on whether the PASS ran, never on whether it emitted: three signals
+    # ever for one and one signal ever for the other, both by design. Same reasoning as the
+    # crypto producers above, and the same ORDER -- `wrr_daily_scan` was given its job_runs
+    # write in bias_scheduler FIRST, because re-pointing a class at job_runs it does not write
+    # renders `no_data` and silently disarms the sentinel.
+    "lab_registered": AGE_SOURCE_JOB_RUNS,
+    "wrr_scanner": AGE_SOURCE_JOB_RUNS,
 }
 # job_runs name per class, where it differs from the class. Both CIRCE source values are
 # written by ONE pass.
@@ -120,6 +147,9 @@ AGE_SOURCE_JOB_NAME: dict[str, str] = {
     # job's compute_all_tape_health(). So "is the CVD engine alive" is answered by "did the
     # tape-health job run", which is the job that would carry it if it had anything to say.
     "crypto_cvd_engine": "crypto_tape_health",
+    # R-IV.1059(b): the class names differ from the job names that write job_runs.
+    "lab_registered": "lab_registered_shadow",
+    "wrr_scanner": "wrr_daily_scan",
 }
 
 # R-IV.617(b): TWO SIGNALS, AND ONLY ONE OF THEM DEGRADES.
@@ -144,7 +174,11 @@ JOB_ALIVE_CLASSES: frozenset[str] = frozenset({"crypto_scanner", "crypto_engine"
 # Classes whose work is expected once per TRADING SESSION rather than continuously.
 # Their SLO is only evaluated when a pass was actually due -- see _pass_overdue().
 SESSION_JOB_CLASSES = frozenset({"triton_grader", "circes_stew", "circes_stew_unsurfaced",
-                                 "shadow_grader"})
+                                 "shadow_grader",
+                                 # R-IV.1059(b): both are once-a-session passes. wrr_scanner
+                                 # fires at 16:20 ET, inside SESSION_JOB_DUE_HOUR_ET's 17:00
+                                 # grace; lab_registered runs a morning pass per session.
+                                 "lab_registered", "wrr_scanner"})
 
 # The grader runs post-close; give it until 16:15 ET plus grace before a pass for
 # that session is considered due.
@@ -181,6 +215,10 @@ SLO_SECONDS: dict[str, int] = {
     "circes_stew": 26 * 3600,
     "circes_stew_unsurfaced": 26 * 3600,
     "shadow_grader": 26 * 3600,
+    # R-IV.1059(b): once a session, same 26h bound as the other session passes. The 4-hour
+    # DEFAULT was the entire defect -- a once-daily producer cannot satisfy it.
+    "lab_registered": 26 * 3600,
+    "wrr_scanner": 26 * 3600,
 }
 
 # Classes that only flow during regular trading hours. Crypto runs 24/7 and must
@@ -391,6 +429,10 @@ async def signals_freshness_summary() -> dict:
     counters = counters_snapshot()
     classes: dict[str, dict] = {}
     worst = "ok"
+    # R-IV.1059(b): tracked separately so an unsupervised class is reported without being
+    # mistaken for a fault. See the aggregate note below.
+    worst_unregistered = "ok"
+    unregistered: list[str] = []
     oldest: float | None = None
 
     # Registry ∪ anything actually observed -- a class that appears but was never
@@ -404,8 +446,26 @@ async def signals_freshness_summary() -> dict:
             alive_note = None
             status = _class_status(cls, age, c["rejected"],
                                    last_session_date=session_dates.get(cls))
-        if _RANK[status] > _RANK[worst]:
-            worst = status
+        # R-IV.1059(b): ONLY A REGISTERED CLASS MOVES THE AGGREGATE.
+        #
+        # The union above is right -- an unregistered class must surface rather than hide --
+        # but letting it set `worst` meant `any_flatline`, and therefore /health's `degraded`,
+        # was driven by classes nobody had declared supervision for. Measured 2026-10-15: the
+        # only two flatlines in the whole surface were the only two unregistered classes, and
+        # both were working exactly as designed. "degraded" has to mean a real fault, and a
+        # fault can only be judged against a declared expectation.
+        #
+        # Unregistered classes keep their own status, are listed by name below, and carry their
+        # own worst, so this is a change of WHICH QUESTION the aggregate answers -- not a
+        # suppression. Nothing becomes invisible; it stops being an alarm it was never armed
+        # to be.
+        if cls in REGISTERED_CLASSES:
+            if _RANK[status] > _RANK[worst]:
+                worst = status
+        else:
+            if _RANK[status] > _RANK[worst_unregistered]:
+                worst_unregistered = status
+            unregistered.append(cls)
         if age is not None and (cls not in RTH_ONLY_CLASSES or is_market_hours()):
             oldest = age if oldest is None else max(oldest, age)
         classes[cls] = {
@@ -434,4 +494,14 @@ async def signals_freshness_summary() -> dict:
         "oldest_persist_age_s": round(oldest) if oldest is not None else None,
         "any_flatline": worst == "flatline",
         "classes": classes,
+        # R-IV.1059(b): surfaced, named, and INERT. A non-empty list here is work owed --
+        # either register the class or retire it -- but it is not a fault in the hub, so it
+        # does not degrade. Empty is the expected state; if a new producer appears it shows up
+        # here by name rather than silently setting off an alarm nobody armed.
+        "unregistered_classes": sorted(unregistered),
+        "worst_status_unregistered": worst_unregistered,
+        "aggregate_basis": ("worst_status and any_flatline cover REGISTERED classes only "
+                            "(R-IV.1059(b)); unregistered classes are listed in "
+                            "unregistered_classes with their own worst_status_unregistered "
+                            "and cannot degrade the hub"),
     }

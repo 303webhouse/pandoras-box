@@ -2378,7 +2378,33 @@ async def run_wrr_scan_job():
         # producer. `scan_wrr` alone would compute and discard.
         from strategies.wrr_buy_model import run_wrr_and_process
         logger.info("WRR Buy Model scan starting (scheduled)...")
-        result = await run_wrr_and_process()
+
+        # R-IV.1059(b): RECORD THE RUN, and record it BEFORE `wrr_scanner` is judged on it.
+        #
+        # This job runs ONCE a day at 16:20 ET on weekdays and emits only when the
+        # countertrend model finds hits -- one signal in its entire history. Judged against
+        # signals_freshness' 4-hour default SLO it was a guaranteed false flatline for ~20 of
+        # every 24 hours, and it is one of the two classes that has kept /health at `degraded`
+        # while nothing was wrong.
+        #
+        # THE ORDER IS THE WHOLE POINT, and signals_freshness states why: "Switching the
+        # source alone would have been WORSE than the bug ... with no job_runs row these
+        # classes render `no_data`" -- which does not set any_flatline. Re-pointing the class
+        # at job_runs without first writing job_runs would have turned the sentinel off and
+        # called it a fix. So the write lands here, and the class is re-pointed only because
+        # this exists.
+        from jobs.stable_jobs import _record
+
+        async def _scan():
+            res = await run_wrr_and_process()
+            # `rows_touched` is what the freshness surface reports as signals_emitted; a zero
+            # is a quiet scan, not a fault, and must not be confused with a failed one.
+            if isinstance(res, dict):
+                res.setdefault("rows_touched", res.get("signals_persisted")
+                               or res.get("hits") or 0)
+            return res
+
+        result = await _record("wrr_daily_scan", _scan, session_date=now.date())
         logger.info("WRR scan complete: %s", result)
     except Exception as e:
         logger.error(f"WRR scan job error: {e}")
