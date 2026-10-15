@@ -124,6 +124,43 @@ async def prune(pool=None) -> int:
         return -1
 
 
+async def day_detail(day: date, pool=None) -> Dict[str, Any]:
+    """Per-caller spend for ONE UW day: {caller: {used, rate_limited}}. R-IV.1059(c).
+
+    THE SQL LIVES HERE, not in the route, for two reasons that turned out to be the same one.
+    This module is the single author of `uw_caller_spend_daily`'s schema and queries, and it
+    runs `DDL` before reading -- so the read cannot depend on a writer having created the
+    table, which is R-IV.1052(b)'s rule.
+
+    The route was written with the SELECT inline first, and MY OWN first-boot guard failed it:
+    "a READ path queries a table the startup migrations do not create". Moving the query here
+    fixes the finding at its cause rather than widening the debt register, and it leaves the
+    route a thin HTTP shell over this function. `summary()` above already had this shape; the
+    route simply needed the per-day grain that `summary()`'s aggregate cannot express.
+
+    Returns {} with `error` set when the read fails. NEVER partial-silently: a caller that gets
+    {} and no error would read "nobody spent anything today", which is the opposite of "I could
+    not look".
+    """
+    out: Dict[str, Any] = {"uw_day": day.isoformat(), "callers": {}, "error": None}
+    try:
+        if pool is None:
+            from database.postgres_client import get_postgres_client
+            pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute(DDL)
+            rows = await conn.fetch(
+                "SELECT caller, requests, rate_limited FROM uw_caller_spend_daily"
+                " WHERE uw_day = $1", day)
+        out["callers"] = {r["caller"]: {"used": int(r["requests"] or 0),
+                                       "rate_limited": int(r["rate_limited"] or 0)}
+                          for r in rows}
+    except Exception as exc:                                        # noqa: BLE001
+        out["error"] = "%s: %s" % (type(exc).__name__, exc)
+        logger.error("[uw_spend_ledger] day_detail(%s) failed: %s", day, out["error"])
+    return out
+
+
 async def summary(days: int = 10, pool=None) -> Dict[str, Any]:
     """Per-caller max / median / total over the last `days` UW DAYS THAT HAVE ROWS.
 

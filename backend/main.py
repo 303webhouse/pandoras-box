@@ -127,6 +127,21 @@ async def lifespan(app: FastAPI):
             #   x4_result             X4's outcome, as text.
             #   cut_due               a DATE, because cut_session() returns a date.
             #   cut_status            text, from b2_cut_alert's verdict set.
+            # R-IV.1059(c): the UW spend ledger's table, migrated AT STARTUP because
+            # `GET /api/uw/spend` now READS it. Until this route existed the table had only a
+            # writer, which created it on first spend; a read path cannot depend on that.
+            #
+            # CAUGHT BY MY OWN GUARD, not by an outage: R-IV.1052(b)'s first-boot test failed
+            # with "a READ path queries a table the startup migrations do not create" the
+            # moment the route landed. The DDL is the ledger's own constant, so there is still
+            # exactly one author of this schema.
+            try:
+                from integrations.uw_spend_ledger import DDL as _UW_SPEND_DDL
+                from integrations.uw_spend_ledger import DDL_INDEX as _UW_SPEND_IDX
+                await conn.execute(_UW_SPEND_DDL)
+                await conn.execute(_UW_SPEND_IDX)
+            except Exception as _uw_ddl_err:
+                logger.warning("uw_caller_spend_daily migration failed: %s", _uw_ddl_err)
             await conn.execute(
                 "ALTER TABLE unified_positions"
                 "  ADD COLUMN IF NOT EXISTS sleeve_reason TEXT,"
@@ -2014,6 +2029,7 @@ from api.flow_ingestion import router as flow_ingestion_router
 from api.flow_radar import router as flow_radar_router
 from api.darkpool_backfill_status import router as darkpool_backfill_status_router
 from api.b2_cut_status import router as b2_cut_status_router
+from api.uw_spend import router as uw_spend_router  # R-IV.1059(c)
 from api.regime import router as regime_router
 from api.catalyst_calendar import router as catalyst_router
 from api.ticker_profile import router as ticker_profile_router
@@ -2074,6 +2090,7 @@ app.include_router(flow_summary_router, prefix="/api", tags=["flow-summary"])
 app.include_router(flow_radar_router, prefix="/api", tags=["flow-radar"])
 app.include_router(darkpool_backfill_status_router, prefix="/api", tags=["darkpool-backfill"])
 app.include_router(b2_cut_status_router, prefix="/api", tags=["b2-cut"])
+app.include_router(uw_spend_router, prefix="/api", tags=["uw-spend"])
 app.include_router(flow_ingestion_router, prefix="/api", tags=["uw-flow"])
 app.include_router(regime_router, prefix="/api", tags=["regime"])
 app.include_router(catalyst_router, prefix="/api", tags=["catalyst"])
