@@ -280,9 +280,16 @@ async def _feed_counts(conn):
     """(last accepted timestamp, rejections since it). Separated so the SQL is testable."""
     try:
         last = await conn.fetchval("SELECT MAX(timestamp) FROM pythia_events")
+        # REFUSALS ONLY. `WEBHOOK_PYTHIA_ENFORCE` unset means OBSERVE, where a bad secret is
+        # ALLOWED THROUGH and recorded under the OBSERVE reason. Counting those here would make
+        # feed_health report `rejecting` -- "arriving and being REFUSED" -- while events were
+        # landing normally, which is a false alarm in the one field built to prevent false
+        # alarms. The observe rows are still written and still readable; they are simply not
+        # refusals, so they do not drive this verdict.
         n = await conn.fetchval(
             "SELECT count(*) FROM pythia_webhook_rejections"
-            " WHERE $1::timestamptz IS NULL OR rejected_at > $1::timestamptz", last)
+            " WHERE (($1::timestamptz IS NULL) OR rejected_at > $1::timestamptz)"
+            "   AND reason NOT LIKE 'OBSERVE:%'", last)
         return last, (int(n) if n is not None else None)
     except Exception:                                               # noqa: BLE001
         # The table may not exist yet on a fresh deploy. None is NOT zero.
