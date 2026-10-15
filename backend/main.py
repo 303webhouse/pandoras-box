@@ -86,6 +86,21 @@ async def lifespan(app: FastAPI):
             # The read path no longer needs it, but a migration that depends on traffic is
             # wrong whatever reads it.
             await conn.execute("ALTER TABLE pythia_events ADD COLUMN IF NOT EXISTS script_version TEXT")
+            # R-IV.1037(c)2: the rejections table, created at STARTUP.
+            #
+            # SECOND INSTANCE OF THE SAME FAULT IN ONE SESSION. I created it inside the
+            # rejection handler, so `feed_health` -- a READ -- depended on a table only a
+            # WRITER creates, and it returned `unknown` until the next 401 happened to arrive.
+            # That is precisely the dependency that took hub_get_market_profile down earlier
+            # today with `column "script_version" does not exist`. A read must never wait on a
+            # writer having run, and the fix is the same: migrate at startup.
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
+                "  id SERIAL PRIMARY KEY,"
+                "  rejected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+                "  ticker TEXT,"
+                "  reason TEXT NOT NULL,"
+                "  secret_len INT NOT NULL)")
         logger.info("✅ Lightning cards confirmations column ready")
     except Exception as e:
         logger.debug("Lightning cards column check: %s", e)
