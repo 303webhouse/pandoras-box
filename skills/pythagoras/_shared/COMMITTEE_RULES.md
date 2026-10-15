@@ -136,12 +136,10 @@ Each agent's `SKILL.md` retains a short "what it owns vs what belongs to other a
 
 ## § Account Context Framework
 
-RULES VERSION: 2026-10-09/v5.4 — AUTHORITATIVE STAMP. An agent or scheduled task
+RULES VERSION: 2026-10-14/v5.5 — AUTHORITATIVE STAMP. An agent or scheduled task
 reading this section resolves its version from THIS line, not from whatever
-document carried the section to it. Supersedes 2026-10-09/v5.3, 2026-10-08/v5.2,
-/v5.1, /v5, /v4, /v3 and 2026-10-07/v2.
-
-Applied from: claude/account-context-2026-10-09-v5_4.md · sha256 3b7f3ac89bd60defad1ebed032525a27a5153fb0d1405137783ba46c32b5863e · 2026-10-12
+document carried the section to it. Supersedes 2026-10-09/v5.4, 2026-10-09/v5.3,
+2026-10-08/v5.2, /v5.1, /v5, /v4, /v3 and 2026-10-07/v2.
 
 NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
 came from a source named below within this conversation.
@@ -262,7 +260,48 @@ sleeve. [R-IV.730(a)]
   market dictates, higher up the risk curve, positioned in line with his bearish
   bias where the tape allows it. Trading here is tax-sound — realised gains are
   tax-free. No options on this account.
-- The **20% risk cap** applies to the sleeve's tactical positions, at market.
+- The **20% risk cap** applies to the sleeve's tactical positions, at market. Its
+  basis, enforcement level and triggers are below.
+
+### § The 20% tactical cap — BASIS, LEVEL AND TRIGGERS. RULED by the principal 2026-10-14
+
+Applies to **FIDELITY_ROTH and FIDELITY_401A**. ROBINHOOD is governed by its sleeve
+ceiling instead.
+
+**Basis:** market value of TACTICAL positions ÷ the account's total balance
+(holdings at market plus cash). **Leveraged and inverse products count at MARKET
+VALUE, not underlying-equivalent.** [Principal, 2026-10-14, R-IV.1031(a)]
+
+**Enforcement level: REMINDER.** Surface the percentage when the cap is crossed.
+**It never blocks a ticket and never vetoes a pass.** [Principal, 2026-10-14]
+
+**Two triggers, so the reminder has something to fire from** [R-IV.1034(b)]:
+1. **Every idea pass** carries the risk-budget line, including the Roth and 401(a)
+   tactical percentage on the market-value basis.
+2. **Any position write in FIDELITY_ROTH or FIDELITY_401A recomputes the cap.**
+   BUILD pushes a phone reminder, **percent only**, at ≥ 20%. A row whose
+   `classification` is NULL counts as TACTICAL **provisionally**, so an unclassified
+   write cannot hide a crossing.
+
+**WHY THE BASIS HAD TO BE WRITTEN DOWN.** On 2026-10-14 the Roth held TSLQ (−2×) and
+SRTY (−3×). The same two positions read **18.78%** on market value and **44.57%** on
+underlying-equivalent — a 2.374× difference, compliant under one reading and 24.57
+points over under the other. For unleveraged holdings the two coincide, which is why
+a cap written without its basis survived this long unexercised.
+
+**THIS CAP AND THE HOUSEHOLD NET-DIRECTION CAP MEASURE DIFFERENTLY, ON PURPOSE.**
+
+| | numerator basis |
+|---|---|
+| **20% tactical cap** (this section) | **market value** — leveraged and inverse at market |
+| **Household net-direction cap** (below) | **leverage-adjusted** — ETFs at their stated multiple, options at delta-adjusted notional |
+
+They are not in conflict and **neither is to be "corrected" to match the other.**
+They answer different questions. This cap asks *how much of the account is in
+tactical positions*, which is a capital-allocation question answered at market. The
+net-direction cap asks *if the market moves 1%, which way does the household move
+and how far*, which only leverage and delta answer. An agent that applies one basis
+to the other cap has changed the rule.
 
 ### § Z2 trend gate — RULED by the principal 2026-10-08 ("match the clock")
 
@@ -312,6 +351,21 @@ author.
   recorded as expiry-stopped. It is never recorded as carrying a 3-day cut it
   cannot execute. This is why B2's stated expression is 7-14 DTE: the band exists
   so the time stop has room to work. [TA-117 §2a]
+  **ORIENTATION FOR THE B2 CUT — DEBIT_WHITELIST, a CLOSED set read by EXACT MATCH**
+  [TA-168 §1, adopted R-IV.1021(a)]. The cut's P&L is signed by whether the row was
+  opened for a debit or a credit. That orientation is **never parsed out of the
+  `structure` string by substring**, which is the `strategy_tag` failure in another
+  column (TA-123). A value qualifies only when **its own text states the orientation
+  unambiguously under standard options convention**:
+  - **DEBIT, orientation +1:** `put_debit_spread`, `call_debit_spread`, `long_put`,
+    `long_call`.
+  - **UNDETERMINED, held, no evaluation:** `stock` (**can be short**),
+    `long_single`, `vertical`, `put_spread`, `three_leg`, `iron_condor`, and **every
+    composite containing `+`**.
+  One named constant, exact match on the **whole** value, never a substring, never a
+  default, no splitting on `+`. Holding `stock` is deliberate: a wrong-signed stock
+  verdict reports a LOSING position as PROFITABLE, and silence is recoverable where
+  an inverted verdict is not.
 - **B3 (intraday scalp).** "Structural Pythia VA trigger required, mechanical stop
   at entry, target = next Pythia level. Two consecutive losers = circuit breaker,
   done for day. $300 daily max loss." Plus, bull side: "max 2 concurrent, max
@@ -448,9 +502,26 @@ by its own sleeve ceiling and sits outside the one-plan boundary. [R-IV.729(a)]
 
 **Leverage adjustment — RULED 2026-10-08 [R-IV.778(d)].** "Leverage-adjusted" means:
 - **shares at 1x;**
-- **leveraged and inverse ETFs at their stated multiple** (SOXS 3x, TSLQ 2x);
+- **leveraged and inverse ETFs at their stated multiple** (SOXS 3x, TSLQ **2x**,
+  SRTY **3x** — all inverse);
 - **options at delta-adjusted notional** — `|delta| x 100 x contracts x spot`, per
   row, signed by direction.
+
+**THE LEVERAGE FACTOR IS A RECORDED FIELD, NOT A LOOKUP.** Any leveraged or inverse
+row records its daily factor **at entry**, on the row. The factor is a property of
+the instrument and **has changed at least once in TSLQ's life**, so it is recorded
+rather than recalled. TSLQ −2× and SRTY −3× were confirmed by the principal
+2026-10-14; a row without a recorded factor is not leverage-adjusted from memory,
+it is reported as pending.
+
+**AND A DOLLAR DELTA PUBLISHED TO AN UNDERLYING STATES ITS REFERENCE ASSET AND ITS
+FACTOR** [TA-164 condition 7]. A long position in an inverse ETF has delta **+1 to
+its own price**; its delta to the underlying is the factor times that, and the
+factor is **not derivable from shares and price**. "Short $X of TSLA" is a claim
+that cannot be computed from the position row alone. Where the factor is not
+recorded, the delta is published **only against the instrument's own price**.
+The instance: on 2026-10-13 TA published TSLQ as "−$1,378.80, short TSLA," silently
+assuming −1×. At the confirmed −2× the figure is **−$2,908.80**.
 
 Delta is the measure because a net-DIRECTION cap answers exactly one question: **if
 the market moves 1%, which way does the household move and how far.** Only delta
@@ -669,17 +740,26 @@ tranches land. Two holdings are handled explicitly:
 - **X10 read as silent on B3 and TAIL.** It is silent on them in its own text, which
   is why F5 states the ceiling across all four tags rather than leaving the two
   smallest unconditioned. [R-IV.822(c)4]
+- **The 20% tactical cap stated without its measurement basis.** Written for years
+  as "20% tactical" with no numerator basis. Harmless while every tactical row was
+  unleveraged; on 2026-10-14 the same two rows read 18.78% and 44.57% depending on
+  the reading. The basis is market value, ruled by the principal 2026-10-14.
+  [R-IV.1031(a)]
+- **Applying the net-direction cap's leverage adjustment to the 20% tactical cap,
+  or the tactical cap's market-value basis to the net-direction cap.** They measure
+  different things deliberately. [R-IV.1031(a); R-IV.778(d)]
+- **A leverage factor recalled rather than read from the row.** TSLQ's factor has
+  changed at least once. TA published TSLQ as "short $1,378.80 of TSLA" on
+  2026-10-13 assuming −1×; the confirmed factor is −2× and the figure is −$2,908.80.
+  [TA-164 condition 7]
+- **Determining a row's debit/credit orientation by substring-matching
+  `structure`.** `vertical`, `three_leg`, `iron_condor`, `put_spread`, `stock` and
+  `long_single` state no orientation; an iron condor is normally a credit. Exact
+  match against DEBIT_WHITELIST, everything else UNDETERMINED. [TA-168 §1]
 - **Reading C5 or F5 as a substitute for the principal's intent at entry.** They
   bound the eligible set; the intent chooses inside it. Both run, in that order.
 - Previously retired and still retired: "Fidelity Roth IRA — inverse ETFs only";
   ROBINHOOD's "5% max risk per trade"; "max 3 contracts".
-
----
-
-Each agent's `SKILL.md` may add a short agent-specific note about how it uses each account (e.g., URSA: "Robinhood — defined-risk only, no naked shorts"; PYTHIA: "Robinhood — PYTHIA's MP levels inform strike anchoring and timing; DAEDALUS owns the structure choice"). Those agent-specific addenda stay in each agent's file.
-
----
-
 ## § Knowledge Architecture
 
 Every committee agent's knowledge is layered:
@@ -784,6 +864,15 @@ These additional rules apply only to agents that recommend specific trade entrie
   market and the break-even account value that would satisfy the cap, and says the
   denominator is pending from the broker app.** It does not substitute a hub
   balance. [TA-112 §3]
+  **BASIS AND LEVEL — RULED by the principal 2026-10-14 [R-IV.1031(a)].** The
+  numerator is **market value** of tactical positions; **leveraged and inverse
+  products count at market value, NOT underlying-equivalent.** The cap is
+  **REMINDER-level: surface the percentage when crossed, never block, never veto.**
+  It is recomputed on **every idea pass** and on **every position write in either
+  Fidelity account**, with a NULL `classification` counting as TACTICAL
+  provisionally [R-IV.1034(b)]. **Do not apply the household net-direction cap's
+  leverage adjustment here** — the two caps measure differently on purpose
+  (§ The 20% tactical cap).
 
 - **Household net-direction — report BOTH tests, separately.** The 2× leverage test
   and the net-short floor are independent, can disagree during a partially-deployed
