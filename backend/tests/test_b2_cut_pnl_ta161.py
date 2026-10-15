@@ -489,10 +489,48 @@ def test_the_explicit_column_still_overrides_the_whitelist():
 
 
 def test_a_held_row_is_NOT_EVALUABLE_and_names_the_rule():
+    """A STOCK row, held — and R-IV.1043(f) changed WHICH rule holds it.
+
+    This asserted `DEBIT_WHITELIST` in the reason, because a share row used to be held simply
+    by not appearing on that list. R-IV.1043(f) gives stock its own rule: *a stock row is
+    evaluated only with `orientation_at_entry` recorded*, checked before the whitelist is
+    consulted at all. The verdict is unchanged, so the behaviour this test guards is intact;
+    the reason now names the rule that actually governs, which is what the test's own name
+    asks for. The whitelist wording is still covered, on an OPTION row, in the test below.
+    """
     cut = b2.alert_first_deploy_session() + timedelta(days=7)
     row = _row(structure="stock", entry_price="18.97", open_quantity=80, mark="17.19",
                mark_as_of=_post_close(cut))
     row["entry_date"] = _entry_for_cut(cut)
     out = b2.decide(row, now=_post_close(cut))
     assert out["verdict"] == b2.NOT_EVALUABLE, out
-    assert "DEBIT_WHITELIST" in out["reason"], out["reason"]
+    assert "orientation_at_entry" in out["reason"], out["reason"]
+    assert "R-IV.1043(f)" in out["reason"], out["reason"]
+
+
+def test_a_stock_row_WITH_the_orientation_recorded_is_evaluated():
+    """THE PAIR for the test above. Holding every share row unconditionally would make
+    R-IV.1043(f)'s column pointless for the one asset class it named."""
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
+    row = _row(structure="stock", entry_price="18.97", open_quantity=80, mark="17.19",
+               mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    row["orientation_at_entry"] = 1
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] != b2.NOT_EVALUABLE, out
+    assert out["verdict"] in b2.VERDICTS, out
+    # A long stock row marked 18.97 -> 17.19 lost money, so the verdict is a real one rather
+    # than merely "not held".
+    assert out["verdict"] == b2.NOT_PROFITABLE, out
+
+
+def test_an_OPTION_row_off_the_whitelist_is_still_held_BY_the_whitelist():
+    """Keeps the DEBIT_WHITELIST wording covered where it still governs: an option structure
+    that is not on the list, and is not shares, is held by TA-168's rule as before."""
+    cut = b2.alert_first_deploy_session() + timedelta(days=7)
+    row = _row(structure="iron_condor", entry_price="1.00", open_quantity=1, mark="0.50",
+               mark_as_of=_post_close(cut))
+    row["entry_date"] = _entry_for_cut(cut)
+    out = b2.decide(row, now=_post_close(cut))
+    assert out["verdict"] == b2.NOT_EVALUABLE, out
+    assert "DEBIT_WHITELIST" in out["reason"] or "credit-opened" in out["reason"], out["reason"]

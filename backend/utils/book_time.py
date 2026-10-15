@@ -41,3 +41,30 @@ def book_instant(value: Any, field: str = "date") -> datetime:
 
 def optional_instant(value: Any, field: str = "date") -> Optional[datetime]:
     return None if value in (None, "") else book_instant(value, field)
+
+
+def is_day_start(when: datetime) -> bool:
+    """True when `when` is exactly 00:00 in Denver — i.e. a DATE was stored, not an instant.
+
+    R-IV.1052(e)(c)5 needs to tell "the principal gave me a date" from "the principal gave me a
+    time", and after `book_instant` both are a UTC datetime. The discriminator is what the
+    instant looks like IN DENVER, because that is the zone the convention is written in: a bare
+    date becomes 06:00Z in summer and 07:00Z in winter, so comparing against either in UTC
+    would be right for half the year.
+
+    THE ONE CASE IT CANNOT SEE: a genuine fill at exactly 00:00:00.000000 Denver reads as a
+    bare date. No exchange this book trades is open then, so the ambiguity is unreachable in
+    practice — but it is an ambiguity, and it is written down rather than left to be discovered.
+    """
+    local = when.astimezone(DENVER)
+    return (local.hour, local.minute, local.second, local.microsecond) == (0, 0, 0, 0)
+
+
+def same_book_day(a: datetime, b: datetime) -> bool:
+    """Whether two instants fall on the same DENVER day — the principal's day.
+
+    Not the UTC day: a 16:15 ET fill is already the next UTC day for part of the year, so a UTC
+    comparison would call two instants from one afternoon different days (convention #39, in the
+    zone this module owns).
+    """
+    return a.astimezone(DENVER).date() == b.astimezone(DENVER).date()

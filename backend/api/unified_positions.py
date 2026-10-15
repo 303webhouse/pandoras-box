@@ -62,7 +62,8 @@ from api.mark_guard import (  # R-IV.394 (T1), now reaching the mark job (R-IV.4
     MARK_REJECTED, evaluate_mark, mark_is_writable,
 )
 from utils.audit_actor import MARK_TO_MARKET, name_actor  # R-IV.462(b)
-from utils.book_time import book_instant, optional_instant  # R-IV.464(a): one date, one instant
+from utils.book_time import (book_instant, is_day_start,  # R-IV.464(a): one date, one instant
+                             optional_instant, same_book_day)
 
 # R-IV.454(d): each terminal status, and the path that records how a position reached it.
 TERMINAL_VIA_PATH = {
@@ -136,6 +137,34 @@ def _match_account_balance(account_filter: str, balance_name: str) -> bool:
     return accounts_match(account_filter, balance_name)
 
 
+def _best_fill_instant(resolved, *candidates):
+    """R-IV.1052(e)(c)5 — upgrade a Denver-midnight stamp to a REAL instant from the same day.
+
+    `book_instant` turns the principal's bare date into 00:00 Denver, which is right as a
+    reading of a DATE and wrong as a fill time whenever the book also holds a timestamp for
+    that same day. AAPL and SRTY on 2026-10-14 were both stamped at midnight with a real
+    instant for that day available, which puts each lot hours before its fill and orders it
+    wrongly against its siblings -- lots are read `ORDER BY fill_time, id`.
+
+    UPGRADED ONLY WITHIN THE SAME DENVER DAY, and that bound is the whole safety of it. A
+    BACKDATED entry -- Monday's fill logged on Wednesday -- must keep Monday 00:00, because
+    Wednesday's clock is not evidence about Monday. The day check is what separates "I know
+    the time of day" from "I know some later time".
+
+    Candidates are tried in order and the first usable one wins, so callers pass their most
+    trustworthy instant first.
+    """
+    if resolved is None or not is_day_start(resolved):
+        return resolved
+    for richer in candidates:
+        if not isinstance(richer, datetime):
+            continue
+        inst = richer if richer.tzinfo else richer.replace(tzinfo=timezone.utc)
+        if not is_day_start(inst) and same_book_day(inst, resolved):
+            return inst.astimezone(timezone.utc)
+    return resolved
+
+
 def _entry_fill_time(req, row):
     """When the position was actually filled, for its opening lot.
 
@@ -143,14 +172,26 @@ def _entry_fill_time(req, row):
     clock, not on the write's. Falling back to the row's creation stamp is a last
     resort and is the one case where the two can differ by a day: R-IV.474(b) already
     had to correct a RAMZ row whose entry_date was the write's own clock.
+
+    R-IV.1052(e)(c)5: when that date resolves to Denver midnight and the row carries a real
+    instant for the SAME day, the instant is stored instead -- see _best_fill_instant.
     """
+    resolved = None
     for candidate in (getattr(req, "entry_date", None), (row or {}).get("entry_date")):
         if candidate:
             try:
-                return _when(candidate, "entry_date")
+                resolved = _when(candidate, "entry_date")
+                break
             except Exception:  # noqa: BLE001
                 continue
-    return (row or {}).get("created_at") or datetime.now(timezone.utc)
+    if resolved is None:
+        return (row or {}).get("created_at") or datetime.now(timezone.utc)
+
+    # The row's own entry_date first -- it is the book's record of the fill -- then the
+    # instant the row was created, which is only ever a same-day upgrade.
+    return _best_fill_instant(resolved,
+                              (row or {}).get("entry_date"),
+                              (row or {}).get("created_at"))
 
 
 async def _adjust_account_cash_with_conn(conn, account: str, delta: float,
@@ -782,8 +823,12 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             if _has_lots:
                 from models.position_lots import PRINCIPAL_REPORTED, principal_entry_source
 
-                fill_time = (_when(req.entry_date, "entry_date") if req.entry_date
-                             else datetime.now(timezone.utc))
+                # R-IV.1052(e)(c)5: an ADD is a fill happening NOW, so when the principal
+                # gives today's date, now() is the instant and midnight is not. Same-day
+                # bound as everywhere else: an add dated earlier keeps that day's midnight.
+                fill_time = (_best_fill_instant(_when(req.entry_date, "entry_date"),
+                                                datetime.now(timezone.utc))
+                             if req.entry_date else datetime.now(timezone.utc))
                 await conn.execute(
                     """INSERT INTO position_lots
                            (position_id, fill_time, qty, price, fees, source, provenance)

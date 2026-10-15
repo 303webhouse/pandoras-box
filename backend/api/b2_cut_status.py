@@ -36,6 +36,10 @@ RECORD_SQL = """
            p.bucket,
            p.status,
            p.structure,
+           -- R-IV.1043(f): the route adjudicates the same rows as the job, so it reads the
+           -- same orientation source. Omitting it here would let the two surfaces disagree
+           -- about one row's orientation, which is worse than neither having it.
+           p.orientation_at_entry,
            p.entry_date,
            p.entry_price,
            p.quantity,

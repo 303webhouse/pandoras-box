@@ -11,6 +11,7 @@ from services.position_economics import capital_at_risk_from_derived
 from services.read_only.positions import list_positions
 
 from models import position_taxonomy as _tx  # TA-123/R-IV.797(c): one author for the three axes
+from .. import field_origin as _origin        # convention #42 (TA-177)
 from models.accounts import CANONICAL_ACCOUNTS as _CANONICAL_TUPLE
 from models.accounts import account_choices as _account_choices
 from models.accounts import describe_accounts as _describe_accounts
@@ -380,4 +381,9 @@ async def hub_get_positions(
     )
     if ticker:
         summary = f"{ticker.upper()}: " + summary
-    return make_response(status="ok", data=data, summary=summary, staleness_seconds=60)
+    # Convention #42 (TA-177): every served field declares STORED or DERIVED, and no cap, gate
+    # or filter may be computed from a DERIVED one. Declared in hub_mcp/field_origin.py rather
+    # than inline, so the declaration and the payload can be tested against each other -- a map
+    # written beside the dict would drift from it the first time a field was added.
+    return make_response(status="ok", data=data, summary=summary, staleness_seconds=60,
+                         field_origin=_origin.origin_map("hub_get_positions"))

@@ -272,12 +272,52 @@ def _structure_parts(row: Dict[str, Any]) -> Tuple[str, ...]:
 def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     """(+1 for a DEBIT-opened position, -1 for CREDIT, None if not stated) + the reason.
 
-    FROM AN EXPLICIT FIELD, NEVER FROM THE SIGN OF A PRICE. R-IV.983(b) allows only
-    DEBIT-opened rows to be evaluated until a `position_orientation` column exists, because
-    inferring "we paid for this" from a positive entry price is exactly the sort of default
-    that turns "I was not told" into a confident claim. `position_orientation` is honoured
-    first so this function stops being the author the moment the column arrives.
+    FROM AN EXPLICIT FIELD, NEVER FROM THE SIGN OF A PRICE. R-IV.983(b) allowed only
+    DEBIT-opened rows to be evaluated until a column existed, because inferring "we paid for
+    this" from a positive entry price is exactly the sort of default that turns "I was not
+    told" into a confident claim.
+
+    THE COLUMN NOW EXISTS. Sources in order, and the order is the ruling's:
+
+      1. `orientation_at_entry` (R-IV.1043(f)) -- the recorded value, +1 or -1;
+      2. `position_orientation` -- the name this module ANTICIPATED while it had no column.
+         **No migration creates it**, so it never arrives from the database; the branch is
+         kept only because callers that build a row dict by hand may still set it, and
+         removing it would change their behaviour silently. `orientation_at_entry` is the
+         column that actually arrived. Do not add it to a SELECT: it would fail the query
+         with UndefinedColumn;
+      3. `DEBIT_WHITELIST` -- the FALLBACK, which R-IV.1043(f) explicitly preserved, for
+         option structures whose shape states the orientation by construction.
+
+    **A STOCK ROW IS EVALUATED ONLY WITH `orientation_at_entry` RECORDED.** Shares carry no
+    debit/credit shape -- long and short stock are the same structure string -- so for stock
+    there is nothing for the fallback to read and it is not consulted.
     """
+    # R-IV.1043(f): `orientation_at_entry` IS THE COLUMN, and it is read FIRST. It arrived in
+    # the R-IV.1043(e) migration as a nullable SMALLINT holding +1 or -1, which is why it is
+    # read as a number rather than by name: a row either recorded the orientation at entry or
+    # it did not, and nothing here reconstructs it.
+    recorded = row.get("orientation_at_entry")
+    if recorded is not None and str(recorded).strip() != "":
+        try:
+            dec = Decimal(str(recorded).strip())
+        except Exception:                                           # noqa: BLE001
+            return None, "orientation_at_entry %r is unreadable" % (recorded,)
+        # NOT int(Decimal(...)). That TRUNCATES, so "1.5" came back as +1 -- a value the
+        # column does not admit, read as a confident orientation. The column is a SMALLINT so
+        # Postgres will never hand us a fraction, but a hand-built row or a JSON round trip
+        # can, and truncating is how an unreadable value becomes an answer.
+        if dec != dec.to_integral_value():
+            return None, ("orientation_at_entry %r is not a whole number; it admits only "
+                          "+1 or -1" % (recorded,))
+        sign = int(dec)
+        if sign == 1:
+            return 1, "orientation_at_entry = +1 (recorded at entry)"
+        if sign == -1:
+            return -1, "orientation_at_entry = -1 (recorded at entry)"
+        return None, ("orientation_at_entry %r is neither +1 nor -1; the column admits no "
+                      "other value" % (recorded,))
+
     explicit = (row.get("position_orientation") or "").strip().upper()
     if explicit in ("DEBIT", "LONG"):
         return 1, "position_orientation = %s" % explicit
@@ -291,7 +331,21 @@ def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     # happens by construction rather than by a separate rule someone can forget.
     whole = (row.get("structure") or "").strip().lower()
     if not whole:
-        return None, "no structure recorded, and no position_orientation column to fall back on"
+        return None, ("no structure recorded, and neither orientation_at_entry nor "
+                      "position_orientation is set")
+
+    # R-IV.1043(f), the second half: **A STOCK ROW IS EVALUATED ONLY WITH
+    # `orientation_at_entry` RECORDED.** Checked BEFORE the whitelist, not after, so the rule
+    # holds even if a share shape is ever added to DEBIT_WHITELIST by someone who did not read
+    # this ruling. Shares have no debit/credit shape to read an orientation out of -- long and
+    # short stock are the same structure string -- so for stock the column is not a preference
+    # over the fallback, it is the only admissible source.
+    if whole in _STOCK_STRUCTURES or all(p in _STOCK_STRUCTURES
+                                         for p in whole.split("+") if p):
+        return None, ("structure %r is SHARES, and a stock row is evaluated only with "
+                      "orientation_at_entry recorded (R-IV.1043(f)); it is not recorded, so "
+                      "orientation is UNDETERMINED and the row is held" % whole)
+
     if whole in DEBIT_WHITELIST:
         return 1, "structure %r is on DEBIT_WHITELIST (exact match, whole value)" % whole
     if "+" in whole:
