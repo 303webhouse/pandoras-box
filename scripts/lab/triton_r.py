@@ -3,7 +3,8 @@
 Claim of record: TRITON-R-v1-STAMPED-R-IV.1080.md (ba9e77df...), = REV 1 (44b98cab...) + R-IV.1080(b)-(g);
 amended by TRITON-R-v1-AMENDMENT-1-R-IV.1084.md (d8030b4f...): continuous EMA; small-sample kill floors;
 and TRITON-R-v1-AMENDMENT-2-R-IV.1090.md (21a2c0e9...): controls from t_r + 1 min; WIN 1 bootstrap 10,000;
-WIN 4 >= 5 claim events per side (named if not met); SUSPECT if > 10% of resamples skipped.
+WIN 4 >= 5 claim events per side (named if not met); SUSPECT if > 10% of resamples skipped;
+and TRITON-R-v1-AMENDMENT-3-R-IV.1093.md (c491c196...): a SUSPECT interval carries no verdict weight.
 Source of record: triton-design-of-record-2026-10-12.md (12ecf72c...).
 
 DATE CEILINGS FIRST (R-IV.1072(d), R-IV.1080): this instrument reads ONLY the backtest block
@@ -69,6 +70,7 @@ MIN_EVENTS, MIN_SESSIONS = 30, 10
 FREQ_FLOOR_TS = 20                                 # amendment 1: the frequency kill needs >= 20 evaluable ticker-sessions
 AMENDMENT_1 = "TRITON-R-v1-AMENDMENT-1-R-IV.1084.md d8030b4f0602af9c54d2f3b0a393479a954b672ff3f5315f2cb478983c10aa58"
 AMENDMENT_2 = "TRITON-R-v1-AMENDMENT-2-R-IV.1090.md 21a2c0e93c4db6eadfdbc1695c7d33ae61c5ff37ce4d53fb1877c9f4d784848a"
+AMENDMENT_3 = "TRITON-R-v1-AMENDMENT-3-R-IV.1093.md c491c196ed3bec75b21f91e31956a98b2c0bdad55f52decc74e57909410e483c"
 WIN4_MIN_PER_SIDE = 5                              # amendment 2 sec. 4
 SUSPECT_SKIP_SHARE = 0.10                          # amendment 2 sec. 5
 TUE_THU = {1, 2, 3}
@@ -531,6 +533,17 @@ def boot_ci(groups, stat, B=BOOT_B, seed=BOOT_SEED):
     return point, float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5)), len(vals)
 
 
+def verdict_of(p):
+    """BACKTEST verdict from the primary summary (R-IV.1080(d); amendments 1 and 3)."""
+    if p["kills_fired"]:
+        return "KILL"
+    if p.get("kills_suppressed_suspect"):
+        return "NO-KILL (SUSPECT)"
+    if not (p["stat_kill_floor_met"] and p["freq_kill_floor_met"]):
+        return "NO-KILL (INSUFFICIENT n)"
+    return "NO-KILL"
+
+
 def suspect(name, point, n_used, B=BOOT_B):
     """Amendment 2 sec. 5: SUSPECT if skipped resamples exceed 10% of B (only when the point is defined)."""
     skipped = (B - n_used) if point is not None else None
@@ -631,15 +644,21 @@ def summarize(events, n_eval_ts):
         "note": "raw readings; below a floor they carry no verdict weight (amendment 1)"}
     out["stat_kill_floor_met"], out["freq_kill_floor_met"] = stat_floor, freq_floor
     out["kill_under_1_per_week"] = freq_floor and out["raw_kill_readings"]["under_1_per_week"]
-    out["kill_L_not_respected"] = stat_floor and out["raw_kill_readings"]["L_not_respected"]
-    out["kill_placebo_keeps_pace"] = stat_floor and out["raw_kill_readings"]["placebo_keeps_pace"]
+    # amendment 3 (c491c196...): a SUSPECT interval carries no verdict weight in either direction
+    s1, s2 = out["win1_suspect"], out["win2_suspect"]
+    out["kill_L_not_respected"] = stat_floor and out["raw_kill_readings"]["L_not_respected"] and not s1
+    out["kill_placebo_keeps_pace"] = stat_floor and out["raw_kill_readings"]["placebo_keeps_pace"] and not s2
     out["kill_one_week_carries_it"] = stat_floor and bool(raw_week)
+    out["kills_suppressed_suspect"] = [k for k, raw_, sus in (
+        ("kill_L_not_respected", out["raw_kill_readings"]["L_not_respected"], s1),
+        ("kill_placebo_keeps_pace", out["raw_kill_readings"]["placebo_keeps_pace"], s2)) if stat_floor and raw_ and sus]
     out["kill_real_approx_shuffled"] = "inherited: satisfied by D4 as frozen (census stop (a) PASS for FRUN); not re-tested"
     out["kills_fired"] = [k for k in ("kill_under_1_per_week", "kill_L_not_respected", "kill_placebo_keeps_pace",
                                       "kill_one_week_carries_it") if out[k] is True]
-    # WIN (reported; the backtest verdict is KILL / NO-KILL only)
-    out["win1"] = bool(lo1 is not None and lo1 > 0)
-    out["win2"] = bool(lo is not None and lo > 0)
+    # WIN (reported; the backtest verdict is KILL / NO-KILL only). Amendment 3: a SUSPECT interval -> NOT MET.
+    out["win1"] = bool(lo1 is not None and lo1 > 0) and not s1
+    out["win2"] = bool(lo is not None and lo > 0) and not s2
+    out["win_not_met_suspect"] = [w for w, sus in (("win1", s1), ("win2", s2)) if sus]
     out["win3"] = bool(out["win3_mean_without_best_week"] is not None and out["win3_mean_without_best_week"] > 0)
     out["win4"] = not out["win4_not_met_sides"]
     out["min_n_met"] = len(events) >= MIN_EVENTS and out["sessions"] >= MIN_SESSIONS
@@ -779,8 +798,8 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
     result["amendment_2"] = AMENDMENT_2
     from datetime import datetime, timezone
     result["computed_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")   # for the outcome log
-    floors_met = p["stat_kill_floor_met"] and p["freq_kill_floor_met"]
-    result["verdict"] = "KILL" if p["kills_fired"] else ("NO-KILL" if floors_met else "NO-KILL (INSUFFICIENT n)")
+    result["amendment_3"] = AMENDMENT_3
+    result["verdict"] = verdict_of(p)
     result["verdict_note"] = ("BACKTEST: KILL or NO-KILL only (R-IV.1080(d)). A KILL ends TRITON-R v1. "
                               "NO-KILL establishes nothing; the confirmation set stays sealed.")
     F = pd.DataFrame(funnel_rows)
@@ -964,6 +983,7 @@ def _e2e():
         checks["E2E: verdict is NO-KILL (INSUFFICIENT n) on a plumbing-sized run, read on TG-ON"] = \
             res["verdict"] == "NO-KILL (INSUFFICIENT n)" and res["amendment_1"].startswith("TRITON-R-v1-AMENDMENT-1") and \
             res["amendment_2"].startswith("TRITON-R-v1-AMENDMENT-2") and res["computed_at_utc"].startswith("20") and \
+            res["amendment_3"].startswith("TRITON-R-v1-AMENDMENT-3") and \
             res["variants"]["TG-ON"]["weight"] == "PRIMARY" and res["variants"]["TG-OFF"]["weight"].startswith("SECONDARY")
         F = pd.read_csv(os.path.join(out, "funnel.csv"))
         checks["E2E: outputs written; funnel is counts only"] = os.path.exists(os.path.join(out, "backtest.json")) and \
@@ -1265,6 +1285,23 @@ def selftest():
     checks["A2 sec. 5: WIN 1 interval with > 10% skipped resamples is labelled SUSPECT"] = \
         s_sus["win1_suspect"] and s_sus["win1_boot_skipped"] > 0.10 * BOOT_B
     checks["A2 sec. 5: a well-defined interval is not SUSPECT"] = sm["win1_suspect"] is False and sm["win2_suspect"] is False
+    # amendment 3: SUSPECT intervals carry no verdict weight
+    a3 = [dict(e, z=0.6, zp=[0.1], touched_L=(e["session"] == days10[0]), held_L=False) for e in evs]
+    s3 = summarize(a3, 40)
+    checks["A3: floor met, raw 'L not respected', interval SUSPECT -> kill does NOT fire, raw kept, named"] = \
+        s3["stat_kill_floor_met"] and s3["win1_suspect"] and s3["raw_kill_readings"]["L_not_respected"] \
+        and not s3["kill_L_not_respected"] and s3["kills_suppressed_suspect"] == ["kill_L_not_respected"]
+    checks["A3: the block reads NO-KILL (SUSPECT)"] = verdict_of(s3) == "NO-KILL (SUSPECT)"
+    checks["A3: a WIN whose interval is SUSPECT is NOT MET, named"] = s3["win1"] is False and \
+        s3["win_not_met_suspect"] == ["win1"]
+    checks["A3: a non-SUSPECT floor-met kill still fires -> KILL"] = not sm["win1_suspect"] and \
+        sm["kill_L_not_respected"] and verdict_of(sm) == "KILL"
+    base = {"kills_fired": [], "kills_suppressed_suspect": [], "stat_kill_floor_met": True, "freq_kill_floor_met": True}
+    checks["A3: verdict branches KILL / NO-KILL (SUSPECT) / NO-KILL (INSUFFICIENT n) / NO-KILL"] = \
+        verdict_of(dict(base, kills_fired=["x"])) == "KILL" and \
+        verdict_of(dict(base, kills_suppressed_suspect=["x"])) == "NO-KILL (SUSPECT)" and \
+        verdict_of(dict(base, stat_kill_floor_met=False)) == "NO-KILL (INSUFFICIENT n)" and \
+        verdict_of(base) == "NO-KILL"
     checks["A2 sec. 3: WIN 1 uses the same 10,000 fixed-seed resamples as WIN 2"] = \
         sm["win1_boot_used"] + sm["win1_boot_skipped"] == BOOT_B == sm["win2_boot_used"] + sm["win2_boot_skipped"]
     p, lo, hi, _ = boot_ci({1: [1.0, 2.0], 2: [3.0]}, mean_stat, B=500)
