@@ -268,7 +268,11 @@ async def _fetch_and_compose(
                         tkr, src, px)
 
     if underlying_price is None:
-        spot_source = "unavailable: chain, /stock-state and snapshot all gave no price"
+        # R-IV.1037(c)1: the quote service is now spot_now's third source, making it
+        # the chain's FOURTH. The string names all four, because a reader who is told
+        # three sources failed will not know a fourth was tried.
+        spot_source = ("unavailable: chain, /stock-state, snapshot and the quote "
+                       "service all gave no price")
         logger.warning("options_chain: NO spot for %s — every BS greek will be null", tkr)
 
     # uw_timestamp source flag (ATLAS M2), now naming the VENDOR's stamp where one exists

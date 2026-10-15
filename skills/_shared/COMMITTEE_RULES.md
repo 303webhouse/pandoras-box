@@ -141,6 +141,8 @@ reading this section resolves its version from THIS line, not from whatever
 document carried the section to it. Supersedes 2026-10-09/v5.4, 2026-10-09/v5.3,
 2026-10-08/v5.2, /v5.1, /v5, /v4, /v3 and 2026-10-07/v2.
 
+Applied from: claude/account-context-2026-10-14-v5_5.md · sha256 ee4a5680be03945262a3a284f4ad9d31f63f569d1bf738361caa9a3967f4788f · 2026-10-15
+
 NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
 came from a source named below within this conversation.
 
@@ -760,6 +762,13 @@ tranches land. Two holdings are handled explicitly:
   bound the eligible set; the intent chooses inside it. Both run, in that order.
 - Previously retired and still retired: "Fidelity Roth IRA — inverse ETFs only";
   ROBINHOOD's "5% max risk per trade"; "max 3 contracts".
+
+---
+
+Each agent's `SKILL.md` may add a short agent-specific note about how it uses each account (e.g., URSA: "Robinhood — defined-risk only, no naked shorts"; PYTHIA: "Robinhood — PYTHIA's MP levels inform strike anchoring and timing; DAEDALUS owns the structure choice"). Those agent-specific addenda stay in each agent's file.
+
+---
+
 ## § Knowledge Architecture
 
 Every committee agent's knowledge is layered:
