@@ -19,7 +19,11 @@ Protocol (all stamped before this file existed or was changed):
   lab\\triton\\TRITON-FP-v1-AMENDMENT-6-FINAL-R-IV.1012.md 0a4f116d...  (b1 / b2 / SUSPECT; D1 drops
                                                                    non-regular settlement)
   R-IV.1019(b): BUILD's reached_floor is the completeness source of record; this script cross-checks
-  it and REFUSES on any per-ticker-session disagreement.
+  it per ticker-session.
+  lab\\triton\\TRITON-FP-v1-AMENDMENT-6b-R-IV.1045.md d6b4a0b5...  (census set = BUILD AND LAB, both
+                                                                   from Q = E; later-Q and cursor causes
+                                                                   excluded; export lag and UNLABELLED
+                                                                   REFUSE)
   Field reference: lab\\triton\\F-README.md e72ea5b9... (BUILD)
 
 Modes:
@@ -325,7 +329,9 @@ def _route(w, e):
 
 def build_complete(wp):
     """walk_pages -> complete.csv rows for CORE8 x CALIBRATION_DATES (route b1 / b2 / SUSPECT / none),
-    plus the anchor-trigger count. complete = route in {b1, b2}; SUSPECT is NOT complete."""
+    plus the anchor-trigger count. Amendment 6b sec. 1: complete and route come from the walk with
+    Q = E ONLY (BUILD's same-date rule governs); SUSPECT is NOT complete. Amendment 5's any-Q >= E
+    credit is kept as a diagnostic (any_q_route, best_query_date) and credits nothing."""
     walks = {}
     for (tk, q), g in wp.groupby(["ticker", "query_date"]):
         walks.setdefault(tk, []).append((pd.Timestamp(q).date(), walk_reach(g)))
@@ -336,18 +342,21 @@ def build_complete(wp):
             cands = [(order[rt], q, w) for q, w in walks.get(tk, []) if q >= e
                      for rt in [_route(w, e)] if rt]
             best = min(cands, key=lambda x: (x[0], x[1])) if cands else None
-            route = {v: k for k, v in order.items()}[best[0]] if best else "none"
+            any_q = {v: k for k, v in order.items()}[best[0]] if best else "none"
             same = [w for q, w in walks.get(tk, []) if q == e]      # the walk BUILD judges E by (Q = E)
             sw = same[0] if same else None
+            route = (_route(sw, e) or "none") if sw else "none"
             rows.append({"ticker": tk, "session": e.isoformat(), "complete": route in ("b1", "b2"),
-                         "same_date_route": (_route(sw, e) or "none") if sw else "no_walk",
+                         "route": route,
+                         "same_date_route": route if sw else "no_walk",
                          "same_date_break": sw["brk"] if sw else "",
                          "same_date_cursor_gap_s": sw["cursor_gap_s"] if sw and sw["cursor_gap_s"] is not None else "",
-                         "route": route, "n_walks": int(sum(1 for q, _ in walks.get(tk, []) if q >= e)),
-                         "best_query_date": best[1].isoformat() if best else "",
-                         "best_reach_et": best[2]["reach"].tz_convert("America/New_York").strftime(
-                             "%Y-%m-%d %H:%M:%S") if best else "",
-                         "cap_used": best[2]["cap"] if best else ""})
+                         "best_reach_et": sw["reach"].tz_convert("America/New_York").strftime(
+                             "%Y-%m-%d %H:%M:%S") if sw and sw["reach"] is not None else "",
+                         "cap_used": sw["cap"] if sw else "",
+                         "n_walks": int(sum(1 for q, _ in walks.get(tk, []) if q >= e)),
+                         "any_q_route": any_q,                        # diagnostic only (amendment 5)
+                         "best_query_date": best[1].isoformat() if best else ""})
     C = pd.DataFrame(rows)
     per_date = C.groupby("session").complete.all()
     return C, {"calibration_dates": len(CALIBRATION_DATES),
@@ -409,13 +418,48 @@ def crosscheck_table(lab_complete, build_set):
                          "lab_route": route, "lab_best_query_date": bq, "lab_same_date_route": sroute,
                          "lab_same_date_break": sbrk,
                          "lab_same_date_cursor_gap_s": _cell(getattr(r, "same_date_cursor_gap_s", "")) if r is not None else "",
-                         "cause": cause})
+                         "cause": cause, "disposition": disposition(cause)})
     return pd.DataFrame(rows)
+
+
+#: Amendment 6b sec. 2 (TRITON-FP-v1-AMENDMENT-6b-R-IV.1045.md d6b4a0b5...): what each cause does.
+EXCLUDED_CAUSES = ("LAB credits via a later query date; BUILD does not",
+                   "BUILD credits; LAB refuses on cursor continuity (> 1 s)")
+EXPORT_LAG = "LAB complete from Q = E; BUILD not"            # R-IV.1039(b): REFUSE; the remedy is a re-export
+
+
+def disposition(cause):
+    """'' (agree) / 'excluded' / 'refuse'. Anything not named, including UNLABELLED, refuses."""
+    return "" if not cause else "excluded" if cause in EXCLUDED_CAUSES else "refuse"
+
+
+def census_set(lab_complete, build_set):
+    """Amendment 6b sec. 1: the ticker-sessions BOTH rules call complete (from Q = E). Returns the set,
+    the exclusions [{ticker, session, cause}], and the refusals [same]. A non-empty refusal list means
+    `run` must not read a print."""
+    T = crosscheck_table(lab_complete, build_set)
+    both = T[T.lab & T.build]
+    S = {(r.ticker, date.fromisoformat(r.session)) for r in both.itertuples()}
+    rec = lambda df: [{"ticker": r.ticker, "session": r.session, "cause": r.cause} for r in df.itertuples()]  # noqa: E731
+    return S, rec(T[T.disposition == "excluded"]), rec(T[T.disposition == "refuse"])
+
+
+def refusal_message(refusals):
+    lag = [f"{r['ticker']} {r['session']}" for r in refusals if r["cause"] == EXPORT_LAG]
+    other = [f"{r['ticker']} {r['session']}: {r['cause']}" for r in refusals if r["cause"] != EXPORT_LAG]
+    parts = []
+    if lag:
+        parts.append(f"EXPORT LAG on {len(lag)} ticker-session(s) -- LAB's same-date walk is complete but "
+                     f"BUILD's export lacks them; BUILD re-exports, then crosscheck again: {lag}")
+    if other:
+        parts.append(f"{len(other)} unlabelled disagreement(s): {other}")
+    return "amendment 6b: refusing. " + " | ".join(parts)
 
 
 def run_crosscheck(prints_glob, complete_csv, out_csv):
     """Before the overnight `run`: BUILD's set (the export's session_date) vs LAB's complete.csv.
-    Reads only the ticker and session_date columns. Exit 1 on any disagreement (`run` would refuse)."""
+    Reads only the ticker and session_date columns. Amendment 6b: exit 1 when any disagreement's
+    disposition is 'refuse' (`run` would refuse); excluded causes alone exit 0."""
     files = sorted(glob.glob(prints_glob))
     if not files:
         raise SystemExit(f"no files match {prints_glob}")
@@ -427,8 +471,10 @@ def run_crosscheck(prints_glob, complete_csv, out_csv):
     T.to_csv(out_csv, index=False)
     print(json.dumps({"ticker_sessions": int(len(T)), "agree": int(T.agree.sum()),
                       "disagree": int((~T.agree).sum()),
-                      "by_cause": T[~T.agree].cause.value_counts().to_dict()}, indent=1))
-    return 0 if bool(T.agree.all()) else 1
+                      "by_cause": T[~T.agree].cause.value_counts().to_dict(),
+                      "excluded": int((T.disposition == "excluded").sum()),
+                      "refuse": int((T.disposition == "refuse").sum())}, indent=1))
+    return 1 if bool((T.disposition == "refuse").any()) else 0
 
 
 def run_build_complete(walk_csv, out_csv):
@@ -719,10 +765,12 @@ def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_di
     raw = _read_parquet(prints_glob)
     build_set = build_complete_set(raw)
     lab_c = pd.read_csv(complete_csv)
-    dis = cross_check(lab_c, build_set)
-    if dis:
-        raise SystemExit(f"completeness DISAGREES with BUILD on {len(dis)} ticker-session(s); refusing: {dis[:10]}")
-    df, n_dup, dropped = prepare_prints(raw, build_set)         # BUILD's set is the source of record
+    S, excluded, refusals = census_set(lab_c, build_set)        # amendment 6b: the intersection
+    if refusals:
+        raise SystemExit(refusal_message(refusals))
+    df, n_dup, dropped = prepare_prints(raw, S)
+    sess = pd.DataFrame(sorted(S), columns=["ticker", "session"]) if S else pd.DataFrame(columns=["ticker", "session"])
+    census_all8 = int((sess.groupby("session").ticker.nunique() == len(CORE8)).sum()) if len(sess) else 0
     braw = load_bars(bars_glob)
     bars = bars_by_session(braw)
     adv_df = pd.read_csv(adv_csv, parse_dates=["session"])
@@ -740,6 +788,12 @@ def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_di
                              "sessions_with_bars": len(bars), "bar_sessions_by_source": bar_sources(braw),
                              "duplicate_tracking_ids_dropped": n_dup,
                              "incomplete_ticker_sessions_dropped": dropped,
+                             "amendment_6b": "TRITON-FP-v1-AMENDMENT-6b-R-IV.1045.md d6b4a0b5...",
+                             "census_set_ticker_sessions": len(S),
+                             "census_dates_complete_for_all_8": census_all8,
+                             "completeness_exclusions": excluded,
+                             "completeness_exclusions_by_cause": pd.Series(
+                                 [x["cause"] for x in excluded], dtype=object).value_counts().to_dict(),
                              "floor_counts": "post-D5 = kept by D4 AND D5-matched at tau "
                                              "(events_m4_d5: arm=real, kept=True, d5_matched); beside it: "
                                              "D5-matched over all real runs (kept True + False) and the "
@@ -978,15 +1032,49 @@ def selftest():
         xt.loc[("IWM", "2026-09-02"), "cause"].startswith("UNLABELLED: BUILD credits")
     checks["A6 crosscheck: agreement carries no cause"] = \
         bool(xt.loc[("SPY", "2026-09-02"), "agree"]) and xt.loc[("SPY", "2026-09-02"), "cause"] == ""
+    # amendment 6b: the census set and one test per row of sec. 2
+    d2 = "2026-09-02"
+    lab6 = pd.DataFrame([
+        {"ticker": "SPY", "session": d2, "complete": True, "same_date_route": "b1", "same_date_break": "", "best_query_date": d2},
+        {"ticker": "QQQ", "session": d2, "complete": True, "best_query_date": "2026-09-03"},     # old format, later Q
+        {"ticker": "IWM", "session": d2, "complete": False, "same_date_route": "none", "same_date_break": "cursor_gap"},
+        {"ticker": "AAPL", "session": d2, "complete": True, "same_date_route": "b1", "same_date_break": "", "best_query_date": d2}])
+    b6 = {("SPY", date(2026, 9, 2)), ("IWM", date(2026, 9, 2)), ("AAPL", date(2026, 9, 2))}
+    S6, ex6, rf6 = census_set(lab6, b6)
+    checks["6b sec. 1: census set = BOTH rules complete (SPY, AAPL); excluded never enter it"] = \
+        S6 == {("SPY", date(2026, 9, 2)), ("AAPL", date(2026, 9, 2))}
+    checks["6b sec. 2 row 1: later query date -> excluded and logged with its cause"] = \
+        {"ticker": "QQQ", "session": d2, "cause": EXCLUDED_CAUSES[0]} in ex6
+    checks["6b sec. 2 row 2: cursor continuity (> 1 s) -> excluded and logged"] = \
+        {"ticker": "IWM", "session": d2, "cause": EXCLUDED_CAUSES[1]} in ex6 and len(ex6) == 2 and rf6 == []
+    lab6u = pd.concat([lab6, pd.DataFrame([{"ticker": "NVDA", "session": d2, "complete": False,
+                                             "same_date_route": "none", "same_date_break": "page_gap"}])])
+    _, _, rfu = census_set(lab6u, b6 | {("NVDA", date(2026, 9, 2))})
+    checks["6b sec. 2 row 3: UNLABELLED (BUILD credits, LAB page gap) -> refuse"] = \
+        len(rfu) == 1 and rfu[0]["ticker"] == "NVDA" and rfu[0]["cause"].startswith("UNLABELLED")
+    _, _, rfl = census_set(lab6, b6 - {("AAPL", date(2026, 9, 2))})
+    msg = refusal_message(rfl)
+    checks["6b sec. 2 row 4: export lag -> refuse, and the message NAMES the ticker-session"] = \
+        len(rfl) == 1 and rfl[0]["cause"] == EXPORT_LAG and "EXPORT LAG" in msg and "AAPL 2026-09-02" in msg
+    checks["6b: unknown causes refuse by default"] = disposition("something new") == "refuse" and disposition("") == ""
     with tempfile.TemporaryDirectory() as tdx:
-        # export holds SPY 09-02 only: LAB's QQQ 09-02 (True) has no BUILD row -> exactly 1 disagreement
+        # export holds SPY 09-02 only: LAB's QQQ 09-02 (True, via a later Q) has no BUILD row -> 1
+        # disagreement, which 6b EXCLUDES -> exit 0
         pd.DataFrame({"ticker": ["SPY", "SPY"], "session_date": ["2026-09-02", "2026-09-02"],
                       "price": [1.0, 2.0]}).to_parquet(os.path.join(tdx, "a.parquet"), index=False)
         lab_q.to_csv(os.path.join(tdx, "c.csv"), index=False)
         rc_ = run_crosscheck(os.path.join(tdx, "*.parquet"), os.path.join(tdx, "c.csv"), os.path.join(tdx, "x.csv"))
         xo = pd.read_csv(os.path.join(tdx, "x.csv"))
-        checks["A6 crosscheck e2e: reads session_date from Parquet, exit 1, one disagreement, no price out"] = \
-            rc_ == 1 and int((~xo.agree).sum()) == 1 and int(xo.build.sum()) == 1 and "price" not in xo.columns
+        checks["6b crosscheck e2e: one later-Q disagreement is EXCLUDED, exit 0, no price out"] = \
+            rc_ == 0 and int((~xo.agree).sum()) == 1 and int(xo.build.sum()) == 1 and "price" not in xo.columns \
+            and xo[~xo.agree].disposition.tolist() == ["excluded"]
+        # export lag: LAB's same-date walk complete, BUILD's export lacks it -> refuse, exit 1
+        lab_lag = lab_q.assign(same_date_route=["b1", "b1", "none"], best_query_date=["2026-09-02", "2026-09-02", ""])
+        lab_lag.to_csv(os.path.join(tdx, "c.csv"), index=False)
+        rc_ = run_crosscheck(os.path.join(tdx, "*.parquet"), os.path.join(tdx, "c.csv"), os.path.join(tdx, "x.csv"))
+        xo = pd.read_csv(os.path.join(tdx, "x.csv"))
+        checks["6b crosscheck e2e: an export lag is labelled, disposition refuse, exit 1"] = \
+            rc_ == 1 and xo[~xo.agree].cause.tolist() == [EXPORT_LAG] and xo[~xo.agree].disposition.tolist() == ["refuse"]
         pd.DataFrame({"ticker": ["SPY"], "price": [1.0]}).to_parquet(os.path.join(tdx, "a.parquet"), index=False)
         try:
             run_crosscheck(os.path.join(tdx, "*.parquet"), os.path.join(tdx, "c.csv"), os.path.join(tdx, "x.csv"))
@@ -1044,11 +1132,17 @@ def selftest():
     C, info = build_complete(wp)
     spy = C[C.ticker == "SPY"].set_index("session").complete
     short = build_complete(pd.DataFrame(pg("2026-09-03", 30, "2026-09-03 23:59", 120)))[0]
-    checks["A5: a 60-h walk (30 pages) stops at 09-01 07:59 ET, so 09-01 is INCOMPLETE, 09-02 complete"] = \
-        bool(not short.set_index(["ticker", "session"]).complete[("SPY", "2026-09-01")]
-             and short.set_index(["ticker", "session"]).complete[("SPY", "2026-09-02")])
-    checks["A5: an unbroken walk from 09-03 completes 09-01, 09-02, 09-03"] = \
-        bool(spy["2026-09-01"] and spy["2026-09-02"] and spy["2026-09-03"])
+    sq = short.set_index(["ticker", "session"])
+    checks["A5 reach (diagnostic): a 60-h walk stops at 09-01 07:59 ET -> any-Q route none for 09-01, b1 for 09-02"] = \
+        sq.any_q_route[("SPY", "2026-09-01")] == "none" and sq.any_q_route[("SPY", "2026-09-02")] == "b1"
+    checks["6b: that 09-03 walk credits ONLY 09-03 (no walk for 09-02 -> 09-02 not complete)"] = \
+        bool(sq.complete[("SPY", "2026-09-03")]) and not bool(sq.complete[("SPY", "2026-09-02")]) \
+        and sq.same_date_route[("SPY", "2026-09-02")] == "no_walk"
+    anyq = C[C.ticker == "SPY"].set_index("session").any_q_route
+    checks["A5 reach (diagnostic): the 80-h walk from 09-03 reaches 09-01, 09-02, 09-03 (any-Q b1)"] = \
+        all(anyq[x] == "b1" for x in ("2026-09-01", "2026-09-02", "2026-09-03"))
+    checks["6b: ... but completes only 09-03, its own date"] = \
+        bool(spy["2026-09-03"]) and not (spy["2026-09-01"] or spy["2026-09-02"])
     checks["A5: a cursor gap breaks the walk (09-08..09-10 not complete)"] = \
         not (spy["2026-09-08"] or spy["2026-09-09"] or spy["2026-09-10"])
     checks["A5: a walk that never reaches 04:00 ET leaves the date incomplete (09-16)"] = not spy["2026-09-16"]
@@ -1080,7 +1174,13 @@ def selftest():
         for tk, g in exp.groupby("ticker"):                  # BUILD exports complete sessions only
             os.makedirs(os.path.join(td, "dp", tk), exist_ok=True)
             g.to_parquet(os.path.join(td, "dp", tk, "202609.parquet"), index=False)
-        pd.DataFrame([{"ticker": t_, "session": str(x.date()), "complete": (t_, x.date()) in complete_e2e}
+        cal_e2e = sorted(k for k in complete_e2e if k[1] in CALIBRATION_DATES)
+        gap_pair = [k for k in cal_e2e if sum(1 for x in cal_e2e if x[1] == k[1]) >= 2][0]   # its date stays read
+        # 6b: BUILD exports gap_pair, LAB's same-date walk has a cursor gap -> excluded
+        pd.DataFrame([{"ticker": t_, "session": str(x.date()),
+                       "complete": (t_, x.date()) in complete_e2e and (t_, x.date()) != gap_pair,
+                       "same_date_route": "none" if (t_, x.date()) == gap_pair else "",
+                       "same_date_break": "cursor_gap" if (t_, x.date()) == gap_pair else ""}
                       for t_ in CORE8 for x in sessions]).to_csv(os.path.join(td, "complete.csv"), index=False)
         pd.DataFrame([{"ticker": t_, "session": str(x.date()), "adv_dollars": 2.5e9}
                       for t_ in CORE8 for x in sessions]).to_csv(os.path.join(td, "adv.csv"), index=False)
@@ -1103,6 +1203,27 @@ def selftest():
             {"per_ticker_session.csv", "events_m4_d5.csv", "d6_direction.csv", "pythia_loc.csv",
              "macro_day.csv"} <= files and meta["sessions_read"] == ["2026-09-02", "2026-09-03"]
         checks["end-to-end `run`: bar sessions by source recorded"] = bool(meta["bar_sessions_by_source"])
+        checks["6b e2e: the cursor-gap session is excluded, logged with its cause, and the run completes"] = \
+            meta["completeness_exclusions"] == [{"ticker": gap_pair[0], "session": gap_pair[1].isoformat(),
+                                                 "cause": EXCLUDED_CAUSES[1]}] \
+            and meta["census_set_ticker_sessions"] == len(cal_e2e) - 1
+        # 6b e2e export lag: LAB's same-date walk complete for a name BUILD's export does not hold
+        lag_tk = [t_ for t_ in CORE8 if t_ not in set(raw.ticker)][0]
+        cc = pd.read_csv(os.path.join(td, "complete.csv"))
+        cc.loc[(cc.ticker == lag_tk) & (cc.session == str(sessions[0].date())), ["complete", "same_date_route"]] = [True, "b1"]
+        cc.to_csv(os.path.join(td, "complete_lag.csv"), index=False)
+        g_["TAU_FINAL"] = True
+        try:
+            run(os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "bars1m", "*", "*.parquet"),
+                os.path.join(td, "adv.csv"), os.path.join(td, "va.csv"), os.path.join(td, "complete_lag.csv"),
+                os.path.join(td, "macro.csv"), os.path.join(td, "out_lag"))
+            checks["6b e2e: an export lag REFUSES the run and names the ticker-session"] = False
+        except SystemExit as e_:
+            checks["6b e2e: an export lag REFUSES the run and names the ticker-session"] = \
+                "EXPORT LAG" in str(e_) and f"{lag_tk} {sessions[0].date()}" in str(e_) \
+                and not os.path.exists(os.path.join(td, "out_lag"))
+        finally:
+            g_["TAU_FINAL"] = saved[0]
         checks["tau gate restored after the test"] = TAU_FINAL is True
         g_["TAU_FINAL"] = False
         try:
