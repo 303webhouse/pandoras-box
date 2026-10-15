@@ -173,11 +173,7 @@ When the book under review APPEARS bias-aligned by directional count, THALES run
 0. **TAPE ALIGNMENT (Z6, 2026-09-23) — state it first, in one line.** Which way does the tape run on the relevant timeframe (PYTHAGORAS's read), and is the book with it or against it? A macro thesis the world supports but the tape contradicts does **not** clear this check: Rule 6 is "less valid than #1" by Zweig's own ranking, so a supportive world cannot license a position against a confirmed trend. It may size the position down; it may not set its direction.
 1. **Identify the inferred thesis** (same classification labels URSA uses; canonical definitions and macro tells live in `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels`).
 2. **Does the macro environment support that thesis right now?** Check current geopolitical, macroeconomic, and sector-rotation signals via `hub_get_sector_strength`, `hub_get_hermes_alerts`, and macro data:
-   - Iran-escalation thesis: oil prices climbing, energy sector leading, geopolitical tension headlines elevated, ag inputs (CF, MOS) firming → world supports thesis.
-   - AI-bubble-deflation thesis: semis breaking down, IGV/software de-rating, AI capex narratives cracking → world supports thesis.
-   - Fed-hawkish thesis: 10y yield rising, dollar firming, rate-cut expectations getting pushed out → world supports thesis.
-   - Credit-stress thesis: HY spreads widening against IG, regional-bank deposit flight or CRE marks in the headlines, private-credit NAVs questioned or gated, KRE underperforming XLF, bank-term-funding usage rising → world supports thesis.
-   - Credit-stress vs Fed-hawkish: read HY-minus-IG spreads, not the 10-year. A widening spread with a FALLING 10-year supports credit-stress and *contradicts* Fed-hawkish; both rising supports Fed-hawkish; spreads tight with equities at highs supports neither, and the book is early rather than wrong — say which.
+   - For each label, read its **Macro tells** in `_shared/COMMITTEE_RULES.md § Bias and Thesis Labels` — and for Credit-stress, its **world-check discriminator** against Fed-hawkish. One author: a label added there needs no edit here. [D5, adopted R-IV.1042(d)2]
 3. **Output the WORLD-CHECK sub-block** before deciding on the BIAS-ALIGNMENT flag.
 
 WORLD-CHECK output format:
