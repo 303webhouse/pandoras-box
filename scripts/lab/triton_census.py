@@ -47,6 +47,8 @@ because the D5/D6 window is clipped to the regular session (amendment 2 sec. 4).
 Usage (QUERY):
   python scripts/lab/triton_census.py build-complete <walk_pages_csv> <complete_csv_out>
   python scripts/lab/triton_census.py crosscheck <prints_glob> <complete_csv> <crosscheck_csv_out>
+  python scripts/lab/triton_census.py --window reserve <any mode> ...   (amendment 8: reserve dates ONLY)
+  python scripts/lab/triton_census.py verdict-a8 <census_out_dir> [<comparisons_csv outside it>]
   python scripts/lab/triton_census.py anchor <prints_glob> <complete_csv> <out_dir>
   python scripts/lab/triton_census.py run <prints_glob> <bars_glob> <polygon_glob> <adv_csv> <va_csv|-> <complete_csv> <macro_csv> <out_dir>
   (polygon_glob: bars1m_polygon/*_adjusted_false.parquet -- amendment 7; bars1m/ is read only where Polygon
@@ -74,6 +76,11 @@ CALIBRATION = (date(2026, 9, 1), date(2026, 9, 24))     # amendment 4 sec. 3; re
 NYSE_HOLIDAYS_IN_WINDOW = {date(2026, 9, 7)}             # Labor Day
 CALIBRATION_DATES = [d.date() for d in pd.bdate_range(CALIBRATION[0], CALIBRATION[1])
                      if d.date() not in NYSE_HOLIDAYS_IN_WINDOW]               # 17 executed dates
+#: Amendment 8 (TRITON-FP-v1-AMENDMENT-8-R-IV.1062.md dccbd9b8...): the reserve, spent ONCE. Selected
+#: only by `--window reserve` on the command line; the default is calibration.
+RESERVE = (date(2026, 9, 25), date(2026, 10, 9))
+RESERVE_HOLIDAYS = set()                                 # none in 09-25 .. 10-09
+WINDOW_NAME = "calibration"
 CURSOR_TOL_S = 1.0                                       # amendment 5 sec. 3 (iii)
 TICK = 0.01
 TAU_PCT = 0.0002                    # amendment 4 sec. 1; final only after A0 (and 4b if triggered)
@@ -192,6 +199,88 @@ def drop_incomplete(df, complete):
 def _et(df):
     t = pd.to_datetime(df.t_utc, utc=True, format="ISO8601").dt.tz_convert("America/New_York")
     return t, t.dt.date
+
+
+def set_window(name):
+    """Amendment 8 sec. 1-2: the ONLY change for the reserve run is the date window. Every reader
+    (in_calibration, CALIBRATION_DATES) then reads only that window; all other dates are dropped."""
+    global CALIBRATION, CALIBRATION_DATES, WINDOW_NAME
+    if name == "reserve":
+        CALIBRATION = RESERVE
+        CALIBRATION_DATES = [d.date() for d in pd.bdate_range(*RESERVE) if d.date() not in RESERVE_HOLIDAYS]
+    elif name == "calibration":
+        CALIBRATION = (date(2026, 9, 1), date(2026, 9, 24))
+        CALIBRATION_DATES = [d.date() for d in pd.bdate_range(*CALIBRATION) if d.date() not in NYSE_HOLIDAYS_IN_WINDOW]
+    else:
+        raise SystemExit(f"unknown window {name!r}: calibration or reserve")
+    WINDOW_NAME = name
+
+
+#: Amendment 8 sec. 3: the 9 definitions, fixed (non-empty on calibration), and the verdict.
+A8_DEFINITIONS = [(w, f) for f in ("F100K", "F500K", "FRUN") for w in ("NOGATE", "T0945", "T1000")]
+A8_KILL = "TRITON-FP v1: KILL"
+A8_NOT_REPLICATED = "calibration kill not replicated, returned to SPINE"
+
+
+def a8_comparisons(E, D):
+    """The 27 real-vs-placebo comparisons of amendment 8 sec. 3, from events_m4_d5 (E) and
+    d6_direction (D). 'exceeds' = real strictly greater; undefined (no testable event in an arm)
+    does not exceed and is named."""
+    rows = []
+
+    def ratio(num, den):
+        return (float(num) / float(den)) if den and den > 0 else None
+    for w, f in A8_DEFINITIONS:
+        e = E[(E.window == w) & (E.floor == f)]
+        rk = e[(e.arm == "real") & (e.kept.astype(str) == "True")]
+        pl = e[e.arm == "shuffled"]
+        tr, tp = (rk.events - rk.no_bars).sum(), (pl.events - pl.no_bars).sum()
+        d = D[(D.window == w) & (D.floor == f) & (D.tolerance == "tau")]
+        dr, dp = d[d.arm == "real"], d[d.arm == "shuffled"]
+
+        def dir_share(x):
+            t = x[x.d6 != "NO_BARS"].events.sum()
+            return ratio(x[x.d6.isin(["BUYER", "SELLER"])].events.sum(), t)
+        for m, r_, p_ in (("D5_tau", ratio(rk.d5_matched.sum(), tr), ratio(pl.d5_matched.sum(), tp)),
+                          ("D5_1tick", ratio(rk.d5_matched_1tick.sum(), tr), ratio(pl.d5_matched_1tick.sum(), tp)),
+                          ("D6_directional", dir_share(dr), dir_share(dp))):
+            undef = r_ is None or p_ is None
+            rows.append({"window": w, "floor": f, "measure": m, "real": r_, "placebo": p_,
+                         "undefined": undef, "exceeds": (not undef) and r_ > p_})
+    C = pd.DataFrame(rows)
+    k = int(C.exceeds.sum())
+    return C, k, (A8_NOT_REPLICATED if k >= 14 else A8_KILL)
+
+
+def a8_sanity(P, E, n_dates):
+    """Stop rules (a) and (b), reported beside the verdict (amendment 8 sec. 3); they do not change it."""
+    g = P.groupby(["window", "floor"]).agg(real=("real_runs", "sum"), kept=("kept_runs", "sum"),
+                                           p95=("shuffled_p95", "sum")).reset_index()
+    approx = [(r.real == 0) or (r.kept / r.real < 0.10) or (r.real <= r.p95) for r in g.itertuples()]
+    fl = E[(E.arm == "real") & (E.kept.astype(str) == "True")]
+    best = int(fl.d5_matched.max()) if len(fl) else 0
+    per_week = best / (n_dates / 5.0) if n_dates else 0.0
+    return {"stop_a_fires": bool(all(approx)), "definitions_approx_shuffled": int(sum(approx)),
+            "stop_b_best_floor": best, "stop_b_per_week": round(per_week, 1), "stop_b_fires": per_week < 0.5}
+
+
+def run_verdict_a8(census_dir, comparisons_csv=None):
+    """Read a census output folder (read-only; nothing is written into it) and print amendment 8's
+    k, verdict and sanity check. The 27 comparisons go to comparisons_csv only if a path is given,
+    and that path must be outside census_dir. Aggregates only."""
+    E = pd.read_csv(os.path.join(census_dir, "events_m4_d5.csv"))
+    D = pd.read_csv(os.path.join(census_dir, "d6_direction.csv"))
+    P = pd.read_csv(os.path.join(census_dir, "per_ticker_session.csv"))
+    C, k, verdict = a8_comparisons(E, D)
+    if comparisons_csv:
+        if os.path.abspath(os.path.dirname(comparisons_csv)) == os.path.abspath(census_dir):
+            raise SystemExit("verdict-a8 never writes into the census folder it reads")
+        C.to_csv(comparisons_csv, index=False)
+    out = {"k_real_exceeds_placebo": k, "of": len(C), "verdict": verdict,
+           "undefined": C[C.undefined][["window", "floor", "measure"]].to_dict("records"),
+           "sanity": a8_sanity(P, E, P.session.nunique()), "amendment_8": "dccbd9b8..."}
+    print(json.dumps(out, indent=1))
+    return out
 
 
 def in_calibration(sessions):
@@ -850,7 +939,8 @@ def run(prints_glob, bars_glob, polygon_glob, adv_csv, va_csv, complete_csv, mac
         va = {(r.ticker, r.session.date()): (r.vah, r.val) for r in v.itertuples()}
     macro = set(pd.read_csv(macro_csv, parse_dates=["date"]).date.dt.date)
     frames = census(df, adv, bars, va, macro=macro)
-    _write(frames, out_dir, {"calibration": CALIBRATION, "tau_pct": TAU_PCT, "tau_provenance": TAU_PROVENANCE,
+    _write(frames, out_dir, {"calibration": CALIBRATION, "window_name": WINDOW_NAME,
+                             "tau_pct": TAU_PCT, "tau_provenance": TAU_PROVENANCE,
                              "tau_confirmation": TAU_CONFIRMATION,
                              "seed": SEED, "n_shuffles": N_SHUFFLES, "keep_note": KEEP_LINE,
                              "pythia_label": PYTHIA_LABEL, "sessions_read": sorted({str(x) for x in df.session}),
@@ -962,6 +1052,7 @@ def _write_polygon(root, tk, session, lows_at, base=500.0, adjusted=False, ticke
 
 def selftest():
     import tempfile
+    set_window("calibration")                    # the self-test always runs on the calibration window
     rng = np.random.default_rng(7)
     raw, braw, sessions = _synthetic_vendor(rng)
     checks = {}
@@ -1375,13 +1466,93 @@ def selftest():
             checks["`run` still refuses when tau is not final (gate intact)"] = "tau is not final" in str(e_)
         finally:
             g_["TAU_FINAL"] = saved[0]
+    # amendment 8: the reserve window and the verdict
+    try:
+        set_window("reserve")
+        want = ["09-25", "09-28", "09-29", "09-30", "10-01", "10-02", "10-05", "10-06", "10-07", "10-08", "10-09"]
+        checks["A8: reserve window = the 11 executed dates 09-25 .. 10-09"] = \
+            [d.strftime("%m-%d") for d in CALIBRATION_DATES] == want and WINDOW_NAME == "reserve"
+        probe = [date(2026, 9, 24), date(2026, 9, 25), date(2026, 10, 9), date(2026, 10, 12), date(2026, 9, 1)]
+        checks["A8: reserve run reads ONLY reserve dates (09-24, 10-12, 09-01 dropped)"] = \
+            list(in_calibration(probe)) == [False, True, True, False, False]
+        dfr, _, _ = prepare_prints(raw, {(tk, s.date()) for tk in CORE8 for s in sessions})
+        checks["A8: synthetic prints -> only the reserve session (09-28) survives"] = \
+            sorted({str(x) for x in dfr.session}) == ["2026-09-28"]
+    finally:
+        set_window("calibration")
+    checks["A8: window restored to calibration (17 dates)"] = len(CALIBRATION_DATES) == 17 and WINDOW_NAME == "calibration"
+    try:
+        set_window("everything")
+        checks["A8: an unknown window refuses"] = False
+    except SystemExit:
+        checks["A8: an unknown window refuses"] = True
+
+    def a8_frames(real_hi):
+        """Synthetic outputs: real beats placebo on exactly real_hi of the 27 comparisons."""
+        er, dr, n = [], [], 0
+        for w, f in A8_DEFINITIONS:
+            hi = []
+            for _ in range(3):
+                hi.append(n < real_hi)
+                n += 1
+            er += [{"window": w, "floor": f, "arm": "real", "kept": True, "events": 100, "m4": 99,
+                    "d5_matched": 90 if hi[0] else 80, "d5_matched_1tick": 30 if hi[1] else 20, "no_bars": 0},
+                   {"window": w, "floor": f, "arm": "shuffled", "kept": np.nan, "events": 100, "m4": 99,
+                    "d5_matched": 85, "d5_matched_1tick": 25, "no_bars": 0}]
+            dr += [{"window": w, "floor": f, "arm": "real", "d6": "BUYER", "events": 30 if hi[2] else 10, "tolerance": "tau"},
+                   {"window": w, "floor": f, "arm": "real", "d6": "NONE", "events": 70 if hi[2] else 90, "tolerance": "tau"},
+                   {"window": w, "floor": f, "arm": "shuffled", "d6": "SELLER", "events": 20, "tolerance": "tau"},
+                   {"window": w, "floor": f, "arm": "shuffled", "d6": "NONE", "events": 80, "tolerance": "tau"}]
+        return pd.DataFrame(er), pd.DataFrame(dr)
+    C0, k0, v0 = a8_comparisons(*a8_frames(0))
+    checks["A8 verdict: real below placebo everywhere -> k = 0 -> KILL"] = len(C0) == 27 and k0 == 0 and v0 == A8_KILL
+    C13, k13, v13 = a8_comparisons(*a8_frames(13))
+    C14, k14, v14 = a8_comparisons(*a8_frames(14))
+    checks["A8 verdict: k = 13 -> KILL; k = 14 -> not replicated, returned to SPINE"] = \
+        k13 == 13 and v13 == A8_KILL and k14 == 14 and v14 == A8_NOT_REPLICATED
+    Et, Dt = a8_frames(0)
+    Et.loc[(Et.arm == "real"), "d5_matched"] = 85                     # ties with the placebo on D5 at tau
+    Ct, kt, _ = a8_comparisons(Et, Dt)
+    checks["A8 verdict: a tie does NOT exceed"] = kt == 0 and int((Ct.measure == "D5_tau").sum()) == 9
+    Eu, Du = a8_frames(27)
+    Eu.loc[(Eu.arm == "shuffled") & (Eu.window == "NOGATE") & (Eu.floor == "FRUN"), ["events", "no_bars"]] = [0, 0]
+    Cu, ku, _ = a8_comparisons(Eu, Du)
+    und = Cu[Cu.undefined]
+    checks["A8 verdict: an undefined comparison does not exceed and is named"] = \
+        ku == 25 and len(und) == 2 and set(und.measure) == {"D5_tau", "D5_1tick"} and set(und.floor) == {"FRUN"}
+    with tempfile.TemporaryDirectory() as tdv:
+        cdir = os.path.join(tdv, "census")
+        os.makedirs(cdir)
+        E0, D0 = a8_frames(0)
+        E0.to_csv(os.path.join(cdir, "events_m4_d5.csv"), index=False)
+        D0.to_csv(os.path.join(cdir, "d6_direction.csv"), index=False)
+        pd.DataFrame([{"ticker": "SPY", "session": "2026-09-25", "window": w, "floor": f, "real_runs": 100,
+                       "shuffled_mean": 40.0, "shuffled_p95": 50.0, "kept_runs": 90} for w, f in A8_DEFINITIONS]
+                     ).to_csv(os.path.join(cdir, "per_ticker_session.csv"), index=False)
+        before = sorted(os.listdir(cdir))
+        res = run_verdict_a8(cdir, os.path.join(tdv, "a8.csv"))
+        checks["A8 verdict-a8: reads the folder, writes NOTHING into it, comparisons go elsewhere"] = \
+            sorted(os.listdir(cdir)) == before and os.path.exists(os.path.join(tdv, "a8.csv")) \
+            and res["verdict"] == A8_KILL and res["sanity"]["stop_a_fires"] is False
+        try:
+            run_verdict_a8(cdir, os.path.join(cdir, "a8.csv"))
+            checks["A8 verdict-a8: refuses to write into the census folder"] = False
+        except SystemExit:
+            checks["A8 verdict-a8: refuses to write into the census folder"] = \
+                sorted(os.listdir(cdir)) == before
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
     return 0 if all(checks.values()) else 1
 
 
 if __name__ == "__main__":
+    if sys.argv[1] == "--window":                        # amendment 8: `--window reserve <mode> ...`
+        set_window(sys.argv[2])
+        del sys.argv[1:3]
     mode = sys.argv[1]
+    if mode == "verdict-a8":
+        run_verdict_a8(*sys.argv[2:4])
+        sys.exit(0)
     if mode == "selftest":
         sys.exit(selftest())
     if mode == "build-complete":
