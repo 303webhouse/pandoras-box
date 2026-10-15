@@ -2464,8 +2464,17 @@ async def get_risk_budget(account: Optional[str] = None):
     equity_positions = [p for p in positions if (p.get("asset_type") or "").upper() != "CRYPTO"]
     crypto_positions = [p for p in positions if (p.get("asset_type") or "").upper() == "CRYPTO"]
 
-    equity_max_loss = sum(abs(float(p.get("max_loss") or 0)) for p in equity_positions)
-    crypto_max_loss = sum(abs(float(p.get("max_loss") or 0)) for p in crypto_positions)
+    # R-IV.1052(e)(c)3: a NULL max_loss is UNKNOWN risk, not zero risk. Summing it as 0
+    # understates a risk total, and `breakout_remaining_dd` below SUBTRACTS this figure from
+    # the drawdown limit -- so a position whose worst case cannot be computed would hand the
+    # account MORE headroom than it has. The known legs are summed; the unmeasurable ones are
+    # counted and served beside the total, so a reader can see the total is partial.
+    equity_max_loss = sum(abs(float(p["max_loss"])) for p in equity_positions
+                          if p.get("max_loss") is not None)
+    crypto_max_loss = sum(abs(float(p["max_loss"])) for p in crypto_positions
+                          if p.get("max_loss") is not None)
+    equity_max_loss_unknown = sum(1 for p in equity_positions if p.get("max_loss") is None)
+    crypto_max_loss_unknown = sum(1 for p in crypto_positions if p.get("max_loss") is None)
 
     # Breakout prop account specifics
     breakout_balance = 25000
@@ -2477,14 +2486,26 @@ async def get_risk_budget(account: Optional[str] = None):
         "equity": {
             "open_positions": len(equity_positions),
             "total_max_loss": round(equity_max_loss, 2),
+            # The total covers only the rows that HAVE a worst case. Non-zero here means it
+            # is a floor, not the risk.
+            "max_loss_unknown_count": equity_max_loss_unknown,
+            "total_max_loss_is_partial": equity_max_loss_unknown > 0,
         },
         "crypto": {
             "open_positions": len(crypto_positions),
             "max_concurrent": 2,
             "total_max_loss": round(crypto_max_loss, 2),
+            "max_loss_unknown_count": crypto_max_loss_unknown,
+            "total_max_loss_is_partial": crypto_max_loss_unknown > 0,
             "breakout_static_dd_remaining": round(breakout_remaining_dd, 2),
             "breakout_daily_remaining": round(breakout_daily_limit, 2),
-            "can_open_new": len(crypto_positions) < 2 and breakout_remaining_dd > 250,
+            "can_open_new": (len(crypto_positions) < 2
+                             and breakout_remaining_dd > 250
+                             and crypto_max_loss_unknown == 0),
+            "can_open_new_blocked_by": ("%d crypto position(s) have no computable worst case, "
+                                        "so the remaining drawdown is unknown"
+                                        % crypto_max_loss_unknown)
+                                       if crypto_max_loss_unknown else None,
         },
         "combined": {
             "total_positions": len(positions),

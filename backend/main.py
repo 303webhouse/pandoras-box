@@ -94,6 +94,17 @@ async def lifespan(app: FastAPI):
             # That is precisely the dependency that took hub_get_market_profile down earlier
             # today with `column "script_version" does not exist`. A read must never wait on a
             # writer having run, and the fix is the same: migrate at startup.
+            # R-IV.1052(b): the B2 mark trio and the cut flag. Added by jobs/b2_cut_alert_job
+            # at its own first run, and SELECTed by api/b2_cut_status -- a read depending on a
+            # writer, the fourth instance of that fault found in this session, this time by
+            # the guard rather than by an outage.
+            await conn.execute(
+                "ALTER TABLE unified_positions"
+                "  ADD COLUMN IF NOT EXISTS mark NUMERIC,"
+                "  ADD COLUMN IF NOT EXISTS mark_as_of TIMESTAMPTZ,"
+                "  ADD COLUMN IF NOT EXISTS mark_integrity TEXT,"
+                "  ADD COLUMN IF NOT EXISTS mark_integrity_reason TEXT,"
+                "  ADD COLUMN IF NOT EXISTS b2_cut_alerted_at TIMESTAMPTZ")
             await conn.execute(
                 "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
                 "  id SERIAL PRIMARY KEY,"
