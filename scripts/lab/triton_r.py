@@ -266,6 +266,40 @@ def atr_at(seq, i):
     return float(np.mean(trs))
 
 
+def slot_lookback_skips(prior_b5, slot, prior_dates):
+    """R-IV.1122(b): the trading sessions (from `prior_dates`, the readable sessions before the event's)
+    that the amendment 6 lookback stepped over for `slot` -- no bars at all, or bars without that slot --
+    between the event and the oldest contributing session. [] when the 10 contributors are the 10 most recent
+    sessions; None when there are fewer than 10 contributors (the median is MISSING anyway)."""
+    by_date = {b.session.iloc[0]: b for b in prior_b5 if len(b)}
+    used = []
+    for d in reversed(sorted(prior_dates)):
+        b = by_date.get(d)
+        if b is not None and len(b.volume[b.slot == slot]):
+            used.append(d)
+            if len(used) == SLOT_LOOKBACK:
+                break
+    if len(used) < SLOT_LOOKBACK:
+        return None
+    oldest = used[-1]
+    return [d for d in prior_dates if oldest < d and d not in used]
+
+
+def classify_skips(skips):
+    """'half_day' if any skipped session is an early close, 'data_gap' if any is a regular session."""
+    return {"half_day": any(d in HALF_DAYS for d in skips), "data_gap": any(d not in HALF_DAYS for d in skips)}
+
+
+def skip_counts(claim_results):
+    """(claim events whose lookback skipped >= 1 session, of which half-day, of which data gap)."""
+    a = h = g = 0
+    for res in claim_results:
+        if res["slot_skips"]:
+            c_ = classify_skips(res["slot_skips"])
+            a, h, g = a + 1, h + int(c_["half_day"]), g + int(c_["data_gap"])
+    return a, h, g
+
+
 def slot_median(prior_b5, slot):
     """Median volume of `slot` over the 10 most recent prior sessions in which that slot EXISTS (amendment 6,
     b8a5ff38...): a half-day (or any session lacking the slot) is skipped for it. Fewer than 10 -> None."""
@@ -279,8 +313,9 @@ def slot_median(prior_b5, slot):
     return None
 
 
-def d7(seq, sess_mask, prior_b5, t_event, L, side):
-    """('CONFIRMED', bar_index_in_seq) / ('UNCONFIRMED', None) / ('MISSING', what)."""
+def d7(seq, sess_mask, prior_b5, t_event, L, side, prior_dates=None, skips=None):
+    """('CONFIRMED', bar_index_in_seq) / ('UNCONFIRMED', None) / ('MISSING', what). If `skips` is a list, the
+    sessions the slot-median lookback skipped on every scanned bar are added to it (R-IV.1122(b))."""
     idx = np.flatnonzero(sess_mask)
     for i in idx:
         tc = seq.t_close.iloc[i]
@@ -290,6 +325,10 @@ def d7(seq, sess_mask, prior_b5, t_event, L, side):
             break
         atr = atr_at(seq, i)
         med = slot_median(prior_b5, int(seq.slot.iloc[i]))
+        if skips is not None and prior_dates is not None and med is not None:
+            sk = slot_lookback_skips(prior_b5, int(seq.slot.iloc[i]), prior_dates)
+            if sk:
+                skips.extend(sk)
         if atr is None:
             return "MISSING", "atr14"
         if med is None:
@@ -438,7 +477,7 @@ class Ctx:
 def evaluate(ctx, tk, d, t, L, side, outcome=True):
     """All ingredients for one (tk, d, t, L, side). Returns dict: missing, fails, and if claim, Z inputs.
     outcome=False (the COUNT-ONLY job, R-IV.1080(b)): S_close, sigma and Z are never read or computed."""
-    res = {"missing": [], "fails": [], "z": None, "conf": None}
+    res = {"missing": [], "fails": [], "z": None, "conf": None, "slot_skips": []}
     cal = calendar_ok(d, ctx.macro_excl)
     if cal != "OK":
         res["fails"].append(cal)
@@ -447,7 +486,9 @@ def evaluate(ctx, tk, d, t, L, side, outcome=True):
         return res
     seq = ctx.seq[tk]
     mask = (seq.session == d).to_numpy()
-    st, info = d7(seq, mask, ctx.prior_b5(tk, d), t, L, side)
+    skips = []
+    st, info = d7(seq, mask, ctx.prior_b5(tk, d), t, L, side, prior_dates=[x for x in ctx.dates if x < d], skips=skips)
+    res["slot_skips"] = sorted(set(skips))
     if st == "MISSING":
         res["missing"].append(info)
         return res
@@ -895,7 +936,8 @@ NYSE_HOLIDAYS_CONFIRM = {date(2026, 11, 26), date(2026, 12, 25)}
 COUNT_COLUMNS = ["variant", "weight", "as_of", "window_first", "window_last", "window_sessions", "half_sessions",
                  "evaluable_ticker_sessions", "claim_events", "sessions_with_claim_events",
                  "events_with_placebo", "events_without_placebo", "stop_rule_met", "stop_rule_frozen_as_of",
-                 "state_dir", "state_dir_status", "stop_trigger_sha256"]
+                 "state_dir", "state_dir_status", "stop_trigger_sha256",
+                 "claim_events_lookback_skipped", "lookback_skipped_half_day", "lookback_skipped_data_gap"]
 UNEVAL_COLUMNS = ["variant", "session_date", "ingredient", "events_unevaluable"]     # R-IV.1120(b)2: a date axis
 RUN_LOG = "runs.jsonl"                        # one line per count run in this state dir (R-IV.1120(b)1)
 PLACEBO_WARN_SHARE = 0.20                     # R-IV.1120(b)3
@@ -1031,6 +1073,7 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
         wstart = C.WINDOWS[wname][0].hour * 3600 + C.WINDOWS[wname][0].minute * 60
         rng = np.random.default_rng(SEED_R)
         n, sess, with_p, miss = 0, set(), 0, {}
+        claim_res = []
         for r in ev.itertuples():
             res = evaluate(ctx, r.ticker, r.session, r.t, r.L, r.d6, outcome=False)
             for m in res["missing"]:
@@ -1038,9 +1081,11 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
             if not res["missing"] and not res["fails"]:
                 n += 1
                 sess.add(r.session)
+                claim_res.append(res)
                 pl = placebos(ctx, prints_by_ts, {}, r.ticker, r.session, r.t, wstart, rng, bars_hl, eligible,
                               outcome=False)
                 with_p += int(len(pl) > 0)
+        sk_any, sk_half, sk_gap = skip_counts(claim_res)                # R-IV.1122(b): count only
         for (sd, m), k in sorted(miss.items()):
             unev.append({"variant": vname, "session_date": sd, "ingredient": m, "events_unevaluable": k})
         primary = vname == PRIMARY
@@ -1051,7 +1096,9 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
                      "sessions_with_claim_events": len(sess), "events_with_placebo": with_p,
                      "events_without_placebo": n - with_p, "stop_rule_met": met if primary else "",
                      "stop_rule_frozen_as_of": str(as_of) if met else "", "state_dir": state["path"],
-                     "state_dir_status": state["status"], "stop_trigger_sha256": state["stop_trigger_sha256"]})
+                     "state_dir_status": state["status"], "stop_trigger_sha256": state["stop_trigger_sha256"],
+                     "claim_events_lookback_skipped": sk_any, "lookback_skipped_half_day": sk_half,
+                     "lookback_skipped_data_gap": sk_gap})
     out = pd.DataFrame(rows, columns=COUNT_COLUMNS)
     U = pd.DataFrame(unev, columns=UNEVAL_COLUMNS)
     C.assert_aggregate({"counts": out, "unevaluable": U})
@@ -1085,6 +1132,10 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
                           "they hold fewer 5-min bars, so the slot median is MISSING for afternoon slots for the 10 "
                           "sessions after one; the EMA runs across them as across any session"),
         "placebo_columns": "existence of >= 1 valid placebo per claim event (evaluate(outcome=False)); no Z",
+        "lookback_skip_columns": ("claim events whose D7 slot-median lookback (amendment 6) reached beyond the 10 "
+                                  "consecutive prior sessions on any scanned bar, i.e. skipped >= 1 session; split by "
+                                  "whether a skipped session was a half-day or a regular session (data gap). An event "
+                                  "can be in both splits. Count only (R-IV.1122(b))."),
         "state": state,
         "placebo_warning": [
             {"variant": r["variant"], "claim_events": r["claim_events"], "events_with_placebo": r["events_with_placebo"],
@@ -1493,6 +1544,20 @@ def selftest():
     checks["A1 EMA: a 10:10 ET confirmation is evaluable (continuous EMA); the session-only EMA would be None"] = \
         r3["missing"] == [] and r3["fails"] == [] and r3["z"] is not None and r3["conf"][1] == 10 * 3600 + 10 * 60 \
         and ema_at(sess_closes, 7) is None
+    checks["R-IV.1122(b): with no gap, the lookback skips nothing"] = r3["slot_skips"] == [] and \
+        skip_counts([r3]) == (0, 0, 0)
+    # a constructed DATA GAP: one regular prior session lacks the 10:05-10:10 slot the event confirms on
+    o_gap = dict(o3)
+    gk = ("SPY", ds[5])
+    gb = o_gap[gk]
+    o_gap[gk] = gb[~((gb.t_s >= 10 * 3600 + 5 * 60) & (gb.t_s < 10 * 3600 + 10 * 60))].reset_index(drop=True)
+    r_gap = evaluate(Ctx(o_gap, tide, ivd, va, set(), ds), "SPY", ds[-1], 10 * 3600, 100.0, "BUYER")
+    checks["R-IV.1122(b): a constructed data gap -> still a claim (A6), lookback skipped exactly that session"] = \
+        r_gap["missing"] == [] and r_gap["fails"] == [] and r_gap["slot_skips"] == [ds[5]]
+    checks["R-IV.1122(b): the count is NON-ZERO on the constructed gap, split 'data gap' (not half-day)"] = \
+        skip_counts([r_gap, r3]) == (1, 0, 1)
+    checks["R-IV.1122(b): a skipped early close classifies as half-day"] = \
+        classify_skips([date(2026, 11, 27)]) == {"half_day": True, "data_gap": False}
     first = ctx3.seq["SPY"]
     checks["A1 EMA: only the first 19 readable bars (from 09-01) are UNEVALUABLE"] = \
         ema_at(first.close.to_numpy(), 18) is None and ema_at(first.close.to_numpy(), 19) is not None \
