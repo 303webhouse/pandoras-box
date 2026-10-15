@@ -381,3 +381,34 @@ place. The guard already exists and is the natural home; what is missing is that
 be made to pass through it.
 
 **Not scheduled.** Logged under R-IV.1035 as tech debt, not queued work.
+
+## STRUCTURAL OMISSION: VIX has no spot and no correct delta (R-IV.1048(b))
+
+**Ruled 2026-10-15. Not a defect to fix — an omission to declare.**
+
+Measured under R-IV.1037(c)1: VIX is the only ticker in the open book with no chain spot, and
+0 of 140 contracts carry a delta.
+
+```
+UW API /api/stock/VIX/stock-state: HTTP 422
+  "Stock state data is not available for index ticker VIX"
+spot_now: NO spot for VIX — all THREE sources gave nothing
+```
+
+**Two independent reasons, and the second is the decisive one.**
+
+1. VIX is an **index**, and UW's `/stock-state` refuses index tickers outright. All three of
+   `spot_now`'s sources route through `/stock-state` or the snapshot, so none can serve it.
+2. **VIX options price off VIX FUTURES, not spot.** So a spot-based Black-Scholes delta would be
+   wrong *even if a spot were available*. Adding a source would produce a number that looks
+   right and is not — worse than the null.
+
+**DO NOT substitute VIXY or UVXY.** They are different instruments with different term
+structure; serving one as "VIX" is the wrong-asset fault that `hub_get_crypto_quote`'s
+asset-class guard exists to prevent, and which Tier 2 #10 already flags for `hub_get_quote`.
+
+**Scope: one position** — a VIX call debit spread 25/35, expiry 2026-10-21, max loss 125.
+
+**What the hub must do instead:** VIX is **listed as omitted, with this reason, in any delta
+publication.** An omission that names its cause is honest; a null with no explanation invites
+someone to go looking for a source.
