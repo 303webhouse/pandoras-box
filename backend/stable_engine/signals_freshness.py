@@ -190,7 +190,23 @@ SLO_SECONDS: dict[str, int] = {
     "tradingview": 4 * 3600,
     "server_scanner": 4 * 3600,
     "cta_scanner": 4 * 3600,
-    "footprint": 6 * 3600,
+    # R-IV.1089(c): 6h -> 96h. MEASURED over 60 days (211 signals): median gap 0.75h, but
+    # p90 19.0h, p95 23.5h and a maximum of 91.0h -- and **40 of 210 gaps (19.0%) breached the
+    # 6h bound**. It was a false-flatline generator, the identical shape this file already
+    # records for crypto_scanner ("median gap 0.5h, yet ELEVEN gaps past the 12h SLO").
+    #
+    # 96h is chosen from that distribution, not picked: 96h yields ZERO breaches in the 60-day
+    # sample, 72h leaves 1 (0.5%), 24h leaves 10. The 2026-10-15 flatline that prompted this
+    # was a 25.3h gap -- its own p95, well inside its envelope.
+    #
+    # WHY NOT the crypto fix. Those producers moved to AGE_SOURCE_JOB_RUNS -- judge whether the
+    # JOB RAN rather than whether it emitted. `footprint` is an INBOUND WEBHOOK with no job to
+    # run, so there is nothing to record. A heartbeat from the sender is the only thing that
+    # could separate "no condition fired" from "sender dead"; R-IV.1089(c) declined it because
+    # TRITON-R does not use the footprint signal. So this bound detects TOTAL DEATH only, and
+    # takes up to 4 days to do it. That limit is the ruling's, stated here so no later reader
+    # mistakes 96h for a liveness guarantee.
+    "footprint": 96 * 3600,
     "crypto_scanner": 12 * 3600,
     "crypto_engine": 12 * 3600,
     "crypto_cvd_engine": 12 * 3600,
