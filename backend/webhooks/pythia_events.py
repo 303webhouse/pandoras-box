@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from database.postgres_client import get_postgres_client
 from database.redis_client import get_redis_client
 from utils.json_sanitize import dumps_jsonb
+from utils.webhook_auth import validate_webhook_secret
 
 logger = logging.getLogger("pythia_events")
 router = APIRouter(tags=["pythia"])
@@ -27,6 +28,44 @@ router = APIRouter(tags=["pythia"])
 # check), AND it is directly POST-able at /api/webhook/pythia. Enforcing here covers
 # both paths.
 PYTHIA_WEBHOOK_SECRET = os.getenv("PYTHIA_WEBHOOK_SECRET") or ""
+
+
+def _pythia_observe() -> bool:
+    """OBSERVE only when `WEBHOOK_PYTHIA_ENFORCE` is set FALSEY. **Unset = ENFORCE.**
+
+    THE DEFAULT IS DELIBERATELY INVERTED from `_tv_observe` / `_factor_observe("TICK")` /
+    `_factor_observe("BREADTH")`, and this is the one place in the convention that differs.
+    The switch, the variable name and the read-at-request-time behaviour are identical; only
+    the default is not. Three reasons, and the third decided it:
+
+    1. **No `WEBHOOK_*_ENFORCE` variable is set in Railway at all** (measured 2026-10-15), so
+       the six endpoints following that convention are ALL observing. PYTHIA's hardcoded
+       fail-closed check made it the only webhook in the hub that actually enforced its
+       secret. "Parity" would have been parity with six endpoints that do not.
+    2. R-IV.1083(b): the secret stays, because "anyone holding the URL can write PYTHIA
+       levels, and those now feed TRITON-R's PYTHIA-LOC filter". An unset-means-open default
+       is that exposure by default.
+    3. **TWO EXISTING TESTS ENCODE THE GUARANTEE** and failed when the default was OBSERVE:
+       `test_auth.py::test_fail_closed_webhook_rejects_without_secret[/api/webhook/pythia]`
+       and `test_pythia_v26_extra_key_r964.py::test_a_wrong_secret_is_still_rejected`.
+       Shipping unset-means-observe would have required weakening both. The codebase refused
+       it before any reviewer had to.
+
+    **READ AT REQUEST TIME**, which is the point the principal asked for: set
+    `WEBHOOK_PYTHIA_ENFORCE=0` (or false/no/off) in Railway and the very next alert is
+    observed, with no code change and no deploy. Set it back, or delete it, and enforcement
+    resumes just as fast.
+    """
+    #: ONLY AN EXPLICIT FALSEY VALUE OBSERVES. Anything else -- unset, empty, "1", "true",
+    #: "enforce", "on", or a typo -- enforces.
+    #:
+    #: This matters more than it looks. Mirroring the other switches' expression with the
+    #: default flipped would have made `WEBHOOK_PYTHIA_ENFORCE=enforce` mean OBSERVE, because
+    #: "enforce" is not in ("1","true","yes") -- a plausible thing to type that would silently
+    #: disable the auth it names. A fail-closed switch must resolve AMBIGUITY toward closed,
+    #: so the falsey set is enumerated and everything outside it enforces.
+    raw = (os.getenv("WEBHOOK_PYTHIA_ENFORCE") or "").strip().lower()
+    return raw in ("0", "false", "no", "off")
 MAX_PAYLOAD_BYTES = 8192  # reject oversized bodies
 
 # B4 Chunk C — replay protection + idempotency.
@@ -61,6 +100,39 @@ def _num_or_none(v):
 #: silence costs a day of events. Not annotated `Optional[str]` because this module does not
 #: import typing and a new import for one annotation is not worth it.
 _FEED_WARNED_SESSION = None
+
+
+#: The reason written for a payload that FAILED the secret check and was ALLOWED anyway
+#: because enforcement is off. Distinct from the two refusal reasons on purpose: feed_health
+#: counts refusals, and these were not refused.
+OBSERVE_ALLOWED_REASON = "OBSERVE: secret invalid, allowed (WEBHOOK_PYTHIA_ENFORCE unset)"
+
+
+async def _record_observe_allowed(ticker, secret_len: int) -> None:
+    """Write down that a bad secret was let through. NEVER raises, never logs the value.
+
+    This exists because OBSERVE mode's whole risk is that it is QUIET: the data flows, the
+    dashboards look healthy, and nobody learns the secret is wrong until enforcement is turned
+    on and everything stops. One row per occurrence, with the LENGTH only -- the same
+    discriminator the refusal path records, for the same reason (R-IV.331(a)).
+    """
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
+                "  id SERIAL PRIMARY KEY,"
+                "  rejected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+                "  ticker TEXT,"
+                "  reason TEXT NOT NULL,"
+                "  secret_len INT NOT NULL)")
+            await conn.execute(
+                "INSERT INTO pythia_webhook_rejections (ticker, reason, secret_len) "
+                "VALUES ($1, $2, $3)",
+                (ticker or "")[:16] or None, OBSERVE_ALLOWED_REASON, int(secret_len))
+    except Exception as exc:                                        # noqa: BLE001
+        # A supervision write must never break the request it supervises.
+        logger.warning("[pythia] observe-allowed not recorded: %s", type(exc).__name__)
 
 
 async def _warn_feed_rejecting(ticker, secret_len):
@@ -144,12 +216,28 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
         logger.warning("Rejected PYTHIA webhook — payload over size cap")
         raise HTTPException(status_code=413, detail="payload too large")
 
-    # ── AEGIS: shared secret — constant-time, FAIL-CLOSED ──
-    if not PYTHIA_WEBHOOK_SECRET:
-        logger.error("PYTHIA_WEBHOOK_SECRET not configured — rejecting (fail-closed)")
-        raise HTTPException(status_code=503, detail="webhook auth not configured")
+    # ── AEGIS: shared secret — constant-time, FAIL-CLOSED when ENFORCING ──
+    #
+    # `WEBHOOK_PYTHIA_ENFORCE` (unset = OBSERVE) is read PER REQUEST, so the principal flips
+    # enforcement in Railway without a code change or a deploy. In OBSERVE the verdict is
+    # computed and logged exactly as in ENFORCE -- the payload is then allowed through instead
+    # of refused. Validate-but-allow, never skip-the-check: an observe mode that stopped
+    # comparing would leave nothing to turn back on.
+    observe = _pythia_observe()
     supplied = str(payload.get("secret") or "")
-    if not hmac.compare_digest(supplied, PYTHIA_WEBHOOK_SECRET):
+    valid = validate_webhook_secret(supplied, secret=PYTHIA_WEBHOOK_SECRET,
+                                    observe=observe, label="pythia")
+    if observe and not valid:
+        # RECORDED, because a silently-allowed bad secret is the "silence looks like health"
+        # fault this register keeps finding -- in OBSERVE the data flows and the
+        # misconfiguration is invisible unless it is written down.
+        #
+        # Under a DISTINCT reason, because these payloads were NOT refused. feed_health's
+        # `rejecting` means "arriving and being REFUSED"; counting an allowed payload there
+        # would report a refused feed while events were landing, which is a false alarm in the
+        # field built to prevent false alarms. `_feed_counts` excludes observe rows.
+        await _record_observe_allowed(payload.get("ticker"), len(supplied))
+    if not observe and not valid:
         # R-IV.331(a): log the DISCRIMINATOR, never the value. secret_len 0 means the
         # alert carried no secret field at all (a misconfigured alert); a non-zero length
         # means a wrong value (a stale secret). Those have different fixes, and before this
