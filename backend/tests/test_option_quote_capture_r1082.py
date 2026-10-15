@@ -450,3 +450,74 @@ async def test_nothing_is_expected_on_a_weekend():
 
     assert st["slots_expected_so_far"] == 0
     assert st["slots_missed"] == []
+
+
+# ── 11. coverage survives a restart ─────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_slots_already_STORED_are_not_reported_missed_after_a_restart():
+    """THE MIRROR OF THE POST-CLOSE BUG, found on the live surface minutes after deploying.
+
+    `_slots_done` is in-memory and Railway restarts on every deploy. A deploy at 13:00 empties
+    it, so a surface built on it alone would report the morning's slots as MISSED while their
+    rows sit in the table. One fault hid real misses; this one would invent them -- and a
+    surface that cries after every deploy stops being read, which costs the real alarm.
+    """
+    import jobs.option_quote_capture as m
+
+    class _Conn:
+        async def fetch(self, *a, **k):
+            return [{"slot_et": "10:00"}, {"slot_et": "10:30"}, {"slot_et": "11:00"}]
+
+    class _Acq:
+        async def __aenter__(self): return _Conn()
+        async def __aexit__(self, *a): return False
+
+    class _Pool:
+        def acquire(self): return _Acq()
+
+    async def pool():
+        return _Pool()
+
+    import database.postgres_client as pg
+    real_pool, real_dt = pg.get_postgres_client, m.datetime
+
+    class _At1145(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return real_dt(2026, 10, 16, 15, 45, tzinfo=__import__("datetime").timezone.utc)
+
+    pg.get_postgres_client = pool
+    m.datetime = _At1145
+    try:
+        m.reset_for_tests()          # the restart: nothing in memory
+        st = await m.capture_status()
+    finally:
+        pg.get_postgres_client, m.datetime = real_pool, real_dt
+
+    assert st["coverage_source"] == "stored_rows"
+    assert set(st["slots_captured"]) == {"10:00", "10:30", "11:00"}
+    assert "10:00" not in st["slots_missed"]
+    assert "11:30" in st["slots_missed"], "a genuinely missed slot must still be reported"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_db_is_NAMED_not_silently_treated_as_no_coverage():
+    """"no slot was captured" and "I could not ask" are different claims, and only the first is
+    a fault in the capture. Collapsing them would make every DB blip look like a lost session."""
+    import jobs.option_quote_capture as m
+    import database.postgres_client as pg
+
+    async def boom():
+        raise RuntimeError("down")
+
+    real = pg.get_postgres_client
+    pg.get_postgres_client = boom
+    try:
+        m.reset_for_tests()
+        st = await m.capture_status()
+    finally:
+        pg.get_postgres_client = real
+
+    assert st["coverage_source"].startswith("memory")
+    assert "db unreadable" in st["coverage_source"]

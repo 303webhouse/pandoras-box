@@ -536,14 +536,43 @@ async def capture_status() -> dict:
     is_session_day = now_et.weekday() < 5
     expected = ([s.strftime("%H:%M") for s in SLOT_TIMES_ET if now_et.time() >= s]
                 if is_session_day else [])
-    missed = [s for s in expected if s not in _slots_done]
+
+    # THE STORED ROWS ARE THE TRUTH; `_slots_done` IS A PROXY THAT RESETS ON RESTART.
+    # Railway restarts on every deploy, so a deploy at 13:00 would empty the in-memory set and
+    # this surface would report the morning's slots as MISSED when they were captured and are
+    # sitting in the table. That is the same fault as the post-close blindness above, pointing
+    # the other way: one hid real misses, this would invent them -- and a surface that cries
+    # after every deploy stops being read, which costs the real alarm.
+    captured, source = set(_slots_done), "memory"
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        if pool is not None:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT DISTINCT slot_et FROM option_quote_capture"
+                    " WHERE session_date = $1::date", now_et.date())
+            # Union, not replacement: the DB is authoritative for what was stored, and the
+            # in-memory set still knows about a slot captured seconds ago.
+            captured |= {r["slot_et"] for r in rows}
+            source = "stored_rows"
+    except Exception as exc:                                        # noqa: BLE001
+        # Named, never silent: "no slot was captured" and "I could not ask" are different
+        # claims and only one of them is a fault in the capture.
+        source = "memory (db unreadable: %s)" % type(exc).__name__
+
+    missed = [s for s in expected if s not in captured]
     return {
         "job": JOB_NAME,
         "caller_tag": CALLER_TAG,
         "session_et_date": _session_et_date,
         "slots_expected_so_far": len(expected),
-        "slots_captured": sorted(_slots_done),
+        "slots_captured": sorted(captured),
         "slots_missed": missed,
+        #: Which of the two sources answered. `memory` after a restart means the figures
+        #: describe this process only, not the session -- so the reader knows how far to
+        #: trust `slots_missed` instead of assuming it is the session's truth.
+        "coverage_source": source,
         "calls_used_session": _calls_used,
         "ceiling": SESSION_CALL_CEILING,
         "last_slot": dict(_last_result) if _last_result else None,
