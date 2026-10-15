@@ -344,7 +344,19 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     # "deactivated" comment named a DIFFERENT, genuinely-disabled loop in
     # bias_scheduler.py and sized this one's quota to 100 while it spent 1,640.
     # 2000 matches the "~1,680 UW calls/day" main.py:878 already documented.
-    "flow_per_expiry": (2000, TIER_STANDARD),
+    # R-IV.1082(b): reduced 2000 -> 1700 to fund `option_quote_capture` below, budget-neutral.
+    # The 1,640-1,680 measured spend cited above still fits; the cut takes only the headroom.
+    "flow_per_expiry": (1700, TIER_STANDARD),
+    # R-IV.1082(b): the forward option bid/ask capture, 8 names x 0-3 DTE x 12 intraday slots.
+    # Carved from flow_per_expiry by exactly this amount, so QUOTAS still sums to 26,000.
+    # MEASURED from the expiry calendar before the job was written: 144/204/168/132/132 calls
+    # Mon-Fri, worst day 204, mean 156 -- but 384 on Mon/Tue if all eight names turn out to
+    # carry daily expiries. The job budgets ITSELF to 288/session rather than relying on which
+    # case holds, because the governor sheds the calls that arrive LAST and those are the 15:00
+    # and 15:30 slots. NO off-hours entry below: its window is 10:00-15:30 ET, entirely RTH,
+    # so the STANDARD haircut never applies to it and an exemption would be a licence it has
+    # no use for.
+    "option_quote_capture": (300, TIER_STANDARD),
     "darkpool_ticker": (500, TIER_STANDARD),
     # R-IV.867(e): the daily ATM implied-volatility snapshot. Runs ONCE a session at 16:45 ET,
     # one /option-contracts call per universe ticker. 250 covers the universe with headroom and

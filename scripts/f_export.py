@@ -523,6 +523,75 @@ def _archive_rows() -> list:
 #: column holding a magic number is a lie told in the column's own type, and it cost QUERY 56
 #: round-trip failures across 57 rows.
 #: `status` carries what the sentinel used to smuggle.
+# ── the forward option bid/ask capture (R-IV.1082(b)) ────────────────
+
+#: ONE FILE PER SESSION DATE, not per ticker-month. The intraday series is read a session at a
+#: time -- "what did the spread do across 2026-10-16" -- and a session is ~2,600 rows, small
+#: enough that splitting it further would only make a reader stitch it back together.
+#:
+#: ONLY WHOLE SESSIONS ARE EXPORTED. A session still being captured would be written with the
+#: slots it had so far, and a later run would overwrite it with more -- so the hash in the
+#: manifest would describe a file that no longer exists while reading as verified. Today's
+#: session is therefore held back until tomorrow, the same rule the dark-pool export follows.
+OPTION_QUOTE_SESSIONS_SQL = """
+    SELECT session_date, COUNT(*) AS rows,
+           COUNT(DISTINCT slot_et) AS slots,
+           COUNT(DISTINCT ticker)  AS tickers
+      FROM option_quote_capture
+     WHERE session_date < (NOW() AT TIME ZONE 'America/New_York')::date
+     GROUP BY session_date
+     ORDER BY session_date
+"""
+
+OPTION_QUOTE_ROWS_SQL = """
+    SELECT session_date, slot_et, captured_at, ticker, expiry, dte,
+           contract_type, strike, bid, ask, mid, iv, delta,
+           volume, open_interest, atm_strike, atm_method,
+           raw_contract_count, truncated
+      FROM option_quote_capture
+     WHERE session_date = $1
+     ORDER BY slot_et, ticker, expiry, contract_type, strike
+"""
+
+
+async def export_option_quotes() -> None:
+    """One Parquet per session date, one row per (slot, contract).
+
+    THE SLOT COVERAGE IS PRINTED AND CARRIED, because this is a forward collection under the
+    collector law: a session with 7 of 12 slots is usable but weaker, and a reader who cannot
+    see that treats it as complete. 12/12 is the only clean session.
+    """
+    import asyncpg
+
+    print("=== option_quote_capture: whole sessions only ===")
+    conn = await asyncpg.connect(_pg_dsn())
+    try:
+        sessions = [dict(r) for r in await conn.fetch(OPTION_QUOTE_SESSIONS_SQL)]
+        if not sessions:
+            print("  no completed capture sessions yet; nothing exported")
+            return
+        print("  %d session(s) to export" % len(sessions))
+        for s in sessions:
+            d = s["session_date"]
+            rows = await conn.fetch(OPTION_QUOTE_ROWS_SQL, d)
+            if not rows:
+                continue
+            df = pd.DataFrame([dict(r) for r in rows])
+            path = os.path.join(ROOT, "option_quotes", "%s.parquet" % d.isoformat())
+            row = write_parquet(df, path)
+            full = s["slots"] == len(df["slot_et"].unique()) == 12
+            note = "%d/12 slots, %d tickers" % (s["slots"], s["tickers"])
+            if not full:
+                # On the manifest row, so the archive carries its own incompleteness rather
+                # than leaving the next reader to count slots and discover it.
+                row["MISMATCH"] = "INCOMPLETE SESSION: %s" % note
+            print("  %s %6d rows, %s, %d bytes%s"
+                  % (d.isoformat(), len(df), note, row["bytes"],
+                     "" if full else "   <- INCOMPLETE"))
+    finally:
+        await conn.close()
+
+
 MANIFEST_COLUMNS = ("kind", "path", "rows_written", "rows_read_back", "bytes", "sha256",
                     "status", "note")
 
@@ -831,6 +900,13 @@ def main() -> int:
         # The bars and the README are already on disk and verified; a database failure must not
         # discard them or skip the manifest that proves they are there.
         print("  darkpool export FAILED: %s: %s" % (type(exc).__name__, exc))
+    print()
+    try:
+        asyncio.run(export_option_quotes())
+    except Exception as exc:                                        # noqa: BLE001
+        # Its own try for the same reason as the dark-pool export above: one dataset failing
+        # must not discard the others or skip the manifest.
+        print("  option-quote export FAILED: %s: %s" % (type(exc).__name__, exc))
     write_manifest(_completeness_map())
     try:
         mismatches = match_report()

@@ -1051,6 +1051,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("❌ Hermes phase 2 session alarm did NOT start: %s", e)
 
+    # R-IV.1082(b): forward option bid/ask capture. 8 names, 0-3 DTE, 12 slots 10:00-15:30 ET.
+    # Logged at ERROR if it fails to start, for the same reason as the alarm above: this is a
+    # FORWARD collection under the collector law, so a session it misses is permanently absent
+    # and there is no retroactive fix. /health.option_quote_capture reports slots_missed.
+    try:
+        from jobs import option_quote_capture as _oqc
+        if (os.getenv("OPTION_QUOTE_CAPTURE_ENABLED") or "true").lower() == "false":
+            logger.info("option_quote_capture: disabled via OPTION_QUOTE_CAPTURE_ENABLED")
+        else:
+            asyncio.create_task(_oqc.run_forever())
+            logger.info("✅ option_quote_capture started (tag=%s, ceiling=%d/session)",
+                        _oqc.CALLER_TAG, _oqc.SESSION_CALL_CEILING)
+    except Exception as e:
+        logger.error("❌ option_quote_capture did NOT start: %s", e)
+
     # Triton Step-0: whale-flow shadow poller (RTH 09:30-16:00 ET, 120s cadence).
     # SHADOW-ONLY — writes triton_flow_shadow; nothing reads it for scoring.
     async def triton_shadow_poller_loop():
@@ -1790,12 +1805,20 @@ async def health_check():
     except Exception as _s8e:
         s8_block = {"state": "ERROR", "reason": str(_s8e)}
 
+    oqc_block: dict = {}
+    try:
+        from jobs.option_quote_capture import capture_status
+        oqc_block = await capture_status()
+    except Exception as _oqce:
+        oqc_block = {"state": "ERROR", "reason": str(_oqce)}
+
     return _sanitise_health({
         # Derived, never assigned: see degraded_by above.
         "status": "degraded" if degraded_by else "healthy",
         "degraded_by": degraded_by,
         "build": build_block,
         "option_chain_snapshot": s8_block,
+        "option_quote_capture": oqc_block,
         "uw_quota": uw_quota_block,
         "outcome_resolver": resolver_block,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
