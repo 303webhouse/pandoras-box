@@ -24,6 +24,9 @@ Protocol (all stamped before this file existed or was changed):
                                                                    from Q = E; later-Q and cursor causes
                                                                    excluded; export lag and UNLABELLED
                                                                    REFUSE)
+  lab\\triton\\TRITON-FP-v1-AMENDMENT-7-R-IV.1054.md e7d96d47...  (D5/D6 bars: Polygon unadjusted where
+                                                                   it covers (T, E), else bars1m/; fixed
+                                                                   by coverage, never by outcome)
   Field reference: lab\\triton\\F-README.md e72ea5b9... (BUILD)
 
 Modes:
@@ -45,13 +48,16 @@ Usage (QUERY):
   python scripts/lab/triton_census.py build-complete <walk_pages_csv> <complete_csv_out>
   python scripts/lab/triton_census.py crosscheck <prints_glob> <complete_csv> <crosscheck_csv_out>
   python scripts/lab/triton_census.py anchor <prints_glob> <complete_csv> <out_dir>
-  python scripts/lab/triton_census.py run <prints_glob> <bars_glob> <adv_csv> <va_csv|-> <complete_csv> <macro_csv> <out_dir>
+  python scripts/lab/triton_census.py run <prints_glob> <bars_glob> <polygon_glob> <adv_csv> <va_csv|-> <complete_csv> <macro_csv> <out_dir>
+  (polygon_glob: bars1m_polygon/*_adjusted_false.parquet -- amendment 7; bars1m/ is read only where Polygon
+   does not cover a ticker-session)
   (complete_csv: LAB's cross-check from `build-complete` (ticker, session, complete, route, ...). BUILD's
    export is the source of record (R-IV.1019(b)): `run` reads BUILD's set from the prints' session_date
    and REFUSES on any per-ticker-session disagreement with complete_csv.)
   python scripts/lab/triton_census.py selftest
 """
 import glob
+import hashlib
 import json
 import os
 import re
@@ -226,6 +232,66 @@ def load_bars(globpat):
                                    "low": b["Low"].to_numpy(float), "close": b["Close"].to_numpy(float),
                                    "source": b["source"].astype(str).to_numpy()}))
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=list(BAR_COLUMNS))
+
+
+def load_polygon(globpat):
+    """Amendment 7 sec. 2: bars1m_polygon/<TICKER>_adjusted_false.parquet -> BAR_COLUMNS, source
+    'polygon'. adjusted_true files are never read. Returns (bars, per-file info). Refuses on no file,
+    a ticker that does not match its file name, or an adjusted value that is not False."""
+    files = sorted(f for f in glob.glob(globpat) if os.path.basename(f).endswith("_adjusted_false.parquet"))
+    if not files:
+        raise SystemExit(f"no unadjusted Polygon bar files match {globpat} (amendment 7 sec. 2: refusing)")
+    parts, info = [], []
+    for f in files:
+        tk = os.path.basename(f)[: -len("_adjusted_false.parquet")]
+        if tk not in CORE8:
+            continue
+        b = pd.read_parquet(f)
+        if set(b.ticker.astype(str)) != {tk}:
+            raise SystemExit(f"{f}: holds {sorted(set(b.ticker.astype(str)))}, not {tk} (amendment 7 sec. 2)")
+        if "adjusted" in b.columns and bool(b.adjusted.astype(bool).any()):
+            raise SystemExit(f"{f}: carries adjusted=True rows in an unadjusted file (amendment 7 sec. 2)")
+        t = pd.to_datetime(b.timestamp_utc, utc=True)
+        et = t.dt.tz_convert("America/New_York").dt.date
+        info.append({"file": os.path.basename(f), "sha256": hashlib.sha256(open(f, "rb").read()).hexdigest(),
+                     "rows_read": int(len(b)), "first_session_et": str(et.min()), "last_session_et": str(et.max())})
+        parts.append(pd.DataFrame({"ticker": tk, "t_utc": t.to_numpy(), "high": b["high"].to_numpy(float),
+                                   "low": b["low"].to_numpy(float), "close": b["close"].to_numpy(float),
+                                   "source": "polygon"}))
+    return (pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=list(BAR_COLUMNS))), info
+
+
+def _rth_keys(bars):
+    """(ticker, ET date) pairs holding at least one bar opening 09:30-15:59 ET."""
+    if bars is None or not len(bars):
+        return set()
+    t = pd.to_datetime(bars.t_utc, utc=True).dt.tz_convert("America/New_York")
+    tod = t.dt.time
+    m = (tod >= time(9, 30)) & (tod < time(16, 0))
+    return set(zip(bars.ticker[m], t.dt.date[m]))
+
+
+def choose_bars(readme_bars, polygon_bars):
+    """Amendment 7 sec. 1, FIXED, by coverage only: per calibration (T, E), Polygon unadjusted if it
+    covers (T, E), else bars1m/ if it holds RTH bars, else none. Never mixed within a ticker-session.
+    Returns (bars, source_map) -- the map holds ticker, session, source and no price."""
+    pk, rk = _rth_keys(polygon_bars), _rth_keys(readme_bars)
+    rows = []
+    for tk in CORE8:
+        for e in CALIBRATION_DATES:
+            src = "polygon" if (tk, e) in pk else "bars1m" if (tk, e) in rk else "none"
+            rows.append({"ticker": tk, "session": e.isoformat(), "source": src})
+    M = pd.DataFrame(rows)
+    use_p = {(r.ticker, date.fromisoformat(r.session)) for r in M[M.source == "polygon"].itertuples()}
+    use_r = {(r.ticker, date.fromisoformat(r.session)) for r in M[M.source == "bars1m"].itertuples()}
+
+    def pick(b, keys):
+        if b is None or not len(b) or not keys:
+            return b.iloc[0:0] if b is not None else pd.DataFrame(columns=list(BAR_COLUMNS))
+        d = pd.to_datetime(b.t_utc, utc=True).dt.tz_convert("America/New_York").dt.date
+        return b[[k in keys for k in zip(b.ticker, d)]]
+    bars = pd.concat([pick(polygon_bars, use_p), pick(readme_bars, use_r)], ignore_index=True)
+    return bars, M
 
 
 def bars_by_session(bars):
@@ -759,7 +825,7 @@ def run_anchor(prints_glob, complete_csv, out_dir):
             "duplicate_tracking_ids_dropped": n_dup, "incomplete_ticker_sessions_dropped": dropped, **decision})
 
 
-def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_dir):
+def run(prints_glob, bars_glob, polygon_glob, adv_csv, va_csv, complete_csv, macro_csv, out_dir):
     if not TAU_FINAL:
         raise SystemExit("tau is not final: run `anchor` first and record SPINE's confirmation (amendment 4/4a)")
     raw = _read_parquet(prints_glob)
@@ -771,7 +837,10 @@ def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_di
     df, n_dup, dropped = prepare_prints(raw, S)
     sess = pd.DataFrame(sorted(S), columns=["ticker", "session"]) if S else pd.DataFrame(columns=["ticker", "session"])
     census_all8 = int((sess.groupby("session").ticker.nunique() == len(CORE8)).sum()) if len(sess) else 0
-    braw = load_bars(bars_glob)
+    praw, poly_info = load_polygon(polygon_glob)                # amendment 7: Polygon unadjusted first
+    braw, source_map = choose_bars(load_bars(bars_glob), praw)  # fixed by coverage, before any D5
+    os.makedirs(out_dir, exist_ok=True)
+    source_map.to_csv(os.path.join(out_dir, "bar_source_map.csv"), index=False)
     bars = bars_by_session(braw)
     adv_df = pd.read_csv(adv_csv, parse_dates=["session"])
     adv = {(r.ticker, r.session.date()): r.adv_dollars for r in adv_df.itertuples()}
@@ -785,10 +854,14 @@ def run(prints_glob, bars_glob, adv_csv, va_csv, complete_csv, macro_csv, out_di
                              "tau_confirmation": TAU_CONFIRMATION,
                              "seed": SEED, "n_shuffles": N_SHUFFLES, "keep_note": KEEP_LINE,
                              "pythia_label": PYTHIA_LABEL, "sessions_read": sorted({str(x) for x in df.session}),
-                             "sessions_with_bars": len(bars), "bar_sessions_by_source": bar_sources(braw),
+                             "sessions_with_bars": len(bars), "bar_sessions_by_source": bar_sources(braw),  # chosen bars
                              "duplicate_tracking_ids_dropped": n_dup,
                              "incomplete_ticker_sessions_dropped": dropped,
                              "amendment_6b": "TRITON-FP-v1-AMENDMENT-6b-R-IV.1045.md d6b4a0b5...",
+                             "amendment_7": "TRITON-FP-v1-AMENDMENT-7-R-IV.1054.md e7d96d47... (bars: Polygon "
+                                            "unadjusted where it covers the ticker-session, else bars1m/)",
+                             "bar_source_map_counts": source_map.source.value_counts().to_dict(),
+                             "polygon_files": poly_info,
                              "census_set_ticker_sessions": len(S),
                              "census_dates_complete_for_all_8": census_all8,
                              "completeness_exclusions": excluded,
@@ -867,6 +940,24 @@ def _write_readme_bars(braw, root):
                             "Dividends": 0.0, "Stock Splits": 0.0, "Capital Gains": 0.0,
                             "source": g.source.values}, index=pd.DatetimeIndex(g.t_et).tz_convert("America/New_York"))
         out.to_parquet(os.path.join(root, d, f"{tk}.parquet"))
+
+
+def _write_polygon(root, tk, session, lows_at, base=500.0, adjusted=False, ticker_in_file=None):
+    """Synthetic bars in BUILD's bars1m_polygon layout (scripts/polygon_1m_export.py): one file per
+    ticker and adjustment, 04:00-19:59 ET, timestamp_utc = bar open. lows_at = {"HH:MM": low}."""
+    et = pd.date_range(f"{session} 04:00", f"{session} 19:59", freq="1min", tz="America/New_York")
+    low = np.full(len(et), base)
+    for hm, v in lows_at.items():
+        low[et.strftime("%H:%M") == hm] = v
+    df = pd.DataFrame({"open": base + 0.2, "high": base + 0.5, "low": low, "close": base + 0.2, "volume": 100.0,
+                       "vwap": base + 0.2, "transactions": 10, "timestamp_utc": et.tz_convert("UTC"),
+                       "timestamp_et": et, "session_et": et.strftime("%Y-%m-%d"),
+                       "ticker": ticker_in_file or tk, "source": "polygon_v2_aggs_1minute", "adjusted": adjusted})
+    path = os.path.join(root, f"{tk}_adjusted_{'true' if adjusted else 'false'}.parquet")
+    if os.path.exists(path):
+        df = pd.concat([pd.read_parquet(path), df], ignore_index=True)
+    os.makedirs(root, exist_ok=True)
+    df.to_parquet(path, index=False)
 
 
 def selftest():
@@ -1168,6 +1259,50 @@ def selftest():
         checks["pre-market bars cannot reach the D5/D6 window (clip holds)"] = d5 is False
         s_, hi, lo, cl = bs[k]
         checks["no bar before 09:30 ET survives the clip"] = float(s_.min()) >= 9.5 * 3600
+        # amendment 7: Polygon unadjusted where it covers (T, E), else bars1m/; fixed by coverage
+        pr = os.path.join(td, "bars1m_polygon")
+        _write_polygon(pr, "SPY", "2026-09-04", {"10:00": 499.00, "10:02": 499.00})   # Polygon ONLY (no bars1m/)
+        _write_polygon(pr, "SPY", "2026-09-02", {"11:00": 488.00, "11:02": 488.00})   # both sources hold 09-02
+        _write_polygon(pr, "SPY", "2026-09-04", {}, base=400.0, adjusted=True)          # never read
+        pb, pinfo = load_polygon(os.path.join(pr, "*.parquet"))
+        checks["A7: only *_adjusted_false files are read (adjusted_true ignored)"] = \
+            [x["file"] for x in pinfo] == ["SPY_adjusted_false.parquet"] and set(pb.source) == {"polygon"} \
+            and float(pb.low.min()) == 488.00
+        chosen, smap = choose_bars(lb, pb)
+        sm = smap.set_index(["ticker", "session"]).source
+        checks["A7: source map -- Polygon-only date -> polygon; both -> polygon; bars1m-only -> bars1m; else none"] = \
+            sm[("SPY", "2026-09-04")] == "polygon" and sm[("SPY", "2026-09-02")] == "polygon" \
+            and sm[("NVDA", "2026-09-02")] == "bars1m" and sm[("QQQ", "2026-09-02")] == "none" \
+            and set(smap.columns) == {"ticker", "session", "source"}
+        bs7 = bars_by_session(chosen)
+        k4 = ("SPY", date(2026, 9, 4))
+        d5_7, _ = lit(bs7.get(k4), 10 * 3600 + 60, 499.00, 0.10)
+        d5_old, cls_old = lit(bars_by_session(lb).get(k4), 10 * 3600 + 60, 499.00, 0.10)
+        checks["A7: a date present ONLY in Polygon matches (D5 True); bars1m/ alone gives NO_BARS"] = \
+            d5_7 is True and d5_old is None and cls_old == "NO_BARS" and len(bs7[k4][0]) == 390
+        d5_both, _ = lit(bs7.get(k), 11 * 3600 + 60, 488.00, 0.10)
+        d5_r1, _ = lit(bars_by_session(lb).get(k), 11 * 3600 + 60, 488.00, 0.10)
+        checks["A7: on a date both hold, Polygon's bars are used and never mixed with bars1m/"] = \
+            d5_both is True and d5_r1 is False and len(bs7[k][0]) == 390
+        checks["A7: NVDA (no Polygon file) keeps its bars1m/ bars"] = \
+            len(bs7[("NVDA", date(2026, 9, 2))][0]) == len(bars_by_session(lb)[("NVDA", date(2026, 9, 2))][0])
+        bad = os.path.join(td, "poly_bad")
+        _write_polygon(bad, "QQQ", "2026-09-04", {}, ticker_in_file="SPY")
+        for nm, pat in (("a file holding another ticker", os.path.join(bad, "*.parquet")),
+                        ("no Polygon file at all", os.path.join(td, "nowhere", "*.parquet"))):
+            try:
+                load_polygon(pat)
+                checks[f"A7: refuses on {nm}"] = False
+            except SystemExit:
+                checks[f"A7: refuses on {nm}"] = True
+        bad2 = os.path.join(td, "poly_bad2")
+        _write_polygon(bad2, "SPY", "2026-09-04", {}, adjusted=True)
+        os.replace(os.path.join(bad2, "SPY_adjusted_true.parquet"), os.path.join(bad2, "SPY_adjusted_false.parquet"))
+        try:
+            load_polygon(os.path.join(bad2, "*.parquet"))
+            checks["A7: refuses on adjusted=True rows inside an unadjusted file"] = False
+        except SystemExit:
+            checks["A7: refuses on adjusted=True rows inside an unadjusted file"] = True
         # end to end: `run` through Parquet with tau forced final inside the test only
         complete_e2e = {k for k in complete if k[0] in set(raw.ticker)}   # only names the export holds
         exp = raw[[(t_, pd.Timestamp(d_).date()) in complete_e2e for t_, d_ in zip(raw.ticker, raw.session_date)]]
@@ -1193,6 +1328,7 @@ def selftest():
         g_["TAU_FINAL"], g_["N_SHUFFLES"] = True, 100
         try:
             run(os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "bars1m", "*", "*.parquet"),
+                os.path.join(td, "bars1m_polygon", "*.parquet"),
                 os.path.join(td, "adv.csv"), os.path.join(td, "va.csv"), os.path.join(td, "complete.csv"),
                 os.path.join(td, "macro.csv"), os.path.join(td, "out"))
         finally:
@@ -1203,6 +1339,11 @@ def selftest():
             {"per_ticker_session.csv", "events_m4_d5.csv", "d6_direction.csv", "pythia_loc.csv",
              "macro_day.csv"} <= files and meta["sessions_read"] == ["2026-09-02", "2026-09-03"]
         checks["end-to-end `run`: bar sessions by source recorded"] = bool(meta["bar_sessions_by_source"])
+        sm_e2e = pd.read_csv(os.path.join(td, "out", "bar_source_map.csv"))
+        checks["A7 e2e: source map written (no price), Polygon files hashed in meta, polygon counted"] = \
+            set(sm_e2e.columns) == {"ticker", "session", "source"} and len(sm_e2e) == len(CORE8) * len(CALIBRATION_DATES) \
+            and meta["bar_source_map_counts"].get("polygon") == 2 and meta["polygon_files"][0]["sha256"] \
+            and meta["bar_sessions_by_source"].get("polygon") == 2 and meta["amendment_7"].startswith("TRITON-FP-v1-AMENDMENT-7")
         checks["6b e2e: the cursor-gap session is excluded, logged with its cause, and the run completes"] = \
             meta["completeness_exclusions"] == [{"ticker": gap_pair[0], "session": gap_pair[1].isoformat(),
                                                  "cause": EXCLUDED_CAUSES[1]}] \
@@ -1215,6 +1356,7 @@ def selftest():
         g_["TAU_FINAL"] = True
         try:
             run(os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "bars1m", "*", "*.parquet"),
+                os.path.join(td, "bars1m_polygon", "*.parquet"),
                 os.path.join(td, "adv.csv"), os.path.join(td, "va.csv"), os.path.join(td, "complete_lag.csv"),
                 os.path.join(td, "macro.csv"), os.path.join(td, "out_lag"))
             checks["6b e2e: an export lag REFUSES the run and names the ticker-session"] = False
@@ -1227,7 +1369,7 @@ def selftest():
         checks["tau gate restored after the test"] = TAU_FINAL is True
         g_["TAU_FINAL"] = False
         try:
-            run(*["unused"] * 7)
+            run(*["unused"] * 8)
             checks["`run` still refuses when tau is not final (gate intact)"] = False
         except SystemExit as e_:
             checks["`run` still refuses when tau is not final (gate intact)"] = "tau is not final" in str(e_)
@@ -1249,4 +1391,4 @@ if __name__ == "__main__":
     elif mode == "anchor":
         run_anchor(*sys.argv[2:5])
     elif mode == "run":
-        run(*sys.argv[2:9])
+        run(*sys.argv[2:10])
