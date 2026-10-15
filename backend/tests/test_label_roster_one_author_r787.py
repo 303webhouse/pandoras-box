@@ -33,8 +33,8 @@ RULES_NAME = "COMMITTEE_RULES.md"
 # this pair moves with it. The `claude/` prefix is the convention the stamp has always
 # used -- my first application dropped it and these eight tests caught that, which is
 # the point of asserting the stamp rather than merely its presence.
-SOURCE = "claude/account-context-2026-10-14-v5_5.md"
-SOURCE_SHA = "ee4a5680be03945262a3a284f4ad9d31f63f569d1bf738361caa9a3967f4788f"
+SOURCE = "claude/account-context-2026-10-15-v5_6.md"
+SOURCE_SHA = "3ca2a54e9ced63855e182faa18e5aa2431aeb72147288b8a8f38a2b0fcc552cd"
 
 
 def _md_files():
@@ -46,6 +46,12 @@ def _md_files():
 
 def _read(p):
     return io.open(p, encoding="utf-8-sig").read().replace("\r\n", "\n")
+
+
+def _rules_text():
+    """The AUTHOR's text. All eight copies are byte-identical — the generator asserts it — so
+    reading one answers for all."""
+    return _read(os.path.join(SKILLS, "_shared", RULES_NAME))
 
 
 class TestOnlyTheRulesFileEnumeratesTheRoster:
@@ -89,23 +95,54 @@ class TestOnlyTheRulesFileEnumeratesTheRoster:
 
 
 class TestTheGuidanceSurvived:
-    """Deleting the roster must not delete how an agent recognises a thesis."""
+    """Deleting the roster must not delete how an agent recognises a thesis.
 
-    def test_ursas_grouping_guidance_bullet_is_intact(self):
+    R-IV.1099(b)/D6 MOVED this guidance rather than deleting it: the per-label tells, the
+    grouping test and the Fed-hawkish discriminator now live WITH THE LABEL in
+    `_shared/COMMITTEE_RULES.md`, and the agent files carry a citation. So these tests follow
+    the guidance to its new home -- the claim they defend is unchanged, which is that the
+    content exists SOMEWHERE and exactly once.
+
+    This is the same reason D6 exists: THALES listed world-support tells for four labels and
+    none for Trend-continuation, because a new label gets no tell in a file that restates them.
+    One author fixes that by construction.
+    """
+
+    def test_ursas_grouping_guidance_lives_in_the_rules_now(self):
+        rules = _rules_text()
+        assert "Grouping test (URSA reads it here)" in rules
+        assert "short HYG or short private-credit names" in rules, (
+            "the Fed-hawkish discriminator must remain SOMEWHERE")
+
+    def test_ursa_keeps_a_CITATION_not_a_copy(self):
+        """THE PAIR. The guidance moving out must leave a pointer, or URSA simply loses it."""
         t = _read(os.path.join(SKILLS, "ursa", "SKILL.md"))
-        assert "- **Credit-stress.** Does the book hold short exposure" in t
-        assert "short HYG or short" in t, "the Fed-hawkish discriminator must remain"
+        assert "COMMITTEE_RULES.md" in t
+        assert "Grouping tests" in t
+        # and the old copy is gone, so the two cannot drift
+        assert "- **Credit-stress.** Does the book hold short exposure" not in t
 
-    def test_thales_keeps_its_per_thesis_tells(self):
-        t = _read(os.path.join(SKILLS, "thales", "SKILL.md"))
-        for tell in ("- Iran-escalation thesis: oil prices climbing",
-                     "- Fed-hawkish thesis: 10y yield rising"):
-            assert tell in t, tell
+    def test_the_per_label_tells_live_in_the_rules_now(self):
+        """Every label carries its own `Macro tells:` there -- including the ones THALES's
+        hand-maintained list had and the one it was missing."""
+        rules = _rules_text()
+        assert rules.count("Macro tells:") >= 5, rules.count("Macro tells:")
+        for tell in ("oil rising", "semis breaking down"):
+            assert tell in rules, tell
 
-    def test_thales_gained_D3s_two_lines(self):
+    def test_thales_keeps_a_CITATION_not_a_copy(self):
         t = _read(os.path.join(SKILLS, "thales", "SKILL.md"))
-        assert "- Credit-stress thesis: HY spreads widening against IG" in t
-        assert "- Credit-stress vs Fed-hawkish: read HY-minus-IG spreads" in t
+        assert "COMMITTEE_RULES.md" in t
+        assert "Macro tells" in t, "THALES must still be told where to read them"
+        assert "- Iran-escalation thesis: oil prices climbing" not in t
+        assert "- Fed-hawkish thesis: 10y yield rising" not in t
+
+    def test_the_discriminator_moved_and_did_not_vanish(self):
+        rules = _rules_text()
+        assert "World-check discriminator against Fed-hawkish (THALES reads it here)" in rules
+        assert "HY-minus-IG spreads" in rules
+        t = _read(os.path.join(SKILLS, "thales", "SKILL.md"))
+        assert "- Credit-stress vs Fed-hawkish: read HY-minus-IG spreads" not in t
 
     def test_the_uncorrected_drafts_bullet_was_removed(self):
         """The first draft put a `- **Credit-stress world-check.**` bullet here. The corrected

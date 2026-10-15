@@ -61,7 +61,10 @@ APPLIED_MARKERS = (
     # R-IV.873(b): v5.4 supersedes v5.2 and CONTAINS v5.3, so the stamp moves and v5.3 is
     # never applied separately. The stamp is the thing scheduled tasks resolve on, so it is
     # asserted as an exact string rather than a prefix.
-    "RULES VERSION: 2026-10-14/v5.5",
+    # R-IV.1099(b): v5.6 applied, so the stamp moves again. It is deliberately an EXACT string
+    # and not a `startswith("RULES VERSION:")` check -- a prefix test would pass while the
+    # scheduled tasks resolved on last month's rules, which is the whole failure this pins.
+    "RULES VERSION: 2026-10-15/v5.6",
     "AUTHORITATIVE STAMP",
     "- **Credit-stress thesis.**",            # SECTION C, after the Fed-hawkish bullet
     "- **X4's implied-volatility input",      # SECTION B's fifth bullet, new in v5.2

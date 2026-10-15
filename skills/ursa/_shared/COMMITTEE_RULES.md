@@ -136,12 +136,12 @@ Each agent's `SKILL.md` retains a short "what it owns vs what belongs to other a
 
 ## § Account Context Framework
 
-RULES VERSION: 2026-10-14/v5.5 — AUTHORITATIVE STAMP. An agent or scheduled task
+RULES VERSION: 2026-10-15/v5.6 — AUTHORITATIVE STAMP. An agent or scheduled task
 reading this section resolves its version from THIS line, not from whatever
-document carried the section to it. Supersedes 2026-10-09/v5.4, 2026-10-09/v5.3,
-2026-10-08/v5.2, /v5.1, /v5, /v4, /v3 and 2026-10-07/v2.
+document carried the section to it. Supersedes 2026-10-14/v5.5, 2026-10-09/v5.4,
+2026-10-09/v5.3, 2026-10-08/v5.2, /v5.1, /v5, /v4, /v3 and 2026-10-07/v2.
 
-Applied from: claude/account-context-2026-10-14-v5_5.md · sha256 ee4a5680be03945262a3a284f4ad9d31f63f569d1bf738361caa9a3967f4788f · 2026-10-15
+Applied from: claude/account-context-2026-10-15-v5_6.md · sha256 3ca2a54e9ced63855e182faa18e5aa2431aeb72147288b8a8f38a2b0fcc552cd · 2026-10-15
 
 NEVER hardcode dollar amounts. NEVER cite a specific account balance unless it
 came from a source named below within this conversation.
@@ -335,6 +335,14 @@ these definitions decide what a bucket then REQUIRES. Quoted verbatim from
 `skills/toro/references/equities.md` "Three-Bucket Fit", so this file is the one
 author.
 
+**Where these five tags are stored.** `bucket` takes **B1, B2 or B3 only**.
+**TAIL and CONVEXITY are `sleeve_tag` values, not bucket values.** A row may carry
+both a sleeve tag and a bucket, or a sleeve tag with `bucket` NULL and a stated
+reason. **Any gate, cap or filter that tests for TAIL or CONVEXITY reads
+`sleeve_tag`; a gate reading `bucket` for them matches nothing and fails open.**
+X4's TAIL exemption is the gate this bites first. [TA-174; R-IV.1041(d),
+R-IV.1042(d)1]
+
 - **B1 (thesis).** "Multi-week to multi-month bear thesis. Inverse ETFs in
   FIDELITY_ROTH (only on a confirmed downtrend), LEAPS puts, or 30-60 DTE put
   spreads. Sizing per longer-dated thesis rules." Bull side: "Multi-week to
@@ -368,6 +376,20 @@ author.
   default, no splitting on `+`. Holding `stock` is deliberate: a wrong-signed stock
   verdict reports a LOSING position as PROFITABLE, and silence is recoverable where
   an inverted verdict is not.
+  **`orientation_at_entry` IS A RECORDED FIELD where `structure` is UNDETERMINED**
+  [TA-175 F5; ruled R-IV.1047(b); built R-IV.1043(e)–(f)]. Such a row records its
+  orientation at entry, **read from the broker's lots by POSITIONS** — never
+  inferred from `max_loss`, from the sign of `unrealized_pnl` against a price move,
+  or from any other corroborating field; corroboration is a default by another
+  name. **Until it is written the row is CUT PENDING ORIENTATION**, and the cut runs
+  unaided once the field lands. **This is NOT the DTE-at-cut case above.** That
+  blockage is STRUCTURAL — no field will ever let the cut run, so the row needs a
+  different stop, and that stop is the principal's. This one is PENDING — one
+  bookkeeping field is missing. **No intra-horizon stop is required of the
+  principal for a pending orientation** (Convention #41). The trap the hold exists
+  for is real: TSLQ's broker lots read "YOU BOUGHT" (+1) while the instrument's own
+  description reads "2X SHORT"; a parser reading the description signs every
+  verdict backwards.
 - **B3 (intraday scalp).** "Structural Pythia VA trigger required, mechanical stop
   at entry, target = next Pythia level. Two consecutive losers = circuit breaker,
   done for day. $300 daily max loss." Plus, bull side: "max 2 concurrent, max
@@ -687,6 +709,30 @@ tranches land. Two holdings are handled explicitly:
 - **TSLQ 80 shares** sits in the FIDELITY_ROTH trading sleeve. Not in the target
   mix; the schedule neither buys nor sells it.
 
+### § Reading the hub — stored, derived and served fields [F3, F6; Convention #42]
+
+**Every field a hub tool serves declares whether its value is STORED or DERIVED,
+and a DERIVED value names the rule that derived it.** `hub_get_positions` carries
+this as `field_origin`. **No cap, gate or filter is computed from a DERIVED
+field** — the prohibition `strategy_tag` carries under TA-123, generalised from one
+poisoned column to the class. The instance it was ruled on: `classification_reason`
+on ROBINHOOD rows is DERIVED (`classification_reason_origin: computed`). The book
+column is empty on every ROBINHOOD row and the serialiser composes the text. It is
+documentation, never an input. [Convention #42, adopted R-IV.1055(b)]
+
+**Five recorded columns are STORED and SERVED** [F3; BUILD R-IV.1048(c)]:
+`sleeve_reason`, `x4_result`, `cut_due`, `cut_status` and `orientation_at_entry`,
+beside `leverage_factor` (§ Household net-direction cap). **Every `sleeve_tag`
+write carries a `sleeve_reason` on the same terms as `bucket_reason`.** A basis
+that is written but not served is indistinguishable, to a reader, from a basis
+never written — TA-110 §7's line shown alone.
+
+**Filing is a record; it is not delivery.** Where a value is held anywhere the hub
+does not serve — `notes` above all — the lane holding it **states the value in the
+reply to whoever asked.** An agent that finds a field absent from the hub reports
+it as **not served**, never as **not existing**, and asks the lane that holds the
+book. [POSITIONS' standing practice, adopted R-IV.1055(a)]
+
 ### Retired, do not reinstate
 
 - **The 40% real-asset limit.** Provisional from the outset and never derived;
@@ -760,6 +806,16 @@ tranches land. Two holdings are handled explicitly:
   match against DEBIT_WHITELIST, everything else UNDETERMINED. [TA-168 §1]
 - **Reading C5 or F5 as a substitute for the principal's intent at entry.** They
   bound the eligible set; the intent chooses inside it. Both run, in that order.
+- **Reading TAIL or CONVEXITY from `bucket`.** They are `sleeve_tag` values; a gate
+  reading `bucket` for them matches nothing and fails open. [TA-174]
+- **Computing a cap, gate or filter from a DERIVED field.** [Convention #42]
+- **Concluding a value does not exist because the hub does not serve it — or that
+  it exists because the hub serves a composed string.** TA made both errors on row
+  986, in consecutive messages, on 2026-10-14. [F3, F6]
+- **Recording a `stock` row awaiting orientation as INOPERATIVE and requiring an
+  intra-horizon stop.** That applied the structural DTE-at-cut remedy to a pending
+  blockage, and put a trade decision on the principal to cover a missing column.
+  [R-IV.1047(b); Convention #41]
 - Previously retired and still retired: "Fidelity Roth IRA — inverse ETFs only";
   ROBINHOOD's "5% max risk per trade"; "max 3 contracts".
 
@@ -815,6 +871,19 @@ to report. [TA-128]
   credit event helps duration while credit keeps widening. A book short both TLT
   and HYG is expressing two theses, not one; label it by whichever leg carries the
   size. Approved by the principal 2026-10-08 [R-IV.778(e)].
+  **Grouping test (URSA reads it here):** Does the book hold short exposure across
+  at least two of: regional banks, high-yield credit, private-credit or
+  alternative-asset managers, rate-sensitive financials? If so the grouping is
+  credit-stress, not a bias stack - check it before reaching for "Pure
+  macro-bearish." The tell that separates it from Fed-hawkish: credit-stress books
+  are short HYG or short private-credit names, which a rates thesis does not
+  require.
+  **World-check discriminator against Fed-hawkish (THALES reads it here):** read
+  HY-minus-IG spreads, not the 10-year. A widening spread with a FALLING 10-year
+  supports credit-stress and *contradicts* Fed-hawkish; both rising supports
+  Fed-hawkish; spreads tight with equities at highs supports neither, and the book
+  is early rather than wrong — say which. [Moved from `ursa/SKILL.md` and
+  `thales/SKILL.md` under D5, adopted R-IV.1042(d)2]
 - **Trend-continuation thesis.** The book is positioned *with* a confirmed trend and the thesis is the trend itself — no macro story required. Macro tells: PYTHAGORAS confirms the trend on the position's timeframe, leadership is consistent with it (Rule 5), and nothing in the book fights it. **This label exists because the previous four all required a macro narrative, which meant the most Zweig-compliant book on the list — long a confirmed uptrend — had no coherent label and read as incoherent.** Added per Z6, 2026-09-23.
 - **Pure macro-bearish bias stack.** Broad short-index exposure with no offsetting long structure and no thematic coherence tying positions together. This is the failure mode the THESIS pre-checks exist to distinguish from the coherent theses above.
 
@@ -898,6 +967,8 @@ These additional rules apply only to agents that recommend specific trade entrie
   term structure. The agent names the strike it read ATM from.
   **X4 tests the bucket, it does not choose it** (§ Buckets, TA-044): a FAIL on a
   non-TAIL ticket is recorded as a FAIL, never resolved by retagging to TAIL.
+  **The exemption is read from `sleeve_tag`, never from `bucket`** — TAIL is a
+  sleeve tag, and a check reading `bucket` for it fails open (§ Buckets). [TA-174]
 
 - **Z2 returns one of THREE results, not two:** PASS, FAIL, or **NOT EVALUABLE**.
   NOT EVALUABLE is returned for any row whose justifying timeframe the hub cannot
@@ -941,6 +1012,13 @@ These additional rules apply only to agents that recommend specific trade entrie
   re-check, and an agent reciting a label's tickers as the current book will report
   a thesis the principal has already exited.
   The instance it was ruled on is in § Account Context's retired list.
+
+- **Stored versus derived — Convention #42.** No cap, gate or filter is computed
+  from a field the hub marks DERIVED in `field_origin`. A value absent from the hub
+  is **not served**, not **non-existent** — ask the lane that holds the book. A
+  `stock` B2 row with no `orientation_at_entry` is **CUT PENDING ORIENTATION**:
+  report it as such, and require no stop of the principal for it (§ Buckets;
+  Convention #41).
 
 ## § Asset-Class Routing Framework
 
