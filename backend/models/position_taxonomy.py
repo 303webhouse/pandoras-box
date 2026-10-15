@@ -89,12 +89,19 @@ def in_cap_scope(account: Any) -> bool:
 # was indistinguishable from "this row is fine", which is how 11 citations went unnoticed.
 NO_BASIS_RECORDED = "NO BASIS RECORDED — do not gate on this value"
 
-# The columns that hold each axis's basis. Only two axes have one: `sleeve_tag` is derived
-# wholly from the legacy tag and carries no separate ruling to cite, so inventing a third
-# column would be a field with nothing to put in it.
+# The columns that hold each axis's basis. ALL THREE axes have one as of R-IV.1041(e).
+#
+# This comment used to argue that `sleeve_tag` needed no reason column, being "derived wholly
+# from the legacy tag" with "nothing to put in it". That reasoning is now overruled: a sleeve
+# can be set deliberately, and the bucket axis already proved the case -- R-IV.807(c) added a
+# "deliberately unbucketed" state to an axis I had likewise called purely derived. An axis
+# whose value can be a DECISION needs somewhere to record the decision.
+#
+# `sleeve_reason` is nullable and this lane writes none; it reads like the other two.
 REASON_COLUMNS: Dict[str, str] = {
     "classification": "classification_reason",
     "bucket": "bucket_reason",
+    "sleeve": "sleeve_reason",
 }
 
 
@@ -118,6 +125,36 @@ def classification_reason(account: Any, classification: Any,
     if (_norm(account) or "") in NO_CLASSIFICATION_ACCOUNTS:
         return NOT_APPLICABLE_REASON
     return NOT_RECORDED_REASON
+
+
+#: R-IV.1048(c). The two values the origin field may take. Named constants so a caller
+#: cannot invent a third spelling (R-IV.925(b): do not invent labels).
+ORIGIN_STORED = "stored"
+ORIGIN_COMPUTED = "computed"
+ORIGINS = (ORIGIN_STORED, ORIGIN_COMPUTED)
+
+
+def classification_reason_origin(account: Any, classification: Any,
+                                 stored: Any = None) -> str:
+    """Whether the served `classification_reason` came from the ROW or from this function.
+
+    R-IV.1048(c), and it closes a real gap: the hub serves "not applicable: ROBINHOOD" on 486
+    rows where the book stores NULL. That text is correct and it is also AUTHORED HERE, so a
+    reader who treats it as recorded provenance is citing the hub back to itself. One field
+    settles it.
+
+    `stored` -> the row's own text, whatever rule it was written under.
+    `computed` -> everything else: NO_BASIS_RECORDED, "not applicable: ROBINHOOD",
+                  "not recorded". All three are this module's words.
+
+    Deliberately mirrors classification_reason()'s branching rather than re-deriving it: if
+    the two ever disagree about which case a row is in, the origin would describe a different
+    row than the reason beside it.
+    """
+    if _norm(classification) in CLASSIFICATIONS:
+        text = (str(stored).strip() if stored is not None else "")
+        return ORIGIN_STORED if text else ORIGIN_COMPUTED
+    return ORIGIN_COMPUTED
 
 
 def bucket_reason(bucket: Any, stored: Any = None) -> Optional[str]:
