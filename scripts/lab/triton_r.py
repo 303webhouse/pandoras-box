@@ -39,6 +39,7 @@ Usage (QUERY):
   python scripts/lab/triton_r.py selftest
 """
 import glob
+import shutil
 import json
 import os
 import sys
@@ -115,10 +116,55 @@ def _globs(spec):
 
 
 def scope_raw(raw, in_scope):
-    """Prints, filtered the moment they are read: export session_date AND executed ET date in scope."""
-    sd = _dates(raw.session_date)
-    ex = list(pd.to_datetime(raw.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date)
-    return raw[[in_scope(a) and in_scope(b) for a, b in zip(sd, ex)]].reset_index(drop=True)
+    """Prints, filtered the moment they are read, by EXECUTED ET DATE ONLY -- exactly as census run 2
+    filtered them (R-IV.1112(b)). A walk file fetched on/after 09-25 may be opened, but only so that its
+    out-of-scope rows are dropped here; no row executed outside scope survives the load. Every copy of a
+    print (same tracking_id) carries the same executed_at, so the D1-clean set is run 2's."""
+    ex = pd.to_datetime(raw.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date
+    return raw[[in_scope(b) for b in ex]].reset_index(drop=True)
+
+
+#: The counts and output hashes of record (R-IV.1112(b)): census run 2, `triton-a7\out\` (QUERY R-IV.1057).
+RUN2_COUNTS = {"T1000": {"census_kept": 288, "census_d5": 258}, "NOGATE": {"census_kept": 362, "census_d5": 306}}
+RUN2_HASHES = {
+    "events_m4_d5": "5e496738a5033c03af78c8176d8c24a2683c0985dc8ef7ac2314325e3a8f5a1d",
+    "d6_direction": "0fdbaa84d9d90a545c05d131fc1dd9bace19ac155acb536e25d559b3b9c8b03d",
+    "per_ticker_session": "b4787e54183bb73693edbe58bd298952cc48bf02ae68f6361ba1258b25afb05d",
+    "time_of_day": "43f8261bbadf3535bceaf7b1845cdc19f4401f2d96adf3017d61b1ad452d76ca",
+    "weekday": "a261504df009d144cba663790d9fc14b82d7e3e00822f0c17d10c5890a8c2558",
+    "macro_day": "a8b2a06c16b6415222fea60257e6d8248af1eec548bc323faef6825a53ec2539",
+    "pythia_loc": "0515ca0388f5ad6740b066c3eece16a704e0e8b2b5f5186f8d0f3753f11b6a8f"}
+
+
+def frame_hashes(frames):
+    """sha256 of each census frame written exactly as `triton_census._write` writes it."""
+    import hashlib
+    import tempfile
+    out = {}
+    with tempfile.TemporaryDirectory() as td:
+        for k, f in frames.items():
+            p = os.path.join(td, f"{k}.csv")
+            f.to_csv(p, index=False)
+            out[k] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+    return out
+
+
+def identity_guard(frames, cap, expected_counts=None, expected_hashes=None):
+    """D1-D5 'exactly as frozen in census run 2' (stamped sec. 3): the captured FRUN counts must equal the
+    NAMED counts of record and every census output must hash to run 2's. Returns the list of mismatches."""
+    expected_counts = RUN2_COUNTS if expected_counts is None else expected_counts
+    expected_hashes = RUN2_HASHES if expected_hashes is None else expected_hashes
+    bad = []
+    for w, exp in expected_counts.items():
+        got = cap.get(w, {})
+        for k, v in exp.items():
+            if got.get(k) != v:
+                bad.append(f"{w} {k}: got {got.get(k)}, record {v}")
+    hs = frame_hashes(frames)
+    for k, v in expected_hashes.items():
+        if hs.get(k) != v:
+            bad.append(f"{k}.csv sha256 {str(hs.get(k))[:16]}... != record {v[:16]}...")
+    return bad
 
 
 def scope_bars(bars, in_scope):
@@ -708,15 +754,13 @@ def fx_state(fx, symbol, d):
     return "RE-LEVER" if c[-1] > c[-6] else "UNWIND"
 
 
-def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv, macro_csv, tide_csv,
-             iv_csv, fx_csv, out_dir, n_shuffles=None):
-    if not C.TAU_FINAL:
-        raise SystemExit("tau is not final")
-    C.set_window("calibration")
-    if C.CALIBRATION != BACKTEST:
-        raise SystemExit("the census calibration window is not the backtest block; refusing")
-    va, macro_all, macro_excl, tide, iv, fx = load_side_inputs(va_csv, macro_csv, tide_csv, iv_csv, fx_csv)
-    raw = scope_raw(C._read_parquet(prints_glob), in_block)          # the ceiling, at the read
+def backtest_census(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va, macro_all, n_shuffles=None):
+    """The census half of the backtest: load (ceiling at the read), census set, the frozen census captured.
+    Returns a dict; no outcome is computed here."""
+    raw = scope_raw(C._read_parquet(prints_glob), in_block)          # the ceiling, at the read (executed date)
+    if len(raw):
+        exd = pd.to_datetime(raw.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date
+        assert_block(set(exd), "prints after the load")
     build_set = C.build_complete_set(raw)
     S, excluded, refusals = C.census_set(pd.read_csv(complete_csv), build_set)
     if refusals:
@@ -739,11 +783,33 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
     cap = capture_matches_census(frames, E)
     if not all(v["match"] for v in cap.values()):
         raise SystemExit(f"captured events do not match the census counts: {cap}; refusing")
+    return {"frames": frames, "E": E, "cap": cap, "S": S, "df": df, "n_dup": n_dup, "bars_hl": bars_hl,
+            "ohlcv": ohlcv, "source_map": source_map, "poly_info": poly_info, "adv": adv}
+
+
+def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv, macro_csv, tide_csv,
+             iv_csv, fx_csv, out_dir, n_shuffles=None, expected_counts=None, expected_hashes=None):
+    if not C.TAU_FINAL:
+        raise SystemExit("tau is not final")
+    C.set_window("calibration")
+    if C.CALIBRATION != BACKTEST:
+        raise SystemExit("the census calibration window is not the backtest block; refusing")
+    va, macro_all, macro_excl, tide, iv, fx = load_side_inputs(va_csv, macro_csv, tide_csv, iv_csv, fx_csv)
+    bc = backtest_census(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va, macro_all, n_shuffles)
+    frames, E, cap, S, df, n_dup = bc["frames"], bc["E"], bc["cap"], bc["S"], bc["df"], bc["n_dup"]
+    bars_hl, ohlcv, source_map, poly_info, adv = bc["bars_hl"], bc["ohlcv"], bc["source_map"], bc["poly_info"], bc["adv"]
+    guard = identity_guard(frames, cap, expected_counts, expected_hashes)   # R-IV.1112(b): the counts of record
+    if guard:
+        raise SystemExit("IDENTITY GUARD: D1-D5 are not census run 2's (stamped sec. 3): " + "; ".join(guard) +
+                         ". Refusing.")
     dates = sorted({d for d in C.CALIBRATION_DATES if in_block(d)})
     ctx = Ctx(ohlcv, tide, iv, va, macro_excl, dates)
     prints_by_ts = {k: g for k, g in df.groupby(["ticker", "session"])}
     result = {"claim": CLAIM, "label": LABEL, "money_gate": MONEY_GATE, "block": [str(BACKTEST[0]), str(BACKTEST[1])],
               "ceiling": str(CEILING), "capture_check": cap, "census_set_ticker_sessions": len(S),
+              "identity_guard": {"counts_of_record": expected_counts or RUN2_COUNTS,
+                                 "hashes_of_record": "RUN2_HASHES (7 census outputs)" if expected_hashes is None
+                                 else "self-test expected", "mismatches": []},
               "duplicate_tracking_ids_dropped": n_dup, "bar_source_map_counts": source_map.source.value_counts().to_dict(),
               "polygon_files": poly_info, "pythia_label": C.PYTHIA_LABEL, "variants": {}}
     funnel_rows = []
@@ -976,7 +1042,34 @@ def _e2e():
                 os.path.join(td, "bars1m", "*", "*.parquet"), os.path.join(td, "poly", "*.parquet"),
                 os.path.join(td, "adv.csv"), os.path.join(td, "va.csv"), os.path.join(td, "macro.csv"),
                 os.path.join(td, "tide.csv"), os.path.join(td, "iv.csv"), os.path.join(td, "fx.csv")]
-        res = backtest(*args, os.path.join(td, "out"), n_shuffles=40)
+        # R-IV.1112(b): the identity guard against NAMED counts and output hashes of record
+        va_, mac_, _, _, _, _ = load_side_inputs(*args[5:10])
+        bc = backtest_census(*args[:5], va_, mac_, n_shuffles=40)
+        exp_c = {w: {"census_kept": v["census_kept"], "census_d5": v["census_d5"]} for w, v in bc["cap"].items()}
+        exp_h = frame_hashes(bc["frames"])
+        try:
+            backtest(*args, os.path.join(td, "out_run2"), n_shuffles=40)
+            checks["GUARD: run 2's real constants refuse a synthetic run (the guard is live)"] = False
+        except SystemExit as e_:
+            checks["GUARD: run 2's real constants refuse a synthetic run (the guard is live)"] = \
+                "IDENTITY GUARD" in str(e_) and "record 288" in str(e_) and not os.path.exists(os.path.join(td, "out_run2"))
+        res = backtest(*args, os.path.join(td, "out"), n_shuffles=40, expected_counts=exp_c, expected_hashes=exp_h)
+        checks["GUARD: matching counts and hashes of record pass"] = res["identity_guard"]["mismatches"] == []
+        pert = os.path.join(td, "dp_pert")
+        shutil.copytree(os.path.join(td, "dp"), pert)
+        fpath = os.path.join(pert, "NVDA", "202609.parquet")
+        g = pd.read_parquet(fpath)
+        i0 = int(np.flatnonzero((g.session_date == "2026-09-02").to_numpy())[100])
+        g.loc[g.index[i0], "size"] = int(g["size"].iloc[i0]) + 1           # ONE row, one field
+        g.to_parquet(fpath, index=False)
+        a3 = list(args)
+        a3[0] = os.path.join(pert, "*", "*.parquet")
+        try:
+            backtest(*a3, os.path.join(td, "out_pert"), n_shuffles=40, expected_counts=exp_c, expected_hashes=exp_h)
+            checks["GUARD: a ONE-ROW perturbation of the prints refuses (R-IV.1096(c)4)"] = False
+        except SystemExit as e_:
+            checks["GUARD: a ONE-ROW perturbation of the prints refuses (R-IV.1096(c)4)"] = \
+                "IDENTITY GUARD" in str(e_) and "sha256" in str(e_)
         out = os.path.join(td, "out")
         checks["E2E: backtest runs; capture equals the census in both windows"] = \
             all(v["match"] for v in res["capture_check"].values())
@@ -1135,6 +1228,19 @@ def selftest():
                       "close": [1, 2, 3]}).to_csv(p, index=False)
         checks["CEILING: fx keeps pre-block history but drops sealed dates"] = \
             sorted(read_fx(p).date) == ["2026-08-14", "2026-09-24"]
+    rng0 = np.random.default_rng(3)
+    raw0, _, _ = C._synthetic_vendor(rng0)
+    late = raw0[raw0.session_date == "2026-09-02"].head(5).copy()
+    late["session_date"] = "2026-09-28"                         # a block print served by a later (sealed) fetch
+    late["tracking_id"] = late.tracking_id + "_late"
+    raw0 = pd.concat([raw0, late], ignore_index=True)
+    kept0 = scope_raw(raw0, in_block)
+    ex0 = pd.to_datetime(kept0.executed_at, utc=True, format="ISO8601").dt.tz_convert("America/New_York").dt.date
+    checks["CEILING (R-IV.1112(b)): no row with execution date >= 09-25 (or sealed) survives the load"] = \
+        all(in_block(d) for d in ex0) and len(kept0) > 0 and \
+        not any(d >= CEILING for d in ex0)
+    checks["CEILING: like run 2, an in-block print served by a later fetch is KEPT (filter is execution date)"] = \
+        int((kept0.tracking_id.str.endswith("_late")).sum()) == 5
     checks["CEILING: census window equals the backtest block"] = C.CALIBRATION == BACKTEST and \
         all(in_block(d) for d in C.CALIBRATION_DATES) and len(C.CALIBRATION_DATES) == 17
     # 1 · the frozen census, captured: counts equal the census's own
