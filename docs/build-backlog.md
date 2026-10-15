@@ -360,3 +360,24 @@ Recording priority calls made during ATHENA workflow passes that may set future 
 | 2026-07-14 | v4 — ZEUS Phase II promoted | Committee brief (2026-07-12) + Titans review (2026-07-13) approved Brief S-1 (Stater Swap v2 foundation) as top-of-queue, forced by a live P0 (wrong-asset crypto quote) and the crypto L0-governance-bypass finding. Rebuild-stack L1/L2, Outcome Tracking Phase C, committee review logging, and Phase B `get_bars` all displaced (not dropped — resequenced behind S-1). S-1's own F-1 through F-4 shipped and deployed same week (`1aae39e`→`90f9d10`); F-5 (this update) closes the "BTCUSDT crypto ticker support" Tier-2 item (absorbed, far larger than originally scoped), records the post-R-2 checkpoint as a standing sequencing gate, records the HELIOS mockup parallel-track approval, and adds the Olympus-crypto-specialist Tier-3 item (Titans one-pager required before any build). Also flagged: hub MCP tool-descriptions spec is 5 tools stale (Framework/housekeeping). |
 | 2026-07-15 | F-4 cutover — inverted shadow, unified pipeline now primary | Fable ruled cutover greenlit: `process_signal_unified` is now the PRIMARY writer for Crypto Scanner signals (persistence/Discord/broadcast/committee-flagging/conflict-dismissal all real); the original ad hoc bypass scorer is demoted to a comparison-only shadow-logger in the same `crypto_dual_write_shadow` table (roles inverted, no schema change). Diff report now tracks RETIREMENT (n>=30 real signals) rather than cutover. Pre-deploy checklist: a 4-agent parallel research pass confirmed no blocking Discord/fan-out risk — the one genuinely new mechanism (VPS committee auto-run on score>=85) is gated by a threshold crypto signals have never crossed historically (max 72 observed) and fails soft on missing enrichment data; feed-tier-v2 top_feed alerts are structurally unreachable for crypto (Pythia watchlist ceiling); lightning-dedup and dashboard rendering confirmed safe no-ops; cross-strategy conflict-dismissal confirmed non-triggerable in practice due to ticker-format inconsistency across the three crypto signal sources (BTCUSDT vs BTC-USD vs raw TradingView format). Added Tier 2 item #6 (incidental finding: `tradingview.py::is_crypto_ticker()` misses hyphenated tickers, unrelated to this cutover, not fixed). Full record: `docs/strategy-reviews/stater-swap-redesign/s1-phase4-findings.md`. |
 | 2026-10-06 | New Tier 2 item | #10 `hub_get_quote` has no VIX — added per R-IV.660(c)5 (Trade Analysis finding, relayed backlog-only, explicitly not actioned in that ruling). Scoped as a SOURCE decision rather than a build: the risk is serving `VIXY`/`UVXY` as "VIX", which is the wrong-asset fault `hub_get_crypto_quote`'s asset-class guard exists to prevent, so declining with a reason is a valid outcome. No code written. |
+
+## TD: no single position-write choke point (R-IV.1035, "noted, not now")
+
+**Measured 2026-10-14.** `backend/api/unified_positions.py` alone carries **35
+INSERT/UPDATE statements across 30 writing endpoints**, and the existing write-scope guard
+(`api/_position_write_scope.py::assert_columns_allowed`) is called from **2** of them. Other
+writers: `database/postgres_client.py` (4), `api/positions.py` (2),
+`jobs/b2_cut_alert_job.py` (2).
+
+**Why it matters.** Anything that must happen "on any position write" has nowhere to attach.
+R-IV.1033(e)'s 20% tactical reminder hit this: hooking thirty call sites is thirty chances to
+miss one, and a reminder that silently fails to fire is the failure nobody notices. It was
+wired to the mark-to-market refresh instead — complete coverage, at a latency of ≤15 min
+during market hours and "next open" outside them (R-IV.1035 accepted that trade).
+
+**What a fix looks like.** One funnel every writer goes through — a `write_position()` that
+owns the SQL and runs the guards and post-write hooks — so a new obligation is added in one
+place. The guard already exists and is the natural home; what is missing is that every writer
+be made to pass through it.
+
+**Not scheduled.** Logged under R-IV.1035 as tech debt, not queued work.
