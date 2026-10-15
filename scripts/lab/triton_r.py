@@ -33,7 +33,8 @@ Usage (QUERY):
   python scripts/lab/triton_r.py backtest <prints_glob> <complete_csv> <bars_glob> <polygon_glob> <adv_csv>
          <va_csv> <macro_csv> <tide_csv> <iv_csv> <fx_csv> <out_dir>
   python scripts/lab/triton_r.py count <as_of> <prints_glob> <complete_csv> <bars_glob> "<polygon_glob>;<polygon_glob2>" <va_csv>
-         <macro_csv> <tide_csv> <iv_csv> <out_dir>      (COUNT-ONLY, confirmation set 09-25 .. as_of)
+         <macro_csv> <tide_csv> <iv_csv> <out_dir> <state_dir>   (COUNT-ONLY, confirmation set 09-25 .. as_of;
+         state_dir keeps the frozen stop trigger across weekly runs; refuses until amendment 5 is stamped)
   python scripts/lab/triton_r.py confirmation-complete <as_of> <walk_pages_csv> <complete_csv_out>
   python scripts/lab/triton_r.py confirmation-crosscheck <as_of> <prints_glob> <complete_csv> <crosscheck_csv_out>
   python scripts/lab/triton_r.py selftest
@@ -59,6 +60,14 @@ VARIANTS = {"TG-ON": "T1000", "TG-OFF": "NOGATE"}  # R-IV.1080(c): TG-ON is PRIM
 PRIMARY = "TG-ON"
 FLOOR = "FRUN"                                     # R-IV.1078(b)
 RTH0, RTH1 = 9 * 3600 + 30 * 60, 16 * 3600
+#: NYSE early closes in the TRITON-R span (13:00 ET). Stamped sec. 6: S_close is the 13:00 close on half-days,
+#: and tau runs to the actual close; QUERY R-IV.1094 sec. 8 ask 4: half sessions are counted and MARKED.
+HALF_DAYS = {date(2026, 11, 27), date(2026, 12, 24)}
+
+
+def session_close(d):
+    """Regular-session close of `d` in seconds after midnight ET (13:00 on a half-day, else 16:00)."""
+    return 13 * 3600 if d in HALF_DAYS else RTH1
 BAR5 = 300
 D7_ATR_MULT, D7_ATR_N, D7_WINDOW_S, SLOT_LOOKBACK = 0.25, 14, 3600, 10
 EMA_N = 20
@@ -72,6 +81,8 @@ FREQ_FLOOR_TS = 20                                 # amendment 1: the frequency 
 AMENDMENT_1 = "TRITON-R-v1-AMENDMENT-1-R-IV.1084.md d8030b4f0602af9c54d2f3b0a393479a954b672ff3f5315f2cb478983c10aa58"
 AMENDMENT_2 = "TRITON-R-v1-AMENDMENT-2-R-IV.1090.md 21a2c0e93c4db6eadfdbc1695c7d33ae61c5ff37ce4d53fb1877c9f4d784848a"
 AMENDMENT_3 = "TRITON-R-v1-AMENDMENT-3-R-IV.1093.md c491c196ed3bec75b21f91e31956a98b2c0bdad55f52decc74e57909410e483c"
+AMENDMENT_4 = "TRITON-R-v1-AMENDMENT-4-R-IV.1111.md 6d26a90e7a2ae6c7cb20620ca5c15ee7dbae1b3a2a298f1a588f7c93bd630b53 (data note)"
+AMENDMENT_5 = ""                                   # set when amendment 5 is stamped (R-IV.1114(b))
 WIN4_MIN_PER_SIDE = 5                              # amendment 2 sec. 4
 SUSPECT_SKIP_SHARE = 0.10                          # amendment 2 sec. 5
 TUE_THU = {1, 2, 3}
@@ -291,7 +302,7 @@ def d7(seq, sess_mask, prior_b5, t_event, L, side):
         c, v = float(seq.close.iloc[i]), float(seq.volume.iloc[i])
         beyond = c >= L + D7_ATR_MULT * atr if side == "BUYER" else c <= L - D7_ATR_MULT * atr
         if beyond and v >= med:
-            if tc >= RTH1:
+            if tc >= session_close(seq.session.iloc[i]):
                 return "MISSING", "horizon"
             return "CONFIRMED", int(i)
     return "UNCONFIRMED", None
@@ -474,7 +485,7 @@ def evaluate(ctx, tk, d, t, L, side, outcome=True):
         b1 = ctx.ohlcv[(tk, d)]
         s_close = float(b1.close.iloc[-1])
         sigma = float(ctx.iv[(tk, ctx.prior_session(d))])
-        tau_y = ((RTH1 - t_conf) / 60.0) / (390.0 * 252.0)
+        tau_y = ((session_close(d) - t_conf) / 60.0) / (390.0 * 252.0)   # to the ACTUAL close
         im = S0 * sigma * np.sqrt(tau_y)
         dsign = 1.0 if side == "BUYER" else -1.0
         res["z"] = dsign * (s_close - S0) / im if im > 0 else None
@@ -524,8 +535,10 @@ def dark_runs(df_sess, t_lo, t_hi, adv):
     return np.vstack(rows)[:, [0, 3]] if rows else np.empty((0, 2))
 
 
-def placebos(ctx, prints_by_ts, adv, tk, d_event, t_event, wstart, rng, bars_hl, eligible_sessions):
-    """Valid placebo Zs for one claim event (up to PLACEBO_MAX, fixed rng)."""
+def placebos(ctx, prints_by_ts, adv, tk, d_event, t_event, wstart, rng, bars_hl, eligible_sessions, outcome=True):
+    """Valid placebo Zs for one claim event (up to PLACEBO_MAX, fixed rng). outcome=False (the COUNT job):
+    only whether valid placebos EXIST -- each is a claim-passing candidate under evaluate(outcome=False);
+    no Z is computed and S_close is never read."""
     cands = []
     for d in eligible_sessions:
         if d == d_event or (tk, d) not in ctx.ohlcv:
@@ -548,9 +561,11 @@ def placebos(ctx, prints_by_ts, adv, tk, d_event, t_event, wstart, rng, bars_hl,
                 if key in seen:
                     continue
                 seen.add(key)
-                ev = evaluate(ctx, tk, d, float(r.t_s), Lp, d6p)
-                if ev["z"] is not None:
+                ev = evaluate(ctx, tk, d, float(r.t_s), Lp, d6p, outcome=outcome)
+                if outcome and ev["z"] is not None:
                     cands.append(ev["z"])
+                elif not outcome and not ev["missing"] and not ev["fails"]:
+                    cands.append(1.0)                                  # existence only
     if not cands:
         return []
     pick = rng.choice(len(cands), size=min(PLACEBO_MAX, len(cands)), replace=False)
@@ -881,8 +896,11 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
 # ── 8 · the weekly COUNT-ONLY job for the CONFIRMATION SET (R-IV.1080(b), R-IV.1084(d)) ─────────
 CONFIRM_FIRST, CONFIRM_LAST = date(2026, 9, 25), date(2026, 12, 31)
 NYSE_HOLIDAYS_CONFIRM = {date(2026, 11, 26), date(2026, 12, 25)}
-COUNT_COLUMNS = ["variant", "weight", "as_of", "window_first", "window_last", "window_sessions",
-                 "evaluable_ticker_sessions", "claim_events", "sessions_with_claim_events", "stop_rule_met"]
+COUNT_COLUMNS = ["variant", "weight", "as_of", "window_first", "window_last", "window_sessions", "half_sessions",
+                 "evaluable_ticker_sessions", "claim_events", "sessions_with_claim_events",
+                 "events_with_placebo", "events_without_placebo", "stop_rule_met", "stop_rule_frozen_as_of"]
+UNEVAL_COLUMNS = ["variant", "ingredient", "events_unevaluable"]
+TRIGGER_FILE = "stop_trigger.json"            # R-IV.1114(c): once true, frozen; the flag never reverts
 
 
 def confirmation_dates(as_of):
@@ -921,12 +939,24 @@ def check_as_of(as_of, today=None):
 
 
 def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, macro_csv, tide_csv, iv_csv, out_dir,
-          n_shuffles=None, today=None):
-    """Per-variant claim-event and evaluable-session counts for the confirmation set 09-25 .. as_of, and
-    NOTHING else (R-IV.1084(d)). D1-D7, the sec. 5 filters and the calendar only; never S_close, Z, a move or a
-    placebo outcome. History bars 09-01 .. 09-24 are read only for ATR / EMA / slot-median continuity."""
+          state_dir, n_shuffles=None, today=None):
+    """Per-variant counts for the confirmation set 09-25 .. as_of (R-IV.1084(d), R-IV.1114(c)): claim events,
+    evaluable ticker-sessions, per-ingredient UNEVALUABLE counts, and events with / without a valid placebo
+    (existence only). D1-D7, the sec. 5 filters and the calendar only; never S_close, Z, a move or a placebo
+    outcome. History bars 09-01 .. 09-24 are read only for ATR / EMA / slot-median continuity.
+    STOP TRIGGER: once a run reports stop_rule_met, its window is written to state_dir/stop_trigger.json and
+    FROZEN as the read window; every later call reports the frozen trigger and reads NO data."""
     as_of = pd.Timestamp(as_of).date()
     check_as_of(as_of, today)
+    trig_path = os.path.join(state_dir, TRIGGER_FILE)
+    if os.path.exists(trig_path):
+        trig = json.load(open(trig_path))
+        os.makedirs(out_dir, exist_ok=True)
+        json.dump({"stop_rule_met": True, "frozen": True, "trigger": trig,
+                   "note": "the stop rule fired earlier; the read window is frozen; no data was read by this call"},
+                  open(os.path.join(out_dir, "trigger_frozen.json"), "w"), indent=1, default=str)
+        print(f"STOP TRIGGER FROZEN at as_of {trig.get('as_of')}; no data read")
+        return None
     conf = confirmation_dates(as_of)
     hist = [d for d in C.CALIBRATION_DATES if in_block(d)]             # 09-01 .. 09-24, seal excluded
     scope = set(conf) | set(hist)
@@ -977,27 +1007,77 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
     ctx = Ctx(ohlcv, tide, iv, va, macro_excl, sorted(scope))
     eval_ts = [(tk, d) for (tk, d) in sorted(S) if d in set(conf) and calendar_ok(d, macro_excl) == "OK"
                and not ctx.session_missing(tk, d)]
-    rows = []
+    prints_by_ts = {k: g for k, g in df.groupby(["ticker", "session"])}
+    eligible = sorted({d for d in conf if calendar_ok(d, macro_excl) == "OK"})
+    halves = [d for d in conf if d in HALF_DAYS]
+    rows, unev = [], []
     for vname, wname in VARIANTS.items():
         ev = E[(E.window == wname) & (E.floor == FLOOR) & E.kept] if len(E) else E
         ev = ev[(ev.d5 == True) & ev.d6.isin(["BUYER", "SELLER"])] if len(ev) else ev  # noqa: E712
-        n, sess = 0, set()
+        wstart = C.WINDOWS[wname][0].hour * 3600 + C.WINDOWS[wname][0].minute * 60
+        rng = np.random.default_rng(SEED_R)
+        n, sess, with_p, miss = 0, set(), 0, {}
         for r in ev.itertuples():
             res = evaluate(ctx, r.ticker, r.session, r.t, r.L, r.d6, outcome=False)
+            for m in res["missing"]:
+                miss[m] = miss.get(m, 0) + 1
             if not res["missing"] and not res["fails"]:
                 n += 1
                 sess.add(r.session)
+                pl = placebos(ctx, prints_by_ts, {}, r.ticker, r.session, r.t, wstart, rng, bars_hl, eligible,
+                              outcome=False)
+                with_p += int(len(pl) > 0)
+        for m, k in sorted(miss.items()):
+            unev.append({"variant": vname, "ingredient": m, "events_unevaluable": k})
         primary = vname == PRIMARY
+        met = bool(primary and ((n >= MIN_EVENTS and len(sess) >= MIN_SESSIONS) or as_of >= CONFIRM_LAST))
         rows.append({"variant": vname, "weight": "PRIMARY" if primary else "SECONDARY", "as_of": str(as_of),
                      "window_first": str(conf[0]), "window_last": str(conf[-1]), "window_sessions": len(conf),
-                     "evaluable_ticker_sessions": len(eval_ts), "claim_events": n,
-                     "sessions_with_claim_events": len(sess),
-                     "stop_rule_met": bool(primary and ((n >= MIN_EVENTS and len(sess) >= MIN_SESSIONS)
-                                                        or as_of >= CONFIRM_LAST)) if primary else ""})
+                     "half_sessions": len(halves), "evaluable_ticker_sessions": len(eval_ts), "claim_events": n,
+                     "sessions_with_claim_events": len(sess), "events_with_placebo": with_p,
+                     "events_without_placebo": n - with_p, "stop_rule_met": met if primary else "",
+                     "stop_rule_frozen_as_of": str(as_of) if met else ""})
     out = pd.DataFrame(rows, columns=COUNT_COLUMNS)
-    C.assert_aggregate({"counts": out})
+    U = pd.DataFrame(unev, columns=UNEVAL_COLUMNS)
+    C.assert_aggregate({"counts": out, "unevaluable": U})
     os.makedirs(out_dir, exist_ok=True)
     out.to_csv(os.path.join(out_dir, "counts.csv"), index=False)
+    U.to_csv(os.path.join(out_dir, "unevaluable.csv"), index=False)
+    from datetime import datetime, timezone
+    meta = {
+        "claim": CLAIM,
+        "amendments": [AMENDMENT_1, AMENDMENT_2, AMENDMENT_3, AMENDMENT_4] + ([AMENDMENT_5] if AMENDMENT_5 else []),
+        "computed_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "count_scope": ("claim events = FRUN runs kept by D4, D5-matched, D6-sided, D7-confirmed, passing every "
+                        "sec. 5 filter, no ingredient missing; CORE8 x confirmation sessions 09-25 .. as_of"),
+        "asset_class": "EQUITY (CORE8: SPY QQQ IWM SMH NVDA AAPL MSFT TSLA)",
+        "grid_cell": "floor FRUN x window T1000 (TG-ON, PRIMARY) / NOGATE (TG-OFF, SECONDARY)",
+        "measurement_system": ("TRITON-R v1 claim of record + the amendments listed; COUNTS ONLY "
+                               "(no S_close, Z, move or placebo outcome)"),
+        "distinct_dates": {"window_sessions": len(conf), "first": str(conf[0]), "last": str(conf[-1]),
+                           "half_sessions_marked": [str(d) for d in halves]},
+        "guards_applied": ["execution-date ceiling at the load (prints, bars, side files)",
+                           "as_of must be a completed session within 09-25 .. 12-31",
+                           "6b completeness: export lag / unlabelled refuse", "capture == in-run census",
+                           "evaluate(outcome=False): S_close and sigma never read",
+                           "no ADV (F-ADV outside the claim)", "stop trigger frozen once met (R-IV.1114(c))"],
+        "not_monotone": ("weekly counts are NOT strictly cumulative: D4's shuffle stream is drawn in (ticker, session) "
+                         "order over the window, so adding sessions can change which earlier runs are kept"),
+        "d7_boundary": ("as_of is a completed session, so every D7 window (t, t+60 min] lies inside its own completed "
+                        "session: a window reaching the close is scanned to the close; a confirmation at the close is "
+                        "UNEVALUABLE (no horizon). No event is pending."),
+        "half_sessions": ("early closes (13:00 ET: 2026-11-27, 2026-12-24) are counted in window_sessions and marked; "
+                          "they hold fewer 5-min bars, so the slot median is MISSING for afternoon slots for the 10 "
+                          "sessions after one; the EMA runs across them as across any session"),
+        "placebo_columns": "existence of >= 1 valid placebo per claim event (evaluate(outcome=False)); no Z"}
+    json.dump(meta, open(os.path.join(out_dir, "meta.json"), "w"), indent=1, default=str)
+    prim = rows[[r["variant"] for r in rows].index(PRIMARY)]
+    if prim["stop_rule_met"] is True:
+        os.makedirs(state_dir, exist_ok=True)
+        json.dump({"as_of": str(as_of), "window_first": str(conf[0]), "window_last": str(conf[-1]),
+                   "claim_events": prim["claim_events"], "sessions_with_claim_events": prim["sessions_with_claim_events"],
+                   "frozen_at_utc": meta["computed_at_utc"], "read_window_rule": "R-IV.1090(c)2 / R-IV.1114(c)"},
+                  open(trig_path, "w"), indent=1)
     print(out.to_string(index=False))
     return out
 
@@ -1170,22 +1250,57 @@ def _count_tests():
                 os.path.join(td, "poly_hist", "*.parquet") + ";" + os.path.join(td, "poly_conf", "*.parquet"),
                 os.path.join(td, "va.csv"), os.path.join(td, "macro.csv"), os.path.join(td, "tide.csv"),
                 os.path.join(td, "iv.csv"), os.path.join(td, "out")]
-        out = count(*args, n_shuffles=30, today=today)
+        state = os.path.join(td, "state")
+        out = count(*args, state, n_shuffles=30, today=today)
         f = pd.read_csv(os.path.join(td, "out", "counts.csv"))
         checks["COUNT e2e: output schema is EXACTLY the count columns, one row per variant"] = \
             list(f.columns) == COUNT_COLUMNS and list(f.variant) == ["TG-ON", "TG-OFF"] and len(out) == 2
-        checks["COUNT e2e: window 09-25 .. 09-28 (2 sessions); primary stop rule not met"] = \
-            f.window_sessions.iloc[0] == 2 and str(f.stop_rule_met.iloc[0]) in ("False", "false")
+        checks["COUNT e2e: window 09-25 .. 09-28 (2 sessions); primary stop rule not met; no trigger written"] = \
+            f.window_sessions.iloc[0] == 2 and str(f.stop_rule_met.iloc[0]) in ("False", "false") and \
+            not os.path.exists(os.path.join(state, TRIGGER_FILE))
+        U = pd.read_csv(os.path.join(td, "out", "unevaluable.csv"))
+        mj = json.load(open(os.path.join(td, "out", "meta.json")))
+        checks["COUNT e2e (ask 1): per-ingredient UNEVALUABLE counts written, schema exact"] = \
+            list(U.columns) == UNEVAL_COLUMNS and int(U.events_unevaluable.sum()) >= 0
+        checks["COUNT e2e: events with + without placebo = claim events"] = \
+            bool(((f.events_with_placebo + f.events_without_placebo) == f.claim_events).all())
+        checks["COUNT e2e (ask 5): meta.json carries the six-item label + the not-monotone and D7 notes"] = \
+            all(k in mj for k in ("count_scope", "asset_class", "grid_cell", "measurement_system", "distinct_dates",
+                                  "guards_applied", "not_monotone", "d7_boundary", "half_sessions"))
         t2 = pd.read_csv(os.path.join(td, "tide.csv"))
         t2.loc[0, "session_date"] = "2026-10-20"
         t2.to_csv(os.path.join(td, "tide_bad.csv"), index=False)
         a2 = list(args)
         a2[7] = os.path.join(td, "tide_bad.csv")
         try:
-            count(*a2, n_shuffles=30, today=today)
+            count(*a2, state, n_shuffles=30, today=today)
             checks["COUNT e2e: a tide row after as_of refuses"] = False
         except SystemExit as e_:
             checks["COUNT e2e: a tide row after as_of refuses"] = "DATE CEILING" in str(e_)
+        # ask 2: the stop rule FIRES (as_of 12-31) -> trigger written; every later call is frozen and reads no data
+        conf_all = confirmation_dates(CONFIRM_LAST)
+        pd.DataFrame([{"ticker": t, "session": e.isoformat(), "complete": (t, e) in bp}
+                      for t in C.CORE8 for e in conf_all]).to_csv(os.path.join(td, "complete_all.csv"), index=False)
+        a4 = list(args)
+        a4[0], a4[2], a4[9] = "2026-12-31", os.path.join(td, "complete_all.csv"), os.path.join(td, "out_end")
+        o4 = count(*a4, state, n_shuffles=30, today=date(2027, 1, 5))
+        f4 = pd.read_csv(os.path.join(td, "out_end", "counts.csv"))
+        checks["COUNT (ask 2): the stop rule fires at the 12-31 session and its trigger is written"] = \
+            o4 is not None and str(f4.stop_rule_met.iloc[0]) in ("True", "true") and \
+            os.path.exists(os.path.join(state, TRIGGER_FILE))
+        checks["COUNT (ask 4): half sessions counted and marked (11-27, 12-24)"] = \
+            int(f4.half_sessions.iloc[0]) == 2 and \
+            json.load(open(os.path.join(td, "out_end", "meta.json")))["distinct_dates"]["half_sessions_marked"] == \
+            ["2026-11-27", "2026-12-24"]
+        bogus = ["2026-10-02"] + [os.path.join(td, "nowhere", "x")] * 8 + [os.path.join(td, "out_frozen")]
+        o5 = count(*bogus, state, n_shuffles=30, today=today)
+        checks["COUNT (ask 2): once the trigger exists, the flag never reverts and NO data is read"] = \
+            o5 is None and json.load(open(os.path.join(td, "out_frozen", "trigger_frozen.json")))["trigger"]["as_of"] \
+            == "2026-12-31"
+    # half-day closes (stamped sec. 6: S_close and tau at 13:00 ET on a half-day)
+    checks["HALF-DAY: session close is 13:00 on 11-27 and 12-24, 16:00 otherwise"] = \
+        session_close(date(2026, 11, 27)) == 13 * 3600 and session_close(date(2026, 12, 24)) == 13 * 3600 \
+        and session_close(date(2026, 11, 25)) == RTH1
     return checks
 
 
@@ -1432,7 +1547,9 @@ if __name__ == "__main__":
     if mode == "backtest":
         backtest(*sys.argv[2:13])
     elif mode == "count":
-        count(*sys.argv[2:12])
+        if not AMENDMENT_5:
+            raise SystemExit("amendment 5 is not stamped yet; the first count run waits for it (R-IV.1114(e))")
+        count(*sys.argv[2:13])
     elif mode == "confirmation-complete":            # 6b completeness for the confirmation window, metadata only
         a = pd.Timestamp(sys.argv[2]).date()
         check_as_of(a)
