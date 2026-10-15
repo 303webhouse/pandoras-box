@@ -72,6 +72,33 @@ async def _warn_feed_rejecting(ticker, secret_len):
     never the topic, and no figure beyond that discriminator.
     """
     global _FEED_WARNED_SESSION
+    # R-IV.1037(c)2: RECORD the rejection before deciding whether to push. feed_health is
+    # computed from this table, and until now rejections were logged only -- so the 65
+    # consecutive refusals of the v2.6 cutover left no trace a reader could query, which is
+    # why the surface could keep answering `ok`.
+    #
+    # THE SECRET IS NEVER STORED. Only its LENGTH, which is the discriminator between "the
+    # alert body carries no secret field" and "the value is stale" -- two different fixes.
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
+                "  id SERIAL PRIMARY KEY,"
+                "  rejected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+                "  ticker TEXT,"
+                "  reason TEXT NOT NULL,"
+                "  secret_len INT NOT NULL)")
+            await conn.execute(
+                "INSERT INTO pythia_webhook_rejections (ticker, reason, secret_len) "
+                "VALUES ($1, $2, $3)",
+                (str(ticker) if ticker else None),
+                ("no secret field in the alert body" if secret_len == 0
+                 else "secret value does not match"),
+                int(secret_len))
+    except Exception:                                               # noqa: BLE001
+        logger.warning("[pythia] could not record the rejection", exc_info=True)
+
     try:
         from zoneinfo import ZoneInfo
         session = datetime.now(ZoneInfo("America/New_York")).date().isoformat()

@@ -194,6 +194,10 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
 
     age_seconds = int((now_utc - ts).total_seconds())
 
+    # R-IV.1037(c)2: feed health. Computed from the ACCEPTED events table and the
+    # rejections table, so it survives a restart -- the R-IV.1033(d) work tracked rejections
+    # in process memory only and therefore could not be served at all.
+    _feed = await _feed_health()
     # The script version the payload carried, or None. Bound once so the three
     # fields below cannot disagree about which Pine wrote this row.
     _script = (row["script_version"] or "").strip() or None
@@ -220,6 +224,11 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
         "event_age_seconds": age_seconds,
         # sessions, not seconds: 3,293,950s does not read as 38 days
         "sessions_behind": sessions_behind,
+        # R-IV.1037(c)2: feed health, BESIDE the freshness verdict and never folded into it.
+        # ok/stale/dark describe the LEVELS (how many sessions behind); they cannot tell a
+        # quiet market from a refused feed, which is why the v2.6 cutover's 65 consecutive
+        # 401s read as `ok` with sessions_behind 0.
+        **_feed,
         # R-IV.1024(c): READ FROM THE DATA. This was the string literal
         # "pythia_webhook_v2.4" plus a note naming v2.4, written when the payload carried no
         # version field at all (verified 2026-06-10). PYTHIA v2.6 adds "script", so the label
@@ -242,6 +251,42 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
     }
 
     return {"status": status, "data": data, "staleness_seconds": age_seconds}
+
+
+async def _feed_health() -> dict:
+    """`feed_health`, `last_accepted_at` and `rejected_since_last_accept`. NEVER raises.
+
+    ACQUIRES ITS OWN CONNECTION rather than taking the caller's. The caller's `async with
+    pool.acquire() as conn` has already closed by the time this runs, so the name is still
+    bound but the connection is back in the pool -- using it would be a use-after-release,
+    which fails intermittently under load and looks like a vendor problem.
+
+    An unreadable count returns `unknown` rather than zero: "I could not check" must not read
+    as "no rejections", which would report a refused feed as healthy.
+    """
+    from models.pythia_feed_health import classify
+    try:
+        from database.postgres_client import get_postgres_client
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            last, n = await _feed_counts(conn)
+        return classify(last, n)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("feed_health unavailable: %s", type(exc).__name__)
+        return classify(None, None)
+
+
+async def _feed_counts(conn):
+    """(last accepted timestamp, rejections since it). Separated so the SQL is testable."""
+    try:
+        last = await conn.fetchval("SELECT MAX(timestamp) FROM pythia_events")
+        n = await conn.fetchval(
+            "SELECT count(*) FROM pythia_webhook_rejections"
+            " WHERE $1::timestamptz IS NULL OR rejected_at > $1::timestamptz", last)
+        return last, (int(n) if n is not None else None)
+    except Exception:                                               # noqa: BLE001
+        # The table may not exist yet on a fresh deploy. None is NOT zero.
+        return None, None
 
 
 def _et_midnight_utc(d: date) -> datetime:
