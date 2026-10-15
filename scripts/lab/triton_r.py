@@ -1,7 +1,9 @@
 """TRITON-R v1 instrument -- the BACKTEST block (R-IV.1080(h)2-3). QUERY runs it read-only; LAB never sees a row.
 
 Claim of record: TRITON-R-v1-STAMPED-R-IV.1080.md (ba9e77df...), = REV 1 (44b98cab...) + R-IV.1080(b)-(g);
-amended by TRITON-R-v1-AMENDMENT-1-R-IV.1084.md (d8030b4f...): continuous EMA; small-sample kill floors.
+amended by TRITON-R-v1-AMENDMENT-1-R-IV.1084.md (d8030b4f...): continuous EMA; small-sample kill floors;
+and TRITON-R-v1-AMENDMENT-2-R-IV.1090.md (21a2c0e9...): controls from t_r + 1 min; WIN 1 bootstrap 10,000;
+WIN 4 >= 5 claim events per side (named if not met); SUSPECT if > 10% of resamples skipped.
 Source of record: triton-design-of-record-2026-10-12.md (12ecf72c...).
 
 DATE CEILINGS FIRST (R-IV.1072(d), R-IV.1080): this instrument reads ONLY the backtest block
@@ -66,6 +68,9 @@ SEED_R = 20261015
 MIN_EVENTS, MIN_SESSIONS = 30, 10
 FREQ_FLOOR_TS = 20                                 # amendment 1: the frequency kill needs >= 20 evaluable ticker-sessions
 AMENDMENT_1 = "TRITON-R-v1-AMENDMENT-1-R-IV.1084.md d8030b4f0602af9c54d2f3b0a393479a954b672ff3f5315f2cb478983c10aa58"
+AMENDMENT_2 = "TRITON-R-v1-AMENDMENT-2-R-IV.1090.md 21a2c0e93c4db6eadfdbc1695c7d33ae61c5ff37ce4d53fb1877c9f4d784848a"
+WIN4_MIN_PER_SIDE = 5                              # amendment 2 sec. 4
+SUSPECT_SKIP_SHARE = 0.10                          # amendment 2 sec. 5
 TUE_THU = {1, 2, 3}
 MACRO_EXCLUDE = {"cpi", "fomc_decision"}
 MONEY_GATE = "money gate: NOT EVALUABLE (backtest; R-IV.1080(g))"
@@ -526,6 +531,13 @@ def boot_ci(groups, stat, B=BOOT_B, seed=BOOT_SEED):
     return point, float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5)), len(vals)
 
 
+def suspect(name, point, n_used, B=BOOT_B):
+    """Amendment 2 sec. 5: SUSPECT if skipped resamples exceed 10% of B (only when the point is defined)."""
+    skipped = (B - n_used) if point is not None else None
+    return {f"{name}_boot_skipped": skipped,
+            f"{name}_suspect": bool(skipped is not None and skipped > SUSPECT_SKIP_SHARE * B)}
+
+
 def mean_stat(parts):
     x = [v for p in parts for v in p]
     return float(np.mean(x)) if x else None
@@ -557,7 +569,7 @@ def summarize(events, n_eval_ts):
     out["win2_mean_z_event"] = float(np.mean([e["z"] for e in with_p])) if with_p else None
     out["win2_mean_z_placebo"] = float(np.mean([np.mean(e["zp"]) for e in with_p])) if with_p else None
     p, lo, hi, nb = boot_ci(g2, mean_stat)
-    out.update({"win2_diff": p, "win2_lo": lo, "win2_hi": hi, "win2_boot_used": nb})
+    out.update({"win2_diff": p, "win2_lo": lo, "win2_hi": hi, "win2_boot_used": nb, **suspect("win2", p, nb)})
     g1 = {}
     for e in events:
         t = g1.setdefault(e["session"], [0, 0, 0, 0])
@@ -566,7 +578,7 @@ def summarize(events, n_eval_ts):
         t[2] += sum(int(a and b) for a, b in e["ctrl"])
         t[3] += sum(int(a) for a, b in e["ctrl"])
     p1, lo1, hi1, nb1 = boot_ci(g1, rate_diff_stat)
-    out.update({"win1_diff": p1, "win1_lo": lo1, "win1_hi": hi1, "win1_boot_used": nb1,
+    out.update({"win1_diff": p1, "win1_lo": lo1, "win1_hi": hi1, "win1_boot_used": nb1, **suspect("win1", p1, nb1),
                 "win1_L_touched": sum(v[1] for v in g1.values()), "win1_L_held": sum(v[0] for v in g1.values()),
                 "win1_ctrl_touched": sum(v[3] for v in g1.values()), "win1_ctrl_held": sum(v[2] for v in g1.values())})
     gm = {}
@@ -577,8 +589,9 @@ def summarize(events, n_eval_ts):
         t[1] += int(e["touched_L"])
         t[2] += int(mt and mh)
         t[3] += int(mt)
-    pm, lom, him, _ = boot_ci(gm, rate_diff_stat)
+    pm, lom, him, nbm = boot_ci(gm, rate_diff_stat)
     out.update({"secondary_mirror_diff": pm, "secondary_mirror_lo": lom, "secondary_mirror_hi": him,
+                **suspect("secondary_mirror", pm, nbm),
                 "secondary_mirror_note": "drift confound: a correct side drifts price toward the mirror; no verdict weight"})
     # WIN 3 / one week carries it
     wk = {}
@@ -597,7 +610,14 @@ def summarize(events, n_eval_ts):
     sides = {}
     for e in with_p:
         sides.setdefault(e["side"], []).append(e["z"] - float(np.mean(e["zp"])))
-    out["win4_by_side"] = {k: {"n": len(v), "mean_diff": float(np.mean(v))} for k, v in sides.items()}
+    n_side = {k: sum(1 for e in events if e["side"] == k) for k in ("BUYER", "SELLER")}
+    out["win4_by_side"] = {k: {"claim_events": n_side[k], "with_placebo": len(sides.get(k, [])),
+                               "mean_diff": float(np.mean(sides[k])) if sides.get(k) else None}
+                           for k in ("BUYER", "SELLER")}
+    # amendment 2 sec. 4: each side needs >= 5 claim events; a side below that, or empty, is NAMED
+    out["win4_not_met_sides"] = [k for k in ("BUYER", "SELLER")
+                                 if n_side[k] < WIN4_MIN_PER_SIDE or out["win4_by_side"][k]["mean_diff"] is None
+                                 or out["win4_by_side"][k]["mean_diff"] < 0]
     # kills -- amendment 1 floors (R-IV.1084(c)): statistical kills only at >= 30 events over >= 10
     # sessions; the frequency kill only with >= 20 evaluable ticker-sessions. Raw readings kept.
     stat_floor = len(events) >= MIN_EVENTS and out["sessions"] >= MIN_SESSIONS
@@ -621,7 +641,7 @@ def summarize(events, n_eval_ts):
     out["win1"] = bool(lo1 is not None and lo1 > 0)
     out["win2"] = bool(lo is not None and lo > 0)
     out["win3"] = bool(out["win3_mean_without_best_week"] is not None and out["win3_mean_without_best_week"] > 0)
-    out["win4"] = bool(sides) and all(v["mean_diff"] >= 0 for v in out["win4_by_side"].values())
+    out["win4"] = not out["win4_not_met_sides"]
     out["min_n_met"] = len(events) >= MIN_EVENTS and out["sessions"] >= MIN_SESSIONS
     return out
 
@@ -756,6 +776,9 @@ def backtest(prints_glob, complete_csv, bars_glob, polygon_glob, adv_csv, va_csv
             funnel_rows.append({"variant": vname, "stage": stage, "count": n})
     p = result["variants"][PRIMARY]
     result["amendment_1"] = AMENDMENT_1
+    result["amendment_2"] = AMENDMENT_2
+    from datetime import datetime, timezone
+    result["computed_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")   # for the outcome log
     floors_met = p["stat_kill_floor_met"] and p["freq_kill_floor_met"]
     result["verdict"] = "KILL" if p["kills_fired"] else ("NO-KILL" if floors_met else "NO-KILL (INSUFFICIENT n)")
     result["verdict_note"] = ("BACKTEST: KILL or NO-KILL only (R-IV.1080(d)). A KILL ends TRITON-R v1. "
@@ -940,6 +963,7 @@ def _e2e():
             all(v["match"] for v in res["capture_check"].values())
         checks["E2E: verdict is NO-KILL (INSUFFICIENT n) on a plumbing-sized run, read on TG-ON"] = \
             res["verdict"] == "NO-KILL (INSUFFICIENT n)" and res["amendment_1"].startswith("TRITON-R-v1-AMENDMENT-1") and \
+            res["amendment_2"].startswith("TRITON-R-v1-AMENDMENT-2") and res["computed_at_utc"].startswith("20") and \
             res["variants"]["TG-ON"]["weight"] == "PRIMARY" and res["variants"]["TG-OFF"]["weight"].startswith("SECONDARY")
         F = pd.read_csv(os.path.join(out, "funnel.csv"))
         checks["E2E: outputs written; funnel is counts only"] = os.path.exists(os.path.join(out, "backtest.json")) and \
@@ -1217,6 +1241,32 @@ def selftest():
     checks["FREQUENCY FLOOR: 0 events / 19 evaluable ticker-sessions -> no frequency kill (raw reading kept)"] = \
         not sm3["freq_kill_floor_met"] and not sm3["kill_under_1_per_week"] and sm3["raw_kill_readings"]["under_1_per_week"]
     checks["MIN N: 12 events -> min_n_met False"] = sm12["min_n_met"] is False
+    # amendment 2
+    bt = pd.DataFrame({"t_s": [0.0, 60, 120, 180], "open": 0.0, "high": [100.5, 105.05, 105.05, 105.05],
+                       "low": [99.5, 104.95, 104.95, 104.95], "close": [100.0, 105.0, 105.0, 105.0], "volume": 1.0})
+    ct = controls(bt, np.array([0.0]), 0.2, np.random.default_rng(3))
+    checks["A2 sec. 2: a control is measured from t_r + 1 min -- a touch only in the t_r bar does not count"] = \
+        len(ct) == K_CONTROLS and all(c == (False, False) for c in ct)
+    both = [dict(e, side=("BUYER" if i % 2 else "SELLER"), z=0.6, zp=[0.1]) for i, e in enumerate(evs[:12])]
+    s_ok = summarize(both, 40)
+    checks["A2 sec. 4: both sides with >= 5 claim events and non-negative -> WIN 4 met"] = \
+        s_ok["win4"] and s_ok["win4_not_met_sides"] == [] and s_ok["win4_by_side"]["SELLER"]["claim_events"] == 6
+    few = [dict(e, side="BUYER") for e in both[:9]] + [dict(both[0], side="SELLER")] * 3
+    s_few = summarize(few, 40)
+    checks["A2 sec. 4: SELLER with 3 claim events -> WIN 4 NOT MET, SELLER named"] = \
+        not s_few["win4"] and s_few["win4_not_met_sides"] == ["SELLER"]
+    s_none = summarize([dict(e, side="BUYER") for e in both], 40)
+    checks["A2 sec. 4: an EMPTY side never satisfies WIN 4 silently (SELLER named)"] = \
+        not s_none["win4"] and s_none["win4_not_met_sides"] == ["SELLER"] and \
+        s_none["win4_by_side"]["SELLER"]["claim_events"] == 0
+    four = [date(2026, 9, d) for d in (15, 16, 17, 22)]
+    sus = [dict(evs[0], session=four[i % 4], touched_L=(i % 4 == 0), held_L=(i % 4 == 0)) for i in range(16)]
+    s_sus = summarize(sus, 40)
+    checks["A2 sec. 5: WIN 1 interval with > 10% skipped resamples is labelled SUSPECT"] = \
+        s_sus["win1_suspect"] and s_sus["win1_boot_skipped"] > 0.10 * BOOT_B
+    checks["A2 sec. 5: a well-defined interval is not SUSPECT"] = sm["win1_suspect"] is False and sm["win2_suspect"] is False
+    checks["A2 sec. 3: WIN 1 uses the same 10,000 fixed-seed resamples as WIN 2"] = \
+        sm["win1_boot_used"] + sm["win1_boot_skipped"] == BOOT_B == sm["win2_boot_used"] + sm["win2_boot_skipped"]
     p, lo, hi, _ = boot_ci({1: [1.0, 2.0], 2: [3.0]}, mean_stat, B=500)
     p_, lo_, hi_, _ = boot_ci({1: [1.0, 2.0], 2: [3.0]}, mean_stat, B=500)
     checks["BOOTSTRAP: fixed seed reproduces; lo <= point <= hi"] = (p, lo, hi) == (p_, lo_, hi_) and lo <= p <= hi
