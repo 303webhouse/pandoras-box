@@ -223,13 +223,41 @@ Every field is the vendor's own. Nothing here is derived, computed or renamed.
 | `canceled` | whether the print was cancelled |
 | `tracking_id` | the vendor's per-print id, so dedup needs no heuristic |
 
+### Two columns that are NOT the vendor's
+
+These come from the hub's own collection record, not from the feed. They are written onto every
+row because a print cannot be read safely without them.
+
+| field | meaning |
+|---|---|
+| `session_date` | **the session the walk was QUERIED for** — which is NOT the same partition as `executed_at`'s date. A walk for one session returns prints that executed on the session before it, so grouping by `session_date` and grouping by `executed_at::date` give different answers and only one of them answers "what executed that day". A 2,053-row disagreement on 2026-09-21 was exactly this. **For "what executed on date D", filter `executed_at`; `session_date` tells you which walk collected the row.** |
+| `quarantined` | the row is collected and kept but **must never be joined to `triton_flow_shadow`** (R-IV.921(b)4). Marks 2026-08-28 and 2026-08-31. |
+
 ## Reading it safely
 
-- **A session is only complete when `darkpool_backfill_sessions.exhausted = TRUE` AND
-  `prints_received > 0`.** Anything else was cut short by the nightly budget and will be
-  resumed — a census that ignores this reads a partial session as a real one.
-- **`quarantined = TRUE` marks 2026-08-28 and 2026-08-31** (R-IV.921(b)4). Collected and kept,
-  **never joined to `triton_flow_shadow`**.
+**A session is complete only when `exhausted = TRUE` AND `reached_floor = TRUE` AND
+`prints_received > 0`.** This file previously named only `exhausted` and `prints_received`, and
+that was wrong: `exhausted` means *the vendor stopped returning pages*, which a walk also
+satisfies when it is cut short. `reached_floor` means *the walk actually reached prints executed
+before its session's 04:00 ET start* — that it ran out of session, not out of budget. The export
+query has required all three since R-IV.1005(d); only this paragraph was stale.
+
+**The two completeness proofs, b1 and b2** (R-IV.1005(d), tightened by R-IV.1010(c)):
+
+| proof | what it establishes |
+|---|---|
+| **b1** | a print executed **before 04:00 ET** on the session was received — so collection demonstrably ran back past the session's start |
+| **b2** | an unbroken prefix ending in exhaustion: the final page came back **below the page cap**, and the earliest print received is at or before **04:15 ET**. The cap is measured as `MAX(row_count)` actually observed, **never the configured `PAGE_LIMIT`** — a configured number that the vendor silently caps lower would make every final page look short and prove completeness for nothing |
+
+**`SUSPECT` is a THIRD state, not a shade of either.** A session that is neither provably
+complete nor provably partial is SUSPECT, and it is reported as SUSPECT. Collapsing it into
+"complete" overstates coverage and collapsing it into "partial" invites a re-walk that spends
+quota for nothing; both are worse than naming the uncertainty.
+
+**`COMPLETENESS_UNKNOWN` in `MANIFEST.tsv` is not `PARTIAL`.** It means the hub could not be
+asked, so no completeness claim exists for that date — a different fact from a date known to be
+incomplete.
+
 - The census universe is the 8 core names only (R-IV.958(f)): SPY, QQQ, IWM, SMH, NVDA, AAPL,
   MSFT, TSLA.
 

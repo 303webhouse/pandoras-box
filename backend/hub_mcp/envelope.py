@@ -20,6 +20,7 @@ def make_response(
     summary: str = "",
     staleness_seconds: Optional[int] = None,
     error: Optional[str] = None,
+    field_origin: Optional[dict] = None,
 ) -> dict:
     """Build the canonical MCP response envelope.
 
@@ -32,7 +33,7 @@ def make_response(
     if summary and len(summary) > SUMMARY_MAX_CHARS:
         summary = summary[: SUMMARY_MAX_CHARS - 3] + "..."
 
-    return {
+    out = {
         "status": status,
         "data": data,
         "summary": summary or "",
@@ -40,3 +41,10 @@ def make_response(
         "schema_version": SCHEMA_VERSION,
         "error": error,
     }
+    # Convention #42 (TA-177). OMITTED rather than sent empty when a tool has no declaration:
+    # `{}` would read as "this tool serves no fields", and a consumer could take that as
+    # "nothing here is gateable" when the truth is "nobody has said yet". An absent key is the
+    # honest shape of an absent claim. See hub_mcp/field_origin.py, which fails closed.
+    if field_origin:
+        out["field_origin"] = field_origin
+    return out

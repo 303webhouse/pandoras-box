@@ -81,6 +81,17 @@ SELECT p.position_id,
        -- "structure None is not priceable" -- which the unit tests could not catch, because
        -- they hand `decide` a row directly and never go through this query.
        p.structure,
+       -- R-IV.1043(f): the B2 cut reads `orientation_at_entry` when it is recorded, so the
+       -- query has to SELECT it, or the column exists and this path cannot see it.
+       --
+       -- `position_orientation` is NOT selected, and must not be: no migration anywhere
+       -- creates it. It was the name this code ANTICIPATED while waiting for a column, and
+       -- `orientation_at_entry` is the column that actually arrived in R-IV.1043(e).
+       -- Selecting the anticipated name would fail the whole query with UndefinedColumn and
+       -- take the cut alert down -- the first-boot fault's mirror image, a read waiting on a
+       -- writer that is never coming. A test asserts this list carries every column
+       -- `orientation()` reads that the schema actually has.
+       p.orientation_at_entry,
        p.long_strike,
        p.short_strike,
        p.b2_cut_alerted_at,
