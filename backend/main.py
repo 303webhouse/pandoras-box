@@ -208,6 +208,17 @@ async def lifespan(app: FastAPI):
                         await snapshot_account_balances()
                     except Exception as snap_err:
                         logger.warning("Balance snapshot after MTM failed: %s", snap_err)
+                    # R-IV.1033(e): the 20% tactical reminder, HERE rather than on the write.
+                    # There is no single write choke point (35 INSERT/UPDATEs across 30
+                    # endpoints), so hooking "any write" would be thirty chances to miss one
+                    # -- and a reminder that silently fails to fire is the failure nobody
+                    # notices. Here it cannot miss, the marks are freshest, and the cap is on
+                    # MARKET value so it must be computed after the refresh, not before.
+                    try:
+                        from jobs.roth_cap_reminder import run as _roth_cap
+                        await _roth_cap()
+                    except Exception as cap_err:
+                        logger.warning("Roth tactical reminder failed: %s", cap_err)
                     if errors:
                         logger.warning("📊 Mark-to-market: %d errors", len(errors))
 

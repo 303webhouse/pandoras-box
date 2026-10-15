@@ -94,6 +94,16 @@ TRIGGER_CLOSE_STOP = "CLOSE_STOP"
 TRIGGER_COST_RECOVERY = "COST_RECOVERY"
 NOTICE_UNMEASURABLE = "UNMEASURABLE"
 
+#: R-IV.1033(d): what the PHONE calls each trigger. Separate from `_COLOR` and from the
+#: Discord titles because the phone line must carry no figure at all -- naming the trigger is
+#: the whole payload, and a wording that drifted from the Discord title would be a second
+#: author of what the alert MEANS.
+_NTFY_KIND = {
+    TRIGGER_UNSTOPPED_LOSS: "unstopped loss",
+    TRIGGER_CLOSE_STOP: "daily-close stop breached",
+    TRIGGER_COST_RECOVERY: "cost recovery available",
+}
+
 _COLOR = {
     TRIGGER_UNSTOPPED_LOSS: 0xFF4444,
     TRIGGER_CLOSE_STOP: 0xFF8800,
@@ -786,6 +796,29 @@ async def run_loss_alert(*, injected_rows: Optional[List[Dict[str, Any]]] = None
                 result["pushed"] += 1
             # R-IV.517(d): status codes and figures only. The row is its integer id.
             logger.info("loss_alert %s id=%s http=%s", trigger, row_id, code)
+
+            # ── R-IV.1033(d): the PHONE gets a money-free line ────────────────────────
+            # The Discord body above names the dollar loss, the account value AND the
+            # position size -- all three forbidden on a third-party relay by
+            # R-IV.901(b)2. So the phone is told WHICH position crossed WHICH threshold
+            # and where to look, and every figure stays on the channel we own. This is
+            # not a port of the Discord text; it is a different message with the same
+            # trigger, which is why it is built here rather than scrubbed from `title`.
+            #
+            # Runs only AFTER a delivered Discord push and never affects the verdict: a
+            # phone failure must not lose an alert that has already been delivered.
+            if code in (200, 204):
+                try:
+                    from integrations.ntfy_push import is_configured
+                    from integrations.ntfy_push import send as ntfy_send
+                    if is_configured():
+                        await ntfy_send(
+                            (title.rsplit("-", 1)[-1].strip() or "?")[:12],
+                            _NTFY_KIND.get(trigger, "loss threshold"),
+                            "threshold crossed — open the hub for figures")
+                except Exception as exc:                            # noqa: BLE001
+                    logger.warning("loss_alert ntfy leg failed for %s: %s",
+                                   trigger, type(exc).__name__)
 
         notices = [a for a in alerts if a["trigger"] == NOTICE_UNMEASURABLE]
         for a in (a for a in alerts if a["trigger"] != NOTICE_UNMEASURABLE):
