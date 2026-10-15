@@ -135,6 +135,39 @@ async def _record_observe_allowed(ticker, secret_len: int) -> None:
         logger.warning("[pythia] observe-allowed not recorded: %s", type(exc).__name__)
 
 
+async def _record_validation_refusal(ticker, reason: str, secret_len: int) -> None:
+    """Write down a refusal that was NOT about the secret. NEVER raises.
+
+    R-IV.1113(c). The zero-level check is the one validation gate a genuine PYTHIA alert can
+    still fail, and before this it left no durable trace -- only a log line, and
+    `railway logs` reaches only the current deployment. So the one question SPINE asked
+    ("name any eod_snapshot rejected that way") was unanswerable from the data, and the
+    ticker would have read as "no alert arrived": a different fault, a different fix, and the
+    principal sent to the wrong place.
+
+    Recorded WITHOUT the `OBSERVE:` prefix on purpose: this is a true refusal, so it SHOULD
+    count toward feed_health. An OBSERVE row was allowed through; this one was not.
+    """
+    try:
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
+                "  id SERIAL PRIMARY KEY,"
+                "  rejected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),"
+                "  ticker TEXT,"
+                "  reason TEXT NOT NULL,"
+                "  secret_len INT NOT NULL)")
+            await conn.execute(
+                "INSERT INTO pythia_webhook_rejections (ticker, reason, secret_len) "
+                "VALUES ($1, $2, $3)",
+                (ticker or "")[:16] or None, reason[:200], int(secret_len))
+    except Exception as exc:                                        # noqa: BLE001
+        # A supervision write must never break the request it supervises -- and here the
+        # request is already being refused, so losing the record must not change the status.
+        logger.warning("[pythia] validation refusal not recorded: %s", type(exc).__name__)
+
+
 async def _warn_feed_rejecting(ticker, secret_len):
     """Push ONCE per session that PYTHIA alerts are being refused. NEVER raises.
 
@@ -271,6 +304,22 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
             "Rejected PYTHIA webhook — vah/val/poc missing or <= 0 (ticker=%s vah=%s val=%s poc=%s)",
             ticker, vah, val, poc,
         )
+        # R-IV.1113(c) KEEPS THIS REJECTING -- a zero level must never be stored as a level --
+        # and asked for any such rejection to be NAMED in the close report. It could not be:
+        # this path only logged and raised, so it wrote NOTHING durable. A ticker rejected here
+        # would have appeared in that report as "no alert arrived", which is a different fault
+        # with a different fix and would have sent the principal to look in the wrong place.
+        #
+        # THE REJECTION IS A REAL REFUSAL, unlike an OBSERVE row: the alert arrived and the hub
+        # turned it away. So it is recorded WITHOUT the `OBSERVE:` prefix and therefore DOES
+        # count toward feed_health -- "arriving and being refused" is exactly what happened.
+        #
+        # The reason carries the event name, because `eod_snapshot` failing this check means a
+        # Pine `nz(VAL/VAH, 0)` sent a zero and SPINE fixes the script; an events-alert failure
+        # means something else.
+        await _record_validation_refusal(
+            ticker, "%s: vah/val/poc missing or <= 0" % (alert_type or "unknown"),
+            len(supplied))
         raise HTTPException(status_code=400, detail="vah/val/poc required and must be > 0")
 
     # ── Chunk C: replay protection — bar_time required + within ±10 min ──
@@ -360,7 +409,16 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
     except Exception as e:
         logger.error("Failed to store Pythia event: %s", e)
 
-    # Also cache latest levels in Redis for quick scoring lookups
+    # Also cache latest levels in Redis for quick scoring lookups.
+    #
+    # NAMED SIDE EFFECT (R-IV.1113(b)). This key is the ONE piece of state this handler changes
+    # beyond the row it inserts, and scoring reads it. A v2.7 `eod_snapshot` therefore
+    # OVERWRITES `pythia:{ticker}` with the FINAL SESSION value area, for 24h.
+    #
+    # That is accepted and is the right thing to cache -- the end-of-session levels are the
+    # authoritative ones for that session. It is recorded here because "it is a levels row
+    # only" was the claim R-IV.1110(b) asked me to verify, and a cache write is not a row.
+    # Anyone auditing this handler's effects should find them both named in one place.
     redis = await get_redis_client()
     if redis and vah and val and poc:
         try:
