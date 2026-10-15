@@ -55,6 +55,47 @@ def _num_or_none(v):
         return None
 
 
+#: R-IV.1033(d). The ET session already warned about. In-process, so a redeploy can warn
+#: again for the same session -- the right failure direction: a restart is a fresh chance to
+#: notice a feed that is STILL broken, and a duplicate push costs one notification where
+#: silence costs a day of events. Not annotated `Optional[str]` because this module does not
+#: import typing and a new import for one annotation is not worth it.
+_FEED_WARNED_SESSION = None
+
+
+async def _warn_feed_rejecting(ticker, secret_len):
+    """Push ONCE per session that PYTHIA alerts are being refused. NEVER raises.
+
+    The two causes have different fixes and the message says which: `secret_len == 0` means
+    the alert body carries no `secret` field at all (a misconfigured alert); any other length
+    means the value is wrong (a stale secret). Nothing else is disclosed -- never the secret,
+    never the topic, and no figure beyond that discriminator.
+    """
+    global _FEED_WARNED_SESSION
+    try:
+        from zoneinfo import ZoneInfo
+        session = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        if _FEED_WARNED_SESSION == session:
+            return
+        from integrations.ntfy_push import is_configured
+        from integrations.ntfy_push import send as ntfy_send
+        if not is_configured():
+            return
+        why = ("the alert body carries NO secret field" if secret_len == 0
+               else "the secret value does not match")
+        # Claim the session BEFORE awaiting the send: a burst of rejections across 51 tickers
+        # would otherwise each get past the check while the first push is still in flight.
+        _FEED_WARNED_SESSION = session
+        await ntfy_send(
+            (str(ticker or "?") or "?")[:12], "PYTHIA feed rejecting",
+            "alerts are being refused: %s. TradingView shows no error. Fix the alert body."
+            % why)
+        logger.warning("[pythia] feed-rejecting push sent for session %s (secret_len=%d)",
+                       session, secret_len)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[pythia] feed-rejecting push failed: %s", type(exc).__name__)
+
+
 @router.post("/webhook/pythia")
 async def pythia_webhook(request: Request = None, payload: dict = None):
     """
@@ -91,6 +132,9 @@ async def pythia_webhook(request: Request = None, payload: dict = None):
             "Rejected PYTHIA webhook — invalid secret (ticker=%s secret_len=%d present=%s)",
             payload.get("ticker"), len(supplied), bool(supplied),
         )
+        # R-IV.1033(d): tell the principal, because only he can fix it. At most ONCE per
+        # session, so a misconfigured alert firing across 51 tickers is one push, not 51.
+        await _warn_feed_rejecting(payload.get("ticker"), len(supplied))
         raise HTTPException(status_code=401, detail="invalid webhook secret")
 
     # ── AEGIS: strip secret before ANY logging or persistence ──
