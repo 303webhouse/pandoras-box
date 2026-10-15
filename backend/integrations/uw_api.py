@@ -606,7 +606,7 @@ async def _get_info_cached_long(ticker: str) -> Dict[str, Any]:
     return {}
 
 
-async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
+async def get_snapshot(ticker: str, *, caller: str = "snapshot") -> Optional[Dict[str, Any]]:
     """
     Get latest snapshot for a ticker. Matches polygon_equities.get_snapshot() schema:
     {ticker, day: {o, h, l, c, v}, prevDay: {o, h, l, c, v}, lastTrade: {p, s, t}, ...}
@@ -625,7 +625,12 @@ async def get_snapshot(ticker: str) -> Optional[Dict[str, Any]]:
     # introduced the wrong path (UW MCP tool is named stock_state, but the REST URL
     # uses kebab-case). UW returned 404 on every call, tripping the circuit breaker
     # and degrading the heatmap to stale fallback data. Validated against api_spec.yaml.
-    state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/stock-state", caller="snapshot")
+    # R-IV.1058(b): the caller tag is a PARAMETER now, defaulting to "snapshot" so every
+    # existing consumer is unchanged. It exists because `hermes_session_poll` shared this tag
+    # and spent it out mid-session, blocking MTM, quote and the macro strip along with itself.
+    # The Redis cache key is deliberately NOT tagged -- all consumers still share one cached
+    # quote, which is what keeps the total call count down; only the ATTRIBUTION splits.
+    state_resp = await _uw_request(f"/api/stock/{ticker.upper()}/stock-state", caller=caller)
     # The governor's sentinel is PROPAGATED, not collapsed (same contract as get_ohlc and
     # technical_indicator): it is falsy, so every `if snap:` consumer behaves as before, and a
     # consumer that wants to say WHY it is falling back can now read the cause instead of

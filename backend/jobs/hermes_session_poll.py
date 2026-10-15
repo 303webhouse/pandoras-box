@@ -41,10 +41,27 @@ POLL_SECONDS = 60
 # has RECORDED, so appearing there is earned by a completed pass and cannot be declared.
 JOB_NAME = "hermes_session_poll"
 
+# R-IV.1058(b): THIS JOB'S OWN UW CALLER TAG.
+#
+# It used to spend under `snapshot`, which also funds MTM, quote and the macro strip on a
+# 1,100/day quota measured in September, before this job existed. Measured outcome: the tag hit
+# 1,106 on 2026-10-13 and pinned at 1,100 on 2026-10-14, where it ran out at 17:47:08Z and this
+# job then failed 133 times -- once a minute to the 16:00 ET close -- reporting "alarm is
+# blind". UW's own limiter never fired (429s = 0 on every row); the governor was blocking an
+# under-funded tag, which is what it is for.
+#
+# Its own tag does two things: the spend becomes visible per consumer, and this job can no
+# longer starve the marks that price positions.
+CALLER_TAG = "hermes_session"
+
 # Keyed by ET session date, so a new session starts with an empty ladder.
 _session_date: Optional[str] = None
 _last_alerted: Dict[str, float] = {}
 _prior_close: Dict[str, float] = {}
+
+# R-IV.1058(b): the blind-alarm notice, at most once per ET session. Cleared by _roll_session
+# along with the ladder, so each session gets exactly one chance to say it cannot see.
+_blind_pushed: Dict[str, bool] = {}
 
 
 # The running loop, so /health can say whether the alarm is ARMED. R-IV.867(a): "enabled" and
@@ -97,6 +114,9 @@ def _roll_session(et_date: str) -> bool:
     _session_date = et_date
     _last_alerted.clear()
     _prior_close.clear()
+    # R-IV.1058(b): one blind notice per session, so a multi-day outage says so each day
+    # rather than once ever -- and a session that recovers can go blind again and be heard.
+    _blind_pushed.clear()
     logger.info("[hermes.session] new session %s — ladder cleared", et_date)
     return True
 
@@ -118,7 +138,7 @@ async def _snapshot(ticker: str) -> Optional[dict]:
                      "anything until that is fixed", exc_info=True)
         return None
     try:
-        snap = await get_snapshot(ticker)
+        snap = await get_snapshot(ticker, caller=CALLER_TAG)
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("[hermes.session] %s snapshot unavailable: %s", ticker,
                        type(exc).__name__)
@@ -242,9 +262,60 @@ async def _recorded_pass() -> dict:
         if rec["alert"]:
             logger.info("[hermes.session] %s", rec)
     if recs and all(r.get("move_pct") is None for r in recs):
+        # R-IV.1058(b): THE ALARM ANNOUNCES ITS OWN BLINDNESS.
+        #
+        # This raise already counted toward the flatline alert, and on 2026-10-14 it did fire --
+        # `stable_job_status.alerted` was TRUE. It reached /health and it did NOT reach the
+        # phone, so the alarm was blind for 133 minutes and the one person who needed to know
+        # found out the next day from a health read. An alarm that can fail silently is not an
+        # alarm, and the escalation has to travel the SAME road as the alerts it is failing to
+        # send -- which is the phone, not a dashboard.
+        #
+        # Once per ET session, before the raise, so a push failure cannot swallow the raise.
+        await _push_blind_notice(len(recs))
         raise OutputCheckFailed(
             "no evaluable displacement for any of %d symbol(s) — alarm is blind" % len(recs))
     return {"symbols": len(recs)}
+
+
+async def _push_blind_notice(n_symbols: int) -> dict:
+    """Tell the phone the alarm cannot see. At most once per ET session. NEVER RAISES.
+
+    NEVER RAISES is load-bearing twice over. This is called from inside `_recorded_pass`
+    immediately before the `OutputCheckFailed` that records the failure, so an exception here
+    would replace a precise "alarm is blind" ledger entry with whatever went wrong in the
+    notifier -- the blindness would still exist and would now be mislabelled. And a notifier
+    that dies takes the next alert with it (the same reasoning `run_forever` already carries).
+
+    NO MONEY FIGURES, by construction: `ntfy_push.build_message` takes three strings and has no
+    amount parameter, and R-IV.901(b)2 is enforced inside it. The ticker field says HERMES
+    because the subject is the alarm itself, not any one symbol.
+    """
+    global _session_date
+    key = _session_date or "unknown-session"
+    if _blind_pushed.get(key):
+        return {"sent": False, "reason": "already notified this session"}
+    # Marked BEFORE the await, not after. An await that is cancelled mid-flight would otherwise
+    # leave the flag unset and the next pass would push again -- one per minute, 133 times,
+    # which is the failure this guard exists to report rather than reproduce.
+    _blind_pushed[key] = True
+    try:
+        from integrations import ntfy_push
+        if not ntfy_push.is_configured():
+            logger.error("[hermes.session] BLIND and %s is not set -- the notice cannot be "
+                         "delivered", ntfy_push.TOPIC_ENV)
+            return {"sent": False, "reason": "%s not set" % ntfy_push.TOPIC_ENV}
+        res = await ntfy_push.send(
+            "HERMES", "session alarm BLIND",
+            "no price for any of %d tracked symbols this session; displacement alerts are NOT "
+            "being evaluated. Check the UW caller quota for '%s' and /health."
+            % (n_symbols, CALLER_TAG),
+            title="Pandora: Hermes is blind", priority="high")
+        logger.error("[hermes.session] blind notice -> sent=%s", res.get("sent"))
+        return res
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("[hermes.session] blind notice failed: %s", type(exc).__name__)
+        return {"sent": False, "reason": type(exc).__name__}
 
 
 async def run_forever() -> None:
