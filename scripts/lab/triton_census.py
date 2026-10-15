@@ -47,7 +47,7 @@ because the D5/D6 window is clipped to the regular session (amendment 2 sec. 4).
 Usage (QUERY):
   python scripts/lab/triton_census.py build-complete <walk_pages_csv> <complete_csv_out>
   python scripts/lab/triton_census.py crosscheck <prints_glob> <complete_csv> <crosscheck_csv_out>
-  python scripts/lab/triton_census.py --window reserve <any mode> ...   (amendment 8: reserve dates ONLY)
+  (--window reserve: WITHDRAWN by amendment 9 -- it refuses; the reserve is sealed for TRITON-R)
   python scripts/lab/triton_census.py verdict-a8 <census_out_dir> [<comparisons_csv outside it>]
   python scripts/lab/triton_census.py anchor <prints_glob> <complete_csv> <out_dir>
   python scripts/lab/triton_census.py run <prints_glob> <bars_glob> <polygon_glob> <adv_csv> <va_csv|-> <complete_csv> <macro_csv> <out_dir>
@@ -80,6 +80,10 @@ CALIBRATION_DATES = [d.date() for d in pd.bdate_range(CALIBRATION[0], CALIBRATIO
 #: only by `--window reserve` on the command line; the default is calibration.
 RESERVE = (date(2026, 9, 25), date(2026, 10, 9))
 RESERVE_HOLIDAYS = set()                                 # none in 09-25 .. 10-09
+#: Amendment 9 (TRITON-FP-v1-AMENDMENT-9-R-IV.1069.md 6c168a01...): amendment 8 is WITHDRAWN and the
+#: reserve is sealed for TRITON-R. `--window reserve` refuses. Only the self-test may switch the window
+#: (synthetic data only) to prove the guard and the old date logic.
+_A8_TEST_ONLY = [False]
 WINDOW_NAME = "calibration"
 CURSOR_TOL_S = 1.0                                       # amendment 5 sec. 3 (iii)
 TICK = 0.01
@@ -205,6 +209,9 @@ def set_window(name):
     """Amendment 8 sec. 1-2: the ONLY change for the reserve run is the date window. Every reader
     (in_calibration, CALIBRATION_DATES) then reads only that window; all other dates are dropped."""
     global CALIBRATION, CALIBRATION_DATES, WINDOW_NAME
+    if name == "reserve" and not _A8_TEST_ONLY[0]:
+        raise SystemExit("amendment 9 (R-IV.1069(a)): amendment 8 is WITHDRAWN; the reserve 09-25 -> 10-09 is "
+                         "sealed as the TRITON-R final holdout and is never read by the census. Refusing.")
     if name == "reserve":
         CALIBRATION = RESERVE
         CALIBRATION_DATES = [d.date() for d in pd.bdate_range(*RESERVE) if d.date() not in RESERVE_HOLIDAYS]
@@ -1466,8 +1473,16 @@ def selftest():
             checks["`run` still refuses when tau is not final (gate intact)"] = "tau is not final" in str(e_)
         finally:
             g_["TAU_FINAL"] = saved[0]
-    # amendment 8: the reserve window and the verdict
+    # amendment 9: `--window reserve` REFUSES (amendment 8 withdrawn; the reserve is sealed for TRITON-R)
     try:
+        set_window("reserve")
+        checks["A9: the reserve window refuses (amendment 8 withdrawn)"] = False
+    except SystemExit as e_:
+        checks["A9: the reserve window refuses (amendment 8 withdrawn)"] = "amendment 9" in str(e_) \
+            and WINDOW_NAME == "calibration" and len(CALIBRATION_DATES) == 17
+    # amendment 8's date logic, kept and tested on SYNTHETIC data only, behind the test-only switch
+    try:
+        _A8_TEST_ONLY[0] = True
         set_window("reserve")
         want = ["09-25", "09-28", "09-29", "09-30", "10-01", "10-02", "10-05", "10-06", "10-07", "10-08", "10-09"]
         checks["A8: reserve window = the 11 executed dates 09-25 .. 10-09"] = \
@@ -1479,6 +1494,7 @@ def selftest():
         checks["A8: synthetic prints -> only the reserve session (09-28) survives"] = \
             sorted({str(x) for x in dfr.session}) == ["2026-09-28"]
     finally:
+        _A8_TEST_ONLY[0] = False
         set_window("calibration")
     checks["A8: window restored to calibration (17 dates)"] = len(CALIBRATION_DATES) == 17 and WINDOW_NAME == "calibration"
     try:
