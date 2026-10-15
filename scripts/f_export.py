@@ -459,8 +459,21 @@ def _archive_rows() -> list:
     still sitting on the drive. An archive whose manifest omits part of it is worse than no
     manifest: it reads as a complete inventory.
 
-    These rows carry `rows_written = -1`, NOT 0: this process did not write them, which is not
-    the same as having written nothing.
+    R-IV.1064(c): `rows_written` IS NOW FILLED for a carried parquet, from the file itself --
+    and from a DIFFERENT MECHANISM than `rows_read_back`, which is the only way filling it
+    stays worth anything.
+
+      rows_written    the parquet FOOTER's `num_rows` (metadata, no data pages touched)
+      rows_read_back  the row count obtained by actually READING the data
+
+    Taking both from the same read would have made the two columns tautologically equal for
+    every carried file and quietly retired the mismatch detector. Sourced separately they still
+    disagree when a file is corrupt -- a footer that claims rows the body cannot produce -- which
+    is convention #34's "two routes verify a read-back" applied to a file instead of a route.
+
+    A non-parquet file (the READMEs) has no row concept, so both stay EMPTY. Never -1: a count
+    column holding a magic number is a lie told in the column's own type, and that one cost
+    QUERY 56 failures (R-IV.1017(c)).
     """
     written = {os.path.normcase(r["path"]) for r in _manifest_rows}
     out = []
@@ -473,13 +486,30 @@ def _archive_rows() -> list:
                 continue
             try:
                 rows_back = -1
+                rows_declared = None
+                note = "not written this run; hash verified"
                 if name.endswith(".parquet"):
+                    # R-IV.1064(c): the FOOTER first, which is metadata and cheap...
+                    import pyarrow.parquet as _pq
+                    rows_declared = int(_pq.ParquetFile(path).metadata.num_rows)
+                    # ...then the DATA, independently.
                     rows_back = len(pd.read_parquet(path))
-                out.append({"path": path, "rows_written": -1, "rows_read_back": rows_back,
+                    if rows_declared != rows_back:
+                        out.append({"path": path, "rows_written": rows_declared,
+                                    "rows_read_back": rows_back,
+                                    "bytes": os.path.getsize(path), "sha256": sha256_of(path),
+                                    "MISMATCH": ("parquet footer declares %d rows, the data "
+                                                 "reads %d -- the file is corrupt"
+                                                 % (rows_declared, rows_back))})
+                        continue
+                    note = ("not written this run; hash verified; rows from the parquet footer "
+                            "and confirmed by reading the data")
+                out.append({"path": path, "rows_written": rows_declared,
+                            "rows_read_back": rows_back,
                             "bytes": os.path.getsize(path), "sha256": sha256_of(path),
-                            "note": "not written this run; hash verified"})
+                            "note": note})
             except Exception as exc:                                # noqa: BLE001
-                out.append({"path": path, "rows_written": -1, "rows_read_back": -1,
+                out.append({"path": path, "rows_written": None, "rows_read_back": -1,
                             "bytes": os.path.getsize(path) if os.path.exists(path) else -1,
                             "sha256": "", "MISMATCH": "unreadable: %s" % type(exc).__name__})
     return out
@@ -634,8 +664,9 @@ def write_manifest(status_by: dict = None) -> None:
                      "note": r.get("MISMATCH", "")})
     for r in _archive_rows():
         rows.append({"kind": "FILE", "path": r["path"],
-                     # EMPTY, not -1. This process did not write it, which is not a count.
-                     "rows_written": None,
+                     # R-IV.1064(c): the carried file's own declared row count, from its parquet
+                     # footer. Still EMPTY (never -1) for a non-parquet file, which has no rows.
+                     "rows_written": r.get("rows_written"),
                      "rows_read_back": r["rows_read_back"], "bytes": r["bytes"],
                      "sha256": r["sha256"],
                      "status": ST_UNREADABLE if "MISMATCH" in r else ST_CARRIED,
