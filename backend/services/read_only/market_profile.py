@@ -293,6 +293,9 @@ async def _feed_health(tkr: str = None) -> dict:
             last, n = await _feed_counts(conn)
             who = await _last_accepted_ticker(conn)
             mine, mine_n = await _ticker_feed_counts(conn, tkr) if tkr else (None, None)
+            newest, all_before, basis = (
+                await _ticker_newest_refusal(conn, tkr) if tkr
+                else (None, None, "no ticker was requested"))
         out = classify(last, n)
         out["feed_health_scope"] = (
             "FEED-WIDE: feed_health, last_accepted_at and rejected_since_last_accept cover "
@@ -302,10 +305,36 @@ async def _feed_health(tkr: str = None) -> dict:
         out["this_ticker_last_accepted_at"] = (
             mine.astimezone(timezone.utc).isoformat() if mine else None)
         out["this_ticker_rejections_since"] = mine_n
+        # R-IV.1109(b). `this_ticker_rejections_since` counts from this ticker's own last
+        # ACCEPT; this instant is the newest refusal outright. The pair is what makes a count
+        # actionable: "3 refusals" with no instant cannot tell a reader whether they are stale.
+        out["this_ticker_newest_refusal_at"] = (
+            newest.astimezone(timezone.utc).isoformat() if newest else None)
+        out["this_ticker_refusals_all_before_process_start"] = all_before
+        out["this_ticker_refusals_basis"] = basis
+        # The reference instant the boolean was computed against, so a reader can CHECK it
+        # rather than trust it. A boolean whose comparison point is absent from the payload is
+        # unverifiable, and this one decides whether the principal recreates an alert.
+        _started = _process_started_at()
+        out["process_started_at"] = _started.isoformat() if _started else None
         return out
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("feed_health unavailable: %s", type(exc).__name__)
-        return classify(None, None)
+        # THE ERROR PATH MUST RETURN THE SAME SHAPE AS THE SUCCESS PATH. It used to return
+        # `classify(None, None)` alone, so a database failure did not merely blank these
+        # fields -- it REMOVED them, and an absent key reads to a consumer as "not
+        # applicable" rather than "could not determine". Those are different facts, and the
+        # one this field exists to report is the second. Caught by
+        # test_the_payload_carries_the_instant_the_boolean_and_its_reference.
+        out = classify(None, None)
+        out["this_ticker_newest_refusal_at"] = None
+        out["this_ticker_refusals_all_before_process_start"] = None
+        out["this_ticker_refusals_basis"] = (
+            "unreadable: %s while reading the feed, so nothing is claimed"
+            % type(exc).__name__)
+        _started = _process_started_at()
+        out["process_started_at"] = _started.isoformat() if _started else None
+        return out
 
 
 async def _last_accepted_ticker(conn):
@@ -333,6 +362,60 @@ async def _ticker_feed_counts(conn, tkr: str):
         return last, (int(n) if n is not None else None)
     except Exception:                                               # noqa: BLE001
         return None, None
+
+
+async def _ticker_newest_refusal(conn, tkr: str):
+    """R-IV.1109(b). (newest real refusal for this ticker, all_before_process_start, basis).
+
+    WHAT THIS AUTOMATES. On 2026-10-15 the question "does any refusal for QQQ fall after the
+    16:23:49Z restart?" had to be settled by hand from the log, because the payload could say
+    how MANY refusals there were but not WHEN the newest one was. Without the instant, a count
+    cannot distinguish "refused before the fix, now fine" from "still being refused" -- and
+    those have opposite remedies: one needs nothing, the other needs the alert recreated.
+
+    `OBSERVE:`-prefixed rows are EXCLUDED, as everywhere else in this module: they arrived and
+    were LET THROUGH. Counting an allow-through as a refusal would invert the field's meaning.
+
+    THE BOOLEAN IS NEVER VACUOUSLY TRUE. With no refusals on record, "all refusals are before
+    the process start" is true of the empty set and would read as a verified all-clear -- a
+    claim about a check that had no subject. That is the DEF-EDGE-SPEC-B2 defect exactly, where
+    a column counted row-existence twice and answered nothing. So the boolean is None there,
+    and `basis` says which of the three Nones applies: no refusals, or unreadable.
+    """
+    try:
+        newest = await conn.fetchval(
+            "SELECT MAX(rejected_at) FROM pythia_webhook_rejections"
+            " WHERE ticker = $1 AND reason NOT LIKE 'OBSERVE:%'", tkr)
+    except Exception:                                               # noqa: BLE001
+        return None, None, "unreadable: the refusal table could not be queried"
+
+    if newest is None:
+        return None, None, "no real refusal is on record for this ticker"
+
+    started = _process_started_at()
+    if started is None:
+        return newest, None, "unreadable: this process's start instant is unavailable"
+
+    before = newest < started
+    return newest, before, (
+        "every refusal for this ticker predates this process's start"
+        if before else
+        "at least one refusal for this ticker POSTDATES this process's start")
+
+
+def _process_started_at():
+    """This process's start, from the same constant /health reports.
+
+    Imported rather than re-derived: a second `datetime.now()` captured at a different import
+    moment would disagree with /health by seconds, and a boolean compared against the wrong
+    instant is worse than no boolean -- it would answer the restart question confidently and
+    wrongly for any refusal landing in the gap.
+    """
+    try:
+        from build_identity import PROCESS_STARTED_AT
+        return PROCESS_STARTED_AT
+    except Exception:                                               # noqa: BLE001
+        return None
 
 
 async def _feed_counts(conn):
