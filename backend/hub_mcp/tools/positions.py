@@ -71,6 +71,20 @@ DESCRIPTION = (
     "(R-IV.807(c)) — a row expired before bucketing, or held as strategic core, or pre-scope. A "
     "null bucket reading \"not recorded\" is the gap. Exactly the distinction "
     "`classification_reason` draws between \"not applicable: ROBINHOOD\" and \"not recorded\".\n\n"
+    "**`classification_reason_origin` SAYS WHOSE WORDS THE REASON IS** (R-IV.1048(c)): "
+    "`\"stored\"` = the row's own recorded text; `\"computed\"` = this hub authored the sentence. "
+    "All of \"NO BASIS RECORDED\", \"not applicable: ROBINHOOD\" and \"not recorded\" are "
+    "computed. **486 rows store NULL and are served a confident reason**, so without this field "
+    "a reader cites the hub's own sentence back as recorded provenance.\n\n"
+    "**THE OWED COLUMNS, served STORED and uninterpreted** (R-IV.1043(e)): `sleeve_reason` (the "
+    "third axis's basis — it has one now, R-IV.1041(e)), `orientation_at_entry` (+1/−1, which "
+    "the B2 cut reads in preference to any whitelist), `x4_result`, `cut_due` (a date) and "
+    "`cut_status`. All nullable and none written by the build lane, so a null means NOT "
+    "RECORDED and nothing more.\n\n"
+    "**`leverage_factor`: NEGATIVE MEANS INVERSE, and a NULL IS NOT 1x.** POSITIONS owns these "
+    "figures. `leverage_factor_recorded` is served beside it precisely so an unrecorded −3x row "
+    "cannot be quietly read as unlevered, which would understate its risk threefold. Do not "
+    "size or gate on the value while `leverage_factor_recorded` is false.\n\n"
     "**AND CHECK `classification_backfilled` BEFORE ENFORCING ANYTHING.** While it is false the "
     "three fields are present but NOT yet populated, so a `null` there means \"not yet "
     "migrated\", NOT \"this row has no classification\". Reading the first as the second is how "
@@ -222,6 +236,26 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         "needs_document": row.get("needs_document"),
         "classification_reason": _tx.classification_reason(
             row.get("account"), row.get("classification"), row.get("classification_reason")),
+        # R-IV.1048(c): WHOSE WORDS the line above is. "stored" = the row's own text;
+        # "computed" = this hub authored it (NO BASIS RECORDED, "not applicable: ROBINHOOD",
+        # "not recorded"). Without this a reader cites the hub's own sentence back as
+        # recorded provenance -- 486 rows store NULL and are served a confident reason.
+        "classification_reason_origin": _tx.classification_reason_origin(
+            row.get("account"), row.get("classification"), row.get("classification_reason")),
+        # R-IV.1043(e) + R-IV.1048(c): the five owed columns, served STORED and
+        # uninterpreted. All nullable, none written by this lane, so a null here means NOT
+        # RECORDED and nothing more.
+        "sleeve_reason": row.get("sleeve_reason"),
+        "orientation_at_entry": row.get("orientation_at_entry"),
+        "x4_result": row.get("x4_result"),
+        "cut_due": (row["cut_due"].isoformat() if row.get("cut_due") else None),
+        "cut_status": row.get("cut_status"),
+        # R-IV.1052(e)(c)4: NEGATIVE means inverse (TSLQ -2, SRTY -3, SOXS -3). A null is
+        # "not recorded", NEVER 1x -- the companion flag exists so a reader cannot quietly
+        # treat an unrecorded -3x row as unlevered and understate its risk threefold.
+        "leverage_factor": (float(row["leverage_factor"])
+                            if row.get("leverage_factor") is not None else None),
+        "leverage_factor_recorded": row.get("leverage_factor") is not None,
         # R-IV.804(c): same fail-loud shape. A bucket with no recorded basis says so here
         # rather than reading as a settled verdict.
         "bucket_reason": _tx.bucket_reason(row.get("bucket"), row.get("bucket_reason")),

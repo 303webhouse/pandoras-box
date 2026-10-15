@@ -98,6 +98,14 @@ async def lifespan(app: FastAPI):
             # at its own first run, and SELECTed by api/b2_cut_status -- a read depending on a
             # writer, the fourth instance of that fault found in this session, this time by
             # the guard rather than by an outage.
+            # R-IV.1052(e)(c)4: leverage_factor. NULLABLE NUMERIC, and this lane does not
+            # write a single value -- POSITIONS owns the figures (TSLQ -2, SRTY -3, SOXS -3).
+            # Negative means inverse. A NULL is therefore "not recorded", NOT "1x unlevered",
+            # and the payload says which, because reading an unrecorded -3x row as 1x
+            # understates its risk threefold.
+            await conn.execute(
+                "ALTER TABLE unified_positions"
+                "  ADD COLUMN IF NOT EXISTS leverage_factor NUMERIC")
             await conn.execute(
                 "ALTER TABLE unified_positions"
                 "  ADD COLUMN IF NOT EXISTS mark NUMERIC,"
@@ -105,6 +113,27 @@ async def lifespan(app: FastAPI):
                 "  ADD COLUMN IF NOT EXISTS mark_integrity TEXT,"
                 "  ADD COLUMN IF NOT EXISTS mark_integrity_reason TEXT,"
                 "  ADD COLUMN IF NOT EXISTS b2_cut_alerted_at TIMESTAMPTZ")
+            # R-IV.1043(e) + R-IV.1048(c): THE MIGRATION. One statement, five columns, all
+            # nullable, none written by this lane.
+            #   sleeve_reason         the third axis's basis. models/position_taxonomy.py said
+            #                         a sleeve reason would be "a field with nothing to put in
+            #                         it"; R-IV.1041(e) overrules that, so the comment there is
+            #                         corrected in the same change rather than left to
+            #                         contradict the schema.
+            #   orientation_at_entry  +1 / -1, SMALLINT. R-IV.1043(f): the B2 cut reads THIS
+            #                         when recorded, and a stock row is evaluated ONLY with it
+            #                         recorded -- the debit whitelist stays the fallback for
+            #                         options rows.
+            #   x4_result             X4's outcome, as text.
+            #   cut_due               a DATE, because cut_session() returns a date.
+            #   cut_status            text, from b2_cut_alert's verdict set.
+            await conn.execute(
+                "ALTER TABLE unified_positions"
+                "  ADD COLUMN IF NOT EXISTS sleeve_reason TEXT,"
+                "  ADD COLUMN IF NOT EXISTS orientation_at_entry SMALLINT,"
+                "  ADD COLUMN IF NOT EXISTS x4_result TEXT,"
+                "  ADD COLUMN IF NOT EXISTS cut_due DATE,"
+                "  ADD COLUMN IF NOT EXISTS cut_status TEXT")
             await conn.execute(
                 "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
                 "  id SERIAL PRIMARY KEY,"
