@@ -894,8 +894,11 @@ CONFIRM_FIRST, CONFIRM_LAST = date(2026, 9, 25), date(2026, 12, 31)
 NYSE_HOLIDAYS_CONFIRM = {date(2026, 11, 26), date(2026, 12, 25)}
 COUNT_COLUMNS = ["variant", "weight", "as_of", "window_first", "window_last", "window_sessions", "half_sessions",
                  "evaluable_ticker_sessions", "claim_events", "sessions_with_claim_events",
-                 "events_with_placebo", "events_without_placebo", "stop_rule_met", "stop_rule_frozen_as_of"]
-UNEVAL_COLUMNS = ["variant", "ingredient", "events_unevaluable"]
+                 "events_with_placebo", "events_without_placebo", "stop_rule_met", "stop_rule_frozen_as_of",
+                 "state_dir", "state_dir_status", "stop_trigger_sha256"]
+UNEVAL_COLUMNS = ["variant", "session_date", "ingredient", "events_unevaluable"]     # R-IV.1120(b)2: a date axis
+RUN_LOG = "runs.jsonl"                        # one line per count run in this state dir (R-IV.1120(b)1)
+PLACEBO_WARN_SHARE = 0.20                     # R-IV.1120(b)3
 TRIGGER_FILE = "stop_trigger.json"            # R-IV.1114(c): once true, frozen; the flag never reverts
 
 
@@ -934,6 +937,20 @@ def check_as_of(as_of, today=None):
         raise SystemExit(f"as_of {as_of} is not a completed session (today ET {today}); refusing")
 
 
+def state_identity(state_dir):
+    """R-IV.1120(b)1: the state directory on the face of every output. FRESH = no earlier count run is
+    recorded there, so a run pointed at a new or wrong directory says so visibly."""
+    import hashlib
+    trig = os.path.join(state_dir, TRIGGER_FILE)
+    runs = os.path.join(state_dir, RUN_LOG)
+    n_runs = sum(1 for _ in open(runs, encoding="utf-8")) if os.path.exists(runs) else 0
+    return {"path": os.path.abspath(state_dir),
+            "status": (f"EXISTING ({n_runs} earlier count run(s) recorded)" if n_runs
+                       else "FRESH: no earlier count run recorded in this state dir"),
+            "earlier_runs": n_runs,
+            "stop_trigger_sha256": hashlib.sha256(open(trig, "rb").read()).hexdigest() if os.path.exists(trig) else "none"}
+
+
 def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, macro_csv, tide_csv, iv_csv, out_dir,
           state_dir, n_shuffles=None, today=None):
     """Per-variant counts for the confirmation set 09-25 .. as_of (R-IV.1084(d), R-IV.1114(c)): claim events,
@@ -945,10 +962,11 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
     as_of = pd.Timestamp(as_of).date()
     check_as_of(as_of, today)
     trig_path = os.path.join(state_dir, TRIGGER_FILE)
+    state = state_identity(state_dir)
     if os.path.exists(trig_path):
         trig = json.load(open(trig_path))
         os.makedirs(out_dir, exist_ok=True)
-        json.dump({"stop_rule_met": True, "frozen": True, "trigger": trig,
+        json.dump({"stop_rule_met": True, "frozen": True, "trigger": trig, "state": state,
                    "note": "the stop rule fired earlier; the read window is frozen; no data was read by this call"},
                   open(os.path.join(out_dir, "trigger_frozen.json"), "w"), indent=1, default=str)
         print(f"STOP TRIGGER FROZEN at as_of {trig.get('as_of')}; no data read")
@@ -1016,15 +1034,15 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
         for r in ev.itertuples():
             res = evaluate(ctx, r.ticker, r.session, r.t, r.L, r.d6, outcome=False)
             for m in res["missing"]:
-                miss[m] = miss.get(m, 0) + 1
+                miss[(str(r.session), m)] = miss.get((str(r.session), m), 0) + 1
             if not res["missing"] and not res["fails"]:
                 n += 1
                 sess.add(r.session)
                 pl = placebos(ctx, prints_by_ts, {}, r.ticker, r.session, r.t, wstart, rng, bars_hl, eligible,
                               outcome=False)
                 with_p += int(len(pl) > 0)
-        for m, k in sorted(miss.items()):
-            unev.append({"variant": vname, "ingredient": m, "events_unevaluable": k})
+        for (sd, m), k in sorted(miss.items()):
+            unev.append({"variant": vname, "session_date": sd, "ingredient": m, "events_unevaluable": k})
         primary = vname == PRIMARY
         met = bool(primary and ((n >= MIN_EVENTS and len(sess) >= MIN_SESSIONS) or as_of >= CONFIRM_LAST))
         rows.append({"variant": vname, "weight": "PRIMARY" if primary else "SECONDARY", "as_of": str(as_of),
@@ -1032,7 +1050,8 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
                      "half_sessions": len(halves), "evaluable_ticker_sessions": len(eval_ts), "claim_events": n,
                      "sessions_with_claim_events": len(sess), "events_with_placebo": with_p,
                      "events_without_placebo": n - with_p, "stop_rule_met": met if primary else "",
-                     "stop_rule_frozen_as_of": str(as_of) if met else ""})
+                     "stop_rule_frozen_as_of": str(as_of) if met else "", "state_dir": state["path"],
+                     "state_dir_status": state["status"], "stop_trigger_sha256": state["stop_trigger_sha256"]})
     out = pd.DataFrame(rows, columns=COUNT_COLUMNS)
     U = pd.DataFrame(unev, columns=UNEVAL_COLUMNS)
     C.assert_aggregate({"counts": out, "unevaluable": U})
@@ -1065,8 +1084,16 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
         "half_sessions": ("early closes (13:00 ET: 2026-11-27, 2026-12-24) are counted in window_sessions and marked; "
                           "they hold fewer 5-min bars, so the slot median is MISSING for afternoon slots for the 10 "
                           "sessions after one; the EMA runs across them as across any session"),
-        "placebo_columns": "existence of >= 1 valid placebo per claim event (evaluate(outcome=False)); no Z"}
+        "placebo_columns": "existence of >= 1 valid placebo per claim event (evaluate(outcome=False)); no Z",
+        "state": state,
+        "placebo_warning": [
+            {"variant": r["variant"], "claim_events": r["claim_events"], "events_with_placebo": r["events_with_placebo"],
+             "warning": "kill 4 / WIN 2 may be undecidable."}
+            for r in rows if r["events_with_placebo"] == 0 or r["events_with_placebo"] < PLACEBO_WARN_SHARE * r["claim_events"]]}
     json.dump(meta, open(os.path.join(out_dir, "meta.json"), "w"), indent=1, default=str)
+    os.makedirs(state_dir, exist_ok=True)
+    with open(os.path.join(state_dir, RUN_LOG), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"as_of": str(as_of), "computed_at_utc": meta["computed_at_utc"]}) + "\n")
     prim = rows[[r["variant"] for r in rows].index(PRIMARY)]
     if prim["stop_rule_met"] is True:
         os.makedirs(state_dir, exist_ok=True)
@@ -1258,6 +1285,15 @@ def _count_tests():
         mj = json.load(open(os.path.join(td, "out", "meta.json")))
         checks["COUNT e2e (ask 1): per-ingredient UNEVALUABLE counts written, schema exact"] = \
             list(U.columns) == UNEVAL_COLUMNS and int(U.events_unevaluable.sum()) >= 0
+        checks["R-IV.1120(b)2: unevaluable.csv has a session_date axis, inside the window"] = \
+            "session_date" in U.columns and len(U) > 0 and all(str(x) in ("2026-09-25", "2026-09-28") for x in U.session_date)
+        checks["R-IV.1120(b)1: a FRESH state dir says so on the face (counts.csv and meta.json)"] = \
+            str(f.state_dir_status.iloc[0]).startswith("FRESH") and f.stop_trigger_sha256.iloc[0] == "none" and \
+            mj["state"]["status"].startswith("FRESH") and mj["state"]["path"] == os.path.abspath(state)
+        checks["R-IV.1120(b)3: placebo warning when events_with_placebo is 0 / < 20% of claim events"] = \
+            all(w["warning"] == "kill 4 / WIN 2 may be undecidable." for w in mj["placebo_warning"]) and \
+            len(mj["placebo_warning"]) == int(((f.events_with_placebo == 0) |
+                                               (f.events_with_placebo < 0.2 * f.claim_events)).sum())
         checks["COUNT e2e: events with + without placebo = claim events"] = \
             bool(((f.events_with_placebo + f.events_without_placebo) == f.claim_events).all())
         checks["COUNT e2e (ask 5): meta.json carries the six-item label + the not-monotone and D7 notes"] = \
@@ -1293,6 +1329,9 @@ def _count_tests():
         checks["COUNT (ask 2): once the trigger exists, the flag never reverts and NO data is read"] = \
             o5 is None and json.load(open(os.path.join(td, "out_frozen", "trigger_frozen.json")))["trigger"]["as_of"] \
             == "2026-12-31"
+        checks["R-IV.1120(b)1: a later run in the same state dir reads EXISTING; the frozen output names the trigger hash"] = \
+            str(f4.state_dir_status.iloc[0]).startswith("EXISTING") and \
+            json.load(open(os.path.join(td, "out_frozen", "trigger_frozen.json")))["state"]["stop_trigger_sha256"] != "none"
     # half-day closes (stamped sec. 6: S_close and tau at 13:00 ET on a half-day)
     checks["HALF-DAY: session close is 13:00 on 11-27 and 12-24, 16:00 otherwise"] = \
         session_close(date(2026, 11, 27)) == 13 * 3600 and session_close(date(2026, 12, 24)) == 13 * 3600 \
