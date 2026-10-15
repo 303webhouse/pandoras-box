@@ -2299,6 +2299,51 @@ async def init_database():
                 ON option_chain_snapshots (session_date DESC, ticker)
         """)
 
+        # R-IV.1082(b): the forward option bid/ask capture. SEPARATE from
+        # option_chain_snapshots above, which is one 30-45 DTE capture a day for two
+        # tickers; this is 8 names x 0-3 DTE x 12 intraday slots, and the slot IS part
+        # of the identity -- the same contract is captured twelve times a session and
+        # each row is evidence about its own slot only.
+        #
+        # atm_method is stored because the +/-5 strike window has to be centred on
+        # something, and the three routes are not equally good: a window centred by
+        # `delta` is strong, by `parity` acceptable, by `median` weak. A reader that
+        # cannot tell which was used cannot weight the row.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS option_quote_capture (
+                id                  BIGSERIAL PRIMARY KEY,
+                captured_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                session_date        DATE        NOT NULL,
+                slot_et             TEXT        NOT NULL,
+                ticker              TEXT        NOT NULL,
+                expiry              DATE        NOT NULL,
+                dte                 INTEGER     NOT NULL,
+                contract_type       TEXT        NOT NULL,
+                strike              NUMERIC(12,4) NOT NULL,
+                bid                 NUMERIC(12,4),
+                ask                 NUMERIC(12,4),
+                mid                 NUMERIC(12,4),
+                iv                  NUMERIC(10,6),
+                delta               NUMERIC(10,6),
+                volume              BIGINT,
+                open_interest       BIGINT,
+                atm_strike          NUMERIC(12,4),
+                atm_method          TEXT,
+                raw_contract_count  INTEGER,
+                truncated           BOOLEAN     NOT NULL DEFAULT FALSE,
+                caller_tag          TEXT        NOT NULL DEFAULT 'option_quote_capture',
+                UNIQUE (session_date, slot_et, ticker, expiry, contract_type, strike)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oqc_session_slot
+                ON option_quote_capture (session_date DESC, slot_et, ticker)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oqc_contract
+                ON option_quote_capture (ticker, expiry, contract_type, strike, session_date)
+        """)
+
         # Migration 032 (R-IV.394, T1): the mark guard's verdict column. On any
         # non-OK value unrealized_pnl was NOT written -- never zeroed, because a
         # zero P&L is a CLAIM that the position is flat.
