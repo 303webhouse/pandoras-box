@@ -197,7 +197,7 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
     # R-IV.1037(c)2: feed health. Computed from the ACCEPTED events table and the
     # rejections table, so it survives a restart -- the R-IV.1033(d) work tracked rejections
     # in process memory only and therefore could not be served at all.
-    _feed = await _feed_health()
+    _feed = await _feed_health(tkr)
     # The script version the payload carried, or None. Bound once so the three
     # fields below cannot disagree about which Pine wrote this row.
     _script = (row["script_version"] or "").strip() or None
@@ -253,8 +253,29 @@ async def get_market_profile(ticker: str) -> Optional[Dict[str, Any]]:
     return {"status": status, "data": data, "staleness_seconds": age_seconds}
 
 
-async def _feed_health() -> dict:
+async def _feed_health(tkr: str = None) -> dict:
     """`feed_health`, `last_accepted_at` and `rejected_since_last_accept`. NEVER raises.
+
+    R-IV.1095(b): EVERY FIELD HERE NOW NAMES ITS SCOPE, because two correct fields side by
+    side implied something false.
+
+    `feed_health` is deliberately FEED-WIDE: "is the pipe alive" is not a per-ticker question,
+    and R-IV.1037(c)2 created it to catch 65 consecutive 401s that the per-ticker freshness
+    verdict reported as `ok`. That scope is right and is kept.
+
+    THE DEFECT WAS SERVING IT UNLABELLED INSIDE A PER-TICKER PAYLOAD. `data` holds SPY's
+    levels; `last_accepted_at` held MAX(timestamp) across ALL tickers. On 2026-10-15 a read of
+    SPY returned `last_accepted_at 16:34:49Z` while SPY's own newest row was from 10-14 --
+    both figures correct, and together they said SPY had just reported. It had not: 31 events
+    landed that day across 28 tickers and NONE were core-8. The newest row belonged to SRE.
+    So the fix is not a different number, it is the SCOPE of each number, stated:
+
+      feed_health / last_accepted_at / rejected_since_last_accept   FEED-WIDE
+      last_accepted_ticker                                          which ticker that was
+      this_ticker_last_accepted_at / this_ticker_rejections_since   THIS ticker
+
+    `last_accepted_ticker` alone would have prevented the misreading: the field would have
+    said SRE.
 
     ACQUIRES ITS OWN CONNECTION rather than taking the caller's. The caller's `async with
     pool.acquire() as conn` has already closed by the time this runs, so the name is still
@@ -270,10 +291,48 @@ async def _feed_health() -> dict:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
             last, n = await _feed_counts(conn)
-        return classify(last, n)
+            who = await _last_accepted_ticker(conn)
+            mine, mine_n = await _ticker_feed_counts(conn, tkr) if tkr else (None, None)
+        out = classify(last, n)
+        out["feed_health_scope"] = (
+            "FEED-WIDE: feed_health, last_accepted_at and rejected_since_last_accept cover "
+            "EVERY ticker, not this one. `this_ticker_last_accepted_at` is this ticker's own "
+            "(R-IV.1095(b)).")
+        out["last_accepted_ticker"] = who
+        out["this_ticker_last_accepted_at"] = (
+            mine.astimezone(timezone.utc).isoformat() if mine else None)
+        out["this_ticker_rejections_since"] = mine_n
+        return out
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("feed_health unavailable: %s", type(exc).__name__)
         return classify(None, None)
+
+
+async def _last_accepted_ticker(conn):
+    """WHICH ticker the feed-wide `last_accepted_at` belongs to. None when unreadable.
+
+    The single field that would have prevented R-IV.1095(b)'s misreading on its own: a reader
+    seeing `SRE` next to a SPY request cannot mistake it for SPY.
+    """
+    try:
+        return await conn.fetchval(
+            "SELECT ticker FROM pythia_events ORDER BY timestamp DESC LIMIT 1")
+    except Exception:                                               # noqa: BLE001
+        return None
+
+
+async def _ticker_feed_counts(conn, tkr: str):
+    """(this ticker's last accepted instant, refusals since it). None is NOT zero."""
+    try:
+        last = await conn.fetchval(
+            "SELECT MAX(timestamp) FROM pythia_events WHERE ticker = $1", tkr)
+        n = await conn.fetchval(
+            "SELECT count(*) FROM pythia_webhook_rejections"
+            " WHERE ticker = $1 AND reason NOT LIKE 'OBSERVE:%'"
+            "   AND (($2::timestamptz IS NULL) OR rejected_at > $2::timestamptz)", tkr, last)
+        return last, (int(n) if n is not None else None)
+    except Exception:                                               # noqa: BLE001
+        return None, None
 
 
 async def _feed_counts(conn):
