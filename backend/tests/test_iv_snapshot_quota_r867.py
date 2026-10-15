@@ -80,9 +80,10 @@ def test_only_the_ruled_callers_are_exempt():
     """A named set, not a count: it fails on an unintended addition exactly as a count would AND
     says which callers are exempt, so the next reader need not go and look.
 
-    It has now done its job TWICE: adding darkpool_collector under R-IV.876(e), and
-    darkpool_backfill_triton under R-IV.940(b), each failed this assertion rather than passing
-    silently. That is the whole reason to name the set instead of counting it.
+    It has now done its job THREE TIMES: darkpool_collector under R-IV.876(e),
+    darkpool_backfill_triton under R-IV.940(b), and iv_term_backfill under R-IV.1073(c) --
+    each failed this assertion rather than passing silently. That is the whole reason to name
+    the set instead of counting it.
 
     Each exemption needs the same justification -- the caller's WHOLE WINDOW is after the close,
     so budgeting it as though off-hours were its idle time is wrong. The backfill earned it the
@@ -92,6 +93,11 @@ def test_only_the_ruled_callers_are_exempt():
         "iv_snapshot",                # R-IV.867(e)
         "darkpool_collector",         # R-IV.876(e) / R-IV.839(c)
         "darkpool_backfill_triton",   # R-IV.940(b)
+        # R-IV.1073(c), ratified by R-IV.1079(a): "iv_term_backfill: 1.0 makes the approved
+        # 136 calls spendable and does not widen the grant; quota 165 and tier STANDARD are
+        # unchanged." It earned it the same hard way as the line above -- the 0.25 factor cut
+        # the ruled 165 to 41 and the governor logged "BLOCK ... count=41 limit=41".
+        "iv_term_backfill",           # R-IV.1073(c) / R-IV.1079(a)
     }
 
 

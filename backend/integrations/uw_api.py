@@ -1283,15 +1283,21 @@ async def get_market_tide_for_date(session: str) -> Optional[Dict[str, Any]]:
                              caller="market_tide")
 
 
-async def get_iv_term_structure(ticker: str, session: str) -> Optional[Dict[str, Any]]:
+async def get_iv_term_structure(ticker: str, session: str, *,
+                                caller: str = "iv_snapshot") -> Optional[Dict[str, Any]]:
     """ATM IV per expiry for one ticker on one market date (R-IV.866(b), the IV snapshot).
 
     `/api/stock/{ticker}/volatility/term-structure?date=` -- the average of the at-the-money call
     and put IV for every expiry. Returns the WHOLE body as received (the snapshot stores it), or
     the falsy result of `_uw_request`. Deliberately NOT cached: it is dated, and read once a day.
     """
+    # R-IV.1073(c): the caller tag is a PARAMETER, defaulting to the nightly job's own tag so
+    # that path is unchanged. The calibration BACKFILL passes `iv_term_backfill`, which is
+    # funded from the 12,000 FOREIGN RESERVE -- `iv_snapshot` is a 250/day DAILY_BUDGET tag with
+    # a measured peak of 208, so a 136-call backfill through it would have exhausted the
+    # nightly snapshot instead. The Hermes outage was exactly that mistake one tag over.
     return await _uw_request(f"/api/stock/{ticker.upper()}/volatility/term-structure",
-                             params={"date": session}, caller="iv_snapshot")
+                             params={"date": session}, caller=caller)
 
 
 async def get_darkpool_recent() -> Optional[List[Dict[str, Any]]]:
