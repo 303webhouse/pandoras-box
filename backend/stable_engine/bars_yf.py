@@ -18,6 +18,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from . import config, db
+from .market_calendar import last_settled_session
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ def download_and_store(
     end: date | None = None,
     batch_size: int = 100,
     block_tickers: set[str] | None = None,
+    include_unsettled: bool = False,
 ) -> dict:
     """Download daily bars for `tickers`, upsert to stable_daily_bars.
 
@@ -232,10 +234,30 @@ def download_and_store(
         days: incremental window (nightly refresh) — start = end - days.
         block_tickers: simulate a partial outage — these tickers are skipped from the
             request entirely (degraded-run test), never fabricated.
+        include_unsettled: R-IV.1176(b)1 — store TODAY'S IN-PROGRESS BAR as well. Off by
+            default, and a caller that turns it on is saying it wants a partial session.
 
     Returns a coverage summary. degraded=True when coverage < 90% of the request.
+
+    THE RIGHT EDGE IS THE LAST SETTLED SESSION (R-IV.1176(b)1). yfinance serves an
+    in-progress daily bar for the current session, so this function used to store one
+    whenever it ran during market hours -- and every figure computed downstream (ret_1d,
+    the moving-average flags, new highs and lows, the breadth percentages, the regime label
+    itself) was then computed off a day that had not finished, while `sessions_behind` read
+    0 and `degraded` read false. Measured on 2026-10-16: 250 tickers, bars stored at 14:40
+    ET, regime served as RISK-OFF with eighty minutes of the session left.
+
+    The nightly is UNAFFECTED. It runs at 21:00 ET, by which time the last settled session
+    IS today, so its window is unchanged -- which is the test that this clamp costs nothing
+    where the behaviour was already correct.
     """
-    end = end or (date.today() + timedelta(days=1))  # yfinance end is exclusive
+    # Clamped whether `end` was given or defaulted: one rule, no second path to a partial
+    # session. `+ 1` because yfinance's end is exclusive.
+    if include_unsettled:
+        end = end or (date.today() + timedelta(days=1))
+    else:
+        settled_end = last_settled_session() + timedelta(days=1)
+        end = min(end, settled_end) if end else settled_end
     if days is not None:
         start = end - timedelta(days=days)
     else:

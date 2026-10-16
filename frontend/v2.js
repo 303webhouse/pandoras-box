@@ -1827,12 +1827,17 @@
       '<div id="posEarn" class="kv"><span class="k">Earnings</span><span class="v">…</span></div>' +
       `<div class="drawer-actions">
          <button type="button" class="btn-danger" id="posCloseBtn">Close position</button>
+         ${ADD_POS_ELIGIBLE(p) ? '<button type="button" class="btn-secondary add-pos-btn" id="posAddBtn">Add to position</button>' : ''}
          <button type="button" class="btn-secondary" id="posChartBtn">Chart</button>
        </div>`;
     closePopup(); setSide($('drawer'), popSide(null, 'book')); syncTopbarH();
     $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open'); placeChartSoon();
     $('posCloseBtn').addEventListener('click', () => openCloseForm(p));
     $('posChartBtn').addEventListener('click', (e) => openChart(p.ticker, e.target));
+    // R-IV.1178(b): bound only when the button was drawn. Querying an element that a
+    // template chose not to render returns null, and `null.addEventListener` would throw
+    // and take the rest of this function -- the earnings fetch included -- down with it.
+    if ($('posAddBtn')) $('posAddBtn').addEventListener('click', () => openAddToPositionForm(p));
     // Earnings surface (CHRONOS) — single earnings source from P0
     try {
       const r = await apiFetch('/api/chronos/next-earnings-batch?tickers=' + encodeURIComponent(p.ticker));
@@ -2156,6 +2161,153 @@
     again.addEventListener('click', () => { addConfirmDuplicate = true; submitAdd(); });
     msg.appendChild(text);
     msg.appendChild(again);
+  }
+
+  // ── Add to position (R-IV.1173 STEP 1, surfaced here by R-IV.1178(b)) ───────────────────
+  //
+  // PREVIEW ONLY. Confirm is disabled and NOTHING is bound to it. The arithmetic below is the
+  // same arithmetic the write path will do in Python, which is the reason the two sets of
+  // structure names are mirrored explicitly rather than guessed: if they ever disagree, the
+  // principal confirms one trade and the book records another, and each side looks internally
+  // consistent while they differ.
+  //
+  // A CREDIT STRUCTURE IS PAID ON OPEN, so adding to one CREDITS cash and everything else
+  // debits it. Mirrored from `backend/api/unified_positions.py` CREDIT_STRUCTURES.
+  const ADD_POS_CREDIT_STRUCTURES = new Set(['credit_spread', 'put_credit_spread', 'bull_put_spread',
+    'call_credit_spread', 'bear_call_spread', 'iron_condor', 'iron_butterfly',
+    'short_call', 'naked_call', 'short_put', 'naked_put', 'cash_secured_put', 'covered_call']);
+  // Decides the multiplier. Getting this wrong makes every options preview wrong by 100x.
+  const ADD_POS_STOCK_STRUCTURES = new Set(['stock', 'shares', 'equity', 'long_stock', 'short_stock']);
+
+  // R-IV.1173(e): a closed row has nothing to add to, so the button is not drawn at all. A
+  // control that appears and then refuses is worse than one that is absent.
+  const ADD_POS_ELIGIBLE = (p) => String((p && p.status) || '').toUpperCase() === 'OPEN';
+
+  const addPosStructure = (p) => String((p && p.structure) || '').toLowerCase();
+  const addPosMultiplier = (p) => ADD_POS_STOCK_STRUCTURES.has(addPosStructure(p)) ? 1 : 100;
+  const addPosIsCredit = (p) => ADD_POS_CREDIT_STRUCTURES.has(addPosStructure(p));
+
+  // Multi-leg structures can only be added in whole units: adding 3 contracts to a 2-leg
+  // spread is not a bigger spread, it is a different position. Refused with the alternative
+  // named, because a bare "invalid" leaves nowhere to go.
+  function addPosLegRatioProblem(p, qty) {
+    const legs = Number(p && p.legs_count);
+    if (!Number.isFinite(legs) || legs <= 1) return null;
+    if (!Number.isFinite(qty) || qty <= 0) return null;
+    return null;  // whole-unit quantities are what the field collects; kept for STEP 2
+  }
+
+  function openAddToPositionForm(p) {
+    const held = openQty(p);
+    const credit = addPosIsCredit(p);
+    const mult = addPosMultiplier(p);
+    openModal('Add to ' + p.ticker, `
+      <div class="add-pos-locked">
+        <div><span class="add-pos-lock-label">Position</span>${esc(p.ticker + ' · ' + structureStr(p))}</div>
+        <div><span class="add-pos-lock-label">Account</span>${esc(p.account_display || '—')}</div>
+        <div><span class="add-pos-lock-label">Held</span>${held != null ? esc(String(held)) : 'unknown'}</div>
+        <div class="add-pos-lock-note">The account and the instrument are fixed. An add that
+          could change either is a different position, so there is no field for them.</div>
+      </div>
+      <div class="form-grid">
+        <div class="fld"><label for="a_qty">Quantity to add</label>
+          <input id="a_qty" type="number" min="1" step="1" placeholder="how many more?">
+          <div class="fld-echo">${mult === 1 ? 'shares' : 'contracts · 100 per contract'}</div></div>
+        <div class="fld"><label for="a_price">Price per ${mult === 1 ? 'share' : 'contract'}</label>
+          <input id="a_price" type="number" step="any" placeholder="${p.current_price != null ? esc(String(p.current_price)) : '0.00'}"></div>
+        <div class="fld"><label for="a_cost">Exact total <span class="add-pos-optional">(optional)</span></label>
+          <input id="a_cost" type="number" step="any" placeholder="leave blank to derive">
+          <div class="fld-echo">Blank derives it from price x quantity and records
+            derived_from_cost_basis. Fill it in to use the broker's own figure.</div></div>
+        ${dateFieldHtml('a_when', 'Date added', 'the day you added — today unless you say otherwise')}
+        <div class="fld full"><label for="a_note">Note</label><input id="a_note" placeholder="optional"></div>
+      </div>
+      <div class="add-pos-preview">
+        <div class="add-pos-preview-title">What this would do</div>
+        <div id="a_preview" class="add-pos-preview-wait">Enter a quantity and a price.</div>
+      </div>
+      <div class="add-pos-refusal" id="a_refusal"></div>
+      <div class="add-pos-step1-note">Preview only — saving is switched off in this step.
+        Try the numbers, and say the word when the preview looks right.</div>
+      <div class="form-foot">
+        <div class="form-msg" id="a_msg"></div>
+        <div class="form-actions">
+          <button type="button" class="btn-primary" id="a_submit" disabled>Confirm add</button>
+          <button type="button" class="btn-secondary" id="a_cancel">Cancel</button>
+        </div>
+      </div>`);
+    $('a_cancel').addEventListener('click', closeModal);
+    // NO HANDLER ON a_submit. The `disabled` attribute can be removed in devtools; an unbound
+    // button cannot do anything regardless. STEP 2 is where a handler appears.
+    ['a_qty', 'a_price', 'a_cost'].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('input', () => updateAddToPositionPreview(p));
+    });
+    wireDateField('a_when');
+    updateAddToPositionPreview(p);
+  }
+
+  function updateAddToPositionPreview(p) {
+    const out = $('a_preview'), refusal = $('a_refusal');
+    if (!out) return;
+    const qty = Number($('a_qty') && $('a_qty').value);
+    const price = Number($('a_price') && $('a_price').value);
+    const exact = $('a_cost') && $('a_cost').value !== '' ? Number($('a_cost').value) : null;
+    if (refusal) { refusal.textContent = ''; refusal.classList.remove('active'); }
+
+    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) {
+      out.className = 'add-pos-preview-wait';
+      out.textContent = 'Enter a quantity and a price.';
+      return;
+    }
+    const problem = addPosLegRatioProblem(p, qty);
+    if (problem && refusal) {
+      refusal.textContent = problem + ' Open it as a new position instead.';
+      refusal.classList.add('active');
+      out.className = 'add-pos-preview-wait';
+      out.textContent = 'Nothing to preview while the quantity cannot be applied.';
+      return;
+    }
+
+    const mult = addPosMultiplier(p);
+    const credit = addPosIsCredit(p);
+    const addCost = exact != null ? Math.abs(exact) : price * mult * qty;
+    const held = openQty(p);
+    const basisNow = p.cost_basis != null ? Math.abs(Number(p.cost_basis)) : null;
+    const money = (v) => '$' + Number(v).toFixed(2);
+    const lines = [];
+
+    // Quantity: only stated when what is held is actually known. #29 -- `quantity` is the
+    // size OPENED and `open_quantity` is what is held, and guessing between them here would
+    // put a wrong number in front of a decision.
+    if (held != null && Number.isFinite(Number(held))) {
+      lines.push('Quantity goes from ' + held + ' to ' + (Number(held) + qty) + '.');
+    } else {
+      lines.push('Quantity goes up by ' + qty + ' — what is held now is unknown, so the new total cannot be shown.');
+    }
+    if (basisNow != null) {
+      const newBasis = basisNow + addCost;
+      lines.push('Cost basis goes from ' + money(basisNow) + ' to ' + money(newBasis) + '.');
+      if (held != null && Number(held) > 0) {
+        const perNow = basisNow / (Number(held) * mult);
+        const perNew = newBasis / ((Number(held) + qty) * mult);
+        lines.push('Average cost per ' + (mult === 1 ? 'share' : 'contract') + ' goes from '
+          + money(perNow * mult) + ' to ' + money(perNew * mult) + '.');
+      }
+    } else {
+      lines.push('Cost basis goes up by ' + money(addCost) + ' — the current basis is not recorded, so the new total cannot be shown.');
+    }
+    lines.push('Cash in ' + esc(p.account_display || 'this account') + ' '
+      + (credit ? 'goes UP by ' + money(addCost) + ' (a credit structure is paid to you on open).'
+                : 'goes DOWN by ' + money(addCost) + '.'));
+    if (exact != null) {
+      lines.push('Total taken from the figure you entered: ' + money(Math.abs(exact)) + '.');
+    } else {
+      lines.push('Total derived as ' + money(price) + ' x ' + (mult === 1 ? '' : mult + ' x ')
+        + qty + ' = ' + money(addCost) + ' (derived_from_cost_basis).');
+    }
+    out.className = 'add-pos-preview-list';
+    out.innerHTML = '<ul>' + lines.map((l) => '<li>' + l + '</li>').join('') + '</ul>';
   }
 
   function openCloseForm(p) {

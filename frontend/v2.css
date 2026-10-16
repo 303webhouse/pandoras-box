@@ -1265,3 +1265,69 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .acct-seg button[aria-pressed="true"] { color: var(--teal); border-color: var(--teal); }
 .acct-sort[aria-pressed="true"] { color: var(--teal); border-color: var(--teal); }
 @media (max-width: 820px) { .acct-seg button, .acct-sort { min-height: 44px; padding: 8px 12px; } }
+
+/* ── Add to position (R-IV.1173 STEP 1, surfaced by R-IV.1178) ───────────── */
+.add-pos-locked {
+  background: rgba(0, 0, 0, .22);
+  border: 1px solid rgba(78, 205, 196, .22);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: .86rem;
+  line-height: 1.7;
+}
+.add-pos-lock-label {
+  color: var(--muted, #8899a6);
+  display: inline-block;
+  min-width: 72px;
+}
+.add-pos-lock-note {
+  color: var(--muted, #8899a6);
+  font-size: .78rem;
+  line-height: 1.45;
+  margin-top: 6px;
+}
+.add-pos-optional { color: var(--muted, #8899a6); font-weight: 400; }
+.add-pos-preview { margin-top: 12px; }
+.add-pos-preview-title {
+  color: var(--accent, #4ecdc4);
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: .9rem;
+}
+.add-pos-preview-list { font-size: .86rem; line-height: 1.7; }
+.add-pos-preview-list ul { margin: 0; padding-left: 18px; }
+.add-pos-preview-wait {
+  color: var(--muted, #8899a6);
+  font-size: .84rem;
+  font-style: italic;
+}
+/* A refusal is not a hint: it says why nothing will happen, in plain words. */
+.add-pos-refusal {
+  display: none;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: rgba(255, 107, 107, .12);
+  border: 1px solid rgba(255, 107, 107, .4);
+  color: #ff9f9f;
+  font-size: .85rem;
+  line-height: 1.5;
+}
+.add-pos-refusal.active { display: block; }
+/* STEP 1 says so on the face of the form, so nobody wonders why Confirm is dead. */
+.add-pos-step1-note {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: rgba(255, 193, 7, .1);
+  border: 1px solid rgba(255, 193, 7, .35);
+  color: #ffd97a;
+  font-size: .84rem;
+  line-height: 1.5;
+}
+#a_submit:disabled { opacity: .45; cursor: not-allowed; }
+.drawer-actions .add-pos-btn {
+  border-color: rgba(78, 205, 196, .5);
+  color: var(--accent, #4ecdc4);
+}

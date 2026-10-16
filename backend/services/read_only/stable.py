@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date as _date, datetime, timezone
 
 from database.postgres_client import get_postgres_client
 
@@ -108,6 +108,35 @@ def _sessions_back(anchor_date, n: int) -> list:
     return sorted(out)
 
 
+def _settled_block(metrics_date) -> dict:
+    """Whether the session `metrics_date` names has closed, and what that means for the label.
+
+    One place, because the payload needs the same answer three times (the flag, the basis and
+    the human-readable reason) and three derivations would be three chances to disagree.
+    """
+    if metrics_date is None:
+        return {"session_settled": None, "regime_basis": "unknown",
+                "provisional": True,
+                "provisional_reason": "there is no metrics date to judge"}
+    from stable_engine.market_calendar import is_session_settled, settlement_reason
+
+    try:
+        d = _date.fromisoformat(str(metrics_date)[:10])
+    except Exception:                                               # noqa: BLE001
+        return {"session_settled": None, "regime_basis": "unknown", "provisional": True,
+                "provisional_reason": "%r is not a readable date" % (metrics_date,)}
+    settled = is_session_settled(d)
+    if settled is True:
+        return {"session_settled": True, "regime_basis": "settled", "provisional": False,
+                "provisional_reason": None}
+    # BOTH False AND None land here. A guard reads "not settled"; the reader is still told
+    # which of the two it was, through `session_settled` and the reason.
+    return {"session_settled": settled, "regime_basis": "in_session",
+            "provisional": True,
+            "provisional_reason": "computed on %s, which is not a settled session (%s)"
+                                  % (d, settlement_reason(d))}
+
+
 def completeness_verdict(windows: dict, lag: dict = None):
     """(degraded, reason) from a window-completeness block and the anchor lag.
 
@@ -150,7 +179,8 @@ async def _anchor_lag(conn, metrics_date) -> dict:
     fault wearing different clothes: in both cases the figure is computed from the
     wrong days and looks completely ordinary.
     """
-    from stable_engine.market_calendar import trading_days_between
+    from stable_engine.market_calendar import (is_session_settled, settlement_reason,
+                                                trading_days_between)
     from stable_engine.scoring import ANCHOR_MIN_COVERAGE, ANCHOR_MIN_TICKERS_FLOOR
 
     universe = await conn.fetchval(
@@ -170,8 +200,14 @@ async def _anchor_lag(conn, metrics_date) -> dict:
         required,
     )
     if newest is None or metrics_date is None:
+        # SAME SHAPE as the success branch. `_feed_health` returned a different one from its
+        # except branch and its new fields vanished exactly when they mattered.
         return {"metrics_date": str(metrics_date) if metrics_date else None,
-                "newest_complete_session": None, "sessions_behind": None,
+                "newest_complete_session": None,
+                "newest_complete_session_measures": "ticker_breadth_only_not_session_end",
+                "session_closed": None,
+                "session_closed_reason": "no session has enough tickers to measure",
+                "sessions_behind": None,
                 "required_tickers": required, "universe": universe}
     try:
         behind = max(0, trading_days_between(metrics_date, newest))
@@ -180,6 +216,16 @@ async def _anchor_lag(conn, metrics_date) -> dict:
     return {
         "metrics_date": str(metrics_date),
         "newest_complete_session": str(newest),
+        # R-IV.1176(b)4. "COMPLETE" HERE MEANS TICKER BREADTH AND NOTHING ELSE: the newest
+        # date on which at least `required_tickers` names have a bar. It says nothing about
+        # whether the trading day has ended, and on 2026-10-16 it reported 10-16 "complete"
+        # at 14:40 ET with eighty minutes of the session left. The key keeps its name because
+        # renaming a served field breaks readers silently; what it measures is now stated in
+        # the payload itself, next to the value, where a reader cannot miss it.
+        "newest_complete_session_measures": "ticker_breadth_only_not_session_end",
+        # The thing the name above was being mistaken for, as its own field.
+        "session_closed": is_session_settled(newest),
+        "session_closed_reason": settlement_reason(newest),
         "sessions_behind": behind,
         "required_tickers": required,
         "universe": universe,
@@ -489,6 +535,12 @@ async def get_regime() -> dict:
                 degraded_reason=reason,
                 dominant=dominant[:8], emerging=emerging[:8], fading=fading[:8],
                 metrics_date=str(latest_metric_date) if latest_metric_date else None,
+                # R-IV.1176(b)3: IS THAT DATE A FINISHED DAY? The label is an enum and keeps
+                # its three values, because appending a qualifier to it would silently falsify
+                # every comparison against RISK-ON / RISK-OFF / NEUTRAL. The qualifier travels
+                # beside it instead -- and, crucially, into the MCP summary line, which is the
+                # sentence a reader actually reads.
+                **_settled_block(latest_metric_date),
                 # R-IV.1175(b): THE LAST RUN'S OWN VERDICT, beside the date it produced.
                 # `metrics_date` alone cannot distinguish "the nightly is healthy and this is
                 # simply the newest session" from "the nightly came up short and this date is
@@ -500,7 +552,7 @@ async def get_regime() -> dict:
         logger.warning("[services.stable] get_regime failed: %s", e)
         return _envelope(None, None, True, feed="nightly", regime_label="UNKNOWN",
                          thresholds={}, breadth={}, dominant=[], emerging=[], fading=[], metrics_date=None,
-                         nightly_run_status=nightly)
+                         nightly_run_status=nightly, **_settled_block(None))
 
 
 async def get_theme_members(theme: str, top: int = 5, bottom: int = 5) -> dict:

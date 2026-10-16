@@ -32,9 +32,17 @@ sj = importlib.import_module("jobs.stable_jobs")
 
 
 def _ok(**over) -> dict:
-    """A healthy nightly return: edge aligned, metrics written, coverage fine."""
+    """A healthy nightly return: edge aligned, metrics written, coverage fine.
+
+    THE DATE IS A SETTLED PAST SESSION, and that is not incidental. This file originally used
+    2026-10-16 -- the day it was written -- and when R-IV.1176 added the reciprocal test (a
+    newest bar whose session has not closed also withholds confidence) these fixtures started
+    failing every day before 16:00 ET and passing after it. A test about time that depends on
+    the hour it runs is untested at exactly the hour that matters. 2026-10-14 is a Wednesday
+    inside the enumerated calendar, so it is settled for good.
+    """
     base = {"coverage": 99.1, "degraded": False,
-            "newest_bar_date": "2026-10-16", "newest_metrics_date": "2026-10-16",
+            "newest_bar_date": "2026-10-14", "newest_metrics_date": "2026-10-14",
             "metrics_written": 678, "metrics_rows": 887320, "themes_stored": 24}
     base.update(over)
     return base

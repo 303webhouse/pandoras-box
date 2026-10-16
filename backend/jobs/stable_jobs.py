@@ -55,6 +55,32 @@ def _all_tickers() -> list[str]:
 INCOMPLETE_RETRY_SESSIONS = 5
 
 
+def _newest_bar_is_unsettled(newest_bar_date) -> bool:
+    """True when the newest bar's session has NOT closed -- INCLUDING when that cannot be
+    determined, which is the whole fail-closed point. A date the calendar cannot speak for is
+    not a date to score on."""
+    from datetime import date as _d
+
+    from stable_engine.market_calendar import is_session_settled
+
+    try:
+        d = _d.fromisoformat(str(newest_bar_date)[:10])
+    except Exception:                                               # noqa: BLE001
+        return True
+    return is_session_settled(d) is not True
+
+
+def _settlement_reason(newest_bar_date) -> str:
+    from datetime import date as _d
+
+    from stable_engine.market_calendar import settlement_reason
+
+    try:
+        return settlement_reason(_d.fromisoformat(str(newest_bar_date)[:10]))
+    except Exception:                                               # noqa: BLE001
+        return "%r is not a readable date" % (newest_bar_date,)
+
+
 def _newest_edge():
     """(newest bar date, newest metrics date, rows of metrics on the newest BAR date).
 
@@ -491,6 +517,15 @@ def check_nightly_output(res: dict) -> None:
     if nb is None or nm is None or mw is None:
         short.append("the newest-edge read failed, so this pass cannot be verified "
                      "(newest_bar=%s, newest_metrics=%s, metrics_written=%s)" % (nb, nm, mw))
+    elif _newest_bar_is_unsettled(nb):
+        # R-IV.1176(b)2, THE RECIPROCAL TEST. The test above catches bars running AHEAD of
+        # metrics -- a session that went missing. This one catches bars running ahead of the
+        # CLOCK -- a session that has not finished. Both mean the newest edge is not a day
+        # anything should be scored on, and the first version of this check passed the second
+        # case cleanly: bars 10-16, metrics 10-16, count non-zero, all three agreeing on a
+        # day with eighty minutes left to run.
+        short.append("the newest bar date %s is not a settled session (%s)"
+                     % (nb, _settlement_reason(nb)))
     elif str(nm) < str(nb):
         short.append("bars reach %s but metrics stop at %s" % (nb, nm))
     elif mw == 0:
