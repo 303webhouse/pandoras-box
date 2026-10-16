@@ -45,8 +45,23 @@ STATUS_SKIPPED = "skipped"
 # reason — and it is a COMPLETED PASS, so the retry leaves it alone: a deterministic data
 # defect does not heal on repetition, and each retry re-downloads the whole universe.
 STATUS_COMPLETED_DEFECTIVE = "completed_defective"
+# R-IV.1175(b). The pass ran, but its INPUT was short: bar coverage below the downloader's own
+# 90% threshold, or a session whose bars arrived while its metrics did not. DISTINCT from
+# `completed_defective`, and the distinction decides whether a retry happens:
+#
+#   completed_defective -> the download was fine and our computation produced nothing. A
+#                          deterministic defect does not heal on repetition, so it is NOT retried.
+#   degraded            -> the VENDOR was short. Vendor gaps DO heal on repetition -- measured
+#                          2026-10-16, when the same request that returned 514 of 678 bars
+#                          overnight returned all 164 missing names that afternoon.
+#
+# So `degraded` is deliberately kept OUT of PASS_COMPLETE_STATUSES below, which is what makes
+# the retry re-attempt the session instead of leaving it for a ruling. 2026-10-15 recorded `ok`
+# and sat two sessions stale until it was healed by hand; under this status it heals itself.
+STATUS_DEGRADED = "degraded"
 # What the RETRY question counts as "this session's pass is done". Not the same question as
 # "this session produced good data" -- last_completed() below still counts only ok/skipped.
+# NOTE `degraded` is absent ON PURPOSE: a short vendor day is not a completed pass.
 PASS_COMPLETE_STATUSES = (STATUS_OK, STATUS_COMPLETED_DEFECTIVE)
 
 
