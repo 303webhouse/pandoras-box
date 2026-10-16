@@ -13880,48 +13880,27 @@ body[data-mode="analytics"] .analytics-shell {
    sideways. 1417 is the last width at which it does not fit, so that is where the collapse ends. At
    1418px and above the three columns fit unaided and nothing changes. The number is measured, and
    the measurement is the comment: if the row's contents change, this breakpoint is wrong again. */
-@media (max-width: 1417px) {
-
-    .crypto-main-content {
-
-        grid-template-columns: 1fr;
-
-        grid-template-areas:
-
-            "chart"
-
-            "trades"
-
-            "positions"
-
-            "btc";
-
-    }
-
-    .crypto-bias-row {
-
-        grid-template-columns: 1fr;
-
-        row-gap: 10px;
-
-    }
-
-    .crypto-bias-inline {
-
-        justify-self: start;
-
-    }
-
-    .crypto-bias-meta {
-
-        justify-self: end;
-
-    }
-
-}
-
-
-
+@media (max-width: 1417px) {
+    .crypto-main-content {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "chart"
+            "trades"
+            "positions"
+            "btc";
+    }
+    .crypto-bias-row {
+        grid-template-columns: 1fr;
+        row-gap: 10px;
+    }
+    .crypto-bias-inline {
+        justify-self: start;
+    }
+    .crypto-bias-meta {
+        justify-self: end;
+    }
+}
+
 /* ── R-IV.716(b) · and the price row has to fit those widths too ───────────────────────────────
    Collapsing the grid is not sufficient on its own. `#cryptoPriceRow` is a NOWRAP flex row whose
    three price cells carry min-widths of 160px, 120px and 120px; with the funding and CVD chips
