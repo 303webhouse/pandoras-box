@@ -182,6 +182,59 @@ def surviving_cost(lots: Sequence[Dict[str, Any]]) -> Optional[Decimal]:
     return total
 
 
+def surviving_cost_and_fees(
+    lots: Sequence[Dict[str, Any]],
+) -> Tuple[Optional[Decimal], Optional[Decimal]]:
+    """(gross cost, fees) for the lots STILL OPEN, FIFO — R-IV.1181(c)2.
+
+    `surviving_cost` above answers the first half and is kept, because a dozen callers read
+    it and its meaning has not changed. This adds the half that was missing: THE FEES, which
+    were summed elsewhere and never reached the P&L, so every row's unrealized figure was
+    gross while the percentage beneath it divided by a cash basis.
+
+    FEES ARE PRO-RATED BY THE SURVIVING FRACTION OF THEIR LOT. A fee is paid on a fill; the
+    part of that fill still held carries the matching part of the fee. Charging the remainder
+    the whole fee of a half-sold lot would make a position read worse the more of it had been
+    closed, and would count the fee twice across the realized and unrealized sides.
+
+    Returns `(None, None)` on anything it cannot state -- an unpriced lot, a missing quantity,
+    or more sold than was ever acquired -- exactly as `surviving_cost` does. A fee of None is
+    read as zero ONLY when the lot's price is known: a missing fee is a fee not recorded, and
+    on this book that is the ordinary case for an older lot, whereas a missing PRICE makes the
+    whole basis unknown.
+    """
+    ordered = _sorted_lots(lots)
+    if not ordered:
+        return (None, None)
+    # [qty still held, price, fee per unit] — the fee travels per unit so a partial
+    # disposal takes its share with it and no rounding opinion is needed later.
+    open_lots: List[List[Decimal]] = []
+    for l in ordered:
+        q, pr = _d(l.get("qty")), _d(l.get("price"))
+        if q is None or pr is None:
+            return (None, None)
+        fee = _d(l.get("fees")) or Decimal("0")
+        if q > 0:
+            open_lots.append([q, pr, fee / q if q else Decimal("0")])
+            continue
+        take = -q
+        while take > 0 and open_lots:
+            head = open_lots[0]
+            used = head[0] if head[0] <= take else take
+            head[0] -= used
+            take -= used
+            if head[0] == 0:
+                open_lots.pop(0)
+        if take > 0:
+            return (None, None)
+    cost = Decimal("0")
+    fees = Decimal("0")
+    for q, pr, fee_per_unit in open_lots:
+        cost += q * pr
+        fees += q * fee_per_unit
+    return (cost, fees)
+
+
 def close_date_from_lots(
     lots: Sequence[Dict[str, Any]],
 ) -> Tuple[Optional[date], Optional[int], Optional[str]]:
@@ -295,6 +348,13 @@ def economics(
         "unit_cost": None,
         "market_value": None,
         "unrealized_pnl": None,
+        # R-IV.1181(c)2. Declared in the SAME shape every early return uses, so a row that
+        # cannot be computed is missing a VALUE and not a FIELD -- `_feed_health` returned a
+        # different shape from its failure branch and its new fields vanished exactly when
+        # they mattered.
+        "unrealized_pnl_pct": None,
+        "cost_at_remainder_gross": None,
+        "fees_at_remainder": None,
         "max_loss": None,
         "basis_source": None,
         "basis_reason": None,
@@ -329,14 +389,44 @@ def economics(
         out["basis_reason"] = NO_OPEN_REMAINDER
         return out
 
-    cost = surviving_cost(lots)
+    cost, fees_rem = surviving_cost_and_fees(lots)
     if cost is None:
         out["basis_reason"] = "the lots do not state a cost for what is still open"
         return out
 
-    cost_total = cost * mult
+    # R-IV.1181(c)2: THE CASH BASIS. `cost x mult` is the GROSS basis -- what the contracts
+    # cost before fees -- and it is what every figure here used to be built on, while the
+    # percentage beneath them divided by the row's cash `cost_basis`. A fee is money that
+    # left the account, so it belongs in the cost of what is held: a debit costs MORE than
+    # its premium and a credit nets LESS than it. Both figures are published, because the
+    # gross one is what reconciles against a broker fill and the cash one is what a return
+    # is measured on.
+    fees_rem = fees_rem if fees_rem is not None else Decimal("0")
     unit = cost / rem
-    out["cost_at_remainder"] = money(cost_total)
+
+    # THE ORDER OF THESE TWO STEPS IS THE WHOLE ARITHMETIC.
+    #
+    # 1. SIGN THE GROSS. The lots hold a positive price for a credit structure as readily as
+    #    for a debit one -- SOUN 234's lots store +0.48 for an opening that took cash IN -- so
+    #    the direction comes from the structure, which is the only thing here that knows it.
+    # 2. THEN ADD THE FEES. A fee is money leaving the account whichever way the trade went:
+    #    it makes a debit cost more and a credit net less, so it always moves the signed basis
+    #    in the POSITIVE direction.
+    #
+    # Reversing them negates the fee along with the gross, which makes a credit look BIGGER by
+    # its own costs: sold 0.48 with 0.52 of fees read as -48.52 instead of -47.48.
+    #
+    # Both rows this file records come out exact: row 978 at -10.00 + 1.14 = -8.86, and
+    # SOUN 234 at -96.00 + 0.18 = -95.82, each matching its stored cost_basis to the cent.
+    gross_total = cost * mult
+    if is_credit_structure(row.get("structure")) and gross_total > 0:
+        gross_total = -gross_total
+    cost_signed = gross_total + fees_rem
+
+    out["cost_at_remainder"] = money(cost_signed)
+    out["cost_at_remainder_gross"] = money(gross_total)
+    out["fees_at_remainder"] = money(fees_rem)
+    out["cost_basis_includes_fees"] = True
     out["unit_cost"] = float(unit)
     out["basis_source"] = "lots"
 
@@ -359,16 +449,16 @@ def economics(
     # The width comes from the row's own strikes. Without both, there is NO figure and the reason
     # says so -- a credit spread of unknown width has unknown risk, and the one thing not to do
     # is fall back to the cost, which is the number this branch exists to stop.
-    credit = _credit_max_loss(row, cost_total, rem, mult)
+    # Handed the signed CASH cost. `_credit_max_loss` takes its magnitude as "the credit
+    # kept", so this moves it from the gross credit to the NET credit -- the right input to
+    # "width less the credit kept", because the net is what was actually received.
+    credit = _credit_max_loss(row, cost_signed, rem, mult)
     if credit is not None:
-        # R-IV.605(f): signed, NEGATIVE when the position took cash in. The lots cannot say so
-        # (they hold a positive price either way), so the structure does. Without this a reader
-        # is told a credit spread cost him 96 when it paid him 96.
-        if cost_total > 0:
-            out["cost_at_remainder"] = money(-cost_total)
-            out["basis_direction"] = "credit"
-        else:
-            out["basis_direction"] = "credit"
+        # R-IV.605(f) still holds: NEGATIVE when the position took cash in. It is simply
+        # decided earlier now, at the one place the cost is built, instead of being patched
+        # into the output field here -- which left the local value positive and sent the P&L
+        # the number that was not published.
+        out["basis_direction"] = "credit"
         out["max_loss"] = money(credit["max_loss"]) if credit["max_loss"] is not None else None
         out["max_loss_basis"] = credit["basis"]
         if credit["max_loss"] is None:
@@ -386,29 +476,62 @@ def economics(
         # opened for a credit, so the debit it could lose is nothing. It is NOT "no risk" in the
         # wider sense -- a spread still carries assignment exposure -- but max_loss here means the
         # premium at stake, and that is zero.
-        if cost_total < 0:
+        if cost_signed < 0:
             out["max_loss"] = money(Decimal("0"))
             out["max_loss_basis"] = "opened for a net credit; cannot lose below zero"
         else:
-            out["max_loss"] = money(cost_total)
+            # Now the CASH cost: a debit's worst case is the premium plus the fees paid to
+            # put it on, because that is the money that left the account.
+            out["max_loss"] = money(cost_signed)
 
     m = _d(mark)
     if m is None:
         out["basis_reason"] = NO_MARK
         return out
-    value = m * rem * mult
-    out["market_value"] = money(value)
-    # R-IV.605(f) / R-IV.607(c): READ BY CASH DIRECTION.
+
+    # R-IV.1181(c)2 — ONE SIGNED BASIS, AND ONE RULE.
     #
-    # `value - cost` is right for long premium: it rose, you gained. A credit spread is the
-    # other way round -- you were PAID to open it and you pay to close it, so the gain is the
-    # credit kept less what it now costs to buy back. Measured on SOUN 234's shape: sold at
-    # 0.48 with a mark of 0.30, the unsigned form reports -36.00 on a position that is 36.00 up.
+    # `market_value` is now SIGNED the same way `cost_at_remainder` is: positive for
+    # something owned, negative for something owed. A credit structure's mark is what it
+    # would cost to buy back, which is a LIABILITY, so it carries a minus. With both sides
+    # signed alike, one expression is right for every structure:
+    #
+    #     unrealized_pnl = market_value - cost_at_remainder
+    #
+    # and the old credit branch (`abs(cost_total) - value`) comes out as a special case of it
+    # rather than standing as a second rule. The SOUN 234 shape it was written for still
+    # works: sold for 48.00, mark 30.00 -> value -30.00, cost -48.00, P&L +18.00.
+    #
+    # WHY THE SIGN COMES FROM THE STRUCTURE, not from the mark or the cost. R-IV.1181(b):
+    # `entry_price` is an unsigned magnitude and so is a mark, so neither can say which way
+    # the money went. The structure can, and `cost_at_remainder` already agrees with it.
+    magnitude = abs(m) * rem * mult
+    owed = is_credit_structure(row.get("structure"))
+    value = -magnitude if owed else magnitude
+    out["market_value"] = money(value)
+    out["market_value_direction"] = ("liability: what it would cost to buy back" if owed
+                                     else "asset: what it would fetch")
+    out["unrealized_pnl"] = money(value - cost_signed)
+    out["pnl_basis"] = ("cash: market value less the cost of what is still held, fees "
+                        "included")
+    # KEPT, though the arithmetic no longer branches on it. One rule for computing a number is
+    # not a reason to stop publishing what that number means, and a reader may already consult
+    # this. It describes the same subtraction from the credit side's point of view.
     if credit is not None:
-        out["unrealized_pnl"] = money(abs(cost_total) - value)
         out["pnl_direction"] = "credit: the premium kept, less the cost to close"
+    # THE PERCENT IS PUBLISHED HERE so that it cannot be computed against a different basis
+    # downstream. That was the actual defect: the frontend divided a lot-derived GROSS P&L by
+    # the row's stored CASH cost_basis -- two bases in one ratio, and on a partly-closed row
+    # two scopes as well, since the stored column is the size OPENED (convention #29) while
+    # these figures are the open remainder.
+    if cost_signed != 0:
+        pct = (Decimal(str(out["unrealized_pnl"])) / abs(cost_signed)) * Decimal("100")
+        out["unrealized_pnl_pct"] = float(pct.quantize(Decimal("0.1"),
+                                                       rounding=ROUND_HALF_UP))
     else:
-        out["unrealized_pnl"] = money(value - cost_total)
+        out["unrealized_pnl_pct"] = None
+        out["unrealized_pnl_pct_reason"] = (
+            "the cost of what is still held is zero, so a return on it has no denominator")
     return out
 
 

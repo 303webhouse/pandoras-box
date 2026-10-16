@@ -1713,8 +1713,44 @@
       : why ? 'not recorded' : 'no reason sent';
     return vintageChip({ unknownLabel: label, unknownTitle: why || 'the source sent no figure and no reason for its absence' });
   }
+  // R-IV.1181(c)1 — A FIGURE THAT IS NOT SET READS AS AN EM DASH, never as $0.00. Zero is a
+  // measurement: it says the worst case IS nothing, which is true of a credit-opened debit
+  // structure and false of a row whose lots never arrived. The reason is kept in the tooltip
+  // rather than discarded, because "not set" and "not set BECAUSE there are no lots" are
+  // different things to a reader deciding whether to go and fix it.
+  // R-IV.1181(c)3 — A CREDIT OPENING MUST NOT READ AS A COST.
+  //
+  // R-IV.1181(b): `entry_price` is an unsigned MAGNITUDE and stays one. It cannot say which
+  // way the money went, so a bare "Entry 0.10" reads as "it cost 0.10" on a position that was
+  // PAID 0.10 -- and row 978 is exactly that, a put_debit_spread opened for a net credit.
+  // The direction comes from `cost_basis`, which is signed and correct: positive paid,
+  // negative received.
+  function entryLine(p) {
+    if (p.entry_price == null) return '—';
+    const cb = p.cost_at_remainder != null ? Number(p.cost_at_remainder)
+             : p.cost_basis != null ? Number(p.cost_basis) : null;
+    if (cb != null && cb < 0) return 'credit ' + Math.abs(Number(p.entry_price));
+    return p.entry_price;
+  }
+
+  function notSet(p, field) {
+    const why = p && p.derived && p.derived.basis_reason ? String(p.derived.basis_reason) : '';
+    const title = why || 'the source sent no figure and no reason for its absence';
+    return `<span class="not-set" title="${esc(title)}">\u2014</span>`;
+  }
+
   function pnlPct(p) {
-    const cb = Math.abs(Number(p.cost_basis) || 0);
+    // R-IV.1181(c)2: PREFER THE SERVED FIGURE. The server computes the percent from the same
+    // cash basis as the P&L itself, at the open remainder. What this function used to do --
+    // divide a lot-derived GROSS P&L by the row's stored CASH `cost_basis` -- mixed two bases
+    // in one ratio, and on a partly-closed row two scopes too, because the stored column is
+    // the size OPENED (convention #29) while the numerator is what is still held.
+    if (p.unrealized_pnl_pct != null) return Number(p.unrealized_pnl_pct);
+    // Fallback for a payload that predates the field. Kept deliberately rather than returning
+    // null -- an older server should still show a number -- and it is the OLD arithmetic, so
+    // it stays wrong in the old way instead of being wrong in a new one.
+    const cb = Math.abs(Number(p.cost_at_remainder != null ? p.cost_at_remainder
+                                                           : p.cost_basis) || 0);
     if (!cb || p.unrealized_pnl == null) return null;
     return (Number(p.unrealized_pnl) / cb) * 100;
   }
@@ -1814,14 +1850,15 @@
     body.innerHTML =
       kv('Structure', structureStr(p) + (p.structure ? '  (' + String(p.structure).replace(/_/g, ' ') + ')' : '')) +
       kv('Direction', p.direction || '—') + kv('Account', p.account_display || '—') +
-      kv('Entry', p.entry_price != null ? p.entry_price : '—') + kv('Current', p.current_price != null ? p.current_price : '—') +
+      kv('Entry', entryLine(p)) + kv('Current', p.current_price != null ? p.current_price : '—') +
       kv('Stop', p.stop_loss != null ? p.stop_loss : '—') + kv('Target', p.target_1 != null ? p.target_1 : '—') +
       (openQty(p) != null
         ? kv('Open qty', openQty(p))
         : kvh('Open qty', vintageChip({ unknownLabel: 'unknown', unknownTitle: openQtyWhy(p) }))) +
       kv('DTE', p.dte != null ? p.dte : '—') +
       kv('Cost basis', p.cost_basis != null ? '$' + Number(p.cost_basis).toFixed(2) : '—') +
-      (p.max_loss != null ? kv('Max loss', '$' + Number(p.max_loss).toFixed(2)) : kvh('Max loss', noMoney(p, 'max_loss'))) +
+      (p.max_loss != null ? kv('Max loss', '$' + Number(p.max_loss).toFixed(2))
+                          : kvh('Max loss', notSet(p, 'max_loss'))) +
       `<div class="kv"><span class="k">Unrealized P&amp;L</span><span class="v ${suspect ? '' : signCls(pnl)}">${pnl != null ? (pnl >= 0 ? '+' : '-') + '$' + Math.abs(pnl).toFixed(2) : noMoney(p, 'pnl')}${pct != null ? (suspect ? ' <span class="struck">(' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)</span> ' + basisChip(suspect) : ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)') : ''}</span></div>` +
       kv('Bucket', p.bucket || '—') + kv('Theme', tm && tm.theme ? (tm.theme + (tm.inverse ? ' (inverse)' : '')) : '—') +
       '<div id="posEarn" class="kv"><span class="k">Earnings</span><span class="v">…</span></div>' +

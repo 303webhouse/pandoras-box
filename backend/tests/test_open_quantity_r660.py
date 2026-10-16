@@ -337,7 +337,15 @@ class TestTheCensusedReaders:
     def test_the_account_value_and_ceiling_base_already_read_lots(self):
         """`market_value = mark x REMAINDER x multiplier` in position_economics, which
         `account_value` sums and the sleeve ceiling's base reads. Clean, and recorded."""
-        assert "value = m * rem * mult" in _code("services/position_economics.py")
+        # R-IV.1181(c)2 gave the market value a SIGN (an owned structure is an asset, a
+        # credit structure a liability), so the expression is no longer one line. What this
+        # test is about is the SCOPE -- `rem`, the open remainder, never `quantity` -- so that
+        # is what it asserts now. Pinning the spelling made it fail on a change that did not
+        # touch the scope at all.
+        code = _code("services/position_economics.py")
+        assert "abs(m) * rem * mult" in code
+        assert 'm * row.get("quantity")' not in code
+        assert "m * qty" not in code
 
 
 class TestTheCoverageInvariantTestsSomethingThatCanHold:

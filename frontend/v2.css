@@ -1331,3 +1331,13 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   border-color: rgba(78, 205, 196, .5);
   color: var(--accent, #4ecdc4);
 }
+
+/* ── Not set (R-IV.1181(c)1) ──────────────────────────────────────────────── */
+/* An em dash means NO FIGURE. It is deliberately not styled like a number: a reader
+   scanning the panel should see absence, not a quantity that happens to be small. The
+   reason lives in the title attribute, so it is one hover away rather than discarded. */
+.not-set {
+  color: var(--muted, #8899a6);
+  cursor: help;
+  border-bottom: 1px dotted rgba(136, 153, 166, .5);
+}
