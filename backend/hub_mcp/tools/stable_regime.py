@@ -27,6 +27,11 @@ DESCRIPTION = (
     "Robotics score as genuine momentum. Check data_quality_warnings on "
     "every response; if non-empty, discount that theme wherever it appears "
     "in dominant/emerging/fading.\n\n"
+    "IN-SESSION READINGS: the response carries session_settled and provisional. When "
+    "provisional is true the breadth counts and the regime label were computed on a "
+    "trading day that had NOT yet closed, so they can move before the close -- treat "
+    "them as a snapshot, never as the day's verdict, and do not gate a decision on "
+    "them. regime_basis says which it is: \"settled\" or \"in_session\".\n\n"
     "Status ok/degraded/stale/unavailable follows the freshness of the "
     "underlying nightly Stable Engine recompute. unavailable means the feed "
     "has gone dead past its SLO (~26h) -- the last-known data is still "
@@ -45,7 +50,16 @@ def _summary(data: dict, status: str, warnings: list) -> str:
     dom_str = ", ".join(d["theme"] for d in dom[:3]) or "none"
     tag = " (FLATLINE)" if status == "unavailable" else ""
     warn = f" DATA QUALITY WARNING on {len(warnings)} theme(s)." if warnings else ""
-    return f"Regime: {label}{tag}. {p50_str} above 50dma. Dominant: {dom_str}.{warn}"
+    # R-IV.1176(b)3. FIRST IN THE SENTENCE, because a qualifier after the breadth numbers
+    # reads as a footnote and this one changes what the label means. The label value itself is
+    # left alone: readers compare it against RISK-ON / RISK-OFF / NEUTRAL, and appending to it
+    # would turn a visible staleness problem into an invisible one.
+    prov = ""
+    if data.get("provisional"):
+        reason = data.get("provisional_reason") or "the session has not closed"
+        prov = f"PROVISIONAL (IN-SESSION) — {reason}. "
+    return (f"{prov}Regime: {label}{tag}. {p50_str} above 50dma. "
+            f"Dominant: {dom_str}.{warn}")
 
 
 @mcp_tool(name="hub_get_stable_regime", description=DESCRIPTION)

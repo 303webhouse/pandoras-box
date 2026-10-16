@@ -1502,6 +1502,28 @@ app.add_middleware(
 # Compress responses >1KB. AEGIS: minimum_size=1000 is the BREACH/CRIME floor — do not lower.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+
+@app.middleware("http")
+async def _revalidate_html(request, call_next):
+    """R-IV.1178(c) — THE PAGE THAT AUTHORS THE `?v=` PINS MUST NOT BE SERVED STALE.
+
+    Measured on production 2026-10-16: the HTML documents carry `etag` and `last-modified`
+    and **no Cache-Control whatsoever**. With no explicit directive a browser falls back to
+    HEURISTIC freshness and may reuse the document on a navigation without revalidating. The
+    HTML is where every `?v=` number is written, so a stale copy of it keeps pinning the old
+    asset — the cache-busting scheme does nothing, and it fails silently, which is the worst
+    way for it to fail.
+
+    `no-cache` does NOT mean "do not store". It means "revalidate before use", and the etag
+    is already there, so the common case is a 304 with no body. The fingerprinted assets are
+    left alone: their URL changes when their content does, which is the whole point of a pin.
+    """
+    response = await call_next(request)
+    ctype = response.headers.get("content-type", "")
+    if ctype.startswith("text/html") and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
