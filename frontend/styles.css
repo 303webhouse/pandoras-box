@@ -14035,3 +14035,15 @@ body[data-mode="analytics"] .analytics-shell {
     border-color: rgba(78, 205, 196, 0.5);
     color: #4ecdc4;
 }
+
+
+/* -- Max loss not set (R-IV.1181(c)1) ------------------------------------- */
+/* The bar used to render nothing at all for a row with no max_loss, which looks the same
+   as a row whose risk bar is empty. Silence about an unknown worst case is the one thing a
+   risk surface must not do. */
+.max-loss-why {
+    color: #8899a6;
+    font-size: 0.72rem;
+    font-style: italic;
+    margin-left: 4px;
+}

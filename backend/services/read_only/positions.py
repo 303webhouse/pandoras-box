@@ -130,6 +130,11 @@ def attach_economics(positions: List[Dict[str, Any]],
         p["unrealized_pnl_stored"] = p.get("unrealized_pnl")
         p["max_loss"] = e["max_loss"]
         p["unrealized_pnl"] = e["unrealized_pnl"]
+        # R-IV.1181(c)2: the percent travels WITH the figure it belongs to, computed from the
+        # same basis by the same author. A consumer that divides the P&L by some other cost
+        # column is how the screen came to show a gross numerator over a cash denominator.
+        p["unrealized_pnl_pct"] = e.get("unrealized_pnl_pct")
+        p["cost_at_remainder"] = e.get("cost_at_remainder")
         # R-IV.660(b)2: the ruled name is `open_quantity`, and it is stamped HERE because
         # this is the one function where a lot-derived figure reaches a position dict --
         # stamping it per route is how one surface ends up without it. `open_remainder` is

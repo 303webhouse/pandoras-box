@@ -10123,7 +10123,16 @@ function renderPositionCard(pos) {
 
     // Max loss bar
     let maxLossBar = '';
-    if (pos.max_loss && pos.max_loss > 0) {
+    // R-IV.1181(c)1: a row with NO max_loss says so. It used to render nothing at all, which
+    // is indistinguishable from a row whose risk bar is simply empty -- and silence about an
+    // unknown worst case is the one thing a risk surface must not do. A real zero still takes
+    // the branch below and draws its bar.
+    if (pos.max_loss == null) {
+        maxLossBar = `
+            <div class="max-loss-bar-wrap">
+                <span class="max-loss-label">Max loss: &mdash; <span class="max-loss-why">not set</span></span>
+            </div>`;
+    } else if (pos.max_loss > 0) {
         const lossConsumed = Math.min(100, Math.max(0, (Math.abs(pnl) / pos.max_loss) * 100));
         const barClass = pnl < 0 ? (lossConsumed > 75 ? 'loss-severe' : lossConsumed > 50 ? 'loss-warning' : 'loss-ok') : 'loss-ok';
         maxLossBar = `

@@ -139,6 +139,25 @@ def _classification_backfilled(positions: List[Dict[str, Any]]) -> bool:
     return any(p.get("classification") for p in positions)
 
 
+def _iso_day(v: Any) -> Optional[str]:
+    """A date field as a plain ISO day, whatever shape it arrives in.
+
+    THREE SHAPES, because this field has two possible producers and a reader must not care
+    which one ran. `_row_to_dict` stringifies a `date` to ISO and a `datetime` through
+    `iso_utc`, so by the time the MCP sees a row the value is normally a `str` -- but a caller
+    that hands over raw asyncpg rows passes the objects themselves.
+
+    NOT a bare `str()`: a datetime would then serve a full timestamp into a field every reader
+    treats as a day, which is a quieter wrong answer than the crash this replaces. A string is
+    truncated to its first ten characters for the same reason.
+    """
+    if v is None or v == "":
+        return None
+    if hasattr(v, "isoformat"):
+        return v.isoformat()[:10]
+    return str(v)[:10]
+
+
 def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
     expiry = row.get("expiry")
     dte = None
@@ -249,7 +268,11 @@ def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
         "sleeve_reason": row.get("sleeve_reason"),
         "orientation_at_entry": row.get("orientation_at_entry"),
         "x4_result": row.get("x4_result"),
-        "cut_due": (row["cut_due"].isoformat() if row.get("cut_due") else None),
+        # NORMALISED, not assumed. This line used to call `.isoformat()` directly and took
+        # the whole tool down with `'str' object has no attribute 'isoformat'` the moment a
+        # non-null `cut_due` appeared: `_row_to_dict` has always stringified dates before this
+        # code sees them. See `_iso_day` for why it accepts three input shapes.
+        "cut_due": _iso_day(row.get("cut_due")),
         "cut_status": row.get("cut_status"),
         # R-IV.1052(e)(c)4: NEGATIVE means inverse (TSLQ -2, SRTY -3, SOXS -3). A null is
         # "not recorded", NEVER 1x -- the companion flag exists so a reader cannot quietly

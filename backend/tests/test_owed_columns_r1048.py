@@ -227,8 +227,26 @@ def test_cut_due_is_serialised_not_handed_over_raw():
     """A date object is not JSON. Serving it raw works until something downstream calls
     json.dumps on the envelope."""
     src = _src("hub_mcp/tools/positions.py")
-    m = re.search(r'"cut_due":(.{0,120})', src, re.S)
-    assert m and "isoformat" in m.group(1), m and m.group(1)
+    assert re.search(r'"cut_due":', src), "cut_due is not served at all"
+    # BEHAVIOUR, NOT SPELLING. This used to require the literal string "isoformat" beside the
+    # key, and that exact line was taking the whole tool down with `'str' object has no
+    # attribute 'isoformat'`: `_row_to_dict` is the one serialiser every position row passes
+    # through and it stringifies dates before this code sees them. The test held the broken
+    # implementation in place and would have failed any correct fix. What it should pin is
+    # that the value comes out as a JSON-safe ISO day whatever shape it arrived in.
+    from datetime import date as _date
+    from datetime import datetime as _dt
+
+    from hub_mcp.tools.positions import _iso_day
+
+    assert _iso_day(_date(2026, 10, 24)) == "2026-10-24"       # a date object
+    assert _iso_day("2026-10-24") == "2026-10-24"              # what it actually receives
+    assert _iso_day("2026-10-24T13:05:00+00:00") == "2026-10-24"
+    assert _iso_day(_dt(2026, 10, 24, 13, 5)) == "2026-10-24"
+    assert _iso_day(None) is None
+    import json
+
+    json.dumps({"cut_due": _iso_day(_date(2026, 10, 24))})     # the original worry, direct
 
 
 def test_the_b2_cut_verdicts_are_what_cut_status_would_hold():
