@@ -55,6 +55,34 @@ def _all_tickers() -> list[str]:
 INCOMPLETE_RETRY_SESSIONS = 5
 
 
+def _newest_edge():
+    """(newest bar date, newest metrics date, rows of metrics on the newest BAR date).
+
+    Read straight from the two tables rather than inferred from the pass's own counters: the
+    counters are what missed this, and a figure that reports on itself cannot catch itself.
+    """
+    from stable_engine import db
+    try:
+        rows = db.read_df(
+            "SELECT (SELECT MAX(date) FROM stable_daily_bars) AS b,"
+            "       (SELECT MAX(date) FROM stable_metrics) AS m,"
+            "       (SELECT COUNT(*) FROM stable_metrics"
+            "          WHERE date = (SELECT MAX(date) FROM stable_daily_bars)) AS n")
+        r = rows.iloc[0]
+        # TO YYYY-MM-DD, both of them, before anything compares them. The driver may hand
+        # these back as `date` or as a pandas Timestamp depending on the query shape, and
+        # "2026-10-15 00:00:00" < "2026-10-15" is TRUE lexicographically -- a mixed pair
+        # would report a healthy session as behind. Same slice on both, or neither.
+        def _d(v):
+            return str(v)[:10] if v is not None else None
+        return (_d(r["b"]), _d(r["m"]), int(r["n"] or 0))
+    except Exception as exc:                                        # noqa: BLE001
+        # Unreadable is NOT "fine": returned as None so the checker says it could not tell
+        # rather than passing the run.
+        logger.warning("[stable_jobs] newest-edge read failed: %s", exc)
+        return (None, None, None)
+
+
 def _nightly_work() -> dict:
     from datetime import date as _date, timedelta
     from stable_engine import bars_yf, metrics, scoring
@@ -110,7 +138,14 @@ def _nightly_work() -> dict:
     # itself the night after the anchor is fixed instead of waiting for a hand-run script.
     backfilled = scoring.backfill_missing_theme_scores(anchor="close",
                                                        degraded=coverage["degraded"])
+    # R-IV.1175(b): THE NEWEST EDGE, because a whole-history total cannot see a hole in it.
+    # `metrics_rows` below is every row written across all history and is always large; these
+    # two answer the question that actually matters -- did the session whose bars just arrived
+    # also get metrics?
+    newest_bar, newest_metrics, metrics_written = _newest_edge()
     return {"coverage": coverage["coverage_pct"], "degraded": coverage["degraded"],
+            "newest_bar_date": newest_bar, "newest_metrics_date": newest_metrics,
+            "metrics_written": metrics_written,
             "metrics_rows": m.get("rows_written", 0), "themes_stored": stored,
             "held_dates": m.get("held_dates") or [],
             "themes_backfilled": backfilled,
@@ -178,6 +213,22 @@ async def _record(job_name: str, coro_fn, session_date=None):
         rows = res.get("rows_touched") if isinstance(res, dict) else None
         await _finish_run(run_id, "ok", rows_touched=rows if isinstance(rows, int) else None)
         return res
+    except NightlyDegraded as e:
+        # R-IV.1175(b): a short vendor day. Recorded as `degraded`, which is deliberately NOT a
+        # PASS_COMPLETE status, so the retry re-attempts the session rather than leaving a
+        # two-day-stale regime for someone to notice.
+        #
+        # job_status IS DELIBERATELY NOT TOUCHED HERE -- neither mark_success nor
+        # mark_failure. Not success, because the pass did not produce a whole session. Not
+        # failure, because the retry is expected to heal it within the same session and a
+        # flatline alert on the first short attempt would cry wolf every time the vendor was
+        # slow. What stays honest is that `mark_success` is NOT called, so the
+        # last-successful-run age keeps growing and the staleness sentinel still fires if the
+        # degradation persists.
+        logger.warning("[stable_jobs] %s DEGRADED: %s", job_name, e)
+        from jobs.job_runs import STATUS_DEGRADED
+        await _finish_run(run_id, STATUS_DEGRADED, str(e))
+        return None
     except OutputCheckFailed as e:
         # A FAILURE (job_status, alert) that is a COMPLETED PASS (job_runs) -- R-IV.426(b).
         logger.warning("[stable_jobs] %s produced no output: %s", job_name, e)
@@ -398,6 +449,15 @@ async def stable_tide_warmer_loop():
         await asyncio.sleep(300)  # 5 minutes
 
 
+class NightlyDegraded(RuntimeError):
+    """The pass ran but its INPUT was short, so it is retryable (R-IV.1175(b)).
+
+    Its own type, because `_record` chooses the recorded status by exception class: without
+    this it would land in the generic `except Exception` and be recorded as `error` and
+    alerted as a crash, which is a different claim about a different fault.
+    """
+
+
 class OutputCheckFailed(RuntimeError):
     """R-IV.426. The pass completed, but the step's own output says it produced nothing.
     Recorded as a failure with its reason; NOT retried (see job_runs.STATUS_COMPLETED_DEFECTIVE)."""
@@ -413,6 +473,37 @@ def check_nightly_output(res: dict) -> None:
     Download degraded (coverage < 90%) + no output -> ordinary RuntimeError: the retry exists
     for exactly that. Download fine + no output -> OutputCheckFailed: deterministic, not retried.
     """
+    # R-IV.1175(b): THE NEWEST EDGE FIRST, and it is a DEGRADED verdict rather than a defect.
+    #
+    # 2026-10-15 wrote 514 of 678 bars and 0 metrics and recorded `ok`, because the two tests
+    # below both passed: `metrics_rows` was 887,320 (the whole-history UPSERT) and
+    # `themes_stored` was fine. Neither can see one missing session at the newest edge, so the
+    # edge is asked about directly.
+    nb = res.get("newest_bar_date")
+    nm = res.get("newest_metrics_date")
+    mw = res.get("metrics_written")
+    cov = res.get("coverage")
+    short = []
+    # FAIL CLOSED ON AN UNREADABLE EDGE. An earlier draft of this returned None on a failed
+    # read and then skipped every test, because `None == 0` is False and `None is not None` is
+    # False -- so an unreadable edge PASSED the run. "I could not tell" is not "fine", and a
+    # check that cannot answer must say so rather than wave the pass through.
+    if nb is None or nm is None or mw is None:
+        short.append("the newest-edge read failed, so this pass cannot be verified "
+                     "(newest_bar=%s, newest_metrics=%s, metrics_written=%s)" % (nb, nm, mw))
+    elif str(nm) < str(nb):
+        short.append("bars reach %s but metrics stop at %s" % (nb, nm))
+    elif mw == 0:
+        short.append("metrics_written=0 for the newest bar date %s" % nb)
+    if res.get("degraded"):
+        short.append("download degraded, coverage %s%%" % cov)
+    if short:
+        # RETRYABLE, because the shortfall is upstream: the vendor filled 10-15 the next
+        # afternoon and a re-run then healed it completely.
+        raise NightlyDegraded(
+            "%s (coverage %s%%, metrics_written=%s, newest_bar=%s, newest_metrics=%s)"
+            % ("; ".join(short), cov, mw, nb, nm))
+
     problems = []
     if not res.get("metrics_rows"):
         problems.append("metrics_rows=%s" % res.get("metrics_rows"))

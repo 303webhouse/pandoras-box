@@ -18,7 +18,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jobs import job_runs, stable_jobs  # noqa: E402
 from stable_engine import bars_yf  # noqa: E402
 
-GOOD = {"coverage": 98.12, "degraded": False, "metrics_rows": 871700, "themes_stored": 44}
+# R-IV.1175(b) added three keys the checker reads FIRST: the newest bar date, the newest
+# metrics date, and the metrics count on the newest BAR date. A healthy night has the two dates
+# equal and a non-zero count, so that is what GOOD carries -- without them every dict here
+# reads as an unverifiable pass, which is the new guard working, not these tests failing.
+GOOD = {"coverage": 98.12, "degraded": False, "metrics_rows": 871700, "themes_stored": 44,
+        "newest_bar_date": "2026-09-16", "newest_metrics_date": "2026-09-16",
+        "metrics_written": 678}
+EDGE_OK = {"newest_bar_date": "2026-09-16", "newest_metrics_date": "2026-09-16",
+           "metrics_written": 678}
 
 
 # ── the predicate ────────────────────────────────────────────────────────────────────────
@@ -29,7 +37,11 @@ def test_a_pass_with_output_is_ok():
 
 def test_the_eight_day_night_is_now_a_failure():
     """The exact result logged by production on 2026-09-16."""
-    night = {"coverage": 98.12, "degraded": False, "metrics_rows": 871700, "themes_stored": 0}
+    # The edge is healthy here ON PURPOSE: this night's fault was that nothing was STORED
+    # while the download was fine, which is the non-retried defect. Leaving the edge out would
+    # reclassify it as a short vendor day and test the wrong branch.
+    night = {"coverage": 98.12, "degraded": False, "metrics_rows": 871700, "themes_stored": 0,
+             **EDGE_OK}
     with pytest.raises(stable_jobs.OutputCheckFailed) as e:
         stable_jobs.check_nightly_output(night)
     assert "themes_stored=0" in str(e.value)
@@ -43,15 +55,31 @@ def test_no_metrics_is_a_failure_too():
 
 def test_degraded_download_with_no_output_is_RETRYABLE():
     """The retry exists for a pass that did not properly complete. A degraded download is
-    that case, so it must NOT be classed as the non-retried kind."""
+    that case, so it must NOT be classed as the non-retried kind.
+
+    R-IV.1175(b) SHARPENED this: the raise is now a named `NightlyDegraded` rather than a bare
+    RuntimeError, and it fires on a degraded download whether or not there was output. Both
+    the original claim and the new type are asserted, since the original claim is the one the
+    retry depends on.
+    """
     with pytest.raises(RuntimeError) as e:
         stable_jobs.check_nightly_output({**GOOD, "degraded": True, "themes_stored": 0})
     assert not isinstance(e.value, stable_jobs.OutputCheckFailed)
+    assert isinstance(e.value, stable_jobs.NightlyDegraded)
 
 
 def test_missing_fields_are_not_success():
-    with pytest.raises(stable_jobs.OutputCheckFailed):
+    """SPLIT BY R-IV.1175(b), because the two halves are now different verdicts.
+
+    A res carrying nothing cannot be judged -- we cannot tell a short vendor day from a broken
+    computation -- so it fails closed as retryable. A res whose edge is healthy and whose
+    output is empty is still the deterministic defect that is NOT retried. What both halves
+    share, and what this test has always been about, is that neither is success.
+    """
+    with pytest.raises(stable_jobs.NightlyDegraded):
         stable_jobs.check_nightly_output({"coverage": 99.0, "degraded": False})
+    with pytest.raises(stable_jobs.OutputCheckFailed):
+        stable_jobs.check_nightly_output({"coverage": 99.0, "degraded": False, **EDGE_OK})
 
 
 # ── how _record closes each outcome ─────────────────────────────────────────────────────

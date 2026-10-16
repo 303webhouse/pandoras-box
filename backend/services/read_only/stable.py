@@ -327,8 +327,50 @@ async def get_themes() -> dict:
         return _envelope(None, None, True, feed="nightly", themes=[], count=0)
 
 
+async def _nightly_run_status() -> dict:
+    """The last `stable_nightly` run's own verdict, for the regime payload (R-IV.1175(b)).
+
+    Built on `job_runs.last_run()` rather than its own SELECT: that function already owns this
+    query for /health, and a second copy here is a second place for the column list to drift.
+    It acquires its own connection, so this is called BEFORE the regime read takes one.
+
+    An unreadable ledger returns `status: None`, never "ok". This field exists precisely
+    because a short run reported itself healthy, so a failure to read it must not be able to
+    say the thing the field was added to catch.
+    """
+    try:
+        from jobs.job_runs import JOB_NIGHTLY, STATUS_OK, last_run
+
+        row = await last_run(JOB_NIGHTLY)
+        if row is None:
+            # None here is BOTH "no run on record" and "the ledger could not be read" --
+            # last_run collapses them. Neither is a pass, so neither may read as healthy.
+            return {"status": None, "healthy": None,
+                    "detail": "no stable_nightly run on record, or job_runs unreadable"}
+        return {
+            "status": row.get("status"),
+            # A reader comparing this with `metrics_date` can see a run that finished for a
+            # session whose metrics never landed -- the 2026-10-15 failure, which served a
+            # 10-14 regime under status=ok for two days.
+            "session_date": str(row["session_date"]) if row.get("session_date") else None,
+            "finished_at": (row["finished_at"].isoformat()
+                            if row.get("finished_at") else None),
+            "detail": row.get("error") or row.get("skip_reason"),
+            "healthy": row.get("status") == STATUS_OK,
+        }
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[services.stable] nightly run status unreadable: %s", exc)
+        return {"status": None, "healthy": None,
+                "detail": "unreadable: %s" % type(exc).__name__}
+
+
 async def get_regime() -> dict:
     """Regime read: breadth counts + dominant/emerging/fading themes."""
+    # OUTSIDE the try below, and before the pool acquire, ON PURPOSE. The failure path has to
+    # serve this field too: an error envelope that drops it would hide the run status exactly
+    # when the run is the thing that went wrong. (`_feed_health` had this bug -- its except
+    # branch returned a different shape, so the new fields vanished when they mattered.)
+    nightly = await _nightly_run_status()
     try:
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
@@ -447,11 +489,18 @@ async def get_regime() -> dict:
                 degraded_reason=reason,
                 dominant=dominant[:8], emerging=emerging[:8], fading=fading[:8],
                 metrics_date=str(latest_metric_date) if latest_metric_date else None,
+                # R-IV.1175(b): THE LAST RUN'S OWN VERDICT, beside the date it produced.
+                # `metrics_date` alone cannot distinguish "the nightly is healthy and this is
+                # simply the newest session" from "the nightly came up short and this date is
+                # stale" -- 2026-10-15 served 10-14 for two days and looked identical to a
+                # quiet market from here. DERIVED, and a reminder, never a gate (#42).
+                nightly_run_status=nightly,
             )
     except Exception as e:
         logger.warning("[services.stable] get_regime failed: %s", e)
         return _envelope(None, None, True, feed="nightly", regime_label="UNKNOWN",
-                         thresholds={}, breadth={}, dominant=[], emerging=[], fading=[], metrics_date=None)
+                         thresholds={}, breadth={}, dominant=[], emerging=[], fading=[], metrics_date=None,
+                         nightly_run_status=nightly)
 
 
 async def get_theme_members(theme: str, top: int = 5, bottom: int = 5) -> dict:
