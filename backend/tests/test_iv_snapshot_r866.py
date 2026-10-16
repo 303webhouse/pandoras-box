@@ -75,7 +75,11 @@ async def test_one_real_cycle_writes_a_row_per_ticker():
         return TERM
 
     res = await iv.snapshot_session(conn, SESSION, _fetch)
-    want = len(UNIVERSE) + 2                              # + PDBC, WEAT
+    # R-IV.1148(c) put the 8 TRITON census names ahead of UNIVERSE, and SPY was not in it --
+    # so the count is derived from the actual composition rather than hard-coded. A literal
+    # `len(UNIVERSE) + 2` would break on every legitimate census change while saying nothing
+    # about the property under test, which is ONE ROW PER TICKER with crypto filtered out.
+    want = len(set(iv.TRITON_CENSUS) | set(UNIVERSE)) + 2   # + PDBC, WEAT
     assert res["tickers"] == want == len(asked) and res["rows_touched"] == want
     assert "BTC-USD" not in asked and asked[-2:] == ["PDBC", "WEAT"]
     rows = [a for s, a in conn.executed if s == iv.UPSERT]

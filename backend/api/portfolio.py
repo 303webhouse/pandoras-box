@@ -8,6 +8,7 @@ Brief 10: Gap fixes — signal_id/account columns, partial sync, single create,
 
 import json
 import os
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -572,6 +573,15 @@ class CashFlowCreate(BaseModel):
     # an old caller is answered rather than rejected, and the response says plainly
     # that nothing was adjusted and why.
     adjust_balance: bool = False
+    # R-IV.1145(e)2: WHICH BROKER LINE THIS EVENT IS, as <sha12>:L<n> (Convention #44).
+    #
+    # Without it a credit posted through this route is PERMANENTLY UNMATCHABLE to the close it
+    # pays for. R-IV.1142(c) needed three attempts for exactly this reason: `source_ref` is
+    # written by `close_position()` (a position_id) and by the CSV importer (a file path), and
+    # this route wrote neither -- so an audit keyed on it called fourteen already-credited
+    # closes "missing", which would have invented about 14,000 of cash had the list been acted
+    # on. Credits 212 and 213 are in that state now.
+    source_ref: Optional[str] = None
 
 
 @router.post("/cash-flows")
@@ -586,11 +596,47 @@ async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
         except ValueError:
             pass
 
+    # R-IV.1145(e)2: the shape is checked, not trusted. A `source_ref` that is not
+    # <sha12>:L<n> would sit in the same column as the importer's file paths and the close
+    # path's position_ids, giving the column a FOURTH vocabulary -- which is the fault being
+    # closed, not a new one to add.
+    from services.cash_ledger import dedup_key
+
+    src = (body.source_ref or "").strip() or None
+    if src is not None and not re.fullmatch(r"[0-9a-f]{12}:L\d+", src):
+        raise HTTPException(
+            status_code=400,
+            detail="source_ref must be <sha12>:L<n> (Convention #44), e.g. "
+                   "d3af6637dc16:L6 - got %r" % src)
+
+    # R-IV.1145(e)3: a dedup key ONLY when the movement can be attributed. Three legitimate
+    # same-day 24.91 orders are three different broker lines, so keying on <sha12>:L<n> keeps
+    # them distinct; without a source_ref the key is NULL, which sits outside the partial
+    # unique index and so refuses nothing -- losing a real movement is worse than repeating one.
+    key = dedup_key(body.account_name, body.flow_type, body.amount, act_date, src) if src else None
+
     row = await pool.fetchrow("""
-        INSERT INTO cash_flows (account_name, flow_type, amount, description, activity_date, imported_from)
-        VALUES ($1, $2, $3, $4, $5, 'manual')
+        INSERT INTO cash_flows (account_name, flow_type, amount, description, activity_date,
+                                imported_from, source_ref, dedup_key)
+        VALUES ($1, $2, $3, $4, $5, 'manual', $6, $7)
+        ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+        DO NOTHING
         RETURNING *
-    """, body.account_name, body.flow_type, body.amount, body.description, act_date)
+    """, body.account_name, body.flow_type, body.amount, body.description, act_date, src, key)
+
+    if row is None and key is not None:
+        # A conflict is NOT a failure: this exact broker line is already in the ledger. Said
+        # plainly, with the id, so a caller does not retry forever or conclude the write was lost.
+        existing = await pool.fetchrow(
+            "SELECT * FROM cash_flows WHERE account_name = $1 AND dedup_key = $2",
+            body.account_name, key)
+        if existing is not None:
+            out = _row_to_dict(existing)
+            out["balance_adjusted"] = False
+            out["already_present"] = True
+            out["note"] = ("this broker line is already in the ledger as id %s; nothing was "
+                           "written and nothing is wrong" % existing["id"])
+            return out
 
     if row is None:
         # An INSERT ... RETURNING that returns nothing is not a success with an empty
@@ -1294,6 +1340,13 @@ class CashFlowCorrection(BaseModel):
     """
     amount: Optional[float] = None
     activity_date: Optional[str] = None
+    # R-IV.1148(d): source_ref may be SET, but ONLY from NULL, and only as <sha12>:L<n>.
+    # The docstring above is right that source_ref is IDENTITY -- which is why this is not a
+    # general mutation: COMPLETING an identity never written is a different act from REPLACING
+    # one, and an overwrite stays refused. It exists because a credit posted through the cash
+    # route had no way to name its broker line, so R-IV.1142(c) took three attempts and a
+    # near-miss worth about 14,000.
+    source_ref: Optional[str] = None
     # Required. An unevidenced correction to money is indistinguishable from a typo with a
     # confident tone, and this route exists precisely because the first figure was wrong.
     evidence_ref: str
@@ -1320,10 +1373,16 @@ async def correct_cash_flow(event_id: int, body: CashFlowCorrection):
                 status_code=400,
                 detail="%s is required: a correction to money that cannot say what it was read "
                        "out of, why, under which ruling, and by whom is not auditable" % field)
-    if body.amount is None and body.activity_date is None:
+    if body.amount is None and body.activity_date is None and body.source_ref is None:
         raise HTTPException(status_code=400,
-                            detail="give amount, activity_date, or both - there is nothing to "
-                                   "correct otherwise")
+                            detail="give amount, activity_date, source_ref, or any "
+                                   "combination - there is nothing to correct otherwise")
+    if body.source_ref is not None and not re.fullmatch(
+            r"[0-9a-f]{12}:L\d+", body.source_ref.strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="source_ref must be <sha12>:L<n> (Convention #44), e.g. d3af6637dc16:L6 "
+                   "- got %r" % body.source_ref)
     if body.amount is not None and body.amount == 0:
         raise HTTPException(status_code=400,
                             detail="amount must be non-zero; a movement of zero is not a "
@@ -1355,7 +1414,20 @@ async def correct_cash_flow(event_id: int, body: CashFlowCorrection):
         amount = Decimal(str(body.amount)) if body.amount is not None else before["amount"]
         when = new_date or before["activity_date"]
 
+        new_src = (body.source_ref or "").strip() or None
+        if new_src is not None and before["source_ref"] is not None:
+            # REFUSED, not silently ignored: a caller who believes they relabelled a row and
+            # did not would carry a wrong belief into the next reconciliation.
+            raise HTTPException(
+                status_code=409,
+                detail=("event %s already has a source_ref. Only a NULL source_ref may be set: "
+                        "replacing one would make this a different event wearing this id."
+                        % event_id))
+        src_final = new_src or before["source_ref"]
+
         changes = []
+        if new_src is not None:
+            changes.append(("source_ref", before["source_ref"], new_src))
         if amount != before["amount"]:
             changes.append(("amount", str(before["amount"]), str(amount)))
         if when != before["activity_date"]:
@@ -1377,7 +1449,7 @@ async def correct_cash_flow(event_id: int, body: CashFlowCorrection):
         # re-import of the original would not. Same shape as a stored total that no longer
         # matches its ledger, and as the cached age fixed under R-IV.699.
         new_key = dedup_key(before["account_name"], before["flow_type"], amount, when,
-                            before["source_ref"], before["occurrence"]) if before["dedup_key"] \
+                            src_final, before["occurrence"]) if (before["dedup_key"] or new_src) \
             else None
         if new_key and new_key != before["dedup_key"]:
             clash = await conn.fetchrow(
@@ -1401,8 +1473,9 @@ async def correct_cash_flow(event_id: int, body: CashFlowCorrection):
 
         try:
             await conn.execute(
-                "UPDATE cash_flows SET amount = $2, activity_date = $3, dedup_key = $4 "
-                "WHERE id = $1", event_id, amount, when, new_key or before["dedup_key"])
+                "UPDATE cash_flows SET amount = $2, activity_date = $3, dedup_key = $4, "
+                "source_ref = $5 WHERE id = $1",
+                event_id, amount, when, new_key or before["dedup_key"], src_final)
         except Exception as exc:
             # The natural-key index (account, type, amount, description, date, imported_from,
             # occurrence) can also collide, and NULLS NOT DISTINCT means a null description does
@@ -1418,6 +1491,7 @@ async def correct_cash_flow(event_id: int, body: CashFlowCorrection):
                        "activity_date": before["activity_date"].isoformat()},
             "after": {"amount": float(amount), "activity_date": when.isoformat()},
             "columns_changed": [c[0] for c in changes],
+            "source_ref": src_final,
             "audit_rows_written": len(changes),
             "evidence_ref": body.evidence_ref.strip(),
             "ruling": body.ruling.strip()}

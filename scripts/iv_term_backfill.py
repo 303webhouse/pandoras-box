@@ -39,6 +39,14 @@ CENSUS = ("SPY", "QQQ", "IWM", "SMH", "NVDA", "AAPL", "MSFT", "TSLA")
 
 #: The first date this backfill may NOT touch. Everything from here on is the sealed reserve
 #: window that R-IV.1064(a) pulls and nobody analyses before step 8.
+#:
+#: R-IV.1145: THIS IS A CEILING, NOT A RANGE, AND THAT IS DELIBERATE. I briefly "fixed" it into
+#: a closed interval 09-25..10-09 so a post-reserve session could be backfilled through this
+#: script, and `test_every_date_at_or_after_the_window_is_refused` caught it. Its reasoning
+#: stands and is better than mine was: refusing only the window would let 10-10 through, and
+#: THE RESERVE WINDOW'S END IS NOT A THING THIS BACKFILL SHOULD NEED TO KNOW. This script's
+#: approved scope is 09-01..09-24; a ceiling keeps it there permanently and cannot rot as the
+#: window recedes. A post-reserve session needs a DIFFERENT path, not a loosened guard here.
 RESERVE_FIRST_DATE = date(2026, 9, 25)
 
 WINDOW_START = date(2026, 9, 1)
