@@ -48,7 +48,12 @@ if HERE not in sys.path:
 import polygon_1m_export as pe        # noqa: E402  the proven fetch/write
 
 ROOT = r"F:\pandora-data"
-OUT_DIR = os.path.join(ROOT, "bars1m_polygon_reserve")
+#: R-IV.1133(b): the window lives in the DIRECTORY name and basenames are UNDATED, because
+#: the frozen loader tests for the exact suffix `_adjusted_<mode>.parquet`. A top-up reads the
+#: PREVIOUS window's directory and writes the NEW window's, so both are derived, never fixed.
+OUT_BASE = os.path.join(ROOT, "bars1m_polygon_reserve")
+SRC_DIR = "%s_%s" % (OUT_BASE, OLD_TAG)
+OUT_DIR = "%s_%s" % (OUT_BASE, NEW_TAG)
 MANIFEST = os.path.join(ROOT, "MANIFEST.tsv")
 
 CENSUS = list(pe.CENSUS)
@@ -126,6 +131,7 @@ def main() -> int:
     if only:
         print("RESTRICTED to %s (a re-run; the others are already merged)" % ", ".join(only))
 
+    os.makedirs(OUT_DIR, exist_ok=True)
     print("=" * 102)
     print("R-IV.1129(a) RESERVE TOP-UP -- fetch %s only, merge to one 15-session artifact"
           % NEW_SESSION)
@@ -141,7 +147,7 @@ def main() -> int:
         series = {}
         for adjusted in (False, True):
             mode = "true" if adjusted else "false"
-            src = os.path.join(OUT_DIR, "%s_adjusted_%s_%s.parquet" % (ticker, mode, OLD_TAG))
+            src = os.path.join(SRC_DIR, "%s_adjusted_%s.parquet" % (ticker, mode))
             if not os.path.exists(src):
                 problems.append((ticker, "source 14-session file missing: %s"
                                  % os.path.basename(src)))
@@ -224,7 +230,7 @@ def main() -> int:
                                  % (adjusted, len(merged), len(old), len(add))))
                 continue
 
-            dst = os.path.join(OUT_DIR, "%s_adjusted_%s_%s.parquet" % (ticker, mode, NEW_TAG))
+            dst = os.path.join(OUT_DIR, "%s_adjusted_%s.parquet" % (ticker, mode))
             r = pe.write(merged, dst)
             sess = sorted(merged["session_et"].unique())
             r.update({"ticker": ticker, "adjusted": adjusted, "sessions": len(sess),

@@ -47,7 +47,37 @@ if HERE not in sys.path:
 import polygon_1m_export as pe        # noqa: E402  the proven fetch/write/compare
 
 ROOT = r"F:\pandora-data"
-OUT_DIR = os.path.join(ROOT, "bars1m_polygon_reserve")
+
+#: R-IV.1133(b): ONE DATED DIRECTORY PER WINDOW, with UNDATED basenames inside it.
+#: The frozen loader tests for the exact basename suffix `_adjusted_<mode>.parquet`
+#: (census :333, instrument :199/:202), so a dated FILENAME is refused outright. The window
+#: therefore lives in the directory name -- and the rule that no name may overstate its
+#: content now applies to the directory, which is why the name is derived from the data's
+#: own span below and every later file must agree with it.
+OUT_BASE = os.path.join(ROOT, "bars1m_polygon_reserve")
+
+#: Resolved from the first file's real span, then held fixed. Not a constant, because the
+#: span is not known until the vendor answers.
+_out_dir = {"path": None, "span": None}
+
+
+def out_dir_for(first: str, last: str) -> str:
+    """The dated directory for this window. Refuses a span that disagrees with the first.
+
+    A second span would mean one directory holding two windows, and its name could only be
+    true of one of them.
+    """
+    span = (first, last)
+    if _out_dir["path"] is None:
+        _out_dir["span"] = span
+        _out_dir["path"] = "%s_%s_%s" % (OUT_BASE, first.replace("-", ""),
+                                         last.replace("-", ""))
+        os.makedirs(_out_dir["path"], exist_ok=True)
+    elif _out_dir["span"] != span:
+        raise RuntimeError(
+            "span %s disagrees with this directory's %s; one directory cannot name two windows"
+            % (span, _out_dir["span"]))
+    return _out_dir["path"]
 
 CENSUS = list(pe.CENSUS)
 
@@ -94,7 +124,8 @@ def main() -> int:
     print("=" * 100)
     print("R-IV.1126(a) SEALED RESERVE PULL -- Polygon 1-minute")
     print("window %s .. %s inclusive | %d names | BOTH modes | %d calls | out: %s"
-          % (pe.DATE_FROM, pe.DATE_TO, len(CENSUS), 2 * len(CENSUS), OUT_DIR))
+          % (pe.DATE_FROM, pe.DATE_TO, len(CENSUS), 2 * len(CENSUS),
+             OUT_BASE + "_<window, from the data>"))
     print("weekday sessions expected in window: %d" % len(exp))
     print("=" * 100)
     print()
@@ -121,14 +152,23 @@ def main() -> int:
             # actually ended 10-14. A dated name that overstates its content is worse than
             # no date at all, and this directory is read by filename glob -- so the name is
             # built from the file's own first and last session.
+            # THE DIRECTORY'S DATES COME FROM THE DATA, THE BASENAME CARRIES NONE.
+            # An earlier version put the window in the filename from the REQUESTED range and
+            # shipped files named `..._20261015` holding data to 10-14. Now the span is read
+            # from the file itself, and the loader gets the undated basename it requires.
             own = sorted(df["session_et"].unique())
             own_tag = "%s_%s" % (own[0].replace("-", ""), own[-1].replace("-", ""))
             if own_tag != tag:
-                print("        name from DATA not request: %s (requested %s)"
+                print("        directory from DATA not request: %s (requested %s)"
                       % (own_tag, tag))
-            name = "%s_adjusted_%s_%s.parquet" % (
-                ticker, "true" if adjusted else "false", own_tag)
-            path = os.path.join(OUT_DIR, name)
+            try:
+                target_dir = out_dir_for(own[0], own[-1])
+            except RuntimeError as exc:
+                problems.append((ticker, str(exc)))
+                print("  %-5s adjusted=%-5s %s" % (ticker, adjusted, exc))
+                continue
+            name = "%s_adjusted_%s.parquet" % (ticker, "true" if adjusted else "false")
+            path = os.path.join(target_dir, name)
             r = pe.write(df, path)
             r["ticker"], r["adjusted"] = ticker, adjusted
             sess = sorted(df["session_et"].unique())
@@ -208,8 +248,8 @@ def main() -> int:
 
     note = "no corporate action in window"
     print(">>> ADJUSTED AND UNADJUSTED IDENTICAL ON EVERY BAR, ALL %d NAMES." % len(CENSUS))
-    readme = os.path.join(OUT_DIR, "README.md")
-    os.makedirs(OUT_DIR, exist_ok=True)
+    readme = os.path.join(os.path.dirname(_out_dir["path"] or OUT_BASE),
+                          "bars1m_polygon_reserve", "README.md")
     with open(readme, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(
             "# Polygon 1-minute bars - SEALED TRITON-R RESERVE WINDOW\n\n"
@@ -236,7 +276,7 @@ def main() -> int:
     print("    README: %s" % readme)
 
     # a standalone hash list, so the gate can be re-checked without re-reading the parquets
-    hashes = os.path.join(OUT_DIR, "SHA256SUMS.txt")
+    hashes = os.path.join(_out_dir["path"], "SHA256SUMS.txt")
     with open(hashes, "w", encoding="utf-8", newline="\n") as fh:
         for r in sorted(results, key=lambda x: x["path"]):
             fh.write("%s  %s\n" % (r["sha256"], os.path.basename(r["path"])))

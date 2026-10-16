@@ -120,11 +120,20 @@ def _body(**kw):
 class TestOnlyTwoFieldsAreCorrectable:
     def test_the_model_carries_no_other_mutable_field(self):
         """"Refuses any other change" is enforced by what a caller can EXPRESS, not by a check
-        that might be forgotten. The account, type, source_ref and occurrence are the event's
-        IDENTITY — correcting those would be a different event wearing this one's id."""
+        that might be forgotten. The account, type and occurrence are the event's IDENTITY —
+        correcting those would be a different event wearing this one's id.
+
+        R-IV.1148(d) ADMITTED `source_ref`, AND ONLY FROM NULL. That is a narrower change than
+        it looks: COMPLETING an identity that was never written is a different act from
+        REPLACING one, and the replacement is still refused — by a 409 in the route rather than
+        by absence from the model, because the route is the only place that can see whether the
+        current value is NULL. The pair for that half is
+        `test_setting_source_ref_over_an_EXISTING_value_is_REFUSED`.
+        """
         fields = set(CashFlowCorrection.model_fields)
-        assert fields == {"amount", "activity_date", "evidence_ref", "reason", "ruling", "actor"}
-        for forbidden in ("account_name", "flow_type", "source_ref", "occurrence",
+        assert fields == {"amount", "activity_date", "source_ref",
+                          "evidence_ref", "reason", "ruling", "actor"}
+        for forbidden in ("account_name", "flow_type", "occurrence",
                           "description", "imported_from"):
             assert forbidden not in fields
 
@@ -136,7 +145,10 @@ class TestOnlyTwoFieldsAreCorrectable:
         stmt = stmt[:stmt.index('"', stmt.index("WHERE id = $1"))]
         assert "amount = $2" in stmt and "activity_date = $3" in stmt
         assert "dedup_key = $4" in stmt
-        for forbidden in ("account_name", "flow_type", "source_ref", "occurrence =",
+        # R-IV.1148(d): source_ref is now writable, from NULL only. The NULL-only half is
+        # enforced in the route (409), not here -- a column list cannot express it.
+        assert "source_ref = $5" in stmt
+        for forbidden in ("account_name", "flow_type", "occurrence =",
                           "description", "imported_from"):
             assert forbidden not in stmt
 

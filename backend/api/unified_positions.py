@@ -329,6 +329,19 @@ class CreatePositionRequest(BaseModel):
     entry_price: Optional[float] = None
     quantity: float = Field(default=1, alias="contracts")   # R-IV.458(b): fractions held
     cost_basis: Optional[float] = None
+    # R-IV.1148(d): THE BROKER'S OWN Amount FOR THE OPEN, mirroring `proceeds` on the close.
+    #
+    # Without it the open side keeps the defect the close side just shed: `cost_basis` is
+    # derived from entry_price x qty x multiplier, so a ROUNDED AVERAGE fill debits the wrong
+    # figure and fees are excluded entirely. Row 951's close was short 0.36 for exactly that
+    # reason, and an open is the same arithmetic. Opens left derived while closes went exact
+    # would be a worse asymmetry than both being derived, because a reconciliation could no
+    # longer assume one rule for the pair.
+    #
+    # Used VERBATIM as the magnitude; the sign still comes from the structure.
+    cost: Optional[float] = None
+    # Which broker line this open is, as <sha12>:L<n> (Convention #44).
+    source_ref: Optional[str] = None
 
     # Risk — auto-calculated if structure is provided, can be overridden
     max_loss: Optional[float] = None
@@ -438,6 +451,19 @@ class ClosePositionRequest(BaseModel):
     # a plausible-looking number from a different method is the failure mode here, and one of
     # them being 16x the other is exactly how it presents.
     expected_realized: Optional[float] = None
+    # R-IV.1145(e)1: THE BROKER'S OWN Amount, when the caller has it.
+    #
+    # `exit_price` cannot reproduce it. The broker's Price column is a ROUNDED AVERAGE of the
+    # fills; its Amount is the true total. Measured on row 951: 80 x 18.43 = 1,474.40 against a
+    # broker Amount of 1,474.76, because the real average fill was 18.4345. The error is
+    # invisible because the same arithmetic is exact to the cent on a single-fill leg -- row
+    # 985's 30 x 27.97 = 839.10 matched perfectly, so one leg of a two-leg check passes and
+    # hides the other. Fees are excluded from the computed figure too.
+    #
+    # Given, it is used VERBATIM as the cash movement's magnitude. The sign still comes from
+    # the structure (a credit spread and a short equity pay out on open and cost on close), so
+    # a caller cannot invert the direction by passing a negative.
+    proceeds: Optional[float] = None
     realized_tolerance: float = 0.01
     # R-IV.463(b): who is asking, for the audit -- the optional actor PATCH already takes. Absent,
     # the write is recorded as legacy-ui: a request whose caller named no one.
@@ -1054,7 +1080,15 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
         s = (req.structure or "").lower()
         d = (direction or "").upper()
         is_short_equity = d == "SHORT" and s in ("stock", "stock_short", "short_stock", "")
-        cash_delta = cost_basis if (s in CREDIT_STRUCTURES or is_short_equity) else -cost_basis
+        # R-IV.1148(d): the broker Amount wins when supplied. `abs()` because the SIGN is the
+        # structure's to decide, not the caller's -- a credit structure is PAID on open.
+        if req.cost is not None:
+            _mag = round(abs(float(req.cost)), 2)
+            cash_source = "exact_from_broker"
+        else:
+            _mag = abs(cost_basis)
+            cash_source = "derived_from_cost_basis"
+        cash_delta = _mag if (s in CREDIT_STRUCTURES or is_short_equity) else -_mag
         try:
             # R-IV.660(c)2: THE EVENT IS DATED WHEN THE TRADE HAPPENED. The row and the
             # opening lot have carried the principal's `entry_date` since R-IV.464(a), but this
@@ -1062,9 +1096,19 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
             # money in the wrong week and the wrong month. `activity_date` is what every
             # reconciliation against a broker statement joins on, and what the weekly and
             # monthly figures bucket by.
+            # R-IV.1148(d): the broker line wins as `source_ref` when supplied, and the
+            # position_id moves into the description so NEITHER link is lost. The audit that
+            # needed this matches on (account, amount, date) now, so both keys stay useful.
+            _src = (req.source_ref or "").strip() or None
+            if _src is not None and not re.fullmatch(r"[0-9a-f]{12}:L\d+", _src):
+                raise HTTPException(
+                    status_code=400,
+                    detail="source_ref must be <sha12>:L<n> (Convention #44), e.g. "
+                           "d3af6637dc16:L6 - got %r" % req.source_ref)
             cash_ok = await _adjust_account_cash(
-                pool, account, cash_delta, source_ref=position_id,
-                description="position opened",
+                pool, account, cash_delta, source_ref=(_src or position_id),
+                description=("position opened (%s)" % cash_source if _src is None
+                             else "position opened (%s) %s" % (cash_source, position_id)),
                 event_date=(_when(req.entry_date, "entry_date").date()
                             if req.entry_date else None))
         except Exception as e:
@@ -2966,9 +3010,16 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                     )
 
                 # Cash adjustment — same conn/transaction as position update
-                if req.exit_price is not None:
+                if req.exit_price is not None or req.proceeds is not None:
                     multiplier = 1 if is_stock else 100
-                    exit_value = round(abs(req.exit_price) * multiplier * close_qty, 2)
+                    # R-IV.1145(e)1: the broker Amount wins when supplied. `abs()` because the
+                    # SIGN is the structure's to decide, below -- not the caller's.
+                    if req.proceeds is not None:
+                        exit_value = round(abs(float(req.proceeds)), 2)
+                        cash_basis = "exact_from_broker"
+                    else:
+                        exit_value = round(abs(req.exit_price) * multiplier * close_qty, 2)
+                        cash_basis = "derived_from_exit_price"
                     d_close = (pos.get("direction") or "").upper()
                     is_short_equity = d_close == "SHORT" and is_stock
                     cash_delta = -exit_value if (s in CREDIT_STRUCTURES or is_short_equity) else exit_value
@@ -2977,10 +3028,13 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                         # instant -- today when the caller gave no `exit_date`, and the
                         # principal's own day when he did -- so a close recorded late no longer
                         # books its proceeds in the week it was typed in.
+                        # The basis is in the DESCRIPTION because that is what a later
+                        # reconciliation reads. Without it a 0.36-rounded figure and an exact
+                        # one are indistinguishable in the ledger (R-IV.1145(e)1).
                         close_cash_ok = await _adjust_account_cash_with_conn(
                             conn, pos.get("account", "ROBINHOOD"), cash_delta,
                             source_ref=pos.get("position_id"),
-                            description="closed position",
+                            description="closed position (%s)" % cash_basis,
                             event_date=now.date())
                     except Exception as e:
                         logger.error("Cash adjustment failed on close: %s", e)

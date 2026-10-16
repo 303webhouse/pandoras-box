@@ -43,9 +43,13 @@ class TestTheCashEventCarriesTheTradeDate:
         and also passes `event_date`, so a bare "the name appears somewhere in the body" check
         stayed green when the create site lost it. A mutation run caught that."""
         body = _route(_code("api/unified_positions.py"), "async def create_position")
-        i = body.index('description="position opened"')
-        assert "event_date=" in body[i:i + 220]
-        assert 'req.entry_date' in body[i:i + 220]
+        # PREFIX anchor: R-IV.1148(d) made the description carry the cash basis
+        # (`position opened (exact_from_broker|derived_from_cost_basis)`). The assertion under
+        # test is the DATE, so the anchor must not be sensitive to a change that leaves the
+        # date untouched.
+        i = body.index('description=("position opened')
+        assert "event_date=" in body[i:i + 320]
+        assert 'req.entry_date' in body[i:i + 320]
 
     def test_the_add_path_dates_its_cash_event_by_entry_date(self):
         """An add is a fill and it has its own date. The lot already used it; the money did not."""
@@ -55,10 +59,15 @@ class TestTheCashEventCarriesTheTradeDate:
         assert "event_date=" in body[i:i + 220]
 
     def test_the_close_path_dates_its_cash_event_by_the_exit_instant(self):
+        """The assertion under test is the DATE. The description is only the anchor used to
+        find the call site, and R-IV.1145(e)1 made it carry the cash basis as well
+        (`closed position (exact_from_broker|derived_from_exit_price)`), so the anchor is
+        matched by PREFIX. Anchoring on the full old literal would fail on a change that did
+        not touch the date at all -- which is exactly what happened."""
         body = _route(_code("api/unified_positions.py"), "async def close_position")
-        assert 'description="closed position"' in body
-        i = body.index('description="closed position"')
-        assert "event_date=now.date()" in body[i:i + 160]
+        assert 'description="closed position' in body
+        i = body.index('description="closed position')
+        assert "event_date=now.date()" in body[i:i + 200]
 
     def test_the_helper_still_defaults_to_today_when_no_date_is_given(self):
         """POSITIVE CONTROL. The default must survive: a caller that genuinely has no date for

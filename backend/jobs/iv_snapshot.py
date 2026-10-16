@@ -125,10 +125,26 @@ def iv_for_expiry(term_structure: Any, expiry: date) -> Optional[float]:
 
 
 # ── I/O ───────────────────────────────────────────────────────────────────────────────────
+#: R-IV.1148(c): the eight TRITON census names are snapshotted EVERY session, position or not.
+#:
+#: SPY was absent from 2026-10-12 through 10-15 and nothing had failed -- it was never asked
+#: for. `registered_shadow.UNIVERSE` carries 196 names including the other seven (QQQ index 11,
+#: IWM 12, SMH 36, AAPL 38, MSFT 39, NVDA 41, TSLA 44) but NOT SPY, so SPY was snapshotted only
+#: while an open SPY position happened to exist. A census whose coverage depends on what is
+#: open is not a census, and the gap appears in the one series TRITON-R reads.
+#:
+#: Put FIRST, ahead of the 196, because the tail of this list is truncated by DAILY_CAP: a
+#: census name added at the end would be dropped exactly when the universe grew.
+TRITON_CENSUS = ("SPY", "QQQ", "IWM", "SMH", "NVDA", "AAPL", "MSFT", "TSLA")
+
+
 async def universe(conn) -> List[str]:
-    """The registered universe first, then open-position underlyings not already in it."""
+    """The TRITON census first, then the registered universe, then open-position underlyings."""
     from strategies.registered_shadow import UNIVERSE
-    out = list(UNIVERSE)
+    out = list(TRITON_CENSUS)
+    for t in UNIVERSE:
+        if t not in out:
+            out.append(t)
     try:
         rows = await conn.fetch(OPEN_UNDERLYINGS)
     except Exception as exc:  # noqa: BLE001
