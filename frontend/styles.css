@@ -13880,27 +13880,48 @@ body[data-mode="analytics"] .analytics-shell {
    sideways. 1417 is the last width at which it does not fit, so that is where the collapse ends. At
    1418px and above the three columns fit unaided and nothing changes. The number is measured, and
    the measurement is the comment: if the row's contents change, this breakpoint is wrong again. */
-@media (max-width: 1417px) {
-    .crypto-main-content {
-        grid-template-columns: 1fr;
-        grid-template-areas:
-            "chart"
-            "trades"
-            "positions"
-            "btc";
-    }
-    .crypto-bias-row {
-        grid-template-columns: 1fr;
-        row-gap: 10px;
-    }
-    .crypto-bias-inline {
-        justify-self: start;
-    }
-    .crypto-bias-meta {
-        justify-self: end;
-    }
-}
-
+@media (max-width: 1417px) {
+
+    .crypto-main-content {
+
+        grid-template-columns: 1fr;
+
+        grid-template-areas:
+
+            "chart"
+
+            "trades"
+
+            "positions"
+
+            "btc";
+
+    }
+
+    .crypto-bias-row {
+
+        grid-template-columns: 1fr;
+
+        row-gap: 10px;
+
+    }
+
+    .crypto-bias-inline {
+
+        justify-self: start;
+
+    }
+
+    .crypto-bias-meta {
+
+        justify-self: end;
+
+    }
+
+}
+
+
+
 /* ── R-IV.716(b) · and the price row has to fit those widths too ───────────────────────────────
    Collapsing the grid is not sufficient on its own. `#cryptoPriceRow` is a NOWRAP flex row whose
    three price cells carry min-widths of 160px, 120px and 120px; with the funding and CVD chips
@@ -13952,4 +13973,86 @@ body[data-mode="analytics"] .analytics-shell {
   .crypto-price-main { font-size: 26px; }
   /* A long CVD line is the last thing that cannot wrap, and it is prose, not a figure. */
   .crypto-price-extra { white-space: normal; }
+}
+
+/* ── Add to position (R-IV.1173) ─────────────────────────────────────────── */
+.add-pos-locked {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(78, 205, 196, 0.25);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+.add-pos-lock-label {
+    color: #8899a6;
+    display: inline-block;
+    min-width: 76px;
+}
+.add-pos-lock-note {
+    color: #8899a6;
+    font-size: 0.8rem;
+    margin-top: 6px;
+    line-height: 1.45;
+}
+.add-pos-hint {
+    color: #8899a6;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    margin-top: 4px;
+}
+.add-pos-preview {
+    margin-top: 14px;
+}
+.add-pos-preview-title {
+    color: #4ecdc4;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+.add-pos-preview-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 0.9rem;
+    line-height: 1.75;
+}
+.add-pos-preview-wait,
+.add-pos-preview-list {
+    color: #c8d6e5;
+}
+.add-pos-preview-wait {
+    font-size: 0.85rem;
+    font-style: italic;
+}
+/* A refusal is not a hint: it says why nothing will happen, in plain words. */
+.add-pos-refusal {
+    display: none;
+    margin-top: 12px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    background: rgba(255, 107, 107, 0.12);
+    border: 1px solid rgba(255, 107, 107, 0.4);
+    color: #ff9f9f;
+    font-size: 0.86rem;
+    line-height: 1.5;
+}
+.add-pos-refusal.active { display: block; }
+/* STEP 1 says so on the face of the form, so nobody wonders why Confirm is dead. */
+.add-pos-step1-note {
+    margin-top: 14px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.35);
+    color: #ffd97a;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+#addToPosConfirmBtn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.position-btn-small.add-btn {
+    border-color: rgba(78, 205, 196, 0.5);
+    color: #4ecdc4;
 }

@@ -10284,6 +10284,9 @@ function renderPositionCard(pos) {
             </div>
             <div class="position-actions">
                 <button class="position-btn-small edit-btn" data-position-id="${posId}">Edit</button>
+                ${String(pos.status || 'OPEN').toUpperCase() === 'OPEN'
+                    ? `<button class="position-btn-small add-btn" data-position-id="${posId}">Add</button>`
+                    : ''}
                 <button class="position-btn-small close-btn" data-position-id="${posId}">Close</button>
             </div>
         </div>
@@ -13624,6 +13627,231 @@ async function loadEarningsIntelTab() {
         console.error('Earnings intel tab load error:', err);
         const el = document.getElementById('earningsBookImpact');
         if (el) el.innerHTML = '<p class="empty-state">Earnings data unavailable</p>';
+    }
+}
+
+// --- Add to position (R-IV.1173) ---------------------------------------------
+//
+// STEP 1 IS PREVIEW ONLY. Confirm is disabled and there is NO click handler bound to it, so
+// there is no code path to a write even if the disabled attribute were removed by hand. The
+// point of shipping it this way is that the arithmetic can be checked against a real row
+// before any of it can touch the book.
+//
+// THE PREVIEW USES THE SAME RULES AS THE WRITE PATH, or it previews a different trade than
+// Confirm would make. Both constants below are MIRRORED from
+// backend/api/unified_positions.py and pinned by a test that fails if the two drift:
+//   CREDIT_STRUCTURES (line 103) - PAID on open, so adding CREDITS cash; everything else debits
+//   the 100x multiplier          - options are per-contract, stock is per-share
+const ADD_POS_CREDIT_STRUCTURES = new Set([
+    'credit_spread', 'put_credit_spread', 'bull_put_spread',
+    'call_credit_spread', 'bear_call_spread',
+    'iron_condor', 'iron_butterfly',
+    'short_call', 'naked_call', 'short_put', 'naked_put',
+    'cash_secured_put', 'covered_call',
+]);
+const ADD_POS_STOCK_STRUCTURES = new Set([
+    'stock', 'stock_long', 'long_stock', 'stock_short', 'short_stock',
+]);
+
+let addToPosRow = null;
+
+function addPosIsStock(pos) {
+    const st = String(pos.structure || '').toLowerCase();
+    if (ADD_POS_STOCK_STRUCTURES.has(st)) return true;
+    return !st && String(pos.asset_type || '').toUpperCase() === 'EQUITY';
+}
+
+function addPosMultiplier(pos) { return addPosIsStock(pos) ? 1 : 100; }
+
+function addPosIsCredit(pos) {
+    const st = String(pos.structure || '').toLowerCase();
+    const dir = String(pos.direction || '').toUpperCase();
+    return ADD_POS_CREDIT_STRUCTURES.has(st) || (dir === 'SHORT' && addPosIsStock(pos));
+}
+
+// R-IV.1173(e): the leg-ratio refusal. A multi-leg structure holds its legs in a fixed ratio,
+// so an add that is not a whole number of units would leave the row describing a structure
+// that does not exist, and R-IV.517(c) could not then be satisfied.
+function addPosLegRatioProblem(pos, addQty) {
+    const legs = Number(pos.legs || 0);
+    if (!legs || legs <= 1) return null;
+    if (!Number.isInteger(addQty)) {
+        return 'This is a ' + legs + '-leg structure, so it can only be added to in whole ' +
+               'units. Open it as a new position instead.';
+    }
+    return null;
+}
+
+function addPosMoney(n) {
+    if (n === null || n === undefined || !isFinite(n)) return '--';
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+}
+
+function addPosFindRow(positionId) {
+    if (window.__positionsById && window.__positionsById[positionId]) {
+        return window.__positionsById[positionId];
+    }
+    const pools = [window.openPositionsCache, window.allPositions, window.positionsCache];
+    for (const pool of pools) {
+        if (Array.isArray(pool)) {
+            const hit = pool.find(p => String(p.position_id || p.id) === String(positionId));
+            if (hit) return hit;
+        }
+    }
+    return null;
+}
+
+function openAddToPositionModal(positionId) {
+    const pos = addPosFindRow(positionId);
+    if (!pos) return;
+    addToPosRow = pos;
+
+    // LOCKED, and shown as TEXT rather than as inputs: an add that could change the account
+    // or the instrument is a different position, not an add.
+    const lock = document.getElementById('addToPosLocked');
+    if (lock) {
+        lock.innerHTML =
+            '<div><span class="add-pos-lock-label">Ticker</span> <strong>' +
+            (pos.ticker || '--') + '</strong></div>' +
+            '<div><span class="add-pos-lock-label">Account</span> <strong>' +
+            (pos.account || '--') + '</strong></div>' +
+            '<div><span class="add-pos-lock-label">Structure</span> <strong>' +
+            (pos.structure || '--') + '</strong></div>' +
+            '<div class="add-pos-lock-note">Account and instrument are fixed to this row. ' +
+            'Classification, bucket and the cut fields are inherited and not re-asked.</div>';
+    }
+    const hint = document.getElementById('addToPosPriceHint');
+    if (hint) {
+        hint.textContent = addPosIsStock(pos) ? '(per share)'
+            : (Number(pos.legs || 0) > 1 ? '(net debit or credit per unit)' : '(per contract)');
+    }
+    // Default now, in MOUNTAIN time, because that is the only clock Nick reads.
+    const when = document.getElementById('addToPosWhen');
+    if (when) {
+        const mt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+        const pad = (x) => String(x).padStart(2, '0');
+        when.value = mt.getFullYear() + '-' + pad(mt.getMonth() + 1) + '-' + pad(mt.getDate()) +
+                     'T' + pad(mt.getHours()) + ':' + pad(mt.getMinutes());
+    }
+    ['addToPosQty', 'addToPosPrice', 'addToPosCost', 'addToPosNote'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    updateAddToPositionPreview();
+    const modal = document.getElementById('addToPositionModal');
+    if (modal) modal.classList.add('active');
+}
+
+function closeAddToPositionModal() {
+    const modal = document.getElementById('addToPositionModal');
+    if (modal) modal.classList.remove('active');
+    addToPosRow = null;
+}
+
+function updateAddToPositionPreview() {
+    const pos = addToPosRow;
+    const out = document.getElementById('addToPosPreview');
+    const refuse = document.getElementById('addToPosRefusal');
+    if (!pos || !out) return;
+    if (refuse) { refuse.textContent = ''; refuse.classList.remove('active'); }
+
+    const qtyEl = document.getElementById('addToPosQty');
+    const addQty = parseFloat(qtyEl ? qtyEl.value : '');
+    const priceEl = document.getElementById('addToPosPrice');
+    const price = parseFloat(priceEl ? priceEl.value : '');
+    const costEl = document.getElementById('addToPosCost');
+    const exact = parseFloat(costEl ? costEl.value : '');
+
+    const problems = [];
+    if (String(pos.status || 'OPEN').toUpperCase() !== 'OPEN') {
+        problems.push('This position is closed, so there is nothing to add to.');
+    }
+    if (!isFinite(addQty) || addQty <= 0) {
+        if (qtyEl && qtyEl.value !== '') {
+            problems.push('Quantity to add must be greater than zero.');
+        }
+        out.innerHTML = '';
+        if (problems.length && refuse) {
+            refuse.textContent = problems.join(' ');
+            refuse.classList.add('active');
+        }
+        return;
+    }
+    const ratio = addPosLegRatioProblem(pos, addQty);
+    if (ratio) problems.push(ratio);
+    if (problems.length) {
+        out.innerHTML = '';
+        if (refuse) { refuse.textContent = problems.join(' '); refuse.classList.add('active'); }
+        return;
+    }
+
+    const mult = addPosMultiplier(pos);
+    const curQty = Number(pos.quantity || 0);
+    const curBasis = Number(pos.cost_basis || 0);
+    const haveExact = isFinite(exact) && exact !== 0;
+    const addCost = haveExact ? Math.abs(exact)
+        : (isFinite(price) ? Math.abs(price) * addQty * mult : NaN);
+    if (!isFinite(addCost)) {
+        out.innerHTML = '<div class="add-pos-preview-wait">Enter a fill price, or the exact ' +
+                        'total, to see the preview.</div>';
+        return;
+    }
+    const newQty = curQty + addQty;
+    const newBasis = curBasis + addCost;
+    const curAvg = curQty ? curBasis / (curQty * mult) : null;
+    const newAvg = newQty ? newBasis / (newQty * mult) : null;
+    const credit = addPosIsCredit(pos);
+    const cashChange = credit ? addCost : -addCost;
+    const unit = addPosIsStock(pos) ? 'share' : 'contract';
+
+    out.innerHTML =
+        '<div class="add-pos-preview-title">If you confirm this:</div>' +
+        '<ul class="add-pos-preview-list">' +
+        '<li>Quantity goes from <strong>' + curQty + '</strong> to <strong>' + newQty +
+        '</strong> (adding ' + addQty + ').</li>' +
+        '<li>Average cost per ' + unit + ' goes from <strong>' + addPosMoney(curAvg) +
+        '</strong> to <strong>' + addPosMoney(newAvg) + '</strong>.</li>' +
+        '<li>Cost basis goes from <strong>' + addPosMoney(curBasis) + '</strong> to <strong>' +
+        addPosMoney(newBasis) + '</strong>.</li>' +
+        '<li>Cash in <strong>' + (pos.account || 'this account') + '</strong> changes by ' +
+        '<strong>' + addPosMoney(cashChange) + '</strong>' +
+        (credit ? ' (a credit structure is paid on open, so adding pays you)' : '') + '.</li>' +
+        '<li>The cash figure would be recorded as <strong>' +
+        (haveExact ? 'exact_from_broker' : 'derived_from_cost_basis') + '</strong>' +
+        (haveExact ? ' - your broker total, fees included'
+                   : ' - derived from price x quantity, so it excludes fees') + '.</li>' +
+        '</ul>';
+}
+
+function initAddToPositionModal() {
+    const closeBtn = document.getElementById('addToPosCloseBtn');
+    const cancelBtn = document.getElementById('addToPosCancelBtn');
+    const modal = document.getElementById('addToPositionModal');
+    if (closeBtn) closeBtn.addEventListener('click', closeAddToPositionModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeAddToPositionModal);
+    if (modal) {
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal) closeAddToPositionModal();
+        });
+    }
+    ['addToPosQty', 'addToPosPrice', 'addToPosCost'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', updateAddToPositionPreview);
+    });
+    // STEP 1: no handler is bound to Confirm. Deliberately.
+    document.addEventListener('click', function (e) {
+        const btn = e.target && e.target.closest ? e.target.closest('.add-btn') : null;
+        if (btn && btn.dataset && btn.dataset.positionId) {
+            openAddToPositionModal(btn.dataset.positionId);
+        }
+    });
+}
+
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initAddToPositionModal);
+    } else {
+        initAddToPositionModal();
     }
 }
 

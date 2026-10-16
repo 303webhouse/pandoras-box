@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="Pandora - Real-time Trading Signal Dashboard">
     <title>Pandora</title>
-    <link rel="stylesheet" href="/styles.css?v=154">
+    <link rel="stylesheet" href="/styles.css?v=155">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -575,6 +575,61 @@
                 </div>
                 <div class="strategies-grid" id="strategiesGrid">
                     <p class="empty-state">Loading strategies...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add-to-Position Modal (R-IV.1173). STEP 1: preview only, Confirm disabled. -->
+        <div class="modal-overlay" id="addToPositionModal">
+            <div class="position-modal">
+                <div class="position-modal-header">
+                    <h2>➕ Add to Position</h2>
+                    <button class="modal-close" id="addToPosCloseBtn">✕</button>
+                </div>
+                <div class="position-modal-body">
+                    <!-- LOCKED to the row. Not inputs: an add that could change the account or
+                         the instrument is a different position, not an add. -->
+                    <div class="add-pos-locked" id="addToPosLocked"></div>
+
+                    <div class="position-form-row">
+                        <label for="addToPosQty">Quantity to add</label>
+                        <input type="number" id="addToPosQty" step="any" min="0" placeholder="shares or contracts">
+                    </div>
+                    <div class="position-form-row">
+                        <label for="addToPosPrice">Fill price <span id="addToPosPriceHint">(per share)</span></label>
+                        <input type="number" id="addToPosPrice" step="any" placeholder="price per unit">
+                    </div>
+                    <div class="position-form-row">
+                        <label for="addToPosCost">Exact total cash from the broker <em>(optional)</em></label>
+                        <input type="number" id="addToPosCost" step="any" placeholder="leave blank to derive">
+                        <div class="add-pos-hint">
+                            Blank is fine. Left blank it is derived from price × quantity and
+                            recorded as <code>derived_from_cost_basis</code>; the broker's own
+                            figure includes fees and a rounded average fill, so it is the exact
+                            one when you have it.
+                        </div>
+                    </div>
+                    <div class="position-form-row">
+                        <label for="addToPosWhen">Date / time <span id="addToPosTz">(Mountain)</span></label>
+                        <input type="datetime-local" id="addToPosWhen">
+                    </div>
+                    <div class="position-form-row">
+                        <label for="addToPosNote">Note <em>(optional)</em></label>
+                        <input type="text" id="addToPosNote" placeholder="anything worth remembering">
+                    </div>
+
+                    <div class="add-pos-preview" id="addToPosPreview"></div>
+                    <div class="add-pos-refusal" id="addToPosRefusal"></div>
+
+                    <div class="add-pos-step1-note" id="addToPosStep1Note">
+                        <strong>Preview only.</strong> Saving is switched off in this step
+                        (R-IV.1173(f) STEP 1) — nothing is written, so try the numbers freely.
+                    </div>
+                </div>
+                <div class="position-modal-footer">
+                    <button class="position-btn-secondary" id="addToPosCancelBtn">Cancel</button>
+                    <button class="position-btn-primary" id="addToPosConfirmBtn" disabled
+                            title="Saving is disabled in STEP 1">Confirm</button>
                 </div>
             </div>
         </div>
@@ -1873,7 +1928,7 @@
     <!-- TradingView Widget Script -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="/app.js?v=178"></script>
+    <script src="/app.js?v=179"></script>
     <!-- cockpit.js + laboratory.js are lazy-loaded on first Abacus (analytics) mode open (P0 4c) -->
 </body>
 </html>
