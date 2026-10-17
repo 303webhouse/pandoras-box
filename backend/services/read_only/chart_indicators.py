@@ -102,6 +102,93 @@ def _f(x: Any) -> Optional[float]:
         return None
 
 
+#: fix-first #5. The ADX floor below which the market is a range, and the floor at or above
+#: which an ALIGNED stack makes it a trend. Both are the strategy-lab §6.2 numbers, and they
+#: match the `adx.trend_strength` bands this module already publishes -- deliberately, because
+#: two sets of thresholds for one question is how two surfaces come to disagree about the same
+#: tape.
+MARKET_STATE_RANGE_BELOW = 20.0
+MARKET_STATE_TREND_AT = 25.0
+
+#: A stack that is telling you it is NOT aligned. An ADX of 30 across a tangled stack is a
+#: transition, not a trend, and this is the clause that makes the state more than an ADX band.
+_STACK_ALIGNED = ("bullish", "bearish")
+
+
+def market_state(adx_value, stack_state, price_vs=None) -> Dict[str, Any]:
+    """`{state, direction, basis, ...}` from the ADX band and the MA stack — fix-first #5.
+
+        ADX < 20                            -> range
+        ADX >= 25 AND the stack is aligned  -> trend
+        anything else                       -> transition
+
+    NO INPUT, NO STATE. A null ADX or a null stack returns `state: None` with a reason naming
+    which was missing. Defaulting to "transition" would read as a measurement of a market that
+    is in fact unmeasured, and would be indistinguishable from a real transition.
+
+    `direction` is separate from `state` on purpose: a trend has one and a range does not.
+    Folding "uptrend" into the state enum would make a reader parse a string for two facts and
+    would leave no way to say "aligned bearish, but ADX is only 22".
+    """
+    out: Dict[str, Any] = {
+        "state": None, "direction": None, "adx": adx_value, "stack_state": stack_state,
+        "range_below": MARKET_STATE_RANGE_BELOW, "trend_at": MARKET_STATE_TREND_AT,
+        "stack_aligned": stack_state in _STACK_ALIGNED if stack_state is not None else None,
+        "price_vs_all": None, "basis": None, "reason": None,
+    }
+
+    # Where the price sits relative to EVERY MA, which is the phrase the book's own notes use
+    # ("above all four MAs"). Reported beside the state, never folded into it: the state is the
+    # §6.2 rule and nothing else.
+    if price_vs:
+        vals = [v for v in price_vs.values()]
+        if vals and all(v == "above" for v in vals):
+            out["price_vs_all"] = "above"
+        elif vals and all(v == "below" for v in vals):
+            out["price_vs_all"] = "below"
+        elif any(v is None for v in vals):
+            out["price_vs_all"] = None
+        else:
+            out["price_vs_all"] = "mixed"
+
+    missing = []
+    if adx_value is None:
+        missing.append("adx")
+    if stack_state is None:
+        missing.append("stack_state")
+    if missing:
+        out["reason"] = ("no market state: %s %s null, and a default would read as a "
+                         "measurement of an unmeasured market"
+                         % (" and ".join(missing), "is" if len(missing) == 1 else "are"))
+        return out
+
+    if adx_value < MARKET_STATE_RANGE_BELOW:
+        out["state"] = "range"
+        out["basis"] = ("ADX %.1f is below %.0f" % (adx_value, MARKET_STATE_RANGE_BELOW))
+        return out
+
+    aligned = stack_state in _STACK_ALIGNED
+    if adx_value >= MARKET_STATE_TREND_AT and aligned:
+        out["state"] = "trend"
+        out["direction"] = "up" if stack_state == "bullish" else "down"
+        out["basis"] = ("ADX %.1f is at or above %.0f and the stack is %s"
+                        % (adx_value, MARKET_STATE_TREND_AT, stack_state))
+        return out
+
+    out["state"] = "transition"
+    if adx_value >= MARKET_STATE_TREND_AT:
+        out["basis"] = ("ADX %.1f is at or above %.0f but the stack is %s, so it is not a "
+                        "trend" % (adx_value, MARKET_STATE_TREND_AT, stack_state))
+    else:
+        out["basis"] = ("ADX %.1f sits between %.0f and %.0f"
+                        % (adx_value, MARKET_STATE_RANGE_BELOW, MARKET_STATE_TREND_AT))
+    # The stack's direction is reported even in a transition: "aligned bearish but ADX only 22"
+    # is a different thing to know from "tangled stack", and the state alone cannot say which.
+    if aligned:
+        out["direction"] = "up" if stack_state == "bullish" else "down"
+    return out
+
+
 async def get_chart_indicators(ticker: str, timeframe: str = "daily") -> Dict[str, Any]:
     """Return the chart-indicators envelope payload {status, data, staleness_seconds}."""
     tkr = (ticker or "").upper()
@@ -205,6 +292,13 @@ async def get_chart_indicators(ticker: str, timeframe: str = "daily") -> Dict[st
     else:
         trend = "ranging"
 
+    # fix-first #5. Its own warning, because an undecidable state is exactly the case a reader
+    # must not mistake for a measured one -- and `warnings` is how every other missing
+    # indicator here is already surfaced rather than silently dropped.
+    _ms = market_state(adx_val, sma.get("stack_state"), sma.get("price_vs"))
+    if _ms["state"] is None:
+        warnings.append("market_state null (%s)" % _ms["reason"])
+
     data = {
         "ticker": tkr, "timeframe": "daily", "spot": spot, "bar_count": bar_count,
         "indicators_source": "uw_computed", "as_of": as_of,
@@ -215,6 +309,9 @@ async def get_chart_indicators(ticker: str, timeframe: str = "daily") -> Dict[st
                          "signal_line": None, "histogram": None, "hist_state": None},
         "atr": {"period": 14, "value": atr_val, "atr_pct": atr_pct},
         "adx": {"period": 14, "value": adx_val, "trend_strength": trend},
+        # fix-first #5: the MA stack and the ADX band read TOGETHER, so the pairing is done
+        # once here rather than by eye in each reader's notes.
+        "market_state": _ms,
         "volume": {"latest": v_latest, "avg": v_avg, "rvol": rvol, "avg_window": "30d"},
         "vwap": None,
         "warnings": warnings,
