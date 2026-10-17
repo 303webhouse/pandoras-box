@@ -222,9 +222,10 @@ from code cites `file:line`, verified by reading the line, never from memory or 
 1. **Branches only**, named `claude/lab-<topic>`. Never push `main`. Rebase on `origin/main`
    before pushing; report branch + commit. BUILD merges and deploys.
 2. **LAB never grades its own registered test.** QUERY does.
-3. **SEAL.** Never read or print anything that isolates rows with **`id ≤ 377783 AND
-   fired_at ≥ 2026-08-17`** (the Triton holdout). Both predicates, always. That includes
-   counts.
+3. **SEAL.** In **`triton_flow_shadow` and its successors only**, never read or print anything
+   that isolates rows with **`id ≤ 377783 AND fired_at ≥ 2026-08-17`** (the Triton holdout).
+   Both predicates, always. That includes counts. **The seal does not apply to `signals` or
+   `signal_outcomes`; never add its predicate to a query on them** (R-IV.1192(a), (c)).
 4. **Triton** is under a registered forward test until read 7 (Fri 2026-11-06). Don't change its
    code paths or read its outcomes. The only exception is the dark-pool collection (R-IV.823(e)).
 5. **No secrets.** This folder holds no `.env`, API key or DB password, by design. Never
@@ -264,3 +265,7 @@ quoted in the report.
 - 2026-10-09: R-IV.830. §3.3 price basis confirmed and corrected: β on fully adjusted returns;
   r and r_SPY on split-adjusted, dividend-unadjusted prices. Hard rules 12 and 13 added; rule 8
   gains the interim QUERY route.
+- 2026-10-17: R-IV.1192(a), (c), applied under R-IV.1208(c). Hard rule 3 scoped. The Triton seal
+  covers `triton_flow_shadow` and its successors only, never `signals` or `signal_outcomes`.
+  Before this, the rule's unscoped wording led LAB to add the seal predicate to a `signals` grade
+  query (R-IV.1201; corrected by R-IV.1205(b)).
