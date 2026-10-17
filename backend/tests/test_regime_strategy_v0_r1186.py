@@ -369,22 +369,26 @@ def test_the_fixture_is_also_lint_clean():
 
 # ── the badge, the lens rule, and v0's "no wiring" ──────────────────────────
 
-def test_the_badge_says_REGISTERED_AND_STILL_SAYS_DISPLAY_ONLY():
-    """R-IV.1189(c). "display only" SURVIVES registration, and that is the half of this test
-    that matters: a test checking only for "REGISTERED" would pass a badge that had quietly
-    dropped it, which is the reading §1 and convention #42 both forbid."""
+def test_the_REGISTRATION_IS_STILL_RECORDED_after_the_badge_left_the_face():
+    """R-IV.1190(b)1 lists what the header carries and (b)6 forbids other prose on the face, so
+    the REGISTERED badge came off in v0.1. The FACT did not change, only where it is shown.
+
+    "display only" survives in the settled line - asserted in the v0.1 file, which owns the new
+    layout. What this test keeps is the half that the redesign could have quietly lost: that
+    both documents still record the registration at all.
+    """
     html = _read(os.path.join(FRONTEND, "v2.html"))
-    i = html.index('id="rsBadge"')
-    block = html[i:i + 520]
-    assert "REGISTERED 10-16" in block
-    assert "display only" in block
-    assert "UNREGISTERED" not in block
-    # The TITLE ELEMENT, not the first occurrence of the words -- which is the HTML comment
-    # above the tile, 456 characters earlier. Measuring from there made this test fail on a
-    # badge that is correctly placed: the same "anchor matched the wrong occurrence" fault
-    # Convention #43 exists for, in a test rather than an edit.
-    title = html.index('<span class="tile-title">Regime Strategy</span>')
-    assert title < i < title + 400, "the badge must sit beside the title"
+    assert 'id="rsBadge"' not in html, "the badge is off the face of the card in v0.1"
+    assert "UNREGISTERED" not in html
+    for doc in (rp.load_mock(), rp.load_playbooks()):
+        assert doc["registered"] is True
+        assert "19:07" in doc["registered_by"]
+    # and the phrase itself is still on the header, in the line that replaced the badge
+    js = _code(_js())
+    i = js.index("rsSettled")
+    assert "display only" in js[i:i + 400]
+    # The header still leads with the title, which is what the badge used to sit beside.
+    assert '<span class="tile-title">Regime Strategy</span>' in html
 
 
 def test_the_labels_are_REGISTERED_with_who_and_when():
@@ -434,7 +438,9 @@ def test_v0_READS_NO_HUB_ROUTE_AT_ALL():
     two static asset files."""
     js = _code(_js())
     i = js.index("async function loadRegimeStrategy")
-    body = js[i:js.index("function rsChip", i)]
+    # To the next function in the module. `rsChip` was the v0 boundary and the redesign removed
+    # it, so the slice is taken to whatever follows rather than to a name that may move again.
+    body = js[i:js.index("function rsScale", i)]
     assert body.count("fetch(") == 2
     assert "/assets/regime/regime_mock.json" in body
     assert "/assets/regime/playbooks.v2.json" in body, (
@@ -492,18 +498,22 @@ def test_the_styles_are_phone_first():
     the other way round — desktop base plus a phone override — a card reads only on the machine
     it was built on."""
     css = _read(os.path.join(FRONTEND, "v2.css"))
-    i = css.index("Regime Strategy card (R-IV.1186 v0)")
-    block = css[i:]
+    k = css.index("Regime Strategy card (R-IV.1186 v0, redesigned")
+    block = css[css.rindex("/*", 0, k):]
     assert "min-width: 760px" in block
-    assert "max-width:" not in block, (
-        "a max-width query would make the desktop rules the base")
+    # A max-width MEDIA QUERY is what would invert phone-first. `max-width` on an element is a
+    # sizing constraint - the premium gauge caps at 120px - and the substring form of this
+    # assertion failed on it.
+    assert not re.search(r"@media[^{]*max-width", block), (
+        "a max-width media query would make the desktop rules the base")
 
 
 def test_every_class_the_renderer_uses_has_a_style():
     js, css = _code(_js()), _read(os.path.join(FRONTEND, "v2.css"))
     i = js.index("function renderRegimeStrategy")
     used = set(re.findall(r'class="(rs-[a-z0-9-]+)"', js[i:i + 9000]))
-    used |= {"rs-badge", "rs-open", "rs-playbook", "rs-held", "rs-pb-title"}
+    # `rs-badge` is absent on purpose: R-IV.1190(b)1/(b)6 took the badge off the face.
+    used |= {"rs-open", "rs-playbook", "rs-held", "rs-pb-title"}
     missing = sorted(c for c in used if "." + c not in css)
     assert not missing, missing
 

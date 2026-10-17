@@ -1009,15 +1009,24 @@
     return missing.length;
   }
 
-  // ── Regime Strategy card (R-IV.1186 v0) ───────────────────────────────────────────────
+  // ── Regime Strategy card (R-IV.1186 v0, redesigned R-IV.1190 v0.1) ────────────────────
   //
   // MOCK ONLY. Two static files under /assets/regime/ and nothing else: no hub route, no
   // regime table, no kill-switch write. The kill-switch line is a DISPLAY of a value the
   // fixture carries (R-IV.1186(c)).
   //
-  // Lens 2 is never the headline (§1, §5): the base regime is the headline, and the watchlist
-  // reading sits in its own labelled row beside the macro lens.
+  // Lens 2 is never the headline (§1, §5). In v0.1 the whole face of the card is visuals and
+  // the lens reading is one labelled row; the base regime is the only headline.
   let _rsMock = null, _rsPlaybooks = null, _rsOpen = false;
+
+  // R-IV.1190(b)2: the BEAR -> BULL order of the ten registered labels. A FIXED presentation
+  // order, not per-reading data -- in v1 it must not vary with the reading, which is why it is
+  // a constant here and not a fixture field.
+  const RS_SLIDER = ['crash_liquidation', 'bear_market', 'bear_market_rally', 'breakdown',
+    'correction', 'range_chop', 'recovery', 'narrow_uptrend', 'uptrend', 'melt_up'];
+  // R-IV.1190(c). The regime's own colour; the alarm override is applied over it below.
+  const RS_LIME = ['uptrend', 'melt_up', 'recovery'];
+  const RS_VERMILION = ['breakdown', 'bear_market', 'bear_market_rally', 'crash_liquidation'];
 
   async function loadRegimeStrategy() {
     const host = $('regimeStrategy');
@@ -1040,91 +1049,160 @@
     renderRegimeStrategy();
   }
 
-  function rsChip(label, state, detail) {
-    const cls = String(state || '').toLowerCase().replace(/[^a-z]/g, '');
-    return '<span class="rs-chip rs-' + cls + '" title="' + esc(detail || '') + '">'
-      + esc(label) + ' <b>' + esc(state) + '</b></span>';
+  // The gauge scale, stated rather than left as a magic number: the three levels are spread
+  // across the track with 6% of their own span as padding at each end, so the marker never
+  // sits on the rail and the relative order is always legible.
+  function rsScale(vals) {
+    const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    const pad = (hi - lo) * 0.06 || 1;
+    const a = lo - pad, b = hi + pad;
+    return (x) => Math.max(0, Math.min(100, (x - a) / (b - a) * 100));
+  }
+
+  const rsPct = (px, ma) => (px - ma) / ma * 100;
+  const rsFmtPct = (v) => (v >= 0 ? '+' : '\u2212') + Math.abs(v).toFixed(1) + '%';
+
+  // R-IV.1190(c): THE ALARM IS CHECKED FIRST. A Correction with the kill-switch active must
+  // pulse vermilion rather than sit grey, and the override beating the regime colour is only
+  // true if it is tested before it.
+  function rsOutlineClass(m) {
+    const killed = ((m.intraday || {}).kill_switch || '').toUpperCase() === 'ACTIVE';
+    const anyActive = (m.overlays || []).some(
+      (o) => String(o.state || '').toUpperCase() === 'ACTIVE');
+    if (killed || anyActive) return 'rs-o-bear';
+    if (RS_VERMILION.indexOf(m.regime_key) !== -1) return 'rs-o-bear';
+    if (RS_LIME.indexOf(m.regime_key) !== -1) return 'rs-o-bull';
+    return 'rs-o-mixed';
   }
 
   function renderRegimeStrategy() {
-    const host = $('regimeStrategy');
-    const m = _rsMock;
+    const m = _rsMock, host = $('regimeStrategy');
     if (!host || !m) return;
-    const tags = (m.tags || []).join(' \u00b7 ');
-    const idx = (m.per_index || []).map((x) =>
-      '<span class="rs-idx">' + esc(x.ticker) + ' <b>' + esc(x.state)
-      + (x.uncertain ? '<i title="' + esc(x.uncertain_why || '') + '">?</i>' : '')
-      + '</b></span>').join('');
-    const ev = m.evidence || {};
-    const ls = m.lens_split || {};
-    const intra = m.intraday || {};
-    const ov = (m.overlays || []).filter((o) => o.state !== 'CLEAR');
-    const tr = m.tape_rewarding || {};
+
+    // header bits live outside the body, so they are written straight into their slots
+    const tile = host.closest('.tile');
+    if (tile) {
+      tile.classList.remove('rs-o-bear', 'rs-o-bull', 'rs-o-mixed');
+      tile.classList.add(rsOutlineClass(m));
+    }
+    const kill = $('rsKill');
+    if (kill) {
+      const on = ((m.intraday || {}).kill_switch || '').toUpperCase() === 'ACTIVE';
+      // R-IV.1190(b)1: the tag shows ONLY while the switch is active. A permanent KILL chip
+      // would be an alarm that is always on, which is an alarm nobody reads.
+      kill.hidden = !on;
+      kill.title = on ? ('kill-switch ACTIVE'
+        + ((m.intraday || {}).trigger ? ' (' + (m.intraday || {}).trigger + ')' : '')
+        + ' \u2014 shown, not touched by this card') : '';
+    }
+    const st = $('rsSettled');
+    if (st) st.textContent = 'settled ' + (m.settled_close || '\u2014') + ' \u00b7 display only';
+    const dot = $('rsHealth');
+    if (dot) {
+      dot.className = 'health-dot ' + (String(m.health || '').toLowerCase() === 'ok'
+        ? 'ok' : 'unconfirmed');
+      dot.title = (m.health || '') + (m.health_reason ? ' \u2014 ' + m.health_reason : '');
+    }
+
+    // ── regime call + the BEAR -> BULL slider ───────────────────────────────
+    const at = RS_SLIDER.indexOf(m.regime_key);
+    const ticks = RS_SLIDER.map((k, i) => '<i style="left:' + (i * 10 + 5) + '%"'
+      + ' title="' + esc(((_rsPlaybooks.regimes || {})[k] || {}).label || k) + '"></i>').join('');
+    const marker = at === -1 ? ''
+      : '<b style="left:' + (at * 10 + 5) + '%" title="'
+        + esc(m.regime_label || '') + '"></b>';
+    const tw = m.tripwires || {};
+
+    // ── index strip ─────────────────────────────────────────────────────────
+    const strip = (m.per_index || []).map((ix) => {
+      const pos = rsScale([ix.price, ix.ma50, ix.ma200]);
+      const below = ix.price < ix.ma50;
+      const cls = /DOWN|BEAR|BREAK/.test(String(ix.state).toUpperCase()) ? 'st-fad'
+        : /RANGE|CORRECT/.test(String(ix.state).toUpperCase()) ? '' : 'st-dom';
+      return '<div class="rs-ix">'
+        + '<div class="rs-ix-top"><span class="rs-ix-t">' + esc(ix.ticker) + '</span>'
+        +   '<span class="status-chip ' + cls + '">' + esc(ix.state)
+        +   (ix.uncertain ? '<i class="rs-q" title="' + esc(ix.uncertain_why || '') + '">?</i>'
+             : '') + '</span></div>'
+        + '<div class="vc-gauge rs-g">'
+        +   '<i style="left:' + pos(ix.ma200).toFixed(1) + '%" title="200d '
+        +     esc(String(ix.ma200)) + '"></i>'
+        +   '<i class="rs-t50" style="left:' + pos(ix.ma50).toFixed(1) + '%" title="50d '
+        +     esc(String(ix.ma50)) + '"></i>'
+        +   '<b class="' + (below ? 'rs-below' : 'rs-above') + '" style="left:'
+        +     pos(ix.price).toFixed(1) + '%" title="' + esc(String(ix.price)) + '"></b>'
+        + '</div>'
+        + '<div class="rs-ix-foot"><span>200d ' + rsFmtPct(rsPct(ix.price, ix.ma200))
+        +   '</span><span>50d ' + rsFmtPct(rsPct(ix.price, ix.ma50)) + '</span></div>'
+        + '</div>';
+    }).join('');
+
+    // ── evidence: five dots and the overlay chips ───────────────────────────
+    const fams = ((m.evidence || {}).families || []).map((f) => {
+      const s2 = f.state === null || f.state === undefined ? 'nodata' : String(f.state);
+      return '<span class="rs-fam" title="' + esc(f.why || (f.key + ': ' + s2)) + '">'
+        + '<span class="rs-dot rs-' + esc(s2) + '"></span>' + esc(f.key) + '</span>';
+    }).join('');
+    const ovs = (m.overlays || []).map((o) => {
+      const s2 = String(o.state || 'CLEAR').toUpperCase();
+      const k = s2 === 'WATCH' ? 'emg' : s2 === 'ACTIVE' ? 'fad'
+        : s2 === 'CANDIDATE' ? 'rs-cand' : 'rs-clear';
+      return '<span class="chip ' + k + '" title="' + esc(o.short + ' ' + s2
+        + (o.detail ? ' \u2014 ' + o.detail : '')) + '">' + esc(o.short) + '</span>';
+    }).join('');
+
+    // ── the three lights ────────────────────────────────────────────────────
+    const L = m.lights || {};
+    const light = (key, label, cls) => {
+      const l = L[key] || {};
+      return '<div class="rs-light"><span class="rs-lk">' + esc(label) + '</span>'
+        + '<span class="rs-lv ' + (cls || '') + '" title="' + esc(l.basis || '') + '">'
+        + esc(l.value || '\u2014') + '</span></div>';
+    };
+    const prem = L.premium || {};
+    const segs = Number(prem.bands || 3);
+    const premGauge = '<div class="vc-gauge rs-prem">'
+      + Array.from({ length: Math.max(0, segs - 1) }, (_, i) =>
+          '<i style="left:' + ((i + 1) * (100 / segs)).toFixed(1) + '%"></i>').join('')
+      + '<b style="left:' + Number(prem.position_pct || 0).toFixed(1) + '%"></b></div>';
 
     host.innerHTML =
-      // headline: the base regime, and only the base regime
-      '<div class="rs-head">'
+      '<div class="rs-call">'
       +   '<span class="rs-label">' + esc(m.regime_label || '\u2014') + '</span>'
-      +   (tags ? '<span class="rs-tags">' + esc(tags) + '</span>' : '')
-      +   '<span class="rs-health rs-' + esc(String(m.health || '').toLowerCase()) + '" title="'
-      +     esc(m.health_reason || '') + '">\u25cf ' + esc(m.health || '') + '</span>'
+      +   (m.tags || []).map((t) =>
+            '<span class="chip rs-tag">' + esc(t) + '</span>').join('')
       + '</div>'
-      + '<div class="rs-sub">settled ' + esc(m.settled_close || '\u2014') + '</div>'
-      + '<div class="rs-row rs-idxrow">' + idx + '</div>'
-      + '<div class="rs-row">Evidence: <b>' + esc(String(ev.families_risk_off))
-      +   ' of ' + esc(String(ev.families_total)) + '</b> families risk-off'
-      +   ((ev.families_named || []).length ? ' (' + esc(ev.families_named.join(', ')) + ')' : '')
-      +   ((ev.families_unavailable || []).length
-            ? ' \u00b7 ' + esc(ev.families_unavailable.join(', ')) + ' n/a' : '')
+      + '<div class="vc-gauge rs-slider">' + ticks + marker + '</div>'
+      + '<div class="rs-tw">'
+      +   '<span class="rs-tw-bear" title="' + esc((tw.bear || {}).basis || '') + '">\u25c2 '
+      +     esc((tw.bear || {}).text || '') + '</span>'
+      +   '<span class="rs-tw-mid">BEAR \u00b7 \u00b7 \u00b7 BULL</span>'
+      +   '<span class="rs-tw-bull" title="' + esc((tw.bull || {}).basis || '') + '">'
+      +     esc((tw.bull || {}).text || '') + ' \u25b8</span>'
       + '</div>'
-      // Lens 2, labelled, and NOT the headline
-      + (ls.present
-          ? '<div class="rs-row rs-lens">\u21c4 <span class="rs-lenslabel">Watchlist '
-            + '(high-beta) alarm</span> <b>' + esc(ls.watchlist_alarm) + '</b>'
-            + (ls.watchlist_detail ? ' (' + esc(ls.watchlist_detail) + ')' : '')
-            + ' <span class="rs-vs">vs macro</span> <b>' + esc(ls.macro) + '</b></div>'
-          : '')
-      + (intra.kill_switch
-          ? '<div class="rs-row rs-intra">\u26a1 Intraday: kill-switch <b>'
-            + esc(intra.kill_switch) + '</b>'
-            + (intra.trigger ? ' (' + esc(intra.trigger) + ')' : '') + '</div>'
-          : '')
-      + (ov.length
-          ? '<div class="rs-row rs-ovs">OVERLAYS ' + ov.map((o) => rsChip(
-              ((_rsPlaybooks.overlays[o.key] || {}).label) || o.key, o.state, o.detail)).join(' ')
-            + '</div>'
-          : '')
-      + '<div class="rs-sep"></div>'
-      + '<div class="rs-row">Crash check: <b>' + esc(ev.crash_check || '\u2014') + '</b>'
-      +   (ev.crash_check_reason ? ' <i class="rs-why">' + esc(ev.crash_check_reason) + '</i>' : '')
+      + '<div class="rs-strip">' + strip + '</div>'
+      + '<div class="rs-grid">'
+      +   '<div class="rs-box rs-ev"><div class="rs-fams">' + fams + '</div>'
+      +     '<div class="rs-ovs">' + ovs + '</div></div>'
+      +   '<div class="rs-box rs-lights">'
+      +     light('shorts', 'Shorts', 'rs-teal')
+      +     light('longs', 'Longs', '')
+      +     '<div class="rs-light rs-premrow"><span class="rs-lk">Premium</span>'
+      +       premGauge
+      +       '<span class="rs-lv" title="' + esc(prem.basis || '') + '">'
+      +       esc(prem.value || '\u2014') + '</span></div>'
+      +   '</div>'
       + '</div>'
-      + '<div class="rs-row">Bull intact: <b>'
-      +   (ev.bull_intact == null ? '\u2014' : esc(String(ev.bull_intact)))
-      +   ' of ' + esc(String(ev.bull_intact_total)) + '</b>'
-      +   (ev.bull_intact == null && ev.bull_intact_reason
-          ? ' <i class="rs-why">' + esc(ev.bull_intact_reason) + '</i>' : '')
-      +   ' \u00b7 Premium: <b>' + esc(ev.premium_posture || '\u2014') + '</b></div>'
-      + '<div class="rs-sep"></div>'
-      + '<div class="rs-h">WATCH NOW</div><ul class="rs-list">'
-      +   (m.watch_now || []).map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>'
-      + '<div class="rs-h">PROVES ME WRONG</div>'
-      + '<div class="rs-row">' + esc(m.proves_me_wrong || '\u2014') + '</div>'
-      + '<div class="rs-h">' + esc(tr.heading || 'TAPE REWARDING') + '</div>'
-      + '<div class="rs-row">'
-      +   ((tr.leaders || []).length ? esc(tr.leaders.join(', ')) + ' \u2191 ' : '')
-      +   ((tr.laggards || []).length ? esc(tr.laggards.join(', ')) + ' \u2193' : '')
-      + '</div>'
-      + (tr.counterexample
-          ? '<div class="rs-row rs-counter">' + esc(tr.counterexample) + '</div>' : '')
-      + '<div class="rs-costs">' + (m.costs || []).map((c) =>
-          '<div>' + esc(c) + '</div>').join('') + '</div>'
-      + '<div class="rs-foot">Excluded: ' + esc((m.excluded_inputs || []).join(', '))
-      +   ' \u00b7 News watch: ' + esc(m.news_watch || '\u2014')
-      +   ' \u00b7 rules ' + esc(m.rules_version || '\u2014') + '</div>';
+      + '<div class="rs-lensrow" title="' + esc((m.lens_split || {}).headline_rule || '') + '">'
+      +   '\u21c4 <span class="rs-lenslabel">Watchlist (high-beta) alarm</span> <b>'
+      +   esc((m.lens_split || {}).watchlist_alarm || '\u2014') + '</b>'
+      +   '<span class="rs-vs">vs macro</span> <b>'
+      +   esc((m.lens_split || {}).macro || '\u2014') + '</b></div>';
   }
 
   // "Open" expands the CURRENT regime's playbook. Read-only: the texts come from the
-  // versioned file and nothing on this page can edit them (R-IV.1186(b)).
+  // versioned file and nothing on this page can edit them (R-IV.1186(b)). R-IV.1190(b)6: this
+  // is where ALL the prose lives, so the face of the card carries none.
   function renderRegimePlaybook() {
     const box = $('rsPlaybook');
     if (!box || !_rsMock || !_rsPlaybooks) return;
@@ -1148,7 +1226,12 @@
       + '<div class="rs-row">' + esc(r.ending_signs || '') + '</div>'
       + '<div class="rs-h">WHAT WOULD PROVE THIS WRONG</div>'
       + '<div class="rs-row">' + esc(r.proves_wrong || '') + '</div>'
-      + '<div class="rs-foot">' + esc(_rsPlaybooks.not_a_signal || '') + '</div>';
+      + '<div class="rs-h">COSTS, STATED</div><ul class="rs-list">'
+      +   (_rsMock.costs || []).map((c) => '<li>' + esc(c) + '</li>').join('') + '</ul>'
+      + '<div class="rs-foot">Excluded: '
+      +   esc((_rsMock.excluded_inputs || []).join(', '))
+      +   ' \u00b7 News watch: ' + esc(_rsMock.news_watch || '\u2014')
+      +   ' \u00b7 ' + esc(_rsPlaybooks.not_a_signal || '') + '</div>';
   }
 
   function toggleRegimePlaybook() {

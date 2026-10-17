@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=50">
+    <link rel="stylesheet" href="/v2.css?v=51">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -62,14 +62,18 @@
                 </div>
             </div>
 
-            <!-- Regime Strategy card (R-IV.1186 v0 - mock fixture, display only) -->
-            <div class="grid-stack-item" gs-id="regime-strategy" gs-x="0" gs-y="3" gs-w="12" gs-h="11" gs-min-h="6">
+            <!-- Regime Strategy card (R-IV.1186 v0, redesigned R-IV.1190 v0.1) -->
+            <div class="grid-stack-item" gs-id="regime-strategy" gs-x="0" gs-y="3" gs-w="12" gs-h="9" gs-min-h="6">
                 <div class="grid-stack-item-content">
-                    <div class="tile">
+                    <div class="tile rs-tile">
                         <div class="tile-header">
                             <span class="tile-title">Regime Strategy</span>
-                            <span class="rs-badge rs-registered" id="rsBadge" title="The 10 regimes and 7 overlays are registered (Nick, 2026-10-16 19:07 MT, R-IV.1189(c)). Registered makes them rules; it does NOT make this card a gate - nothing in the hub reads this label to change caps, gates, the kill-switch or the journal.">REGISTERED 10-16 &middot; display only</span>
                             <div class="spacer"></div>
+                            <!-- R-IV.1190(b)1: shown ONLY while the kill-switch is active. A
+                                 permanent KILL chip is an alarm nobody reads. -->
+                            <span class="dead-badge" id="rsKill" hidden>KILL</span>
+                            <span class="rs-settled" id="rsSettled">settled &mdash;</span>
+                            <span class="health-dot" id="rsHealth"></span>
                             <button type="button" class="rs-open" id="rsOpen" aria-expanded="false">Open &#9656;</button>
                             <span class="tile-grip" data-gloss="GRIP">&#10239;</span>
                         </div>
@@ -305,6 +309,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=63"></script>
+    <script src="/v2.js?v=64"></script>
 </body>
 </html>

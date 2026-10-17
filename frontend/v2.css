@@ -1342,142 +1342,141 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   border-bottom: 1px dotted rgba(136, 153, 166, .5);
 }
 
-/* ── Regime Strategy card (R-IV.1186 v0) ─────────────────────────────────── */
-/* PHONE-FIRST: these are the phone's rules. The one media query below widens two
-   rows from 760px up. Built the other way round, a card reads only on the machine it
-   was built on. */
-.rs-card { font-size: .86rem; line-height: 1.55; }
-.rs-wait { color: var(--muted, #8899a6); font-style: italic; font-size: .84rem; }
+/* ── Regime Strategy card (R-IV.1186 v0, redesigned R-IV.1190 v0.1) ──────────
+   EVERY COLOUR IS A TOKEN. The approved mockup hard-codes #7CFF6B / #ff5c33 / #223258 /
+   #70829d; those are --up / --down / --border-strong / --text-3 and are used as such, so a
+   theme change reaches this card like every other.
+   PHONE-FIRST: the base rules are the phone's single column. The one media query at 760px
+   widens the index strip and the two lower boxes into rows. */
+.rs-card { font-size: .86rem; line-height: 1.5; display: flex; flex-direction: column; gap: 12px; }
+.rs-wait { color: var(--text-3); font-style: italic; font-size: .82rem; }
 
-/* The badge must survive a glance: the labels are rules and they are NOT registered. */
-.rs-badge {
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: rgba(255, 193, 7, .12);
-  border: 1px solid rgba(255, 193, 7, .45);
-  color: #ffd97a;
-  font-size: .64rem;
-  letter-spacing: .4px;
-  text-transform: uppercase;
-  white-space: nowrap;
-  cursor: help;
-}
-/* Registered is not a warning. The amber badge said "these labels are not rules yet"; now
-   they are, so the chip goes teal -- while still carrying "display only", because registration
-   changed what the labels ARE and not what the card may DO. */
-.rs-badge.rs-registered {
-  background: rgba(78, 205, 196, .12);
-  border-color: rgba(78, 205, 196, .45);
-  color: var(--accent, #4ecdc4);
-}
+/* header slots */
+.rs-settled { font: 10px var(--mono); color: var(--text-3); white-space: nowrap; }
 .rs-open {
-  background: transparent;
-  border: 1px solid rgba(78, 205, 196, .45);
-  color: var(--accent, #4ecdc4);
-  border-radius: 6px;
-  padding: 2px 9px;
-  font-size: .72rem;
-  cursor: pointer;
+  background: transparent; border: 1px solid var(--border-strong); color: var(--teal);
+  border-radius: 6px; padding: 1px 8px; font: 10px var(--mono); cursor: pointer;
 }
-.rs-open:hover { background: rgba(78, 205, 196, .1); }
+.rs-open:hover { border-color: var(--teal); }
 
-/* The headline is the BASE regime and nothing else (section 1). */
-.rs-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
-.rs-label {
-  font-size: 1.22rem;
-  font-weight: 700;
-  letter-spacing: .5px;
-  color: var(--text-1, #e8eef2);
+/* ── the regime call and the BEAR -> BULL slider ─────────────────────────── */
+.rs-call { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.rs-label { font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--text); }
+.chip.rs-tag { border-style: dashed; color: var(--text-3); font-size: 11px; padding: 1px 7px; }
+
+/* The one track, vermilion -> lime, with the ten fixed ticks over it. Built on .vc-gauge so
+   the tick and marker geometry is the dashboard's, not this card's. */
+/* The two intermediate stops are DERIVED, not picked. The mockup's #5a3a3a and #3a5a36 are a
+   muted vermilion and a muted lime; color-mix against --border-strong reproduces them from the
+   tokens, so the whole gradient follows a theme change instead of two hexes staying behind.
+   color-mix is already relied on by the apis-pulse / kodiak-pulse keyframes in this file. */
+.rs-slider { height: 5px; margin-top: 4px; background: linear-gradient(90deg,
+  var(--down) 0%,
+  color-mix(in srgb, var(--down) 45%, var(--border-strong)) 30%,
+  var(--border-strong) 50%,
+  color-mix(in srgb, var(--up) 40%, var(--border-strong)) 70%,
+  var(--up) 100%); }
+.rs-slider i { background: var(--text-3); }
+.rs-slider b { background: var(--text); }
+.rs-tw { display: flex; justify-content: space-between; gap: 8px; font: 11px var(--mono); }
+.rs-tw-bear { color: var(--down); cursor: help; }
+.rs-tw-bull { color: var(--up); cursor: help; }
+.rs-tw-mid { color: var(--text-3); letter-spacing: 1.2px; }
+
+/* ── index strip ─────────────────────────────────────────────────────────── */
+.rs-strip {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
 }
-.rs-tags { color: var(--muted, #8899a6); font-size: .78rem; }
-.rs-health { margin-left: auto; font-size: .72rem; cursor: help; white-space: nowrap; }
-.rs-partial { color: #ffd97a; }
-.rs-ok { color: #4ecdc4; }
-.rs-stale, .rs-broken { color: #ff9f9f; }
-.rs-sub { color: var(--muted, #8899a6); font-size: .74rem; margin-bottom: 6px; }
+.rs-ix { padding: 9px 11px; display: flex; flex-direction: column; gap: 7px; }
+.rs-ix + .rs-ix { border-top: 1px solid var(--border); }
+.rs-ix-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.rs-ix-t { font: 11px var(--mono); letter-spacing: 1px; color: var(--text-2); }
+.rs-q { color: var(--amber); font-style: normal; cursor: help; margin-left: 3px; }
+.rs-g { margin-top: 3px; }
+/* the 50d tick reads heavier than the 200d: it is the one the regime's tripwire turns on */
+.rs-g i.rs-t50 { width: 2px; height: 13px; top: -4px; background: var(--text-2); }
+/* R-IV.1190(b)3: vermilion below the 50d, lime above. */
+.rs-g b.rs-below { background: var(--down); }
+.rs-g b.rs-above { background: var(--up); }
+.rs-ix-foot { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--text-3); }
 
-.rs-row { margin: 3px 0; }
-.rs-idxrow { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0; }
-.rs-idx { font-size: .8rem; color: var(--muted, #8899a6); }
-.rs-idx b { color: var(--text-1, #e8eef2); font-weight: 600; }
-.rs-idx i { color: #ffd97a; font-style: normal; cursor: help; }
-
-/* Lens 2 is labelled and sits in its own row. It is never the headline. */
-.rs-lens { background: rgba(255, 255, 255, .03); border-radius: 6px; padding: 5px 8px; }
-.rs-lenslabel { color: var(--muted, #8899a6); }
-.rs-vs { color: var(--muted, #8899a6); }
-.rs-intra { color: #ffd97a; }
-.rs-ovs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
-.rs-chip {
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: .7rem;
-  border: 1px solid rgba(136, 153, 166, .35);
-  color: var(--muted, #8899a6);
-  cursor: help;
+/* ── evidence and the three lights ───────────────────────────────────────── */
+.rs-grid { display: flex; flex-direction: column; gap: 10px; }
+.rs-box { border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.rs-ev { display: flex; flex-direction: column; gap: 9px; }
+.rs-fams { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+.rs-fam {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: 10px var(--mono); letter-spacing: 1px; color: var(--text-2); cursor: help;
 }
-.rs-chip b { color: var(--text-1, #e8eef2); }
-.rs-watch { border-color: rgba(255, 193, 7, .5); color: #ffd97a; }
-.rs-active { border-color: rgba(255, 107, 107, .55); color: #ff9f9f; }
-.rs-stale { border-color: rgba(136, 153, 166, .5); }
+.rs-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.rs-dot.rs-risk_off { background: var(--down); }
+.rs-dot.rs-risk_on { background: var(--up); }
+/* R-IV.1190(b)4: NO DATA is --text-3. Not green, not red - an unmeasured family is neither
+   reassuring nor alarming, and painting it either way is a reading nobody took. */
+.rs-dot.rs-nodata { background: var(--text-3); }
+.rs-ovs { display: flex; gap: 4px; flex-wrap: wrap; }
+.rs-ovs .chip { font-size: 10px; padding: 1px 7px; cursor: help; }
+/* candidate is DASHED and muted: §5 calls AI-capex a "WATCH candidate", which is weaker than
+   WATCH and must not render as it. */
+.rs-ovs .chip.rs-cand { border-style: dashed; color: var(--text-2); }
+.rs-ovs .chip.rs-clear { color: var(--text-3); border-color: var(--border); }
 
-.rs-sep { height: 1px; background: rgba(255, 255, 255, .07); margin: 9px 0; }
-.rs-h {
-  color: var(--muted, #8899a6);
-  font-family: var(--mono, monospace);
-  font-size: .66rem;
-  letter-spacing: 1px;
-  margin: 9px 0 3px;
+.rs-lights { display: flex; flex-direction: column; gap: 9px; justify-content: space-between; }
+.rs-light { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.rs-lk { font: 10px/13px var(--mono); letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-3); }
+.rs-lv { font-size: 13px; font-weight: 700; color: var(--text); cursor: help; }
+.rs-lv.rs-teal { color: var(--teal); }
+.rs-premrow { align-items: center; }
+.rs-prem { flex: 1; max-width: 120px; margin: 0 4px; }
+
+/* Lens 2: one labelled row, never the headline (§1, §5). */
+.rs-lensrow { font: 11px var(--mono); color: var(--text-3); cursor: help; }
+.rs-lensrow b { color: var(--text-2); font-weight: 600; margin: 0 4px; }
+.rs-lenslabel { color: var(--text-2); }
+.rs-vs { margin-left: 6px; }
+
+/* ── the outline, R-IV.1190(c) ───────────────────────────────────────────────
+   The pulse is a box-shadow on the TILE. H-13: no text animates, so the card stays readable
+   through every frame. The alarm override (kill-switch or any ACTIVE overlay) is decided in
+   v2.js before the regime colour, because an alarm that loses to a label is not an alarm. */
+.rs-tile.rs-o-bull { border-color: var(--up); animation: apis-pulse 2.2s ease-in-out infinite; }
+.rs-tile.rs-o-bear { border-color: var(--down); animation: kodiak-pulse 2.2s ease-in-out infinite; }
+.rs-tile.rs-o-mixed { border-color: var(--border-strong); }
+@media (prefers-reduced-motion: reduce) {
+  /* The colour IS the state; only the movement is decoration. */
+  .rs-tile.rs-o-bull, .rs-tile.rs-o-bear { animation: none; }
 }
-.rs-list { margin: 0; padding-left: 17px; }
+
+/* ── the expanded playbook: all the prose lives here (R-IV.1190(b)6) ─────── */
+.rs-playbook {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px dashed rgba(20,184,166,0.3);
+  font-size: .84rem; line-height: 1.55;
+}
+.rs-pb-title { color: var(--teal); font-weight: 600; letter-spacing: .3px; margin-bottom: 4px; }
+.rs-h { color: var(--text-3); font: 10px var(--mono); letter-spacing: 1px; margin: 9px 0 3px; }
+.rs-row { margin: 3px 0; color: var(--text-2); }
+.rs-list { margin: 0; padding-left: 17px; color: var(--text-2); }
 .rs-list li { margin: 2px 0; }
-.rs-why { color: var(--muted, #8899a6); font-style: normal; font-size: .76rem; }
-.rs-counter { color: var(--muted, #8899a6); font-size: .8rem; }
-.rs-costs {
-  margin-top: 8px;
-  color: var(--muted, #8899a6);
-  font-size: .76rem;
-  font-style: italic;
+/* A withheld line SAYS it is withheld. v2 holds nothing, but the style stays for the next one. */
+.rs-held {
+  margin: 6px 0; padding: 7px 9px; border-radius: 6px;
+  background: rgba(245,165,36,0.09); border: 1px solid rgba(245,165,36,0.3);
+  color: var(--amber); font-size: .76rem; line-height: 1.45;
 }
 .rs-foot {
-  margin-top: 9px;
-  padding-top: 7px;
-  border-top: 1px solid rgba(255, 255, 255, .07);
-  color: var(--muted, #8899a6);
-  font-size: .72rem;
-  line-height: 1.45;
-}
-
-/* The expanded playbook. Read-only by construction: it comes from a versioned file and
-   nothing on the page can edit it. */
-.rs-playbook {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed rgba(78, 205, 196, .3);
-  font-size: .84rem;
-  line-height: 1.55;
-}
-.rs-pb-title {
-  color: var(--accent, #4ecdc4);
-  font-weight: 600;
-  letter-spacing: .3px;
-  margin-bottom: 4px;
-}
-/* A withheld line SAYS it is withheld. A playbook that silently drops a sentence reads as
-   complete, which is the one thing a held text must not do. */
-.rs-held {
-  margin: 6px 0;
-  padding: 7px 9px;
-  border-radius: 6px;
-  background: rgba(255, 193, 7, .09);
-  border: 1px solid rgba(255, 193, 7, .3);
-  color: #ffd97a;
-  font-size: .76rem;
-  line-height: 1.45;
+  margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--border);
+  color: var(--text-3); font-size: .72rem; line-height: 1.45;
 }
 
 @media (min-width: 760px) {
+  /* The index strip becomes three columns and the two lower boxes sit side by side, which is
+     the desktop mockup. Phone keeps the stack. */
+  .rs-strip { flex-direction: row; }
+  .rs-ix { flex: 1; }
+  .rs-ix + .rs-ix { border-top: 0; border-left: 1px solid var(--border); }
+  .rs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rs-list { columns: 2; column-gap: 24px; }
-  .rs-idxrow { gap: 18px; }
 }
