@@ -50,6 +50,12 @@ CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_fired
 CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_ticker
     ON triton_flow_shadow (ticker, fired_at DESC);
 
--- Retention: purge UNGRADED rows older than 90d; graded rows retained.
-DELETE FROM triton_flow_shadow
-    WHERE created_at < NOW() - INTERVAL '90 days' AND graded_at IS NULL;
+-- PURGE FREEZE (R-IV.1195(c)). The 90-day retention DELETE that stood here is
+-- disabled, not narrowed. This file is not a startup path -- nothing in the app
+-- executes migrations/*.sql -- but replaying 021 by hand would no-op every
+-- CREATE ... IF NOT EXISTS above and then DELETE live rows from the registered
+-- forward test, which is a hazard with no upside. The retention policy is
+-- undecided and belongs to DEF-TRITON-RETENTION-DARK.
+--
+-- DELETE FROM triton_flow_shadow
+--     WHERE created_at < NOW() - INTERVAL '90 days' AND graded_at IS NULL;

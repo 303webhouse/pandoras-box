@@ -2381,15 +2381,24 @@ async def init_database():
             CREATE INDEX IF NOT EXISTS idx_triton_flow_shadow_ticker
                 ON triton_flow_shadow (ticker, fired_at DESC)
         """)
-        # Retention (Nick 2026-07-01): purge UNGRADED rows >90d; graded exempt
-        # until docs/strategy-reviews/triton-forward-edge-*.md exists. Bumped 30d->90d
-        # after Railway CLI verified the postgres volume at 816/5000 MB (16%) — the
-        # "94% full" flag (6/23) was STALE; ample headroom. (Cap was 30d out of
-        # caution when the volume % was unknown at B1.)
-        await conn.execute("""
-            DELETE FROM triton_flow_shadow
-            WHERE created_at < NOW() - INTERVAL '90 days' AND graded_at IS NULL
-        """)
+        # PURGE FREEZE (R-IV.1195(c)). A 90-day retention DELETE on UNGRADED
+        # triton_flow_shadow rows ran here, from init_database(), on EVERY boot.
+        #
+        # WHY IT IS GONE RATHER THAN NARROWED, which the ruling is explicit about: a
+        # 90-day window measured from NOW() is a moving edge, and around 2026-11-14 it
+        # reaches rows fired from 2026-08-17 -- the registered forward test's own data,
+        # days before the 11-20 TRITON decision. A narrowed window would still be a
+        # moving edge; only removing the statement stops it moving.
+        #
+        # It also explains a figure the record treated as fixed: "id <= 377783 = 7,014"
+        # was never an invariant. It DECAYED on every deploy, which is why it measured
+        # 6,993 later. Recorded as a decaying figure, not an invariant.
+        #
+        # The retention policy itself is undecided and belongs to
+        # DEF-TRITON-RETENTION-DARK. Nothing is purged until that is ruled.
+        #
+        # Guarded by test_triton_purge_freeze_r1195.py, which fails if ANY startup path
+        # grows a DELETE against this table again.
 
         # UW budget watchdog (Fable 2026-07-09): durable per-day UW-burn snapshot so
         # the 48h Redis counter TTL can never blind us (mirrors migrations/022; the
