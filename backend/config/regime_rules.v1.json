@@ -85,13 +85,14 @@
     "rule": "A family with no feed renders as NO DATA and is never inferred (R-IV.1193(d))."
   },
   "families_v1": {
-    "status": "WORKING DEFINITION, pending ratification (R-IV.925(b): do not invent labels)",
+    "status": "INTERIM, ratified R-IV.1198(e). Not final: section 2 names five families but states no per-family test, so these two reuse the Correction row's own clauses. Per-family tests are designed at the same review as the flip rate.",
     "structure": "risk-off when SPY closes below its 50dma -- the Correction row's own first test",
     "breadth": "risk-off when >= 2 of 3 indices (SPY/QQQ/IWM) close below their 50dma -- the Correction row's second test",
     "credit": null,
     "vol": null,
     "carry": null,
     "absent_rule": "an absent family is counted neither way and never inferred; only row 1 counts families, and row 1 is NOT EVALUABLE in v1",
-    "why_flagged": "section 2 names the five families but v1 has no feed for three of them and no stated per-family test for the two it can measure, so these two reuse clauses section 2 already applies to the Correction row rather than asserting anything new"
+    "why_flagged": "section 2 names the five families but v1 has no feed for three of them and no stated per-family test for the two it can measure, so these two reuse clauses section 2 already applies to the Correction row rather than asserting anything new",
+    "flip_rate_review": "R-IV.1198(c)+(e): the per-family tests and the flip-rate gap are reviewed together."
   }
 }

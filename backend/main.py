@@ -74,6 +74,16 @@ async def lifespan(app: FastAPI):
                 _out = await run_seed(_conn)
                 logger.info("✅ Regime v1 seeded %s session(s) of %s classifiable (%s)",
                             _out.get("written"), _out.get("sessions"), _out.get("reason"))
+            # R-IV.1198(c) and (e): put the flip-rate gap and the INTERIM family status on the
+            # record, not only in a ruling. Both are idempotent on their action, so a redeploy
+            # does not bury the finding under its own restatements.
+            from jobs.regime_job import record_interim_families, record_known_gap
+            _gap = await record_known_gap(_conn)
+            if _gap:
+                logger.info("📌 Regime v1 KNOWN GAP recorded: %s", _gap)
+            _int = await record_interim_families(_conn)
+            if _int:
+                logger.info("📌 Regime v1 families recorded INTERIM (R-IV.1198(e))")
     except Exception as e:
         logger.warning(f"⚠️ Regime v1 seed skipped: {type(e).__name__}: {e}")
 
