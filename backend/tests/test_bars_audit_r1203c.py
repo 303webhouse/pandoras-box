@@ -282,3 +282,145 @@ def test_THE_FINDING_CARRIES_THE_STORED_OHLC_NOT_JUST_THE_CLOSE():
     body = code[i:i + 600]
     assert "'stored': stored" in body
     assert "'vendor':" in body
+
+
+# ── R-IV.1206(b): basis-equivalence replacement, NOT a shape-test conviction ──
+
+@pytest.mark.asyncio
+async def test_TSLA_IS_REPLACED_ON_BASIS_EQUIVALENCE():
+    """R-IV.1206(b). The shape test declined this row and was right to: its stored high sits
+    0.08 ABOVE Polygon's, so the stored range is not inside the settled range. What authorises
+    the write is a different fact -- TSLA pays no dividend, so split-adjusted EQUALS fully
+    adjusted for it and the replacement cannot move the row onto a wrong basis."""
+    from jobs import bars_audit
+
+    writes = []
+
+    class _Conn:
+        async def execute(self, sql, *a):
+            writes.append(a)
+
+    report = {"findings": [{
+        "ticker": "TSLA", "date": "2026-10-16", "verdict": "mismatch_unexplained",
+        "stored_c": 353.2149963378906,
+        "stored": {"o": 369.0400085449219, "h": 370.57989501953125,
+                   "l": 351.1400146484375, "c": 353.2149963378906},
+        "vendor": {"o": 369.145, "h": 370.5, "l": 349.33, "c": 354.72, "v": 1},
+    }]}
+    out = await bars_audit.replace_on_basis_equivalence(_Conn(), report)
+    assert out["replaced_count"] == 1
+    e = out["replaced"][0]
+    assert e["ticker"] == "TSLA" and e["date"] == "2026-10-16"
+    assert e["verdict_was"] == "mismatch_unexplained"
+    assert e["now"] == {"o": 369.145, "h": 370.5, "l": 349.33, "c": 354.72}
+    assert e["basis"] == "R-IV.1206(b)"
+    # ALL FOUR PRICES, as the ruling says -- not the close alone.
+    assert len(writes) == 1
+    assert writes[0][2:6] == (369.145, 370.5, 349.33, 354.72)
+    assert writes[0][1] == dt.date(2026, 10, 16), "a date object, not a string"
+
+
+def test_THE_RULED_PHRASE_IS_LOGGED_VERBATIM():
+    """R-IV.1206(b): log it as "replaced on basis equivalence, not convicted by the shape
+    test"."""
+    from jobs.bars_audit import BASIS_EQUIVALENCE_NOTE
+    assert BASIS_EQUIVALENCE_NOTE == (
+        "replaced on basis equivalence, not convicted by the shape test")
+    code = code_of_file(os.path.join(BACKEND, "jobs", "bars_audit.py"))
+    i = code.index("async def replace_on_basis_equivalence")
+    assert "BASIS_EQUIVALENCE_NOTE" in code[i:], "the phrase must reach the log and the payload"
+    assert "logger.info" in code[i:]
+
+
+def test_THE_SHAPE_TEST_TOLERANCE_WAS_NOT_WIDENED():
+    """R-IV.1206(b) says not to. Widening it to catch the one case it declined would be tuning
+    a conviction threshold on that case -- the fitted-parameter pattern. The same TSLA row must
+    still come back UNCONVICTED from the pure classifier."""
+    from jobs.bars_audit import PRICE_TOL, RATIO_SPREAD_TOL, classify_row
+    assert PRICE_TOL == 0.005
+    assert RATIO_SPREAD_TOL == 0.0008
+    v = classify_row(
+        {"o": 369.0400085449219, "h": 370.57989501953125,
+         "l": 351.1400146484375, "c": 353.2149963378906},
+        {"o": 369.145, "h": 370.5, "l": 349.33, "c": 354.72})
+    assert v["verdict"] == "mismatch_unexplained", (
+        "the shape test keeps its judgement; only the CONSEQUENCE is overridden")
+
+
+def test_THE_EQUIVALENT_SET_IS_RULED_NOT_INFERRED():
+    """"Pays no dividend" is a fact this repo has no feed for, so deriving it would be guessing.
+    A ticker is in the set because a ruling says so, and the citation travels with it -- a
+    ticker that STARTS paying a dividend makes its entry wrong, and only the citation makes
+    that findable."""
+    from jobs.bars_audit import BASIS_EQUIVALENT
+    assert BASIS_EQUIVALENT == {"TSLA": "R-IV.1206(b)"}
+    for ticker, cite in BASIS_EQUIVALENT.items():
+        assert cite.startswith("R-IV."), (ticker, cite)
+    raw = read_source(os.path.join(BACKEND, "jobs", "bars_audit.py"))
+    assert "NOT AN INFERENCE" in raw
+
+
+@pytest.mark.asyncio
+async def test_a_NON_EQUIVALENT_ticker_is_NEVER_replaced_this_way():
+    """The path is scoped to the ruled set. SPY pays dividends, so replacing its row on this
+    reasoning would move a correct fully-adjusted row onto the split-only basis."""
+    from jobs import bars_audit
+
+    class _Conn:
+        async def execute(self, sql, *a):
+            raise AssertionError("nothing may be written for a non-equivalent ticker")
+
+    out = await bars_audit.replace_on_basis_equivalence(_Conn(), {"findings": [{
+        "ticker": "SPY", "date": "2026-10-16", "verdict": "mismatch_unexplained",
+        "stored": {"o": 1, "h": 1, "l": 1, "c": 1},
+        "vendor": {"o": 1, "h": 1, "l": 1, "c": 2, "v": 1}}]})
+    assert out["replaced_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_row_ALREADY_REPAIRED_by_the_shape_test_is_not_written_twice():
+    """Writing it twice would log a replacement that did nothing and muddle which mechanism
+    acted on the row."""
+    from jobs import bars_audit
+
+    class _Conn:
+        async def execute(self, sql, *a):
+            raise AssertionError("nothing may be written")
+
+    report = {"findings": [{
+        "ticker": "TSLA", "date": "2026-10-16", "verdict": "unsettled_capture",
+        "stored": {"o": 1, "h": 1, "l": 1, "c": 1},
+        "vendor": {"o": 1, "h": 1, "l": 1, "c": 2, "v": 1}}]}
+    out = await bars_audit.replace_on_basis_equivalence(
+        _Conn(), report, already_fixed=[{"ticker": "TSLA", "date": "2026-10-16"}])
+    assert out["replaced_count"] == 0
+    assert "already repaired by the shape test" in out["skipped"][0]["why"]
+
+
+@pytest.mark.asyncio
+async def test_a_MATCHING_row_is_left_alone_even_for_an_equivalent_ticker():
+    """Once the row agrees there is nothing to replace, and a write would be churn with a log
+    line that reads like a finding."""
+    from jobs import bars_audit
+
+    class _Conn:
+        async def execute(self, sql, *a):
+            raise AssertionError("nothing may be written")
+
+    out = await bars_audit.replace_on_basis_equivalence(_Conn(), {"findings": [{
+        "ticker": "TSLA", "date": "2026-10-16", "verdict": "match",
+        "stored": {"o": 1, "h": 1, "l": 1, "c": 2},
+        "vendor": {"o": 1, "h": 1, "l": 1, "c": 2, "v": 1}}]})
+    assert out["replaced_count"] == 0
+
+
+def test_THE_REPLACEMENT_IS_A_SEPARATE_FLAG_ON_THE_ROUTE():
+    """Its own switch, so nobody turns it on thinking they are running the audit's own repair.
+    Two different claims, two different buttons."""
+    src = read_source(os.path.join(BACKEND, "api", "stable.py"))
+    i = src.index('@router.post("/bars-audit")')
+    body = src[i:i + 2200]
+    assert "replace_equivalent: bool = Query(False)" in body
+    assert "repair: bool = Query(False)" in body
+    assert "replace_on_basis_equivalence" in body
+    assert "already_fixed=" in body, "the two paths must not write the same row twice"
