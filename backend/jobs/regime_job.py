@@ -79,12 +79,25 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
     the unique key, and says so rather than reporting a fresh success.
     """
     rules = rules or load_rules()
-    series = await load_series(conn)
+    # THE LOAD CAN FAIL, and a raised exception is an absence again. Audited so the one thing a
+    # reader can see -- "no snapshot" -- comes with the reason attached.
+    try:
+        series = await load_series(conn)
+    except Exception as exc:
+        detail = "load_series failed: %s: %s" % (type(exc).__name__, exc)
+        await _audit(conn, action="refused", detail=detail, rules_version=rules.get("version"))
+        logger.warning("[regime_job] seed refused -- %s", detail)
+        return {"sessions": 0, "written": 0, "refused": detail}
+
     counts = {t: len(v) for t, v in series.items()}
     report = seed_depth_report(counts)
+    # The per-ticker counts go into the audit detail either way: when the seed refuses, the bar
+    # counts ARE the diagnosis, and nothing else in this lane can read that table.
+    report = dict(report, bar_counts=counts)
 
     if report["sessions"] <= 0:
-        detail = ("no classifiable session: %s" % report["reason"])
+        detail = ("no classifiable session: %s | bars: %s"
+                  % (report["reason"], sorted(counts.items())))
         await _audit(conn, action="refused", detail=detail,
                      rules_version=rules.get("version"))
         logger.warning("[regime_job] seed refused -- %s", detail)
@@ -204,8 +217,19 @@ async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[st
             ORDER BY as_of DESC
             LIMIT 2""", version)
     if not rows:
-        return {"snapshot": None, "diff": None,
-                "unavailable_reason": "no regime_snapshots row for rules %s" % version}
+        # THE AUDIT ROW IS THE ANSWER TO "WHY NOT". "No snapshot" is a symptom; the run that
+        # declined to write one recorded its reason, and surfacing it here is the whole point of
+        # auditing refusals rather than letting them be an absence.
+        why = "no regime_snapshots row for rules %s" % version
+        try:
+            a = await conn.fetchrow(
+                """SELECT action, detail, created_at FROM regime_audit
+                    ORDER BY created_at DESC LIMIT 1""")
+            if a is not None:
+                why = "%s; last run: %s - %s" % (why, a["action"], a["detail"])
+        except Exception as exc:
+            why = "%s; regime_audit unreadable (%s)" % (why, type(exc).__name__)
+        return {"snapshot": None, "diff": None, "unavailable_reason": why}
 
     cur = dict(rows[0])
     prev = dict(rows[1]) if len(rows) > 1 else None
