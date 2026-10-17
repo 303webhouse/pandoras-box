@@ -7,6 +7,7 @@ Brief 10: Gap fixes — signal_id/account columns, partial sync, single create,
 """
 
 import json
+import logging
 import os
 import re
 from datetime import date, datetime
@@ -17,7 +18,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from utils.pivot_auth import require_api_key
 from pydantic import BaseModel
 
+from asyncpg.exceptions import UniqueViolationError
+
 from database.postgres_client import get_postgres_client
+
+# One module logger. A function at ~L869 builds its own local one, which shadows this
+# harmlessly; the helpers below are at module scope and need a name that exists there.
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -584,6 +591,73 @@ class CashFlowCreate(BaseModel):
     source_ref: Optional[str] = None
 
 
+async def _already_in_the_ledger(conn, exc, *, account_name, flow_type=None, amount=None,
+                                 description=None, activity_date=None, dedup_key=None):
+    """Turn a unique violation into a 409 that names what refused the write — R-IV.1168(b).
+
+    A cash write that collides has NOT failed: the ledger already holds that movement. A bare
+    500 tells the caller the opposite, and a caller told the server broke retries, which on a
+    money route is the one thing to avoid. (`No route voids a cash event`, so a retry that DID
+    land cannot be taken back.)
+
+    NAMES THE CONSTRAINT, because the index that refused the HYG legs is not in this
+    repository -- it exists in the live database only, and its columns cannot be read from
+    here. `constraint_name` makes it identify itself the first time it fires, which is worth
+    more than a column list I would have had to assume, and survives the index changing.
+
+    The existing row is located by `dedup_key` when there is one, else by the natural key this
+    code does know. When it cannot be found the 409 still stands: "this write was refused as a
+    duplicate and I could not locate the original" is a true statement and an actionable one,
+    where a 500 is neither.
+    """
+    constraint = getattr(exc, "constraint_name", None) or "an unnamed unique index"
+    existing = None
+    try:
+        if dedup_key is not None:
+            existing = await conn.fetchrow(
+                "SELECT id, activity_date, amount, description FROM cash_flows "
+                " WHERE account_name = $1 AND dedup_key = $2", account_name, dedup_key)
+        if existing is None and flow_type is not None and amount is not None:
+            existing = await conn.fetchrow(
+                "SELECT id, activity_date, amount, description FROM cash_flows "
+                " WHERE account_name = $1 AND flow_type = $2 AND amount = $3"
+                "   AND COALESCE(description, '') = COALESCE($4, '')"
+                "   AND activity_date = $5"
+                " ORDER BY id LIMIT 1",
+                account_name, flow_type, amount, description, activity_date)
+    except Exception as lookup_exc:                                 # noqa: BLE001
+        # A failed lookup must not turn a 409 into a 500. The refusal is already known;
+        # the id is the nicety.
+        logger.warning("[cash] 409 lookup failed after %s: %s", constraint, lookup_exc)
+
+    detail = {
+        "error": "this movement is already in the ledger",
+        "refused_by": constraint,
+        "existing_id": existing["id"] if existing else None,
+        "account_name": account_name,
+        "note": ("nothing was written and nothing is wrong; the ledger already holds this "
+                 "movement" if existing else
+                 "the write was refused as a duplicate, but the original could not be "
+                 "located from the fields this route has -- do not retry; read the ledger"),
+    }
+    logger.warning("[cash] duplicate refused by %s (existing id %s)",
+                   constraint, detail["existing_id"])
+    raise HTTPException(status_code=409, detail=detail)
+
+
+async def _fetchrow_or_409(conn, sql, *args, **locator):
+    """`conn.fetchrow`, with a unique violation turned into a 409 instead of a bare 500.
+
+    ONE AUTHOR for the translation. Every cash insert needs it, and four hand-written
+    try/except blocks would be four chances for one of them to be forgotten — which is
+    precisely the state this replaces.
+    """
+    try:
+        return await conn.fetchrow(sql, *args)
+    except UniqueViolationError as exc:
+        await _already_in_the_ledger(conn, exc, **locator)
+
+
 @router.post("/cash-flows")
 async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
     """Log a withdrawal or deposit. Optionally adjusts account cash balance."""
@@ -615,14 +689,23 @@ async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
     # unique index and so refuses nothing -- losing a real movement is worse than repeating one.
     key = dedup_key(body.account_name, body.flow_type, body.amount, act_date, src) if src else None
 
-    row = await pool.fetchrow("""
-        INSERT INTO cash_flows (account_name, flow_type, amount, description, activity_date,
-                                imported_from, source_ref, dedup_key)
-        VALUES ($1, $2, $3, $4, $5, 'manual', $6, $7)
-        ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
-        DO NOTHING
-        RETURNING *
-    """, body.account_name, body.flow_type, body.amount, body.description, act_date, src, key)
+    # R-IV.1168(b): `ON CONFLICT` below covers ONE index. A violation of any other propagates
+    # as a bare 500, which is how three identical same-day HYG orders came back as "the server
+    # broke" instead of "the ledger already has this".
+    # Through the SAME wrapper the other four inserts use. A hand-written try/except here
+    # would be a second author for the one translation every cash write needs, and `pool`
+    # exposes `fetchrow` exactly as a connection does.
+    row = await _fetchrow_or_409(
+        pool,
+        """INSERT INTO cash_flows (account_name, flow_type, amount, description,
+                                   activity_date, imported_from, source_ref, dedup_key)
+           VALUES ($1, $2, $3, $4, $5, 'manual', $6, $7)
+           ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
+           DO NOTHING
+           RETURNING *""",
+        body.account_name, body.flow_type, body.amount, body.description, act_date, src, key,
+        account_name=body.account_name, flow_type=body.flow_type, amount=body.amount,
+        description=body.description, activity_date=act_date, dedup_key=key)
 
     if row is None and key is not None:
         # A conflict is NOT a failure: this exact broker line is already in the ledger. Said
@@ -642,6 +725,12 @@ async def log_cash_flow(body: CashFlowCreate, _=Depends(require_api_key)):
         # An INSERT ... RETURNING that returns nothing is not a success with an empty
         # body; it means the row did not land. Said plainly rather than raising a
         # TypeError three lines later on a None the caller never sees.
+        #
+        # R-IV.1168(b): with a dedup_key this is reached only when the conflicting row cannot
+        # be read back, which the branch above already handles -- so a 500 here means the
+        # write genuinely did not land and no duplicate explains it. That distinction is why
+        # this stays a 500 rather than becoming a blanket 409: telling a caller "already
+        # present" when nothing is present would lose a real movement.
         raise HTTPException(status_code=500,
                             detail="the cash flow was not written and the database "
                                    "returned no row")
@@ -1015,7 +1104,8 @@ async def write_cash_anchor(body: CashAnchorCreate, _=Depends(require_api_key)):
 
     pool = await _pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        row = await _fetchrow_or_409(
+            conn,
             """INSERT INTO cash_flows
                    (account_name, flow_type, amount, description, activity_date,
                     imported_from, source_ref, dedup_key, meta)
@@ -1023,13 +1113,16 @@ async def write_cash_anchor(body: CashAnchorCreate, _=Depends(require_api_key)):
                ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
                DO NOTHING
                RETURNING id""",
+            # R-IV.1168(b)
             acct, ANCHOR, body.cash, desc, day, ref, key,
             # R-IV.566(d): the instant as a FIELD, not only inside the sentence. A
             # card that has to parse a log line to print a time is one reworded
             # message away from printing the wrong one.
             json.dumps({"as_of": as_of.isoformat(), "evidence_ref": ref,
                         "kind": "statement", "ruling": body.ruling.strip(),
-                        "actor": body.actor or "unstated"}))
+                        "actor": body.actor or "unstated"}),
+            account_name=acct, flow_type=ANCHOR, amount=body.cash, description=desc,
+            activity_date=day, dedup_key=key)
         created = row is not None
         if not created:
             row = await conn.fetchrow(
@@ -1172,7 +1265,8 @@ async def record_principal_cash_entry(body: CashEntryCreate, _=Depends(require_a
 
     pool = await _pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        row = await _fetchrow_or_409(
+            conn,
             """INSERT INTO cash_flows
                    (account_name, flow_type, amount, description, activity_date,
                     imported_from, source_ref, dedup_key)
@@ -1180,7 +1274,9 @@ async def record_principal_cash_entry(body: CashEntryCreate, _=Depends(require_a
                ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
                DO NOTHING
                RETURNING id, flow_type, amount, activity_date""",
-            acct, ledger_type, body.amount, desc, when, key_raw, key)
+            acct, ledger_type, body.amount, desc, when, key_raw, key,
+            account_name=acct, flow_type=ledger_type, amount=body.amount, description=desc,
+            activity_date=when, dedup_key=key)
         created = row is not None
         if not created:
             row = await conn.fetchrow(
@@ -1286,7 +1382,8 @@ async def record_evidence_backed_event(body: CashLedgerEventCreate,
 
     pool = await _pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        row = await _fetchrow_or_409(
+            conn,
             """INSERT INTO cash_flows
                    (account_name, flow_type, amount, description, activity_date,
                     imported_from, source_ref, dedup_key, occurrence)
@@ -1294,7 +1391,9 @@ async def record_evidence_backed_event(body: CashLedgerEventCreate,
                ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
                DO NOTHING
                RETURNING id""",
-            acct, resolved, body.amount, desc, when, ref, key, body.occurrence)
+            acct, resolved, body.amount, desc, when, ref, key, body.occurrence,
+            account_name=acct, flow_type=resolved, amount=body.amount, description=desc,
+            activity_date=when, dedup_key=key)
         created = row is not None
         if not created:
             row = await conn.fetchrow(
@@ -1549,7 +1648,8 @@ async def principal_reanchor(body: CashReanchorCreate, _=Depends(require_api_key
 
     pool = await _pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        row = await _fetchrow_or_409(
+            conn,
             """INSERT INTO cash_flows
                    (account_name, flow_type, amount, description, activity_date,
                     imported_from, source_ref, dedup_key, meta)
@@ -1557,7 +1657,9 @@ async def principal_reanchor(body: CashReanchorCreate, _=Depends(require_api_key
                ON CONFLICT (account_name, dedup_key) WHERE dedup_key IS NOT NULL
                DO NOTHING
                RETURNING id, amount, meta""",
-            acct, ANCHOR, body.cash, desc, as_of.date(), ref, key, meta)
+            acct, ANCHOR, body.cash, desc, as_of.date(), ref, key, meta,
+            account_name=acct, flow_type=ANCHOR, amount=body.cash, description=desc,
+            activity_date=as_of.date(), dedup_key=key)
         created = row is not None
         if not created:
             row = await conn.fetchrow(
