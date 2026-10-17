@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=48">
+    <link rel="stylesheet" href="/v2.css?v=49">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -57,6 +57,27 @@
                             <div class="regime-band" id="regimeBand">
                                 <div class="regime-cell placeholder"><span class="k">loading…</span></div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Regime Strategy card (R-IV.1186 v0 - mock fixture, display only) -->
+            <div class="grid-stack-item" gs-id="regime-strategy" gs-x="0" gs-y="3" gs-w="12" gs-h="11" gs-min-h="6">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title">Regime Strategy</span>
+                            <span class="rs-badge" id="rsBadge" title="The labels are rules and are not registered yet (R-IV.1186). Nothing in the hub uses this label.">UNREGISTERED &middot; display only</span>
+                            <div class="spacer"></div>
+                            <button type="button" class="rs-open" id="rsOpen" aria-expanded="false">Open &#9656;</button>
+                            <span class="tile-grip" data-gloss="GRIP">&#10239;</span>
+                        </div>
+                        <div class="tile-body">
+                            <div class="rs-card" id="regimeStrategy">
+                                <div class="rs-wait">loading the mock fixture&hellip;</div>
+                            </div>
+                            <div class="rs-playbook" id="rsPlaybook" hidden></div>
                         </div>
                     </div>
                 </div>
@@ -284,6 +305,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=61"></script>
+    <script src="/v2.js?v=62"></script>
 </body>
 </html>

@@ -1341,3 +1341,135 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   cursor: help;
   border-bottom: 1px dotted rgba(136, 153, 166, .5);
 }
+
+/* ── Regime Strategy card (R-IV.1186 v0) ─────────────────────────────────── */
+/* PHONE-FIRST: these are the phone's rules. The one media query below widens two
+   rows from 760px up. Built the other way round, a card reads only on the machine it
+   was built on. */
+.rs-card { font-size: .86rem; line-height: 1.55; }
+.rs-wait { color: var(--muted, #8899a6); font-style: italic; font-size: .84rem; }
+
+/* The badge must survive a glance: the labels are rules and they are NOT registered. */
+.rs-badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 193, 7, .12);
+  border: 1px solid rgba(255, 193, 7, .45);
+  color: #ffd97a;
+  font-size: .64rem;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: help;
+}
+.rs-open {
+  background: transparent;
+  border: 1px solid rgba(78, 205, 196, .45);
+  color: var(--accent, #4ecdc4);
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: .72rem;
+  cursor: pointer;
+}
+.rs-open:hover { background: rgba(78, 205, 196, .1); }
+
+/* The headline is the BASE regime and nothing else (section 1). */
+.rs-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.rs-label {
+  font-size: 1.22rem;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--text-1, #e8eef2);
+}
+.rs-tags { color: var(--muted, #8899a6); font-size: .78rem; }
+.rs-health { margin-left: auto; font-size: .72rem; cursor: help; white-space: nowrap; }
+.rs-partial { color: #ffd97a; }
+.rs-ok { color: #4ecdc4; }
+.rs-stale, .rs-broken { color: #ff9f9f; }
+.rs-sub { color: var(--muted, #8899a6); font-size: .74rem; margin-bottom: 6px; }
+
+.rs-row { margin: 3px 0; }
+.rs-idxrow { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0; }
+.rs-idx { font-size: .8rem; color: var(--muted, #8899a6); }
+.rs-idx b { color: var(--text-1, #e8eef2); font-weight: 600; }
+.rs-idx i { color: #ffd97a; font-style: normal; cursor: help; }
+
+/* Lens 2 is labelled and sits in its own row. It is never the headline. */
+.rs-lens { background: rgba(255, 255, 255, .03); border-radius: 6px; padding: 5px 8px; }
+.rs-lenslabel { color: var(--muted, #8899a6); }
+.rs-vs { color: var(--muted, #8899a6); }
+.rs-intra { color: #ffd97a; }
+.rs-ovs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.rs-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: .7rem;
+  border: 1px solid rgba(136, 153, 166, .35);
+  color: var(--muted, #8899a6);
+  cursor: help;
+}
+.rs-chip b { color: var(--text-1, #e8eef2); }
+.rs-watch { border-color: rgba(255, 193, 7, .5); color: #ffd97a; }
+.rs-active { border-color: rgba(255, 107, 107, .55); color: #ff9f9f; }
+.rs-stale { border-color: rgba(136, 153, 166, .5); }
+
+.rs-sep { height: 1px; background: rgba(255, 255, 255, .07); margin: 9px 0; }
+.rs-h {
+  color: var(--muted, #8899a6);
+  font-family: var(--mono, monospace);
+  font-size: .66rem;
+  letter-spacing: 1px;
+  margin: 9px 0 3px;
+}
+.rs-list { margin: 0; padding-left: 17px; }
+.rs-list li { margin: 2px 0; }
+.rs-why { color: var(--muted, #8899a6); font-style: normal; font-size: .76rem; }
+.rs-counter { color: var(--muted, #8899a6); font-size: .8rem; }
+.rs-costs {
+  margin-top: 8px;
+  color: var(--muted, #8899a6);
+  font-size: .76rem;
+  font-style: italic;
+}
+.rs-foot {
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, .07);
+  color: var(--muted, #8899a6);
+  font-size: .72rem;
+  line-height: 1.45;
+}
+
+/* The expanded playbook. Read-only by construction: it comes from a versioned file and
+   nothing on the page can edit it. */
+.rs-playbook {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(78, 205, 196, .3);
+  font-size: .84rem;
+  line-height: 1.55;
+}
+.rs-pb-title {
+  color: var(--accent, #4ecdc4);
+  font-weight: 600;
+  letter-spacing: .3px;
+  margin-bottom: 4px;
+}
+/* A withheld line SAYS it is withheld. A playbook that silently drops a sentence reads as
+   complete, which is the one thing a held text must not do. */
+.rs-held {
+  margin: 6px 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: rgba(255, 193, 7, .09);
+  border: 1px solid rgba(255, 193, 7, .3);
+  color: #ffd97a;
+  font-size: .76rem;
+  line-height: 1.45;
+}
+
+@media (min-width: 760px) {
+  .rs-list { columns: 2; column-gap: 24px; }
+  .rs-idxrow { gap: 18px; }
+}

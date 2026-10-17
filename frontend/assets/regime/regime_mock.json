@@ -1,0 +1,87 @@
+{
+  "fixture": true,
+  "fixture_note": "MOCK DATA. R-IV.1186(b): v0 renders from this file and wires to nothing. No regime table is read or written, and no live feed touches it. The values are the 10-16 state transcribed from section 9 and section 5 of REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md.",
+  "source": "REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md sha256 37dff5af7faa3843f33722d6c2827fee6d9532c79980ff8fd21375217a657d3e",
+  "rules_version": "v1",
+
+  "registered": false,
+  "badge": "UNREGISTERED · display only",
+
+  "regime_key": "correction",
+  "regime_label": "CORRECTION",
+  "tags": ["narrow", "credit-stress"],
+  "settled_close": "2026-10-16",
+  "health": "PARTIAL",
+  "health_reason": "The crash check is not evaluable and the credit spread level is not measured. Section 5.",
+
+  "per_index": [
+    {"ticker": "SPY", "state": "RANGE", "uncertain": false},
+    {"ticker": "QQQ", "state": "CORRECTION", "uncertain": false},
+    {"ticker": "IWM", "state": "DOWNTREND", "uncertain": true,
+     "uncertain_why": "the RVOL leg of the confirmed-break test is unverified"}
+  ],
+
+  "evidence": {
+    "families_risk_off": 3,
+    "families_total": 5,
+    "families_named": ["structure", "breadth", "credit"],
+    "families_unavailable": ["carry"],
+    "bull_intact": null,
+    "bull_intact_total": 7,
+    "bull_intact_reason": "not computed in v0; the evidence strip arrives in v2 with the free feeds",
+    "crash_check": "NOT EVALUABLE",
+    "crash_check_reason": "the hub has no raw VIX/VIX3M series, only a scaled factor score, so the hard requirement cannot be tested. Section 5.",
+    "premium_posture": "FAIR → EXPENSIVE"
+  },
+
+  "lens_split": {
+    "present": true,
+    "watchlist_alarm": "RISK-OFF",
+    "watchlist_detail": "19.6% above the 50dma",
+    "macro": "NEUTRAL",
+    "headline_rule": "Lens 2 is the watchlist (high-beta) alarm and is NEVER the headline. Section 1 and section 5."
+  },
+
+  "intraday": {
+    "kill_switch": "ACTIVE",
+    "trigger": "vix_spike",
+    "at": "2026-10-16T18:01:00Z",
+    "note": "The intraday layer is the existing kill-switch, shown and not touched (R-IV.1186(c))."
+  },
+
+  "overlays": [
+    {"key": "credit_stress", "state": "WATCH",
+     "detail": "factor pinned at -1.0; the spread level itself is not measured yet"},
+    {"key": "ai_capex_unwind", "state": "WATCH",
+     "detail": "WATCH candidate, bias flag on - it is Nick's own thesis"},
+    {"key": "war_middle_east", "state": "CLEAR",
+     "detail": "no dated source could be verified; see section 3"},
+    {"key": "taiwan_strait", "state": "CLEAR", "detail": ""},
+    {"key": "oil_shock", "state": "CLEAR", "detail": ""},
+    {"key": "carry_unwind", "state": "CLEAR", "detail": ""},
+    {"key": "macro_slowdown", "state": "CLEAR", "detail": ""}
+  ],
+
+  "watch_now": [
+    "Credit spreads: the swing input",
+    "SPY 50dma: a confirmed break means BREAKDOWN",
+    "VIX term: backwardation unlocks the crash check"
+  ],
+
+  "proves_me_wrong": "QQQ and IWM both back over their 50dma on 2 closes.",
+
+  "tape_rewarding": {
+    "heading": "What the tape is rewarding in your watchlist (context)",
+    "leaders": ["Energy"],
+    "laggards": ["AI / semis"],
+    "counterexample": "Most corrections without a credit or recession confirmation have not become bear markets [MKT]."
+  },
+
+  "costs": [
+    "Late at V-shaped bottoms, by design.",
+    "Fast-toward-risk flatters a bearish lean."
+  ],
+
+  "excluded_inputs": ["market_breadth", "Robotics theme score"],
+  "news_watch": "E0 push-only"
+}

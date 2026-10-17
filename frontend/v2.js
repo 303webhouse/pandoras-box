@@ -937,7 +937,10 @@
   // desktop arrangement happens to be persisted. All 11 tiles are listed — no tile
   // is silently dropped from the mobile deck (Ruling 6).
   const MOBILE_ORDER = [
-    'regime-band', 'movers-tape', 'kairos', 'book', 'river',
+    // R-IV.1186(b): PHONE-FIRST means second, not last. An unlisted tile sorts AFTER the
+    // known set (see applyMobileOrder), so leaving `regime-strategy` out would bury the one
+    // card Nick is being asked to look at.
+    'regime-band', 'regime-strategy', 'movers-tape', 'kairos', 'book', 'river',
     'themes', 'divergence', 'breadth', 'index', 'curve', 'usd',
   ];
 
@@ -1004,6 +1007,156 @@
     });
     grid.batchUpdate(false);
     return missing.length;
+  }
+
+  // ── Regime Strategy card (R-IV.1186 v0) ───────────────────────────────────────────────
+  //
+  // MOCK ONLY. Two static files under /assets/regime/ and nothing else: no hub route, no
+  // regime table, no kill-switch write. The kill-switch line is a DISPLAY of a value the
+  // fixture carries (R-IV.1186(c)).
+  //
+  // Lens 2 is never the headline (§1, §5): the base regime is the headline, and the watchlist
+  // reading sits in its own labelled row beside the macro lens.
+  let _rsMock = null, _rsPlaybooks = null, _rsOpen = false;
+
+  async function loadRegimeStrategy() {
+    const host = $('regimeStrategy');
+    if (!host) return;
+    try {
+      const [m, p] = await Promise.all([
+        fetch('/assets/regime/regime_mock.json', { cache: 'no-store' }).then((r) => r.json()),
+        fetch('/assets/regime/playbooks.v1.json', { cache: 'no-store' }).then((r) => r.json()),
+      ]);
+      _rsMock = m; _rsPlaybooks = p;
+    } catch (e) {
+      // Says what is missing. A card that renders an empty shell reads as "no regime", which
+      // is a claim; "the fixture did not load" is the fact.
+      host.innerHTML = '<div class="rs-wait">the mock fixture did not load \u2014 '
+        + esc(String(e && e.message || e)) + '</div>';
+      return;
+    }
+    renderRegimeStrategy();
+  }
+
+  function rsChip(label, state, detail) {
+    const cls = String(state || '').toLowerCase().replace(/[^a-z]/g, '');
+    return '<span class="rs-chip rs-' + cls + '" title="' + esc(detail || '') + '">'
+      + esc(label) + ' <b>' + esc(state) + '</b></span>';
+  }
+
+  function renderRegimeStrategy() {
+    const host = $('regimeStrategy');
+    const m = _rsMock;
+    if (!host || !m) return;
+    const tags = (m.tags || []).join(' \u00b7 ');
+    const idx = (m.per_index || []).map((x) =>
+      '<span class="rs-idx">' + esc(x.ticker) + ' <b>' + esc(x.state)
+      + (x.uncertain ? '<i title="' + esc(x.uncertain_why || '') + '">?</i>' : '')
+      + '</b></span>').join('');
+    const ev = m.evidence || {};
+    const ls = m.lens_split || {};
+    const intra = m.intraday || {};
+    const ov = (m.overlays || []).filter((o) => o.state !== 'CLEAR');
+    const tr = m.tape_rewarding || {};
+
+    host.innerHTML =
+      // headline: the base regime, and only the base regime
+      '<div class="rs-head">'
+      +   '<span class="rs-label">' + esc(m.regime_label || '\u2014') + '</span>'
+      +   (tags ? '<span class="rs-tags">' + esc(tags) + '</span>' : '')
+      +   '<span class="rs-health rs-' + esc(String(m.health || '').toLowerCase()) + '" title="'
+      +     esc(m.health_reason || '') + '">\u25cf ' + esc(m.health || '') + '</span>'
+      + '</div>'
+      + '<div class="rs-sub">settled ' + esc(m.settled_close || '\u2014') + '</div>'
+      + '<div class="rs-row rs-idxrow">' + idx + '</div>'
+      + '<div class="rs-row">Evidence: <b>' + esc(String(ev.families_risk_off))
+      +   ' of ' + esc(String(ev.families_total)) + '</b> families risk-off'
+      +   ((ev.families_named || []).length ? ' (' + esc(ev.families_named.join(', ')) + ')' : '')
+      +   ((ev.families_unavailable || []).length
+            ? ' \u00b7 ' + esc(ev.families_unavailable.join(', ')) + ' n/a' : '')
+      + '</div>'
+      // Lens 2, labelled, and NOT the headline
+      + (ls.present
+          ? '<div class="rs-row rs-lens">\u21c4 <span class="rs-lenslabel">Watchlist '
+            + '(high-beta) alarm</span> <b>' + esc(ls.watchlist_alarm) + '</b>'
+            + (ls.watchlist_detail ? ' (' + esc(ls.watchlist_detail) + ')' : '')
+            + ' <span class="rs-vs">vs macro</span> <b>' + esc(ls.macro) + '</b></div>'
+          : '')
+      + (intra.kill_switch
+          ? '<div class="rs-row rs-intra">\u26a1 Intraday: kill-switch <b>'
+            + esc(intra.kill_switch) + '</b>'
+            + (intra.trigger ? ' (' + esc(intra.trigger) + ')' : '') + '</div>'
+          : '')
+      + (ov.length
+          ? '<div class="rs-row rs-ovs">OVERLAYS ' + ov.map((o) => rsChip(
+              ((_rsPlaybooks.overlays[o.key] || {}).label) || o.key, o.state, o.detail)).join(' ')
+            + '</div>'
+          : '')
+      + '<div class="rs-sep"></div>'
+      + '<div class="rs-row">Crash check: <b>' + esc(ev.crash_check || '\u2014') + '</b>'
+      +   (ev.crash_check_reason ? ' <i class="rs-why">' + esc(ev.crash_check_reason) + '</i>' : '')
+      + '</div>'
+      + '<div class="rs-row">Bull intact: <b>'
+      +   (ev.bull_intact == null ? '\u2014' : esc(String(ev.bull_intact)))
+      +   ' of ' + esc(String(ev.bull_intact_total)) + '</b>'
+      +   (ev.bull_intact == null && ev.bull_intact_reason
+          ? ' <i class="rs-why">' + esc(ev.bull_intact_reason) + '</i>' : '')
+      +   ' \u00b7 Premium: <b>' + esc(ev.premium_posture || '\u2014') + '</b></div>'
+      + '<div class="rs-sep"></div>'
+      + '<div class="rs-h">WATCH NOW</div><ul class="rs-list">'
+      +   (m.watch_now || []).map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>'
+      + '<div class="rs-h">PROVES ME WRONG</div>'
+      + '<div class="rs-row">' + esc(m.proves_me_wrong || '\u2014') + '</div>'
+      + '<div class="rs-h">' + esc(tr.heading || 'TAPE REWARDING') + '</div>'
+      + '<div class="rs-row">'
+      +   ((tr.leaders || []).length ? esc(tr.leaders.join(', ')) + ' \u2191 ' : '')
+      +   ((tr.laggards || []).length ? esc(tr.laggards.join(', ')) + ' \u2193' : '')
+      + '</div>'
+      + (tr.counterexample
+          ? '<div class="rs-row rs-counter">' + esc(tr.counterexample) + '</div>' : '')
+      + '<div class="rs-costs">' + (m.costs || []).map((c) =>
+          '<div>' + esc(c) + '</div>').join('') + '</div>'
+      + '<div class="rs-foot">Excluded: ' + esc((m.excluded_inputs || []).join(', '))
+      +   ' \u00b7 News watch: ' + esc(m.news_watch || '\u2014')
+      +   ' \u00b7 rules ' + esc(m.rules_version || '\u2014') + '</div>';
+  }
+
+  // "Open" expands the CURRENT regime's playbook. Read-only: the texts come from the
+  // versioned file and nothing on this page can edit them (R-IV.1186(b)).
+  function renderRegimePlaybook() {
+    const box = $('rsPlaybook');
+    if (!box || !_rsMock || !_rsPlaybooks) return;
+    const r = (_rsPlaybooks.regimes || {})[_rsMock.regime_key];
+    if (!r) { box.innerHTML = '<div class="rs-wait">no playbook for '
+      + esc(_rsMock.regime_key || '?') + '</div>'; return; }
+    box.innerHTML =
+      '<div class="rs-pb-title">' + esc(r.label) + ' \u00b7 playbook '
+      +   esc(_rsPlaybooks.version) + '</div>'
+      + '<div class="rs-h">WHAT MATTERS NOW</div><ul class="rs-list">'
+      +   (r.matters_now || []).map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>'
+      + '<div class="rs-h">TAPE USUALLY REWARDS / PUNISHES</div>'
+      + '<div class="rs-row">' + esc(r.tape || '') + '</div>'
+      + '<div class="rs-h">PREMIUM POSTURE</div>'
+      + '<div class="rs-row">' + esc(r.premium || '') + '</div>'
+      + (r.held_sentences
+          ? '<div class="rs-held">' + esc(String(r.held_sentences))
+            + ' line(s) withheld: ' + esc(r.held_reason || '') + '</div>'
+          : '')
+      + '<div class="rs-h">ENDING SIGNS</div>'
+      + '<div class="rs-row">' + esc(r.ending_signs || '') + '</div>'
+      + '<div class="rs-h">WHAT WOULD PROVE THIS WRONG</div>'
+      + '<div class="rs-row">' + esc(r.proves_wrong || '') + '</div>'
+      + '<div class="rs-foot">' + esc(_rsPlaybooks.not_a_signal || '') + '</div>';
+  }
+
+  function toggleRegimePlaybook() {
+    const box = $('rsPlaybook'), btn = $('rsOpen');
+    if (!box || !btn) return;
+    _rsOpen = !_rsOpen;
+    if (_rsOpen) renderRegimePlaybook();
+    box.hidden = !_rsOpen;
+    btn.setAttribute('aria-expanded', String(_rsOpen));
+    btn.innerHTML = _rsOpen ? 'Close \u25be' : 'Open \u25b8';
   }
 
   function initGrid() {
@@ -3407,6 +3560,13 @@
     applyGlossary(document);
     initGrid();
     loadRegimeBand(); managedInterval(loadRegimeBand, 60 * 1000);
+    // R-IV.1186 v0: loaded ONCE and never polled. It is a fixture -- a refresh interval on a
+    // static file would imply the card is tracking something, which is the impression v0 must
+    // not give. The Open button is bound here rather than inline so the markup carries no
+    // behaviour.
+    loadRegimeStrategy();
+    const rso = $('rsOpen');
+    if (rso) rso.addEventListener('click', toggleRegimePlaybook);
     loadMoversTape(); managedInterval(loadMoversTape, 5 * 60 * 1000);
     refreshMarket(); managedInterval(refreshMarket, 60 * 1000);
     refreshDesk(); managedInterval(refreshDesk, 2 * 60 * 1000);
