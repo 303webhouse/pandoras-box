@@ -386,7 +386,8 @@
   // Lens 1 — MARKET MIX: the 20-factor composite, in the backend's own five words.
   function lens1View(c) {
     const lvl = c ? (c.bias_level || c.level || null) : null;
-    if (!lvl) return { call: '—', cls: 'val-muted', num: '', dist: 'no reading', dir: 0, held: false };
+    if (!lvl) return { call: '—', cls: 'val-muted', num: '', dist: 'no reading', dir: 0,
+                       held: false, pct: null };
     const d = dial100(c.composite_score), dir = dirOfLevel(lvl);
     const cls = dir > 0 ? 'val-up' : dir < 0 ? 'val-down' : 'val-teal';
     let dist = '', held = false;
@@ -405,7 +406,10 @@
       opts.sort((a, b) => a.n - b.n);
       dist = opts.length ? opts[0].txt : '';
     }
-    return { call: levelWords(lvl), cls, num: d != null ? String(d) : '', dist, dir, held };
+    // `pct` is the 0-100 dial the zone gauge sits on (A2). Returned rather than re-derived
+    // in the renderer: two derivations of one position would eventually disagree.
+    return { call: levelWords(lvl), cls, num: d != null ? String(d) : '', dist, dir, held,
+             pct: d };
   }
 
   // Lens 2 — THEME BREADTH: % of the scored watchlist above its 50-day, in buy/sell words.
@@ -422,7 +426,8 @@
   }
   function lens2View(r) {
     const p = r && r.breadth ? r.breadth.pct_above_50dma : null;
-    if (p == null || !Number.isFinite(Number(p))) return { call: '—', cls: 'val-muted', num: '', dist: 'no reading', dir: 0 };
+    if (p == null || !Number.isFinite(Number(p))) return { call: '—', cls: 'val-muted',
+        num: '', dist: 'no reading', dir: 0, pct: null };
     const th = r.thresholds || {};
     const [call, lvl] = lens2Call(Number(p), th);
     // Distance to the nearer neighbouring call, in 0.1-point steps (integer tenths: no float drift).
@@ -437,7 +442,8 @@
       }
     }
     const dist = best ? (best.sgn > 0 ? '▲' : '▼') + (best.k / 10).toFixed(1) + ' to ' + best.call : '';
-    return { call, cls: lvl > 0 ? 'val-up' : lvl < 0 ? 'val-down' : 'val-teal', num: Number(p).toFixed(1) + '%', dist, dir: Math.sign(lvl) };
+    return { call, cls: lvl > 0 ? 'val-up' : lvl < 0 ? 'val-down' : 'val-teal',
+             num: Number(p).toFixed(1) + '%', dist, dir: Math.sign(lvl), pct: Number(p) };
   }
   // The lenses "split" only when they point opposite ways by their OWN cut-offs.
   const lensSplit = (v1, v2) => v1.dir !== 0 && v2.dir !== 0 && v1.dir !== v2.dir;
@@ -514,8 +520,9 @@
     return riverTime(apiTime(ix.as_of));   // R-IV.611(b)1: the River's clock, never a second one
   }
 
-  // Themes: every dominant / emerging / fading chip in priority order; fitThemeChips() then
-  // hides what does not fit in two rows and adds a "+N" chip (the cell opens the full list).
+  // Themes: every dominant / emerging / fading chip in priority order. Used by the themes
+  // DRAWER only since A2 (R-IV.1209(c)) took the chip list off the Regime tile -- the
+  // two-row fitter that used to trim them went with the cell it measured.
   function themeChipsAll(regime) {
     const groups = [['dom', (regime && regime.dominant) || []], ['emg', (regime && regime.emerging) || []], ['fad', (regime && regime.fading) || []]];
     const out = [];
@@ -524,27 +531,121 @@
     }
     return out.length ? out.join('') : '<span class="chip muted">none</span>';
   }
-  function fitThemeChips() {
-    const box = document.querySelector('#regimeBand .th-chips'); if (!box) return;
-    box.querySelectorAll('.th-more').forEach((m) => m.remove());
-    const chips = [...box.querySelectorAll('.chip')];
-    chips.forEach((c) => { c.hidden = false; });
-    if (!chips.length) return;
-    // Relative to the chip box: the cell centres its content vertically, so hiding chips moves
-    // the whole box, and absolute offsets would drift between measurements.
-    const rowTop = (el) => Math.round(el.getBoundingClientRect().top - box.getBoundingClientRect().top);
-    const tops = [...new Set(chips.map(rowTop))].sort((a, b) => a - b);
-    if (tops.length <= 2) return;
-    const limit = tops[1];
-    let hidden = 0;
-    chips.forEach((c) => { if (rowTop(c) > limit) { c.hidden = true; hidden++; } });
-    const more = document.createElement('span');
-    more.className = 'chip th-more'; more.title = 'Show every theme';
-    box.appendChild(more);
-    // The "+N" chip itself must also fit in row two: hide visible chips from the end until it does.
-    const vis = chips.filter((c) => !c.hidden);
-    more.textContent = '+' + hidden;
-    while (rowTop(more) > limit && vis.length) { vis.pop().hidden = true; hidden++; more.textContent = '+' + hidden; }
+  // `fitThemeChips()` lived here and is GONE (A2, R-IV.1209(c)). Its only DOM target
+  // was `#regimeBand .th-chips`, which the 2x2 grid removed, so it could only ever
+  // return early -- and a function that silently does nothing reads to the next author
+  // as a thing that works. Its resize listeners went with it: a listener calling a
+  // no-op on every resize is cost with no effect.
+  //
+  // `themeChipsAll()` SURVIVES, because the themes DRAWER still renders chips from it.
+
+  // ===========================================================================
+  // A2 — the lean / outline / pulse engine (R-IV.1209(d)).
+  //
+  // FIVE READS LEAN, and the agreement check counts them: the Strategy label, Market mix,
+  // Theme breadth, Tide and Vol curve. The yield curve is NOT counted ((d)6) and carries its
+  // own RARE pulse.
+  //
+  // THE TWO THINGS MOST EASILY GOT WRONG, both stated in the ruling and both asserted in tests:
+  //   - CALM and PREMIUM SELLING are 0, not bull. Calm is not a bull call ((d)1), and a quiet
+  //     tape read as bullish is how a gauge starts lying in the direction its reader hopes.
+  //   - "No reading" is 0, not absent. A read that cannot answer still occupies its slot in the
+  //     count, so three leans out of five means three of FIVE -- not three of however many
+  //     happened to report.
+  // ===========================================================================
+
+  //: lean -> numeric side and whether it is an extreme. (d)1.
+  const LEAN_SCALE = {
+    'strong-bear': { side: -1, extreme: true },
+    'bear': { side: -1, extreme: false },
+    'neutral': { side: 0, extreme: false },
+    'notable': { side: 0, extreme: false },   // teal: neutral-but-notable
+    'bull': { side: 1, extreme: false },
+    'strong-bull': { side: 1, extreme: true },
+  };
+
+  // (d)1, verbatim. Keyed on the WORD each read already shows, so the mapping is auditable
+  // against the ruling line by line rather than buried in conditionals.
+  const LEAN_BY_WORD = {
+    // Strategy (section 2's ten labels)
+    'MELT-UP': 'strong-bull', 'MELT UP': 'strong-bull',
+    'UPTREND': 'bull',
+    'NARROW UPTREND': 'bull-mild', 'RECOVERY': 'bull-mild',
+    'RANGE / CHOP': 'neutral', 'RANGE': 'neutral', 'CHOP': 'neutral',
+    'CORRECTION': 'bear-mild', 'BEAR-MARKET RALLY': 'bear-mild', 'BEAR MARKET RALLY': 'bear-mild',
+    'BREAKDOWN': 'bear', 'BEAR MARKET': 'bear',
+    'CRASH': 'strong-bear', 'CRASH / LIQUIDATION': 'strong-bear',
+    // Market mix
+    'TORO MAJOR': 'strong-bull', 'TORO MINOR': 'bull',
+    'NEUTRAL': 'neutral',
+    'URSA MINOR': 'bear', 'URSA MAJOR': 'strong-bear',
+    // Theme breadth
+    'STRONG BUY': 'strong-bull', 'MODERATE BUY': 'bull',
+    'MODERATE SELL': 'bear', 'STRONG SELL': 'strong-bear',
+    // Tide -- NO EXTREME on this read ((d)1).
+    'BULL FLOW': 'bull', 'BEAR FLOW': 'bear',
+    'PREMIUM SELLING': 'notable', 'TWO-WAY': 'neutral', 'NO READING': 'neutral',
+    // Vol curve
+    'CALM': 'notable', 'FIRMING': 'bear-mild', 'STRESS': 'strong-bear',
+  };
+
+  // The ruling's "mild" steps share a side with their full step but are not extremes. Folded
+  // here so LEAN_SCALE stays the five ruled colours and nothing invents a sixth.
+  function leanOf(word) {
+    const raw = LEAN_BY_WORD[String(word || '').trim().toUpperCase()];
+    if (!raw) return null;                     // unknown word: NOT silently neutral
+    if (raw === 'bull-mild') return 'bull';
+    if (raw === 'bear-mild') return 'bear';
+    return raw;
+  }
+
+  function leanSide(lean) {
+    const e = LEAN_SCALE[lean];
+    return e ? e.side : 0;
+  }
+
+  function leanExtreme(lean, word) {
+    const e = LEAN_SCALE[lean];
+    if (!e || !e.extreme) return false;
+    // (d)1: the Tide read has no extreme, whatever its word would otherwise map to.
+    const w = String(word || '').trim().toUpperCase();
+    if (w === 'BULL FLOW' || w === 'BEAR FLOW') return false;
+    return true;
+  }
+
+  /**
+   * The agreement verdict across the five reads. R-IV.1209(d)4.
+   *
+   * `reads` is [{word, lean}] -- five of them, including any that cannot answer, because a
+   * read that reports nothing still counts as 0 and the threshold is "3 or more lean one way
+   * and 0 lean the other".
+   */
+  function regimeAgreement(reads) {
+    let bull = 0, bear = 0, extremeBull = false, extremeBear = false;
+    (reads || []).forEach((r) => {
+      const side = leanSide(r.lean);
+      if (side > 0) bull++;
+      if (side < 0) bear++;
+      if (leanExtreme(r.lean, r.word)) {
+        if (side > 0) extremeBull = true;
+        if (side < 0) extremeBear = true;
+      }
+    });
+    let side = 0;
+    if (bull >= 3 && bear === 0) side = 1;
+    else if (bear >= 3 && bull === 0) side = -1;
+    const consistent = side !== 0;
+    const sameSideExtreme = side > 0 ? extremeBull : side < 0 ? extremeBear : false;
+    return {
+      bull: bull, bear: bear, side: side, consistent: consistent,
+      pulse: consistent && sameSideExtreme,
+      outline: side > 0 ? 'bull' : side < 0 ? 'bear' : 'grey',
+      // Stated so the tooltip can explain itself rather than leaving a reader to count dots.
+      basis: consistent
+        ? (bull >= 3 ? bull + ' of 5 lean bull, 0 bear' : bear + ' of 5 lean bear, 0 bull')
+          + (sameSideExtreme ? ', with an extreme on that side' : '')
+        : 'mixed: ' + bull + ' bull, ' + bear + ' bear',
+    };
   }
 
   function renderRegimeBand(composite, regime, tide, kill) {
@@ -568,35 +669,104 @@
       : vc.stale ? `<span class="vintage-chip" data-state="stale" title="vix_term factor is stale or excluded">stale</span>` : vintageChip({ iso: vc.iso, freshBoundSec: 1200 });
     const total = b.total != null ? b.total : 250;
 
+    // ── A2 (R-IV.1209(c)): a 2x2 grid of BIG labels, each with a zone gauge and a details
+    // toggle holding today's fine print. The themes chip list is GONE from this tile, and the
+    // Yield Curve has moved in beside the grid.
+    //
+    // THE FIFTH READ IS THE STRATEGY LABEL, which lives on the Strategy card and not in this
+    // bar -- but it is counted in the agreement check ((d)1 lists five reads), so it is read
+    // from the card's own last payload rather than re-derived here. Two derivations of one
+    // label would eventually disagree, and the one on screen would be the untested one.
+    const stratWord = (_rsMock && _rsMock.regime_label) || null;
+    const reads = [
+      { key: 'strategy', word: stratWord, lean: leanOf(stratWord) },
+      { key: 'mix', word: v1.call, lean: leanOf(v1.call) },
+      { key: 'breadth', word: v2.call, lean: leanOf(v2.call) },
+      { key: 'tide', word: tv.word, lean: leanOf(tv.word) },
+      { key: 'vol', word: vc.word, lean: leanOf(vc.word) },
+    ];
+    const agree = regimeAgreement(reads);
+    const leanFor = (k) => (reads.find((r) => r.key === k) || {}).lean;
+    const isExtreme = (k) => {
+      const r = reads.find((x) => x.key === k) || {};
+      return leanExtreme(r.lean, r.word);
+    };
+    // (d)3: a read at an extreme pulses its own label and its own box, whatever the others say.
+    // (d)4: agreement outlines every box; agreement plus a same-side extreme pulses every box.
+    const boxCls = (k) => {
+      const own = isExtreme(k) ? ' rb-x rb-x-' + (leanSide(leanFor(k)) > 0 ? 'bull' : 'bear') : '';
+      const grp = agree.pulse ? ' rb-grp-pulse rb-grp-' + agree.outline
+        : agree.consistent ? ' rb-grp rb-grp-' + agree.outline : ' rb-grp-grey';
+      return own + grp;
+    };
+
     band.innerHTML = `
-      <div class="regime-cell rc-regime" data-drawer="regime">
-        <div class="lens">
-          <div class="lens-lab"><span data-gloss="COMPOSITE">Market mix · 20 factors · 15 min</span>${chip1}${split ? '<span class="split-chip" data-gloss="DIVERGE">LENSES SPLIT</span>' : ''}</div>
-          <div class="lens-line"><span class="lens-call ${v1.cls}">${esc(v1.call)}</span><span class="lens-num num">${esc(v1.num)}</span><span class="lens-dist" title="${esc(v1.dist)}">${esc(v1.dist)}</span></div>
-        </div>
-        <div class="lens">
-          <div class="lens-lab"><span data-gloss="STABLE">Theme breadth · ${esc(total)} names &gt; 50d · nightly</span>${chip2}</div>
-          <div class="lens-line"><span class="lens-call ${v2.cls}">${esc(v2.call)}</span><span class="lens-num num">${esc(v2.num)}</span><span class="lens-dist" title="${esc(v2.dist)}">${esc(v2.dist)}</span></div>
-        </div>
+      <div class="rb-grid">
+        ${rbCell('mix', 'MARKET MIX · 20 FACTORS', v1.call, v1.num, leanFor('mix'),
+          boxCls('mix'), chip1 + (split ? '<span class="split-chip" data-gloss="DIVERGE">LENSES SPLIT</span>' : ''),
+          v1.dist, 'regime', v1.pct)}
+        ${rbCell('breadth', 'THEME BREADTH · &gt;50D', v2.call, v2.num, leanFor('breadth'),
+          boxCls('breadth'), chip2, esc(total) + ' names · nightly · ' + v2.dist,
+          'breadth', v2.pct)}
+        ${rbCell('tide', 'TIDE · OPTIONS FLOW', tv.word, tv.lean || '', leanFor('tide'),
+          boxCls('tide'), chipTide, tv.line2, null, null)}
+        ${rbCell('vol', 'VOL CURVE · VIX/VIX3M', vc.word, vc.value, leanFor('vol'),
+          boxCls('vol'), chipVc, vc.sub, 'volcurve', vc.pct)}
       </div>
-      <div class="regime-cell rc-themes" data-drawer="themes">
-        <span class="label"><span data-gloss="THEMES">Themes · dom · emerging · fading</span>${chipTh}</span>
-        <div class="th-chips">${themeChipsAll(regime)}</div>
-      </div>
-      <div class="regime-cell rc-tide${shut ? ' cell-closed' : ''}">
-        <span class="label"><span data-gloss="TIDE">Tide · ${shut ? 'last session' : 'options flow'}</span>${chipTide}</span>
-        <div class="big ${tv.cls}${tv.word.length > 9 ? ' tide-long' : ''}">${esc(tv.word)}${tv.lean ? `<span class="tide-lean num">${esc(tv.lean)}</span>` : ''}</div>
-        <div class="sub">${esc(tv.line2)}</div>
-      </div>
-      <div class="regime-cell rc-vol" data-drawer="volcurve">
-        <span class="label"><span data-gloss="VOLCURVE">Vol curve</span>${chipVc}</span>
-        <div class="vc-line"><span class="vc-val num ${vc.cls}">${esc(vc.value)}</span><b class="vc-word ${vc.cls}">${esc(vc.word)}</b></div>
-        <div class="sub">${esc(vc.sub)}</div>
-        <div class="vc-gauge" aria-hidden="true"><i style="left:33.33%"></i><i style="left:66.67%"></i>${vc.pct != null ? `<b style="left:${vc.pct.toFixed(1)}%"></b>` : ''}</div>
+      <div class="rb-curve" id="rbCurve">
+        <div class="rb-ch"><span class="rb-cl">YIELD CURVE</span>
+          <span class="mock-chip" title="A2 is mocks (R-IV.1209(c)). The tenor table below is the LIVE /api/stable/rates read; the shape word, z-score chips and spreads arrive in B3.">PART MOCK</span></div>
+        <div class="chart-host sm"><canvas id="curveChart"></canvas></div>
+        <div class="mini-vals" id="curveVals"></div>
       </div>`;
     applyGlossary(band);
-    fitThemeChips();
-    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', () => openDrawer(c.dataset.drawer, { composite, regime, tide, kill }, c)));
+    // The agreement basis rides on the grid so a reader can see WHY every box is outlined the
+    // way it is, rather than counting dots to work it out.
+    const gridEl = band.querySelector('.rb-grid');
+    if (gridEl) gridEl.title = 'outlines: ' + agree.basis;
+    band.querySelectorAll('[data-drawer]').forEach((c) => c.addEventListener('click', (e) => {
+      if (e.target.closest('.rb-det')) return;      // the details toggle is not a drawer open
+      openDrawer(c.dataset.drawer, { composite, regime, tide, kill }, c);
+    }));
+    band.querySelectorAll('.rb-det').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const box = b.parentElement && b.parentElement.querySelector('.rb-fine');
+      if (!box) return;
+      const open = box.hidden;
+      box.hidden = !open;
+      b.setAttribute('aria-expanded', String(open));
+      b.textContent = open ? 'details ▴' : 'details ▾';
+    }));
+    // (d)5: the kill switch / an ACTIVE overlay keeps its red alarm pulse, and it beats (d)4.
+    const tile = band.closest('.tile');
+    if (tile) tile.classList.toggle('rb-alarm', !!(kill && String(kill.state || '').toUpperCase() === 'ARMED'));
+  }
+
+  /**
+   * One cell of the 2x2 regime grid. A2 (R-IV.1209(c)).
+   *
+   * The label is BIG and in Orbit; the number sits beside it; the zone gauge shows where the
+   * reading falls; and the fine print is behind a `details` toggle rather than printed under
+   * every cell, which is what Nick's third tweak asked for.
+   */
+  function rbCell(key, cap, word, num, lean, cls, chip, fine, drawer, pct) {
+    const col = leanColor(lean === 'notable' ? 'notable' : lean);
+    return '<div class="rb-cell' + cls + '"' + (drawer ? ' data-drawer="' + drawer + '"' : '')
+      + '>'
+      + '<div class="rb-cap">' + cap + (chip || '') + '</div>'
+      + '<div class="rb-lab-row">'
+      + '<b class="rb-lab' + (lean && LEAN_SCALE[lean] && LEAN_SCALE[lean].extreme
+        ? ' rb-lab-x' : '') + '" style="color:' + col + '">'
+      + esc(word || '—') + '</b>'
+      + (num ? '<span class="rb-num">' + esc(String(num)) + '</span>' : '')
+      + '</div>'
+      + (pct != null
+        ? '<div class="vc-gauge rb-g" aria-hidden="true"><b style="left:'
+          + Math.max(0, Math.min(100, Number(pct))).toFixed(1) + '%"></b></div>'
+        : '<div class="rb-g rb-g-none" aria-hidden="true"></div>')
+      + '<button type="button" class="rb-det" aria-expanded="false">details ▾</button>'
+      + '<div class="rb-fine" hidden>' + esc(fine || '') + '</div>'
+      + '</div>';
   }
 
   // ── Movers tape ──────────────────────────────────────────────────────────────
@@ -793,6 +963,66 @@
     $('drawerBackdrop').classList.add('open');
     $('drawer').classList.add('open');
     placeChartSoon();
+  }
+
+  /**
+   * A2 (R-IV.1209(c)): the Strategy card's "◂ DETAILS" drawer, slid in from the LEFT.
+   *
+   * The drawer already supported `from-left`, so this forces that side rather than letting
+   * `popSide` pick -- the ruling says left, and the Strategy card is full width, which is
+   * exactly the case where popSide falls back to whatever was clicked.
+   *
+   * PHASE A, SO THE SECTIONS ARE MOCK, and each one says so. The eight sections are board 8's,
+   * in the synthesis's own vote order; B8 wires them one at a time, and each will report its
+   * source and a sample row before it does.
+   */
+  function openRegimeDetails(src) {
+    closePopup();
+    const d = $('drawer');
+    setSide(d, 'left');
+    syncTopbarH();
+    const title = $('drawerTitle'), body = $('drawerBody');
+    title.textContent = 'REGIME STRATEGY';
+
+    const m = _rsMock || {};
+    const sec = (n, name) => '<div class="rd-sec">' + n + ' · ' + esc(name) + '</div>';
+    const mock = (why) => '<div class="rd-mock">MOCK · ' + esc(why) + '</div>';
+    const kv = (k, v) => '<div class="kv"><span class="k">' + esc(k)
+      + '</span><span class="v">' + esc(v) + '</span></div>';
+
+    body.innerHTML =
+      // The live header: this part is NOT mock, it is the card's own stored label.
+      '<div class="rd-head">'
+      + '<b class="rd-lab" style="color:' + leanColor(leanOf(m.regime_label)) + '">'
+      + esc(m.regime_label || '—') + '</b>'
+      + '<span class="rd-sub">' + esc(m.settled_close || '—') + ' · '
+      + esc(m.close_source || '') + ' · display only</span>'
+      + (m.diff && m.diff.detail ? '<span class="rd-diff">' + esc(m.diff.detail)
+        + '</span>' : '')
+      + '</div>'
+      + '<div class="rd-ctx">Usually suits: debit spreads over naked longs · premium '
+      + 'pricey · shorts only early or as a tail. Context, not a signal.</div>'
+
+      + sec('1', 'WHAT WOULD FLIP IT') + mock('both directions; hub data in B8')
+      + sec('2', 'CREDIT · HY SPREAD') + mock('FRED BAMLH0A0HYM2 in B8')
+      + sec('3', 'BREADTH · % ABOVE 50D')
+      + kv('Live now', (((_lastRegime.regime || {}).breadth || {}).pct_above_50dma != null
+        ? _lastRegime.regime.breadth.pct_above_50dma + '%' : '—'))
+      + mock('trend + Zweig thrust flag in B8, labelled a proxy')
+      + sec('4', 'LEADERSHIP · WHO IS CARRYING THE INDEX')
+      + mock('RSP/SPY, IWM/SPY, XLY/XLP, SMH/SPY, copper/gold in B8')
+      + sec('5', 'RATES & CROSS-ASSET') + mock('DFII10, T10YIE, MOVE in B8')
+      + sec('6', 'AUCTION STATE') + mock('PYTHIA feed in B8; bracket counter greyed <10 sessions')
+      + sec('7', 'REGIME RIBBON') + mock('last 40 sessions, from the stored snapshots, in B8')
+      + sec('8', 'LAMPS') + mock('overlay + kill-switch lamps in B8')
+      + '<div class="rd-foot">Phase A: the sections above are placeholders. Each is wired in '
+      + 'B8 one at a time, and its source, terms and a sample row are reported first '
+      + '(R-IV.1209(e)).</div>';
+
+    $('drawerBackdrop').classList.add('open');
+    d.classList.add('open');
+    const btn = $('rsOpen');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
   }
   function closeDrawer() {
     $('drawerBackdrop').classList.remove('open'); $('drawer').classList.remove('open'); placeChartSoon();
@@ -3987,8 +4217,18 @@
     // for the same reason as the regime card above -- a refresh interval on a static file would
     // imply the tiles are tracking something, and in Phase A they are not.
     loadAgoraMocks();
+    // A2 (R-IV.1209(c)): "Open" became "<DETAILS" and opens the LEFT drawer. The inline
+    // playbook box it used to toggle is gone from the card; its content moves into the drawer
+    // across B8.
     const rso = $('rsOpen');
-    if (rso) rso.addEventListener('click', toggleRegimePlaybook);
+    if (rso) rso.addEventListener('click', () => openRegimeDetails(rso));
+    // The themes DRAWER was reachable only from the regime cell A2 removed, so its route moved
+    // to the Themes tile (R-IV.1210(b)'s census). Bound here rather than inline, so the markup
+    // carries no behaviour.
+    const thb = $('themesDrawerBtn');
+    if (thb) thb.addEventListener('click', () => openDrawer('themes',
+      { composite: _lastRegime.composite, regime: _lastRegime.regime,
+        tide: _lastRegime.tide, kill: _lastRegime.kill }, thb));
     loadMoversTape(); managedInterval(loadMoversTape, 5 * 60 * 1000);
     refreshMarket(); managedInterval(refreshMarket, 60 * 1000);
     refreshDesk(); managedInterval(refreshDesk, 2 * 60 * 1000);
@@ -4018,8 +4258,6 @@
       bp.addEventListener('click', openB);
       bp.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openB(); } });
     }
-    window.addEventListener('resize', fitThemeChips);
-    try { grid.on('resizestop', () => setTimeout(fitThemeChips, 50)); } catch (_) {}
     $('drawerClose').addEventListener('click', closeDrawer);
     $('drawerBackdrop').addEventListener('click', closeDrawer);
     $('tvPopClose').addEventListener('click', () => closeChart());
