@@ -48,8 +48,17 @@ def classifiable_sessions(bar_count: int) -> int:
 
     Stated as its own function because it is the number R-IV.1193(d) asks to be reported, and a
     number that is computed inline in a loop is one nobody can quote.
+
+    OFF BY ONE UNTIL THE FIRST LIVE SEED, which reported "seeded 321 of 320 classifiable
+    session(s)" -- absurd on its face, and the written count was the correct one. `n - 200`
+    assumes the 200th bar cannot carry a label. It can: `latest_moving_averages` returns a
+    200dma from EXACTLY 200 closes (measured: 200 closes -> 199.5, 199 closes -> None). So the
+    first classifiable session is the 200th, and the count is inclusive.
+
+    The lesson is the same one twice over in this build: the arithmetic and the loop were two
+    implementations of one question, and only the loop was right.
     """
-    return max(0, int(bar_count) - MIN_BARS_FOR_A_LABEL)
+    return max(0, int(bar_count) - MIN_BARS_FOR_A_LABEL + 1)
 
 
 def seed_depth_report(bar_counts: Dict[str, int]) -> Dict[str, Any]:
