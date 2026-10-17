@@ -949,3 +949,113 @@ def test_the_gap_is_NONE_when_the_rate_is_within_target():
     i = code.index("async def flip_history")
     body = code[i:i + 3000]
     assert "rate <= FLIPS_PER_YEAR_TARGET" in body
+
+
+def test_CLOSES_HELD_IS_NOT_VACUOUS():
+    """A live reporting defect found by reading my own output: every one of the 14 flips said
+    "0 closes". `pending_closes` is zeroed by the hysteresis on the session a change fires, so
+    the stored value is 0 on EVERY flip -- a column that cannot vary, which is the
+    vacuous-column fault (DEF-EDGE-SPEC-B2) in a new place. R-IV.1198(c) asks for the closes
+    held per flip, and a field that cannot vary cannot answer it."""
+    from jobs.regime_job import _closes_from_change
+    assert _closes_from_change("first label after 2 closes") == 2
+    assert _closes_from_change("correction -> uptrend after 2 closes (toward risk)") == 2
+    assert _closes_from_change("uptrend -> range_chop after 10 closes") == 10
+    assert _closes_from_change(None) is None
+    assert _closes_from_change("no count in this sentence") is None, (
+        "a changed wording must show as MISSING data, never as a plausible number")
+
+
+def test_THE_PARSE_AGREES_WITH_THE_PURE_FIELD():
+    """Convention #34 in miniature: two independent routes to one number must agree. The
+    hysteresis now publishes `qualified_closes` directly, and `flip_history` parses the same
+    value out of the `change` sentence it stored -- because the snapshots are append-only and a
+    column added now could never be filled for the 321 rows already seeded."""
+    from jobs.regime_job import _closes_from_change
+    from models.regime_hysteresis import apply_hysteresis
+    series = [{"as_of": "2026-01-%02d" % (i + 1), "regime": k, "settled": True}
+              for i, k in enumerate(["correction"] * 2 + ["uptrend"] * 6)]
+    out = apply_hysteresis(series)
+    changed = [r for r in out if r.get("change")]
+    assert changed, "the fixture must produce at least one change"
+    for r in changed:
+        assert r["qualified_closes"] is not None
+        assert _closes_from_change(r["change"]) == r["qualified_closes"], r["change"]
+
+
+def test_qualified_closes_is_NONE_on_a_session_with_no_change():
+    """It is the count that EARNED a move, so it exists only where a move happened. A 0 would
+    be the vacuous column again, one level up."""
+    from models.regime_hysteresis import apply_hysteresis
+    out = apply_hysteresis([{"as_of": "2026-01-%02d" % (i + 1), "regime": "correction",
+                             "settled": True} for i in range(6)])
+    assert [r["qualified_closes"] for r in out if not r.get("change")] == [None] * 5
+
+
+def test_PAIR_IDENTITY_is_published_because_ORDER_DISTANCE_misleads():
+    """THE FINDING THAT CHANGES THE ANSWER TO (c). §2's order puts range_chop and melt_up
+    between correction and uptrend, so a correction/uptrend oscillation scores 3 "steps" and
+    reads as a real regime change -- while being the same two labels trading places over and
+    over, which is exactly the chatter the ruling asks about. The tape never passed through
+    the labels in between, so the distance is an artefact of the ordering."""
+    from models.regime_classifier import load_rules
+    order = load_rules()["order"]
+    assert abs(order.index("uptrend") - order.index("correction")) == 3
+    assert order[order.index("correction") + 1] == "range_chop"
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def flip_history")
+    body = code[i:i + 3600]
+    for field in ("pair", "pair_counts", "repeated_pairs", "repeated_pair_flips"):
+        assert field in body, field
+
+
+# ── (d) the close source is named until the designated one is wired ────────
+
+def test_THE_SETTLED_LINE_NAMES_ITS_CLOSE_SOURCE():
+    """R-IV.1198(d): "Until this is settled, the card's settled line names its close source."
+
+    Three candidates disagreed on 2026-10-16 and only one matched the Polygon daily aggregate,
+    so an unnamed close is the one a reader assumes is right."""
+    js = read_source(os.path.join(ROOT, "frontend", "v2.js"))
+    i = js.index("const st = $('rsSettled')")
+    body = js[i:i + 900]
+    assert "m.close_source" in body
+    assert "close_source_note" in body, "the rest of the finding rides in the tooltip"
+    assert "display only" in body, "R-IV.1193(b): the phrase stays on the face of the card"
+
+
+def test_the_close_source_is_served_on_BOTH_payload_paths():
+    """An unavailable card still shows the settled line, so it still has to name the source."""
+    from services.read_only.regime_strategy import CLOSE_SOURCE, _unavailable
+    assert CLOSE_SOURCE == "stable_daily_bars"
+    assert _unavailable("x")["close_source"] == CLOSE_SOURCE
+    svc = code_of_file(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
+    assert svc.count("'close_source': CLOSE_SOURCE") == 2
+
+
+def test_the_MEASURED_NUMBERS_are_recorded_with_the_designation():
+    """All three per ticker, as the ruling asks, written where the next reader of this code
+    will find them rather than only in a report."""
+    svc = read_source(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
+    i = svc.index("R-IV.1198(d)")
+    block = svc[i:i + 1800]
+    for n in ("763.25", "709.80", "270.44"):        # Polygon, and the UW chart close
+        assert n in block, n
+    for n in ("764.29", "712.57", "270.67"):        # stable_daily_bars
+        assert n in block, n
+    assert "Polygon" in block
+    assert "designated source is the UW chart close" in block
+
+
+def test_NO_SUBSTITUTION_was_made():
+    """R-IV.1198(d): "If neither matches Polygon, stop and report: no substitution." One DID
+    match, and the designated source is still not wired -- the classifier needs a bar SERIES and
+    the chart route serves only the newest reading. So the card names what it shows and nothing
+    quietly swaps a number."""
+    svc = read_source(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
+    assert "Not yet wired" in svc
+    # The inputs builder still reads the one source it always read; nothing was spliced.
+    inputs = code_of_file(os.path.join(BACKEND, "models", "regime_inputs.py"))
+    assert "stable_daily_bars" not in inputs, "the builder takes bars as an argument"
+    job = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    assert job.count("FROM stable_daily_bars") == 1, "exactly one bar source, still"
