@@ -26,7 +26,7 @@ import logging
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
-from jobs.regime_seed import replay, seed, seed_depth_report
+from jobs.regime_seed import as_date, replay, seed, seed_depth_report
 from models.regime_classifier import load_rules
 from models.regime_inputs import INDICES, MIN_BARS, SECTORS, Bar, sessions_from_series
 
@@ -67,7 +67,7 @@ async def _audit(conn, *, action: str, detail: str, as_of=None, rows_written: in
         await conn.execute(
             """INSERT INTO regime_audit (as_of, rules_version, action, detail, rows_written)
                VALUES ($1, $2, $3, $4, $5)""",
-            as_of, rules_version, action, detail[:2000], int(rows_written))
+            as_date(as_of), rules_version, action, detail[:2000], int(rows_written))
     except Exception as exc:          # an audit failure must not take the job down with it
         logger.warning("[regime_job] audit write failed (%s): %s", action, type(exc).__name__)
 
@@ -116,7 +116,18 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
         return dict(report, written=0, refused=detail)
 
     sessions = sessions_from_series(series, settled_through=through)
-    out = await seed(conn, sessions, rules, seeded=True)
+    # A WRITE FAILURE IS AUDITED TOO. The first live seed raised inside the INSERT -- an ISO
+    # string handed to a DATE column -- and because only the REFUSAL paths audited, it left no
+    # row at all: the route could say "no snapshot" and nothing could say why. Finding that
+    # needed a dig through deploy logs, which is exactly what the audit table exists to avoid.
+    try:
+        out = await seed(conn, sessions, rules, seeded=True)
+    except Exception as exc:
+        detail = ("seed write failed after %d session(s) replayed: %s: %s"
+                  % (len(sessions), type(exc).__name__, exc))
+        await _audit(conn, action="refused", detail=detail, rules_version=rules.get("version"))
+        logger.error("[regime_job] %s", detail)
+        return dict(report, written=0, refused=detail)
     detail = ("seeded %d of %d classifiable session(s); %d already present; %d flip(s); %s"
               % (out["written"], report["sessions"], out.get("conflicts", 0), out["flips"],
                  report["reason"]))
