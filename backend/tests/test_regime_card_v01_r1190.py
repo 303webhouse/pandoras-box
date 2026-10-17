@@ -66,7 +66,15 @@ def _card_css(strip_comments: bool = True) -> str:
     """
     css = _read("v2.css")
     k = css.index("Regime Strategy card (R-IV.1186 v0, redesigned")
-    blk = css[css.rindex("/*", 0, k):]
+    # BOUNDED AT THE END OF THE CARD'S OWN BLOCK. The slice used to run to the end of the
+    # file, so ANY CSS appended to v2.css later became "the card's CSS" to these checks -- the
+    # A1 Agora block landed inside them and failed the card's hex and phone-first guards while
+    # the card itself was untouched. A guard whose scope grows with the file reports findings
+    # about code it was never about.
+    start = css.rindex("/*", 0, k)
+    nxt = css.find("AGORA ADDITIONS, PHASE A1", k)
+    end = css.rindex("/*", 0, nxt) if nxt != -1 else len(css)
+    blk = css[start:end]
     return re.sub(r"/\*.*?\*/", "", blk, flags=re.S) if strip_comments else blk
 
 

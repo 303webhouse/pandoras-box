@@ -1,0 +1,23 @@
+{
+  "_mock": true,
+  "_source": "AGORA-MOCK-EventStrip.dc.html sha256 5480bb3689464c8a7e9b66e2ffd6837bfd31f5391d99077735a4ebb75863ccfe",
+  "_note": "R-IV.1209(c) A1. EVERY VALUE HERE IS FAKE (R-IV.1209(b)). The GDP/PCE dates were placeholders in the mock and stay placeholders here (R-IV.1194(d)).",
+  "badge": "MOCK",
+  "title": "Next 10 sessions",
+  "next_opex": "NEXT OPEX 11-20 · 24d",
+  "blackout_label": "BUYBACK BLACKOUT est.",
+  "legend": ["MACRO", "YOUR BOOK"],
+  "days": [
+    {"dow": "MON", "dd": "19", "events": [{"k": "IWM put exp", "kind": "book"}], "earn": 3, "book_earn": 0, "blackout": true},
+    {"dow": "TUE", "dd": "20", "events": [], "earn": 6, "book_earn": 0, "blackout": true},
+    {"dow": "WED", "dd": "21", "events": [], "earn": 8, "book_earn": 1, "blackout": true},
+    {"dow": "THU", "dd": "22", "events": [], "earn": 9, "book_earn": 0, "blackout": true},
+    {"dow": "FRI", "dd": "23", "events": [{"k": "QQQ spread exp", "kind": "book"}], "earn": 4, "book_earn": 0, "blackout": true},
+    {"dow": "MON", "dd": "26", "events": [], "earn": 5, "book_earn": 0, "blackout": false},
+    {"dow": "TUE", "dd": "27", "events": [{"k": "FOMC day 1", "kind": "macro"}], "earn": 7, "book_earn": 1, "blackout": false},
+    {"dow": "WED", "dd": "28", "events": [{"k": "FOMC 2pm", "kind": "top"}], "earn": 10, "book_earn": 0, "blackout": false},
+    {"dow": "THU", "dd": "29", "events": [{"k": "GDP Q3 adv", "kind": "macro"}], "earn": 9, "book_earn": 2, "blackout": false},
+    {"dow": "FRI", "dd": "30", "events": [{"k": "PCE", "kind": "macro"}], "earn": 4, "book_earn": 0, "blackout": false}
+  ],
+  "caption": "server calendar · display only"
+}

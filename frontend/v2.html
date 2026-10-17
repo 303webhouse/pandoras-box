@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=52">
+    <link rel="stylesheet" href="/v2.css?v=53">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -219,6 +219,65 @@
                         <div class="tile-body pad-0">
                             <div id="bookStrip" class="book-summary"></div>
                             <div id="bookPositions" class="book-positions"></div>
+                            <!-- A1 / board 3: Book Reality Check. A SECTION INSIDE BOOK, not
+                                 its own tile (R-IV.1194(c)). Mock fixture; the MOCK chip is
+                                 rendered by the section itself so it cannot be styled away
+                                 from the header and leave the numbers looking live. -->
+                            <div id="bookStress" class="bs-wrap"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- A1 / board 1: Crowd Gauge. R-IV.1209(c). Display only (#42). -->
+            <div class="grid-stack-item" gs-id="crowd" gs-x="0" gs-y="25" gs-w="4" gs-h="6" gs-min-h="5">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="CROWD">Crowd</span>
+                            <div class="spacer"></div>
+                            <span class="mock-chip" id="crowdMock" hidden>MOCK</span>
+                            <span class="rs-settled" id="crowdSettled">&mdash;</span>
+                            <span class="tile-grip" data-gloss="GRIP">&#10239;</span>
+                        </div>
+                        <div class="tile-body">
+                            <div id="crowdGauge"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- A1 / board 2: Fear Price. R-IV.1209(c). Display only (#42). -->
+            <div class="grid-stack-item" gs-id="fear" gs-x="4" gs-y="25" gs-w="4" gs-h="6" gs-min-h="5">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="FEAR">Fear Price</span>
+                            <div class="spacer"></div>
+                            <span class="mock-chip" id="fearMock" hidden>MOCK</span>
+                            <span class="rs-settled" id="fearSettled">&mdash;</span>
+                            <span class="tile-grip" data-gloss="GRIP">&#10239;</span>
+                        </div>
+                        <div class="tile-body">
+                            <div id="fearPrice"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- A1 / board 4: Event Strip. FULL WIDTH (R-IV.1194(c)). -->
+            <div class="grid-stack-item" gs-id="event-strip" gs-x="0" gs-y="31" gs-w="12" gs-h="4" gs-min-h="3">
+                <div class="grid-stack-item-content">
+                    <div class="tile">
+                        <div class="tile-header">
+                            <span class="tile-title" data-gloss="EVENTS" id="evTitle">Next 10 sessions</span>
+                            <div class="spacer"></div>
+                            <span class="mock-chip" id="evMock" hidden>MOCK</span>
+                            <span class="ev-opex" id="evOpex"></span>
+                            <span class="tile-grip" data-gloss="GRIP">&#10239;</span>
+                        </div>
+                        <div class="tile-body pad-0">
+                            <div id="eventStrip"></div>
                         </div>
                     </div>
                 </div>
@@ -309,6 +368,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=66"></script>
+    <script src="/v2.js?v=67"></script>
 </body>
 </html>

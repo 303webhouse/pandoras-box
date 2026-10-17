@@ -1,0 +1,22 @@
+{
+  "_mock": true,
+  "_source": "AGORA-MOCK-BookStress.dc.html sha256 8e06d963a98f3741b1715108014f354a4e1fbb6bde81902590f686892f0d16eb",
+  "_note": "R-IV.1209(c) A1. EVERY VALUE HERE IS FAKE (R-IV.1209(b)).",
+  "badge": "MOCK",
+  "vol_mode": "VOL REACTS",
+  "columns": ["−10%", "−5%", "−3%", "+3%", "+5%"],
+  "rows": [
+    {"key": "RH",    "cells": [3120, 1450, 690, -610, -1050], "total": false},
+    {"key": "ROTH",  "cells": [-2480, -1180, -700, 690, 1140], "total": false},
+    {"key": "401A",  "cells": [-1060, -520, -310, 300, 500], "total": false},
+    {"key": "TOTAL", "cells": [-420, -250, -320, 380, 590], "total": true}
+  ],
+  "worst": {"value": "−$1,050", "where": "Robinhood @ SPY +5%", "pct_of_sleeve": "−14% of sleeve"},
+  "trend": {"headline": "2 against", "rows": [
+    {"ticker": "GUSH", "dir": "LONG", "daily": "up", "weekly": "up", "verdict": "WITH"},
+    {"ticker": "XLF",  "dir": "SHORT", "daily": "up", "weekly": "up", "verdict": "AGAINST"},
+    {"ticker": "HYG",  "dir": "SHORT", "daily": "up", "weekly": "flat", "verdict": "AGAINST"}
+  ]},
+  "not_modelled": ["BTC · crypto, no beta map"],
+  "caption": "modeled estimate · beta-mapped · Black-Scholes reprice"
+}
