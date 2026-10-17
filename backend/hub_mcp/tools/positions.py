@@ -158,6 +158,73 @@ def _iso_day(v: Any) -> Optional[str]:
     return str(v)[:10]
 
 
+async def _tactical_pct(rows, *, ticker, status, account) -> Dict[str, Any]:
+    """`{ACCOUNT: verdict}` for the capped accounts — R-IV.1167(a). A REMINDER, never a gate.
+
+    WHY IT REFUSES A FILTERED CALL. `tactical_share` filters the rows it is handed by account;
+    it cannot know what the caller filtered out. On `ticker="GUSH"` it would report the Roth's
+    tactical share as that one position's share of the account -- a number that looks like a
+    measurement and understates a limit.
+
+    The cap fields already on this payload do exactly that: measured live, an unfiltered call
+    reported `cap_enforceable: true` and a `ticker="XLF"` call reported false, on the same book
+    in the same minute. This one refuses instead, because an understated cap figure is worse
+    than an absent one -- the entire purpose is noticing that a limit is near.
+
+    So a percentage is produced only when the row set IS the whole open set of a capped
+    account: no ticker filter, status OPEN, and either no account filter or a filter naming
+    that capped account.
+    """
+    from models.roth_tactical_cap import CAP_ACCOUNTS, tactical_share
+
+    out: Dict[str, Any] = {}
+    blockers = []
+    if ticker:
+        blockers.append("this call filters on ticker %r, and one ticker is not an account"
+                        % ticker)
+    if (status or "").upper() != "OPEN":
+        blockers.append("the tactical share is over OPEN positions and this call asked for %r"
+                        % status)
+
+    wanted = sorted(CAP_ACCOUNTS)
+    if account:
+        acct_up = (account or "").strip().upper()
+        wanted = [a for a in wanted if a == acct_up]
+        if not wanted:
+            blockers.append("account %r is not one the cap reaches" % account)
+
+    if blockers:
+        # NAMED, not just absent. "Not computed" with no reason is indistinguishable from a
+        # field nobody implemented.
+        for acct in sorted(CAP_ACCOUNTS):
+            out[acct] = {"account": acct, "pct": None, "at_or_over": False,
+                         "reason": "not computed: " + "; ".join(blockers)}
+        return out
+
+    balances: Dict[str, Any] = {}
+    try:
+        from database.postgres_client import get_postgres_client
+
+        pool = await get_postgres_client()
+        async with pool.acquire() as conn:
+            for r in await conn.fetch(
+                    "SELECT account_name, balance FROM account_balances"
+                    " WHERE UPPER(account_name) = ANY($1::text[])", wanted):
+                balances[(r["account_name"] or "").upper()] = r["balance"]
+    except Exception as exc:                                        # noqa: BLE001
+        # An unreadable balance means no denominator, and `tactical_share` already refuses to
+        # report a percentage of an unusable total rather than calling it zero.
+        for acct in wanted:
+            out[acct] = {"account": acct, "pct": None, "at_or_over": False,
+                         "reason": "not computed: account value unreadable (%s)"
+                                   % type(exc).__name__}
+        return out
+
+    for acct in wanted:
+        out[acct] = tactical_share(rows, acct, balances.get(acct))
+    return out
+
+
 def _build_position(row: Dict[str, Any]) -> Dict[str, Any]:
     expiry = row.get("expiry")
     dte = None
@@ -320,6 +387,11 @@ async def hub_get_positions(
 
     positions: List[Dict[str, Any]] = [_build_position(r) for r in rows]
 
+    # R-IV.1167(a): the tactical share of each capped account, from the author that already
+    # owns the arithmetic. ONLY when this call's rows are that account's whole open set --
+    # see `_tactical_pct` for why a filtered call gets None and a reason instead.
+    tactical = await _tactical_pct(rows, ticker=ticker, status=status, account=account)
+
     # R-IV.207(d) / R-IV.526(b): THIS LINE NO LONGER SUMS max_loss.
     #
     # It used to read `max_loss or cost_basis` across every open row, which was not
@@ -377,6 +449,21 @@ async def hub_get_positions(
             if p.get("classification") and not _tx.has_basis(p, "classification")),
         # R-IV.804(c): the bucket mirror of cap_enforceable.
         "bucket_coverage": _tx.bucket_coverage(positions),
+        # R-IV.1167(a): HOW CLOSE EACH CAPPED ACCOUNT IS, from the one author of the
+        # arithmetic (`models.roth_tactical_cap.tactical_share`, which the push reminder also
+        # uses). DERIVED and GATE-FORBIDDEN: R-IV.1033(e) settled that this cap REMINDS and
+        # blocks nothing, so the figure must never become a block.
+        #
+        # None with a reason on a filtered call -- a share of a subset is not the account's
+        # share, and an understated cap figure is worse than an absent one when the whole
+        # purpose is noticing a limit being approached.
+        "tactical_pct": tactical,
+        "tactical_pct_basis": (
+            "tactical market value as a percentage of the account's balance, over OPEN "
+            "positions, by models.roth_tactical_cap.tactical_share. DERIVED and a REMINDER: "
+            "R-IV.1033(e) -- nothing is blocked by it, and convention #42 forbids a gate on "
+            "it. `pct` is null with a reason whenever this call's rows are not the whole open "
+            "set of a capped account."),
         "cap_scope": list(_tx.CAP_ACCOUNTS),
         "cap_scope_basis": (
             "the 20%% tactical cap reaches %s only; ROBINHOOD is governed by its sleeve "
