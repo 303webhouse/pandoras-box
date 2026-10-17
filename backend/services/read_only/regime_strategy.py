@@ -26,6 +26,26 @@ logger = logging.getLogger(__name__)
 #: Served on every payload. The card prints it; nothing computes from it.
 DISPLAY_ONLY = "display only"
 
+#: R-IV.1198(d). The classifier reads `stable_daily_bars`, and until the designated source is
+#: wired the card must NAME the source it is actually showing -- because the three candidates
+#: measured for 2026-10-16 do not agree:
+#:
+#:   Polygon daily aggregate   SPY 763.25   QQQ 709.80   IWM 270.44
+#:   UW chart close            SPY 763.25   QQQ 709.80   IWM 270.44   <- matches
+#:   stable_daily_bars         SPY 764.29   QQQ 712.57   IWM 270.67   <- matches nothing
+#:
+#: And yfinance, which is `stable_daily_bars`' OWN vendor, returns Polygon's numbers exactly on
+#: a fresh fetch. So the disagreement is in the stored table, not in the source it came from:
+#: 764.29 is not any session's close (10-14 was 769.60, 10-15 771.79) but it does sit inside
+#: 10-16's intraday range, which is what an unsettled capture in a settled-looking row looks
+#: like. Filed for a ruling of its own; not substituted here (the ruling forbids substitution).
+CLOSE_SOURCE = "stable_daily_bars"
+CLOSE_SOURCE_NOTE = (
+    "stable_daily_bars; the designated source is the UW chart close (R-IV.1198(d)), which "
+    "matches the Polygon daily aggregate on SPY/QQQ/IWM for 2026-10-16 where this table does "
+    "not. Not yet wired: the classifier needs a bar SERIES and the chart route serves only the "
+    "newest reading.")
+
 
 #: §2's ten keys, mapped to the display labels the registered playbook file uses. Taken from
 #: the playbook, not invented here (R-IV.925(b)).
@@ -48,6 +68,8 @@ def _unavailable(reason: str) -> Dict[str, Any]:
         "tags": [],
         "basis": None,
         "settled_close": None,
+        "close_source": CLOSE_SOURCE,
+        "close_source_note": CLOSE_SOURCE_NOTE,
         "per_index": [],
         "evidence": {"families": []},
         "display_only": DISPLAY_ONLY,
@@ -201,6 +223,10 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "available": True,
         "as_of": snap["as_of"],
         "settled_close": snap["as_of"],
+        # R-IV.1198(d): until the designated source is wired, the card NAMES the source it
+        # is actually showing. An unnamed close is the one a reader assumes is right.
+        "close_source": CLOSE_SOURCE,
+        "close_source_note": CLOSE_SOURCE_NOTE,
         "regime_key": shown,
         "regime_label": _LABELS.get(shown) if shown else None,
         "raw_regime_key": snap.get("regime"),

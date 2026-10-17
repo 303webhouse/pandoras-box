@@ -1114,7 +1114,16 @@
         + ' \u2014 shown, not touched by this card') : '';
     }
     const st = $('rsSettled');
-    if (st) st.textContent = 'settled ' + (m.settled_close || '\u2014') + ' \u00b7 display only';
+    if (st) {
+      // R-IV.1198(d): the settled line NAMES ITS CLOSE SOURCE until the designated one is
+      // wired. Three candidates disagreed on 2026-10-16 and only one matched the Polygon
+      // aggregate, so an unnamed close is the one a reader assumes is right. The tooltip
+      // carries the rest; "display only" stays on the face (R-IV.1193(b)).
+      st.textContent = 'settled ' + (m.settled_close || '\u2014')
+        + (m.close_source ? ' \u00b7 ' + m.close_source : '')
+        + ' \u00b7 display only';
+      st.title = m.close_source_note || '';
+    }
     const dot = $('rsHealth');
     if (dot) {
       dot.className = 'health-dot ' + (String(m.health || '').toLowerCase() === 'ok'

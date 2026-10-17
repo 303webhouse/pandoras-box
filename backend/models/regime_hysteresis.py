@@ -44,6 +44,8 @@ def apply_hysteresis(raw: List[Dict[str, Any]],
         pending           the candidate accumulating closes, if any
         pending_closes    how many consecutive closes it has
         held_sessions     how long `shown_regime` has held
+        qualified_closes  on a session where the label MOVED, how many consecutive closes
+                          the new label had accumulated to earn it; None otherwise
         change            None, or why the label moved on this session
         blocked           None, or why a qualifying candidate was NOT allowed to take effect
 
@@ -69,6 +71,7 @@ def apply_hysteresis(raw: List[Dict[str, Any]],
         cand = row.get("regime")
         change = None
         blocked = None
+        qualified_closes = None     # set only on the session a change actually fires
 
         # The candidate's streak. A different candidate restarts the count: two closes of one
         # regime and one of another are not three closes of anything.
@@ -85,6 +88,7 @@ def apply_hysteresis(raw: List[Dict[str, Any]],
             # the first session said would make the very first label the one reading that never
             # had to qualify.
             if cand is not None and pending_closes >= need_closes:
+                qualified_closes = pending_closes
                 shown, held, change = cand, 1, "first label after %d closes" % pending_closes
                 pending, pending_closes = None, 0
             else:
@@ -105,6 +109,12 @@ def apply_hysteresis(raw: List[Dict[str, Any]],
                           % (shown, cand, pending_closes,
                              " (toward risk, exempt from the %d-session hold)" % min_hold
                              if is_toward_risk and risk_exempt and held < min_hold else ""))
+                # THE QUALIFYING COUNT IS CAPTURED BEFORE THE RESET. Without this the row
+                # published `pending_closes` AFTER it had been zeroed, so every flip reported
+                # "0 closes" -- a column that is always the same value, which is the vacuous
+                # column fault (DEF-EDGE-SPEC-B2) in a new place. R-IV.1198(c) asks for the
+                # closes held per flip, and a field that cannot vary cannot answer it.
+                qualified_closes = pending_closes
                 shown, held = cand, 1
                 pending, pending_closes = None, 0
             else:
@@ -122,6 +132,7 @@ def apply_hysteresis(raw: List[Dict[str, Any]],
                         shown_regime=shown,
                         pending=pending,
                         pending_closes=pending_closes,
+                        qualified_closes=qualified_closes,
                         held_sessions=held,
                         change=change,
                         blocked=blocked))

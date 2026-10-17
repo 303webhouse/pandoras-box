@@ -23,6 +23,7 @@ DISPLAY ONLY (#42). Nothing gates on what this writes.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
@@ -285,6 +286,20 @@ FLIPS_PER_YEAR_TARGET = 6
 SESSIONS_PER_YEAR = 252
 
 
+def _closes_from_change(change: Optional[str]) -> Optional[int]:
+    """The qualifying close count out of the hysteresis's own `change` sentence.
+
+    Both forms it writes end in "after N closes": "first label after 2 closes" and
+    "correction -> uptrend after 2 closes (toward risk, ...)". Returns None rather than a
+    guess if the sentence ever stops carrying it, so a changed wording shows as missing data
+    instead of a plausible number.
+    """
+    if not change:
+        return None
+    m = re.search(r"after (\d+) closes?", change)
+    return int(m.group(1)) if m else None
+
+
 async def flip_history(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
     """Every session where the shown label changed, oldest-first, with the rate beside it.
 
@@ -310,10 +325,13 @@ async def flip_history(conn, rules_version: Optional[str] = None) -> Dict[str, A
 
     flips = []
     prev: Optional[str] = None
+    pair_counts: Dict[str, int] = {}
     for r in rows:
         to = r["shown_regime"]
         fi = order.index(prev) if prev in order else None
         ti = order.index(to) if to in order else None
+        pair = ("%s<->%s" % tuple(sorted([prev or "(none)", to or "(none)"])))
+        pair_counts[pair] = pair_counts.get(pair, 0) + 1
         flips.append({
             "as_of": str(r["as_of"])[:10],
             "from": prev,
@@ -322,7 +340,14 @@ async def flip_history(conn, rules_version: Optional[str] = None) -> Dict[str, A
             "to_index": ti,
             "steps": (abs(ti - fi) if fi is not None and ti is not None else None),
             "neighbours": (fi is not None and ti is not None and abs(ti - fi) == 1),
-            "closes_held": r["pending_closes"],
+            "pair": pair,
+            # READ FROM THE STORED `change` TEXT, which the hysteresis authored when it wrote
+            # the row. `pending_closes` is NOT this number: the hysteresis zeroes it on the
+            # session a change fires, so the stored value is 0 on every flip -- a column that
+            # cannot vary, which is the vacuous-column fault (DEF-EDGE-SPEC-B2) in a new place.
+            # Parsing the text is the ONE route for all 321 seeded rows, because the snapshots
+            # are append-only and a column added now could never be filled for them.
+            "closes_held": _closes_from_change(r["change"]),
             "held_sessions_before": r["held_sessions"],
             "change": r["change"],
         })
@@ -331,9 +356,19 @@ async def flip_history(conn, rules_version: Optional[str] = None) -> Dict[str, A
     sessions = int(total or 0)
     years = (sessions / SESSIONS_PER_YEAR) if sessions else None
     rate = (len(flips) / years) if years else None
+    # PAIR IDENTITY, NOT ORDER DISTANCE, is what answers the ruling's question. §2's order puts
+    # range_chop and melt_up between correction and uptrend, so a correction<->uptrend
+    # oscillation scores 3 "steps" and reads as a real regime change -- while being the same
+    # two labels trading places over and over, which is exactly the chatter being asked about.
+    # The tape never passed through the labels in between, so the distance is an artefact of
+    # the ordering rather than a fact about the market.
+    repeated = {k: v for k, v in sorted(pair_counts.items(), key=lambda kv: -kv[1]) if v > 1}
     return {
         "flips": flips,
         "count": len(flips),
+        "pair_counts": pair_counts,
+        "repeated_pairs": repeated,
+        "repeated_pair_flips": sum(repeated.values()),
         "sessions": sessions,
         "per_year": (round(rate, 1) if rate is not None else None),
         "design_target_per_year": FLIPS_PER_YEAR_TARGET,
