@@ -137,7 +137,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
     screen would be the one nobody tested.
     """
     try:
-        from jobs.regime_job import health as regime_health, latest_with_diff
+        from jobs.regime_job import health as regime_health, latest_with_diff, seed_run
     except Exception as exc:
         return _unavailable("regime module unavailable (%s)" % type(exc).__name__)
 
@@ -146,6 +146,9 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         async with pool.acquire() as conn:
             got = await latest_with_diff(conn, rules_version)
             hp = await regime_health(conn, rules_version)
+            # R-IV.1195(b) asks for the seed count executed at deploy. Served here so the
+            # number outlives the deploy log it was first read from.
+            seeded_run = await seed_run(conn)
     except Exception as exc:
         logger.warning("[regime_strategy] read failed: %s", type(exc).__name__)
         return _unavailable("regime_snapshots unreadable (%s)" % type(exc).__name__)
@@ -197,4 +200,5 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "rules_version": got.get("rules_version"),
         "display_only": DISPLAY_ONLY,
         "diff": got.get("diff"),
+        "seed_run": seeded_run,
     }
