@@ -1382,6 +1382,9 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .rs-tw-bear { color: var(--down); cursor: help; }
 .rs-tw-bull { color: var(--up); cursor: help; }
 .rs-tw-mid { color: var(--text-3); letter-spacing: 1.2px; }
+/* The since-yesterday line (R-IV.1195(b)). Quietest text on the card: it is a footnote about
+   change, not the call itself, and tokens rather than hexes so it follows the theme. */
+.rs-diff { font: 10px var(--mono); color: var(--text-3); cursor: help; letter-spacing: .2px; }
 
 /* ── index strip ─────────────────────────────────────────────────────────── */
 .rs-strip {

@@ -423,8 +423,10 @@ def test_LENS_2_IS_LABELLED_AN_ALARM_AND_IS_NOT_THE_HEADLINE():
     block carries the words."""
     js = _code(_js())
     i = js.index("function renderRegimeStrategy")
-    body = js[i:js.index("\n  // \"Open\" expands", i)] if '\n  // "Open" expands' in js[i:] \
-        else js[i:i + 6000]
+    # Anchored to the NEXT FUNCTION, not to a comment. The old anchor was a comment line, which
+    # `_code()` strips, so the slice silently fell back to a fixed 6000 characters -- and the
+    # live-wiring changes pushed the lens block past it. A function name survives the stripper.
+    body = js[i:js.index("function renderRegimePlaybook", i)]
     assert "Watchlist \\u2014" not in body
     assert "(high-beta) alarm" in body
     assert body.index("rs-label") < body.index("rs-lens"), (
@@ -433,21 +435,29 @@ def test_LENS_2_IS_LABELLED_AN_ALARM_AND_IS_NOT_THE_HEADLINE():
     assert "NEVER the headline" in m["lens_split"]["headline_rule"]
 
 
-def test_v0_READS_NO_HUB_ROUTE_AT_ALL():
-    """R-IV.1186(c): nothing reads or writes a regime table yet. The card's only inputs are the
-    two static asset files."""
+def test_the_card_reads_THE_LIVE_LABEL_and_the_versioned_playbook():
+    """SUPERSEDED AND RETARGETED. R-IV.1186(c) said "nothing reads or writes a regime table
+    yet", and this asserted the card fetched only the two static files. R-IV.1195(b) lifted it:
+    "GO on the held live wiring". The label now comes from the route; the playbook stays a
+    versioned FILE, which R-IV.1186(b) requires ("stored as versioned files, not editable from
+    the UI") and no ruling has changed.
+    """
     js = _code(_js())
     i = js.index("async function loadRegimeStrategy")
     # To the next function in the module. `rsChip` was the v0 boundary and the redesign removed
     # it, so the slice is taken to whatever follows rather than to a name that may move again.
     body = js[i:js.index("function rsScale", i)]
     assert body.count("fetch(") == 2
-    assert "/assets/regime/regime_mock.json" in body
+    assert "/api/stable/regime-strategy" in body, "the label is live now (R-IV.1195(b))"
+    assert "/assets/regime/regime_mock.json" not in body, (
+        "the fixture must not survive as a fallback: plausible numbers on a healthy-looking "
+        "card is the /api/crypto/market fault")
     assert "/assets/regime/playbooks.v2.json" in body, (
         "the card must fetch the CURRENT version; the URL and the card's 'playbook vN' line "
         "have to agree")
-    assert "apiFetch" not in body, "v0 must not call a hub route"
-    assert "/api/" not in body
+    assert "apiFetch" not in body, "the card must not call the authed hub helper"
+    routes = set(re.findall(r"/api/[A-Za-z0-9_/-]+", body))
+    assert routes == {"/api/stable/regime-strategy"}, routes
 
 
 def test_v0_TOUCHES_NO_KILL_SWITCH_NO_CAPS_NO_JOURNAL():
@@ -457,9 +467,12 @@ def test_v0_TOUCHES_NO_KILL_SWITCH_NO_CAPS_NO_JOURNAL():
     i = js.index("let _rsMock = null")
     j = js.index("function initGrid()", i)
     module = js[i:j]
+    # The read ban moved under R-IV.1195(b); the WRITE ban and the kill-switch ban did not.
     for banned in ("method: 'POST'", 'method: "POST"', "XMLHttpRequest", "apiFetch",
-                   "kill_switch =", "killSwitch(", "/api/"):
+                   "kill_switch =", "killSwitch("):
         assert banned not in module, banned
+    routes = set(re.findall(r"/api/[A-Za-z0-9_/-]+", module))
+    assert routes == {"/api/stable/regime-strategy"}, routes
 
 
 def test_the_card_is_loaded_ONCE_and_never_polled():

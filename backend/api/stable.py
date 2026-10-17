@@ -73,6 +73,23 @@ async def get_regime():
     return await stable_read.get_regime()
 
 
+@router.get("/regime-strategy")
+async def get_regime_strategy():
+    """The Regime Strategy card's v1 label (R-IV.1195(b)). DISPLAY ONLY (#42).
+
+    A DIFFERENT READ from `/regime` above, which serves theme breadth. This one serves the §2
+    regime label for the settled close, its hysteresis state, the since-yesterday diff and a
+    three-state health block. It never falls back to the mock fixture: an unavailable read says
+    so and the card shows "cannot confirm".
+
+    Declared BEFORE `/theme/{theme}/members` purely by position in this file; it shares no
+    prefix with any parameterised route, so ordering is not load-bearing here.
+    """
+    from services.read_only.regime_strategy import get_regime_strategy as _get
+
+    return await _get()
+
+
 @router.get("/theme/{theme}/members")
 async def get_theme_members(theme: str, top: int = Query(5, ge=1, le=50), bottom: int = Query(5, ge=1, le=50)):
     """Members of a theme ranked by 1d %, with last price, 1d %, RS vs QQQ."""

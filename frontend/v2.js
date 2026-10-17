@@ -1033,7 +1033,11 @@
     if (!host) return;
     try {
       const [m, p] = await Promise.all([
-        fetch('/assets/regime/regime_mock.json', { cache: 'no-store' }).then((r) => r.json()),
+        // R-IV.1195(b): LIVE. The v1 classifier's stored label for the settled close, not the
+        // fixture. NO FALLBACK TO THE MOCK, deliberately: plausible numbers on a card that
+        // looks healthy is the /api/crypto/market fault, where a sibling symbol's price was
+        // served as binance_spot for weeks because the fallback was invisible.
+        fetch('/api/stable/regime-strategy', { cache: 'no-store' }).then((r) => r.json()),
         // R-IV.1189(b): v2. The version is in the URL, so a reader of the card's "playbook vN"
         // line and a reader of the network tab see the same number.
         fetch('/assets/regime/playbooks.v2.json', { cache: 'no-store' }).then((r) => r.json()),
@@ -1041,9 +1045,23 @@
       _rsMock = m; _rsPlaybooks = p;
     } catch (e) {
       // Says what is missing. A card that renders an empty shell reads as "no regime", which
-      // is a claim; "the fixture did not load" is the fact.
-      host.innerHTML = '<div class="rs-wait">the mock fixture did not load \u2014 '
+      // is a claim; "the read failed" is the fact.
+      host.innerHTML = '<div class="rs-wait">the regime read failed \u2014 '
         + esc(String(e && e.message || e)) + '</div>';
+      return;
+    }
+    if (_rsMock && _rsMock.available === false) {
+      // The server said so itself, with a reason. Printing the reason beats an empty card:
+      // "cannot confirm" plus why is a fact, an unpopulated card is an invitation to guess.
+      host.innerHTML = '<div class="rs-wait">cannot confirm \u2014 '
+        + esc(String(_rsMock.unavailable_reason || 'no label stored')) + '</div>';
+      const stx = $('rsSettled');
+      if (stx) stx.textContent = 'no settled label \u00b7 display only';
+      const dotx = $('rsHealth');
+      if (dotx) {
+        dotx.className = 'health-dot unconfirmed';
+        dotx.title = String(_rsMock.unavailable_reason || '');
+      }
       return;
     }
     renderRegimeStrategy();
@@ -1151,20 +1169,56 @@
         + (o.detail ? ' \u2014 ' + o.detail : '')) + '">' + esc(o.short) + '</span>';
     }).join('');
 
+    // The server names which blocks have no feed in v1, so the card prints its reason instead
+    // of an em-dash a reader has to interpret. One author for the caption and the gap.
+    const noFeed = (k) => String((m.no_feed_in_v1 || {})[k] || 'no feed in v1');
+
+    // ── since yesterday (R-IV.1195(b)) ──────────────────────────────────────
+    // "Yesterday" is the previous STORED session, never as_of minus a day: a calendar day
+    // before a Monday is a Sunday, which carries no label, so a diff against a date that does
+    // not exist would report every Monday as a change. The server decides that; this only
+    // prints it. Built as a variable rather than inline, because the first inline version was
+    // a nested ternary inside a string concatenation and did not parse.
+    let diffRow = '';
+    if (m.diff) {
+      const d = m.diff;
+      const title = d.previous_as_of
+        ? ('vs the previous stored session ' + d.previous_as_of)
+        : 'no previous session stored';
+      let text;
+      if (d.changed === null || d.changed === undefined) {
+        // NOT "no change". The first stored session has nothing to differ from, and saying
+        // "no change" there is a claim about a comparison nobody made.
+        text = 'first stored session · nothing to compare';
+      } else {
+        text = (d.changed ? 'Δ ' : 'since yesterday: ') + String(d.detail || '');
+      }
+      diffRow = '<div class="rs-diff" title="' + esc(title) + '">' + esc(text) + '</div>';
+    }
+
     // ── the three lights ────────────────────────────────────────────────────
     const L = m.lights || {};
     const light = (key, label, cls) => {
       const l = L[key] || {};
+      // An em-dash with an empty tooltip tells a reader nothing about WHY it is empty.
       return '<div class="rs-light"><span class="rs-lk">' + esc(label) + '</span>'
-        + '<span class="rs-lv ' + (cls || '') + '" title="' + esc(l.basis || '') + '">'
+        + '<span class="rs-lv ' + (cls || '') + '" title="'
+        + esc(l.basis || (l.value ? '' : noFeed('lights'))) + '">'
         + esc(l.value || '\u2014') + '</span></div>';
     };
     const prem = L.premium || {};
     const segs = Number(prem.bands || 3);
-    const premGauge = '<div class="vc-gauge rs-prem">'
+    // THE MARKER IS OMITTED WHEN THERE IS NO READING. `position_pct || 0` placed it at 0% --
+    // hard against the bear end of the track -- which renders as a confident extreme reading
+    // taken from nothing. An absent marker reads as absent, which is the truth. (R-IV.1195(b);
+    // the v1 payload has no discipline feed, so this is the live path, not an edge case.)
+    const hasPrem = prem.position_pct !== null && prem.position_pct !== undefined;
+    const premGauge = '<div class="vc-gauge rs-prem"'
+      + (hasPrem ? '' : ' title="' + esc(noFeed('lights')) + '"') + '>'
       + Array.from({ length: Math.max(0, segs - 1) }, (_, i) =>
           '<i style="left:' + ((i + 1) * (100 / segs)).toFixed(1) + '%"></i>').join('')
-      + '<b style="left:' + Number(prem.position_pct || 0).toFixed(1) + '%"></b></div>';
+      + (hasPrem ? '<b style="left:' + Number(prem.position_pct).toFixed(1) + '%"></b>' : '')
+      + '</div>';
 
     host.innerHTML =
       '<div class="rs-call">'
@@ -1174,12 +1228,15 @@
       + '</div>'
       + '<div class="vc-gauge rs-slider">' + ticks + marker + '</div>'
       + '<div class="rs-tw">'
-      +   '<span class="rs-tw-bear" title="' + esc((tw.bear || {}).basis || '') + '">\u25c2 '
-      +     esc((tw.bear || {}).text || '') + '</span>'
+      +   '<span class="rs-tw-bear" title="'
+      +     esc((tw.bear || {}).basis || ((tw.bear || {}).text ? '' : noFeed('tripwires')))
+      +     '">\u25c2 ' + esc((tw.bear || {}).text || '') + '</span>'
       +   '<span class="rs-tw-mid">BEAR \u00b7 \u00b7 \u00b7 BULL</span>'
-      +   '<span class="rs-tw-bull" title="' + esc((tw.bull || {}).basis || '') + '">'
-      +     esc((tw.bull || {}).text || '') + ' \u25b8</span>'
+      +   '<span class="rs-tw-bull" title="'
+      +     esc((tw.bull || {}).basis || ((tw.bull || {}).text ? '' : noFeed('tripwires')))
+      +     '">' + esc((tw.bull || {}).text || '') + ' \u25b8</span>'
       + '</div>'
+      + diffRow
       + '<div class="rs-strip">' + strip + '</div>'
       + '<div class="rs-grid">'
       +   '<div class="rs-box rs-ev"><div class="rs-fams">' + fams + '</div>'

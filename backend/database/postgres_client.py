@@ -2400,6 +2400,57 @@ async def init_database():
         # Guarded by test_triton_purge_freeze_r1195.py, which fails if ANY startup path
         # grows a DELETE against this table again.
 
+        # Regime v1 (R-IV.1195(b), mirrors migrations/053). DISPLAY ONLY (#42): these rows
+        # drive the Regime Strategy card and nothing else -- no gate, cap, kill-switch,
+        # Kairos input or grade reads them, which a CI check enforces. APPEND-ONLY per
+        # section 8: one row per (as_of, rules_version), and a re-run that disagrees with an
+        # earlier one is refused by the unique key and recorded in regime_audit rather than
+        # overwriting the evidence of the disagreement.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS regime_snapshots (
+                id              SERIAL PRIMARY KEY,
+                as_of           DATE NOT NULL,
+                rules_version   TEXT NOT NULL,
+                regime          TEXT,
+                shown_regime    TEXT,
+                label           TEXT,
+                tags            TEXT[] NOT NULL DEFAULT '{}',
+                basis           TEXT,
+                not_evaluable   TEXT[] NOT NULL DEFAULT '{}',
+                settled         BOOLEAN NOT NULL,
+                pending         TEXT,
+                pending_closes  INT,
+                held_sessions   INT,
+                change          TEXT,
+                blocked         TEXT,
+                inputs_json     JSONB,
+                seeded          BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (as_of, rules_version)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_regime_snapshots_as_of
+                ON regime_snapshots (as_of DESC)
+        """)
+        # A refusal is a ROW, not an absence. A nightly job that skipped a session silently is
+        # the R-IV.1175 fault, so every run records what it did -- including writing nothing.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS regime_audit (
+                id              SERIAL PRIMARY KEY,
+                as_of           DATE,
+                rules_version   TEXT,
+                action          TEXT NOT NULL,
+                detail          TEXT NOT NULL,
+                rows_written    INT NOT NULL DEFAULT 0,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_regime_audit_created
+                ON regime_audit (created_at DESC)
+        """)
+
         # UW budget watchdog (Fable 2026-07-09): durable per-day UW-burn snapshot so
         # the 48h Redis counter TTL can never blind us (mirrors migrations/022; the
         # snapshot job also creates this defensively). day='_TOTAL' caller = grand total.

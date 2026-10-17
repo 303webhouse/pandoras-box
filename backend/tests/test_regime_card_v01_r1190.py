@@ -29,6 +29,7 @@ import io
 import json
 import os
 import re
+import re
 
 import pytest
 
@@ -473,21 +474,32 @@ def test_the_playbook_still_uses_the_R_IV_1189_text():
 
 # ── 9. still no wiring, still lint-clean ───────────────────────────────────
 
-def test_v0_1_STILL_READS_NO_HUB_ROUTE():
+def test_the_card_reads_EXACTLY_ONE_ROUTE_and_it_is_the_regime_one():
+    """SUPERSEDED AND RETARGETED. This asserted `/api/` appeared nowhere, under R-IV.1186(c)'s
+    "nothing reads or writes a regime table yet". R-IV.1195(b) lifted that: "GO on the held live
+    wiring". So the constraint moves to the tightest form the new ruling allows -- one route,
+    and that route -- rather than being dropped.
+    """
     js = _js_code()
     i = js.index("async function loadRegimeStrategy")
     body = js[i:js.index("function rsScale", i)]
     assert body.count("fetch(") == 2
-    assert "apiFetch" not in body
-    assert "/api/" not in body
+    assert "apiFetch" not in body, "the card must not use the authed hub helper"
+    routes = set(re.findall(r"/api/[A-Za-z0-9_/-]+", body))
+    assert routes == {"/api/stable/regime-strategy"}, routes
 
 
 def test_v0_1_STILL_TOUCHES_NO_KILL_SWITCH_NO_CAPS_NO_JOURNAL():
+    """The half of R-IV.1186(c) that NO ruling has lifted: the card reads, it never writes, and
+    it never calls the kill-switch. Only the read ban moved."""
     js = _js_code()
     i = js.index("let _rsMock = null")
     module = js[i:js.index("function initGrid()", i)]
-    for banned in ("method: 'POST'", 'method: "POST"', "XMLHttpRequest", "apiFetch", "/api/"):
+    for banned in ("method: 'POST'", 'method: "POST"', "XMLHttpRequest", "apiFetch",
+                   "kill_switch =", "killSwitch("):
         assert banned not in module, banned
+    routes = set(re.findall(r"/api/[A-Za-z0-9_/-]+", module))
+    assert routes == {"/api/stable/regime-strategy"}, routes
 
 
 def test_the_no_orders_lint_still_passes_over_every_version_and_the_fixture():
