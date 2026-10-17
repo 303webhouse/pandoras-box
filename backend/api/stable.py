@@ -95,6 +95,7 @@ async def get_regime_strategy():
 async def post_bars_audit(
     sessions: int = Query(5, ge=1, le=30),
     repair: bool = Query(False),
+    replace_equivalent: bool = Query(False),
     _auth=Depends(require_api_key),
 ):
     """Compare the last `sessions` stored bars for the CORE8 against Polygon. R-IV.1203(c).
@@ -115,6 +116,14 @@ async def post_bars_audit(
         report = await bars_audit.audit(conn, sessions=sessions)
         if repair:
             report["repair"] = await bars_audit.repair(conn, report)
+        if replace_equivalent:
+            # SEPARATE FLAG, SEPARATE MECHANISM (R-IV.1206(b)). This is not a conviction by the
+            # shape test -- it replaces a row for a ticker whose split-only and fully-adjusted
+            # bases are the same number, which is a different claim and gets its own switch so
+            # nobody turns it on thinking they are running the audit's own repair.
+            report["basis_equivalence"] = await bars_audit.replace_on_basis_equivalence(
+                conn, report,
+                already_fixed=(report.get("repair") or {}).get("repaired"))
     return report
 
 

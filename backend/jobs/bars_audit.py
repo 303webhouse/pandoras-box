@@ -47,6 +47,20 @@ except Exception:                                                # pragma: no co
 #: How far two prices may sit apart and still be the same number. These are 2-decimal quotes.
 PRICE_TOL = 0.005
 
+#: Tickers for which the split-only basis EQUALS the fully-adjusted basis, each with the ruling
+#: that established it. R-IV.1206(b): TSLA pays no dividend, so Polygon's split-adjusted figures
+#: are the fully-adjusted figures for it, and replacing a row outright is basis-correct.
+#:
+#: AN EXPLICIT, RULED SET -- NOT AN INFERENCE. "Pays no dividend" is a fact about a security that
+#: this repo has no feed for, so deriving it would mean guessing. A ticker enters this set
+#: because a ruling says so, and the citation travels with it: a future reader needs to know
+#: that the entry rests on a decision and not on a lookup nobody can reproduce. A ticker that
+#: STARTS paying a dividend makes its entry wrong, and only the citation makes that findable.
+BASIS_EQUIVALENT = {"TSLA": "R-IV.1206(b)"}
+
+#: The exact phrase R-IV.1206(b) requires in the log for a replacement made this way.
+BASIS_EQUIVALENCE_NOTE = ("replaced on basis equivalence, not convicted by the shape test")
+
 #: How far the four stored/true ratios may spread and still be called one scaling factor.
 #: A dividend adjustment is exact to rounding; a truncated session is not close.
 RATIO_SPREAD_TOL = 0.0008
@@ -196,3 +210,53 @@ async def repair(conn, report: Dict[str, Any]) -> Dict[str, Any]:
                       "was": f.get("stored_c"), "now": v["c"]})
     logger.info("[bars_audit] repaired %d row(s), skipped %d", len(fixed), len(skipped))
     return {"repaired": fixed, "repaired_count": len(fixed), "skipped": skipped}
+
+
+async def replace_on_basis_equivalence(conn, report: Dict[str, Any],
+                                       already_fixed=None) -> Dict[str, Any]:
+    """Replace all four prices for a ticker whose two bases are the same. R-IV.1206(b).
+
+    A SEPARATE MECHANISM FROM `repair`, deliberately, and the ruling is emphatic about why: this
+    is NOT a conviction by the shape test. The shape test declined TSLA on 2026-10-16 and was
+    right to -- its stored high sits 0.08 ABOVE Polygon's, so the stored range is not inside the
+    settled range, and two effects were present at once. What authorises the write here is a
+    different fact entirely: TSLA pays no dividend, so split-adjusted equals fully adjusted for
+    it and the replacement cannot move the row onto a wrong basis.
+
+    THE SHAPE TEST IS NOT TOUCHED. R-IV.1206(b) says not to widen its tolerance, and widening it
+    to catch the one case it declined would be tuning a conviction threshold on that case --
+    the fitted-parameter pattern. The test keeps its judgement; this path overrides the
+    CONSEQUENCE for a named ticker on a stated basis, which is a different kind of claim.
+    """
+    done = {(f.get("ticker"), f.get("date")) for f in (already_fixed or [])}
+    replaced, skipped = [], []
+    for f in report.get("findings") or []:
+        t, day = f.get("ticker"), f.get("date")
+        if t not in BASIS_EQUIVALENT:
+            continue
+        if f.get("verdict") == "match":
+            continue
+        if (t, day) in done:
+            # The shape test already convicted and repaired this row. Writing it twice would
+            # log a replacement that did nothing and muddle which mechanism acted.
+            skipped.append({"ticker": t, "date": day, "why": "already repaired by the shape test"})
+            continue
+        v = f.get("vendor") or {}
+        if any(v.get(k) is None for k in ("o", "h", "l", "c")):
+            skipped.append({"ticker": t, "date": day, "why": "vendor bar incomplete"})
+            continue
+        await conn.execute(
+            """UPDATE stable_daily_bars
+                  SET o = $3, h = $4, l = $5, c = $6, v = $7
+                WHERE ticker = $1 AND date = $2""",
+            t, _dt.date.fromisoformat(day), v["o"], v["h"], v["l"], v["c"],
+            int(v.get("v") or 0))
+        entry = {"ticker": t, "date": day, "verdict_was": f.get("verdict"),
+                 "was": f.get("stored"), "now": {k: v[k] for k in ("o", "h", "l", "c")},
+                 "basis": BASIS_EQUIVALENT[t], "note": BASIS_EQUIVALENCE_NOTE}
+        replaced.append(entry)
+        logger.info("[bars_audit] %s %s: %s (%s); O/H/L/C %s -> %s",
+                    t, day, BASIS_EQUIVALENCE_NOTE, BASIS_EQUIVALENT[t],
+                    f.get("stored"), entry["now"])
+    return {"replaced": replaced, "replaced_count": len(replaced), "skipped": skipped,
+            "note": BASIS_EQUIVALENCE_NOTE}
