@@ -729,3 +729,60 @@ def test_a_REFUSAL_names_the_bar_counts():
     i = code.index("async def run_seed")
     body = code[i:code.index("async def run_nightly")]
     assert "bars: %s" in body or "bar_counts" in body
+
+
+# ── the read-back must ask for what it serves ──────────────────────────────
+
+def test_THE_READBACK_SELECTS_INPUTS_JSON():
+    """It did not, in the first live version. The column held the numbers; the query did not ask
+    for them, so the index strip came back empty and every family reported "no feed in v1" --
+    a caption asserting an absence that was not real, about two families that DO have a feed."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def latest_with_diff")
+    body = code[i:i + 1600]
+    assert "inputs_json" in body
+
+
+def test_the_readback_selects_EVERY_column_the_payload_publishes():
+    """The general form of that defect: the SELECT and the payload are two lists that have to
+    agree, and nothing was checking."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def latest_with_diff")
+    m = re.search(r"SELECT (.*?) FROM regime_snapshots", code[i:i + 1800], re.S)
+    assert m, "the read-back query moved"
+    # Identifiers by regex, not a comma split. `ast.unparse` renders the SQL string's newlines
+    # as LITERAL backslash-n, so splitting on commas leaves tokens like "\\n   pending" that
+    # match nothing -- and the test then fails on a column that is plainly in the query.
+    selected = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", m.group(1)))
+    for needed in ("as_of", "regime", "shown_regime", "label", "tags", "basis",
+                   "not_evaluable", "pending", "pending_closes", "held_sessions",
+                   "change", "blocked", "seeded", "inputs_json"):
+        assert needed in selected, needed
+
+
+def test_NO_FEED_IN_V1_is_claimed_ONLY_for_the_families_that_have_none():
+    """A family that has a feed but no value for this session is a DIFFERENT fact from a family
+    with no feed, and only the rules file gets to say which is which."""
+    from services.read_only.regime_strategy import _families
+    # Nothing recorded at all: structure and breadth must NOT claim "no feed".
+    rows = {r["name"]: r for r in _families({})}
+    assert rows["STRUCTURE"]["why"] == "not recorded for this session"
+    assert rows["BREADTH"]["why"] == "not recorded for this session"
+    # With the rules file's own absence reasons present, those ARE quoted.
+    rows2 = {r["name"]: r for r in _families(
+        {"families": {"structure": True},
+         "families_basis": {"structure": "SPY below its 50dma"},
+         "families_absent_in_v1": {"vol": "no VIX/VIX3M series in v1"}})}
+    assert rows2["STRUCTURE"]["state"] == "risk_off"
+    assert rows2["VOL"]["why"] == "no VIX/VIX3M series in v1"
+    assert rows2["CREDIT"]["why"] == "not recorded for this session"
+
+
+def test_a_measured_risk_ON_family_is_not_confused_with_an_absent_one():
+    """False means measured-and-risk-on. None means nobody measured. Both render without a
+    colour, so the distinction has to live in the data."""
+    from services.read_only.regime_strategy import _families
+    rows = {r["name"]: r for r in _families(
+        {"families": {"structure": False}, "families_basis": {"structure": "SPY above 50dma"}})}
+    assert rows["STRUCTURE"]["state"] == "risk_on"
+    assert rows["STRUCTURE"]["why"] == "SPY above 50dma"
