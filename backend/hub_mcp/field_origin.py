@@ -72,6 +72,20 @@ NOTES: Dict[Tuple[str, str], str] = {
     ("hub_get_positions", "leverage_factor"):
         "stored, and NULL means NOT RECORDED rather than 1x. leverage_factor_recorded says "
         "which, and nothing may be sized off the value while it is false (R-IV.1052(e)(c)4)",
+    ("hub_get_positions", "unrealized_pnl"):
+        "R-IV.1183(b). DERIVED: attach_economics (R-IV.526(b)) replaces it with the figure the "
+        "row's LOTS support, at the open remainder and on the cash basis (R-IV.1181(c)2), and "
+        "moves the table's value to unrealized_pnl_stored -- which this tool does not serve. "
+        "It was declared STORED until 2026-10-16, so anything gating on it was in breach",
+    ("hub_get_positions", "max_loss"):
+        # A note saying "same reason as the other field" sends the reader somewhere else to
+        # find out why, and this note's whole job is to stop the next relabel. Self-contained.
+        "R-IV.1183(b). DERIVED: attach_economics (R-IV.526(b)) replaces it with the worst case "
+        "the row's LOTS support at the open remainder, and moves the table's value to "
+        "max_loss_stored, which this tool does not serve. R-IV.207(d) separately forbids "
+        "separately forbids SUMMING it: the stored column carried the wrong scope on ten of "
+        "seventeen lotted open rows, understating the total by $632.08 (13.7%) on 2026-09-24. "
+        "capital_at_risk is cost-derived instead, and says so",
 }
 
 
@@ -98,8 +112,13 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "entry_price": STORED,
         "current_price": STORED,
         "current_value": DERIVED,
-        "unrealized_pnl": STORED,
-        "max_loss": STORED,
+        # R-IV.1183(b): DERIVED, and not a nuance. `attach_economics` (R-IV.526(b)) replaces
+        # both of these with the figure the row's LOTS support and moves the table's own value
+        # to `unrealized_pnl_stored` / `max_loss_stored`, so by the time this tool serialises a
+        # row neither field holds what the book stores. See NOTES for what rested on the old
+        # label.
+        "unrealized_pnl": DERIVED,
+        "max_loss": DERIVED,
         "open_quantity": GATEABLE_BY_RULING,
         "open_quantity_basis": DERIVED,
         "open_remainder": GATEABLE_BY_RULING,   # the older key for open_quantity, same author
