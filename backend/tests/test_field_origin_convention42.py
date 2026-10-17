@@ -76,7 +76,12 @@ def test_every_served_field_is_declared():
                   "position_ids_without_basis", "safe_to_gate", "long", "short", "mixed",
                   "utc", "america_new_york", "exchange_session", "utc_to_the_second",
                   "derived_at", "stored_as_of", "derived_fields", "stored_fields", "now",
-                  "account", "ticker", "positions", "note"}
+                  "account", "ticker", "positions", "note",
+                  # R-IV.1167(a): the per-account tactical verdict's own keys. Declared at
+                  # their container, `tactical_pct`, exactly as bucket_coverage's keys above
+                  # are -- the contract is that a served FIELD is declared, not that every
+                  # leaf of a nested structure is.
+                  "pct", "at_or_over", "reason"}
     missing -= containers
     assert not missing, (
         "the positions payload serves fields that convention #42 does not declare: %s"

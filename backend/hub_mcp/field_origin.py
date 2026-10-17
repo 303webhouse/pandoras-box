@@ -72,6 +72,11 @@ NOTES: Dict[Tuple[str, str], str] = {
     ("hub_get_positions", "leverage_factor"):
         "stored, and NULL means NOT RECORDED rather than 1x. leverage_factor_recorded says "
         "which, and nothing may be sized off the value while it is false (R-IV.1052(e)(c)4)",
+    ("hub_get_positions", "tactical_pct"):
+        "R-IV.1167(a). Tactical market value over the account balance, by "
+        "models.roth_tactical_cap.tactical_share -- the same author the push reminder uses. "
+        "`pct` is null WITH A REASON on any call whose rows are not a capped account's whole "
+        "open set, because a share of a subset understates a limit",
     ("hub_get_positions", "unrealized_pnl"):
         "R-IV.1183(b). DERIVED: attach_economics (R-IV.526(b)) replaces it with the figure the "
         "row's LOTS support, at the open remainder and on the cash basis (R-IV.1181(c)2), and "
@@ -94,6 +99,11 @@ NOTES: Dict[Tuple[str, str], str] = {
 #: field whose gating produced the 8.26%-vs-19.50% error, so the prohibition is explicit and
 #: outranks the label.
 GATE_FORBIDDEN: Dict[Tuple[str, str], str] = {
+    ("hub_get_positions", "tactical_pct"):
+        "R-IV.1033(e) / R-IV.1167(a): the 20% tactical cap REMINDS and blocks nothing, so the "
+        "figure that measures it must not become a block. It is also null on any filtered "
+        "call -- a share of a subset is not the account's share -- and a gate reading that "
+        "null would either fail open or refuse every filtered read.",
     ("hub_get_positions", "strategy_tag"):
         "TA-123 / R-IV.794(b): one column held classification, sleeve and bucket, so each row "
         "kept only the last written. Read classification / sleeve_tag / bucket instead.",
@@ -158,6 +168,12 @@ DECLARED: Dict[str, Dict[str, str]] = {
         "cap_enforceable": DERIVED,
         "classifications_without_basis": DERIVED,
         "bucket_coverage": DERIVED,
+        # R-IV.1167(a). DERIVED, and gate-forbidden below as well: DERIVED alone merely
+        # withholds permission, while a GATE_FORBIDDEN entry says out loud that this figure
+        # must never become a block. R-IV.1033(e) settled that the cap reminds and stops
+        # nothing.
+        "tactical_pct": DERIVED,
+        "tactical_pct_basis": DERIVED,
         "cap_scope": DERIVED,
         "cap_scope_basis": DERIVED,
         "positions_without_strategy_tag": DERIVED,
