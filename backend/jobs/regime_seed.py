@@ -1,0 +1,130 @@
+"""Seed the regime label history by replaying the classifier over settled closes.
+
+R-IV.1193(d): "Hysteresis needs history. Seed it from a backfill of market_state closes."
+
+WHY A REPLAY AND NOT A TABLE OF GUESSES. The hysteresis rules are about label TRANSITIONS, so
+the history they need is a label series. The honest way to produce one for sessions that have
+already closed is to compute each session's inputs from bars that existed then and run the same
+classifier over them -- not to assert what the label "was".
+
+WHAT BOUNDS THE DEPTH, measured rather than assumed. §2's rows need a 200-day average, so a
+session can only be classified if 200 sessions precede it. SPY and IWM each carry 252 daily bars
+(read live from hub_get_chart_indicators on 2026-10-17: `bar_count: 252` for both), so
+
+    252 bars - 200 for the 200dma = 52 classifiable sessions
+
+and 52 comfortably covers every hysteresis lookback: 2 closes to enter, 5 to hold, 10 for Range,
+15 for Bear's second condition.
+
+NO LOOKAHEAD. Each session is classified from the series UP TO AND INCLUDING that session.
+Computing a 200dma over the whole window and reusing it for every session would let a
+February label be decided partly by October's prices, which is the quiet form of the mistake
+this whole module exists to avoid.
+
+APPEND-ONLY, per §8. A seeded row is never rewritten: a re-run that disagreed with an earlier
+one would overwrite the evidence of the disagreement.
+
+#42: the seeded labels drive the card. Nothing gates on them.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("regime_seed")
+
+#: The 200dma is the deepest input any §2 row needs, so it sets the floor.
+MIN_BARS_FOR_A_LABEL = 200
+
+#: What the hysteresis needs behind the newest session. The widest lookback in §2's block is
+#: Bear's "15 closes below a falling 200dma"; Range's 10 and the 5-session hold sit inside it.
+MIN_SEEDED_SESSIONS = 15
+
+
+def classifiable_sessions(bar_count: int) -> int:
+    """How many of `bar_count` sessions can carry a label at all.
+
+    Stated as its own function because it is the number R-IV.1193(d) asks to be reported, and a
+    number that is computed inline in a loop is one nobody can quote.
+    """
+    return max(0, int(bar_count) - MIN_BARS_FOR_A_LABEL)
+
+
+def seed_depth_report(bar_counts: Dict[str, int]) -> Dict[str, Any]:
+    """`{sessions, limited_by, sufficient, reason}` for a set of per-ticker bar counts.
+
+    The depth is the MINIMUM across the tickers, because a session the classifier cannot build
+    inputs for on every index is not a session it can label.
+    """
+    if not bar_counts:
+        return {"sessions": 0, "limited_by": None, "sufficient": False,
+                "reason": "no bar counts supplied"}
+    per = {t: classifiable_sessions(n) for t, n in bar_counts.items()}
+    worst = min(per, key=lambda t: per[t])
+    n = per[worst]
+    return {
+        "sessions": n,
+        "per_ticker": per,
+        "limited_by": worst,
+        "sufficient": n >= MIN_SEEDED_SESSIONS,
+        "reason": ("%d classifiable session(s); the 200dma consumes the first %d bars and %s "
+                   "is the shortest series. The hysteresis needs %d."
+                   % (n, MIN_BARS_FOR_A_LABEL, worst, MIN_SEEDED_SESSIONS)),
+    }
+
+
+def replay(sessions: List[Dict[str, Any]],
+           rules: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Classify each settled session, then apply hysteresis over the whole series.
+
+    `sessions` is oldest-first; each entry is a complete `inputs` dict for
+    `regime_classifier.classify` (its own `as_of`, its own `settled`, and inputs built from bars
+    up to that session only).
+
+    Returns `{raw, shown, flips, depth}`. `flips` is §2's only history check -- roughly six or
+    fewer label changes a year, and never P&L.
+    """
+    from models.regime_classifier import classify
+    from models.regime_hysteresis import apply_hysteresis, flip_count
+
+    raw = [classify(s, rules) for s in sessions]
+    # An unsettled session produces no label and must not occupy a slot in the series: the
+    # hysteresis counts CLOSES, and a refused session is not one.
+    settled = [r for r in raw if r.get("settled")]
+    shown = apply_hysteresis(settled, rules)
+    return {"raw": raw, "shown": shown, "flips": flip_count(shown), "depth": len(settled)}
+
+
+async def seed(conn, sessions: List[Dict[str, Any]],
+               rules: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Write the replayed series to `regime_snapshots`, append-only.
+
+    DELIBERATELY SEPARATE FROM `replay`. The replay is pure and testable; this is the only part
+    that touches a database, so a test can exercise every rule in §2 without one -- and the
+    dry run R-IV.1193(d) asks for is a `replay` call with no writer attached.
+
+    Returns the depth report plus how many rows were written. `ON CONFLICT DO NOTHING` makes a
+    re-run idempotent without rewriting a seeded row (§8: append-only).
+    """
+    out = replay(sessions, rules)
+    written = 0
+    for row in out["shown"]:
+        if row.get("shown_regime") is None:
+            # A session before the first label qualified. Recorded as a session with no label
+            # rather than skipped, so the series has no silent gaps.
+            pass
+        r = await conn.fetchrow(
+            """INSERT INTO regime_snapshots
+                   (as_of, regime, shown_regime, tags, basis, rules_version, inputs_json)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+               ON CONFLICT (as_of, rules_version) DO NOTHING
+               RETURNING as_of""",
+            row.get("as_of"), row.get("regime"), row.get("shown_regime"),
+            row.get("tags") or [], row.get("basis"), row.get("rules_version"), "{}")
+        if r is not None:
+            written += 1
+    out["written"] = written
+    logger.info("[regime_seed] replayed %d session(s), wrote %d, %d flip(s)",
+                out["depth"], written, out["flips"])
+    return out
