@@ -30,6 +30,7 @@ one would overwrite the evidence of the disagreement.
 from __future__ import annotations
 
 import logging
+from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("regime_seed")
@@ -130,6 +131,27 @@ async def seed(conn, sessions: List[Dict[str, Any]],
     return out
 
 
+def as_date(v):
+    """A `datetime.date` for a DATE column, from a date or an ISO string. None stays None.
+
+    THE BOUNDARY NEEDS THIS. Every `as_of` inside the classifier is an ISO STRING, deliberately:
+    the verdicts are compared, keyed and replayed as text, and a string cannot be a date object
+    that silently carries a timezone. But asyncpg wants a `date` for a DATE column, and handed a
+    string it raises `invalid input for query argument $1: '2025-07-10' ('str' object has no
+    attribute 'toordinal')` -- which is what the first live seed did, writing nothing.
+
+    This is the exact mirror of the `cut_due` crash in hub_mcp/tools/positions.py, where an
+    already-stringified date met `.isoformat()`. Same seam, opposite direction. One conversion
+    function at the boundary is the fix in both directions.
+    """
+    if v is None or isinstance(v, _date):
+        return v
+    try:
+        return _date.fromisoformat(str(v)[:10])
+    except ValueError:
+        return None
+
+
 async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool):
     """One append-only snapshot row, or None when (as_of, rules_version) is already present.
 
@@ -148,7 +170,7 @@ async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool):
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16)
            ON CONFLICT (as_of, rules_version) DO NOTHING
            RETURNING as_of""",
-        row.get("as_of"), row.get("rules_version"), row.get("regime"),
+        as_date(row.get("as_of")), row.get("rules_version"), row.get("regime"),
         row.get("shown_regime"), row.get("label"), list(row.get("tags") or []),
         row.get("basis"), list(row.get("not_evaluable_rows") or []),
         bool(row.get("settled")), row.get("pending"), row.get("pending_closes"),

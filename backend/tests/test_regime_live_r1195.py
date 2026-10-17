@@ -668,3 +668,64 @@ def test_the_seed_is_IDEMPOTENT_in_two_independent_ways():
         os.path.join(BACKEND, "main.py"))
     assert "ON CONFLICT (as_of, rules_version) DO NOTHING" in code_of_file(
         os.path.join(BACKEND, "jobs", "regime_seed.py"))
+
+
+# ── the write boundary: a string is not a date ─────────────────────────────
+
+def test_as_date_coerces_the_ISO_STRING_the_classifier_carries():
+    """THE FIRST LIVE SEED WROTE NOTHING because of this. Every `as_of` inside the classifier is
+    an ISO string, deliberately -- verdicts are compared, keyed and replayed as text. asyncpg
+    wants a `date` for a DATE column and raises on a string:
+
+        invalid input for query argument $1: '2025-07-10'
+        ('str' object has no attribute 'toordinal')
+
+    The exact mirror of the `cut_due` crash, where an already-stringified date met
+    `.isoformat()`. Same seam, opposite direction."""
+    import datetime as _dt
+    from jobs.regime_seed import as_date
+    assert as_date("2026-10-16") == _dt.date(2026, 10, 16)
+    assert as_date("2026-10-16 00:00:00") == _dt.date(2026, 10, 16), "a timestamp is truncated"
+    assert as_date(_dt.date(2026, 10, 16)) == _dt.date(2026, 10, 16), "a date passes through"
+    assert as_date(None) is None, "None stays None, never today"
+    assert as_date("not a date") is None, "unparseable is None, not an exception at the DB"
+
+
+def test_BOTH_writers_coerce_as_of():
+    """`regime_snapshots` and `regime_audit` both have a DATE column, and both were handed the
+    string. Fixing one would have left the other to fail at 21:30 ET."""
+    snap = code_of_file(os.path.join(BACKEND, "jobs", "regime_seed.py"))
+    i = snap.index("INSERT INTO regime_snapshots")
+    assert "as_date(row.get('as_of'))" in snap[i:i + 1500]
+    job = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    j = job.index("INSERT INTO regime_audit")
+    assert "as_date(as_of)" in job[j:j + 600]
+
+
+def test_a_SEED_WRITE_FAILURE_is_audited_not_just_raised():
+    """The reason finding this needed a log dig: only the REFUSAL paths audited, so a raised
+    write left no row and the route could say "no snapshot" with nothing able to say why."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def run_seed")
+    body = code[i:code.index("async def run_nightly")]
+    assert "seed write failed" in body
+    assert "except Exception" in body
+
+
+def test_the_unavailable_payload_SURFACES_THE_LAST_AUDIT_ROW():
+    """"No snapshot" is a symptom. The run that declined recorded its reason, and surfacing it
+    is the whole point of auditing refusals rather than letting them be an absence."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def latest_with_diff")
+    body = code[i:i + 1800]
+    assert "FROM regime_audit" in body
+    assert "last run:" in body
+
+
+def test_a_REFUSAL_names_the_bar_counts():
+    """When the seed declines, the per-ticker bar counts ARE the diagnosis, and nothing else in
+    this lane can read that table."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def run_seed")
+    body = code[i:code.index("async def run_nightly")]
+    assert "bars: %s" in body or "bar_counts" in body
