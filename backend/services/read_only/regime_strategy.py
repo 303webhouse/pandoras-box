@@ -116,9 +116,16 @@ def _families(inputs: Dict[str, Any]) -> list:
         if name in fams and fams[name] is not None:
             rows.append({"name": name.upper(), "state": "risk_off" if fams[name] else "risk_on",
                          "why": basis.get(name)})
+        elif name in absent:
+            rows.append({"name": name.upper(), "state": None, "why": absent[name]})
         else:
+            # NOT "no feed in v1". That claim belongs only to the families the rules file names
+            # as having no feed. A family that HAS a feed but no value for this session is a
+            # different fact, and saying "no feed" about it is a caption asserting an absence
+            # that is not real -- which is what the first live payload did for STRUCTURE and
+            # BREADTH, because the read-back had not selected inputs_json.
             rows.append({"name": name.upper(), "state": None,
-                         "why": absent.get(name) or "no feed in v1"})
+                         "why": "not recorded for this session"})
     return rows
 
 

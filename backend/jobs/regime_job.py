@@ -221,8 +221,13 @@ async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[st
     """
     version = rules_version or load_rules().get("version")
     rows = await conn.fetch(
+        # `inputs_json` IS IN THE LIST, and was missing from the first live version. The column
+        # held the numbers all along; the query did not ask for them, so the card's index strip
+        # came back empty and every evidence family reported "no feed in v1" -- a caption
+        # asserting an absence that was not real, about two families that do have a feed.
         """SELECT as_of, regime, shown_regime, label, tags, basis, not_evaluable,
-                  pending, pending_closes, held_sessions, change, blocked, seeded, created_at
+                  pending, pending_closes, held_sessions, change, blocked, seeded,
+                  inputs_json, created_at
              FROM regime_snapshots
             WHERE rules_version = $1
             ORDER BY as_of DESC
