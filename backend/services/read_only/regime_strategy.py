@@ -42,6 +42,21 @@ CLOSE_SOURCE_NOTE = (
     "UW chart close before each nightly write (R-IV.1203(b)). Sector breadth is still read "
     "from stable_daily_bars on a fully-adjusted basis, which is correct for moving averages.")
 
+#: §2's ten keys mapped to the display labels the registered playbook file uses. Taken from the
+#: playbook, not invented here (R-IV.925(b)).
+#:
+#: THIS WAS DELETED BY ACCIDENT AND THE ROUTE 500ed ON IT. The R-IV.1203(b) edit replaced a
+#: block by two computed offsets, and this dict sat between them, so it was swallowed with the
+#: comment it followed. Convention #43 exists for exactly that: a replace anchors BOTH ends by
+#: CONTENT and asserts the line after -- a slice between two index() positions asserts nothing
+#: about what is inside it. Guarded now by a test that assembles the available payload.
+_LABELS = {
+    "crash_liquidation": "CRASH / LIQUIDATION", "bear_market": "BEAR MARKET",
+    "bear_market_rally": "BEAR-MARKET RALLY", "breakdown": "BREAKDOWN",
+    "recovery": "RECOVERY", "correction": "CORRECTION", "range_chop": "RANGE / CHOP",
+    "melt_up": "MELT-UP", "uptrend": "UPTREND", "narrow_uptrend": "NARROW UPTREND",
+}
+
 
 def _unavailable(reason: str) -> Dict[str, Any]:
     """The honest empty payload. `regime_key` is None so the card cannot place a marker."""
