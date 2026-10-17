@@ -759,6 +759,35 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: signals ceiling audit columns migration skipped: {e}")
 
+        # ARTEMIS mode (R-IV.1198(b), salvage fix-first #4; mirrors migrations/054).
+        #
+        # webhooks/tradingview.py has populated `signal_data["artemis_mode"]` since Artemis
+        # shipped, and the INSERT bound 40 named columns with this one not among them -- so the
+        # value was built, logged once, and discarded at the write. The field was the only thing
+        # separating a Normal fire (trend plus a confirmation candle at the VWAP band) from a
+        # Flush fire (exhaustion reversal after a 3%+ move into the band), which is the
+        # distinction every Artemis outcome question turns on.
+        #
+        # TEXT, NOT VARCHAR(n), deliberately. The value reaches here from a webhook payload via
+        # `(alert.mode or "Normal").capitalize()`, so its length is the sender's choice. On a
+        # VARCHAR a long one raises inside the INSERT, and log_signal re-raises by design --
+        # which would mean losing the whole SIGNAL over a label. A label must never be able to
+        # reject a fire.
+        #
+        # NO BACKFILL (R-IV.1198(b)): the field starts recording at the deploy. Rows written
+        # before it are NULL, and NULL here means "not recorded", never "Normal".
+        try:
+            await conn.execute("""
+                ALTER TABLE signals
+                ADD COLUMN IF NOT EXISTS artemis_mode TEXT
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signals_artemis_mode
+                ON signals(artemis_mode) WHERE artemis_mode IS NOT NULL
+            """)
+        except Exception as e:
+            print(f"WARNING: signals artemis_mode migration skipped: {e}")
+
         # One-time cleanup: expire stuck COMMITTEE_REVIEW signals from April 2026 credit outage
         try:
             await conn.execute("""
@@ -3161,12 +3190,12 @@ async def _log_signal_insert(
                 day_of_week, hour_of_day, is_opex_week, days_to_earnings, market_event, signal_category,
                 feed_tier, adx_value, feed_tier_ceiling, score_ceiling_reason, gate_type,
                 feed_tier_v2, feed_tier_v2_path, feed_tier_diverged, confluence_badge,
-                source, status, expires_at, release_at
+                source, status, expires_at, release_at, artemis_mode
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                 $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32,
-                $33, $34, $35, $36, $37, $38, $39, $40
+                $33, $34, $35, $36, $37, $38, $39, $40, $41
             )
             ON CONFLICT (signal_id) DO NOTHING
         """,
@@ -3250,6 +3279,12 @@ async def _log_signal_insert(
             # unreadable value becomes NULL -- which the feed reads as "serve it now". Failing
             # OPEN is right here: a bad value should show a signal early, never hide it forever.
             _expiry_for_db(signal_data.get("release_at"), signal_data.get("signal_id")),
+            # $41 R-IV.1198(b), salvage fix-first #4. The webhook has set this since Artemis
+            # shipped and this INSERT discarded it -- the same swallowed-write class the
+            # docstring above describes, except silent rather than raising: a key in the dict
+            # that no column received. Stored as it fired; NULL for every non-Artemis signal,
+            # which is what "this strategy has no mode" looks like.
+            signal_data.get("artemis_mode"),
         )
         inserted = str(result).strip().endswith("1")
         if not inserted:
