@@ -786,3 +786,17 @@ def test_a_measured_risk_ON_family_is_not_confused_with_an_absent_one():
         {"families": {"structure": False}, "families_basis": {"structure": "SPY above 50dma"}})}
     assert rows["STRUCTURE"]["state"] == "risk_on"
     assert rows["STRUCTURE"]["why"] == "SPY above 50dma"
+
+
+def test_THE_SEED_COUNT_IS_READABLE_FROM_THE_ROUTE():
+    """R-IV.1195(b) asks for "the seed count actually executed at deploy". The first time I went
+    looking, the answer was only in a deploy log that had already rolled off. A number a ruling
+    asks to be reported has to be readable from the thing that produced it."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    assert "async def seed_run" in code
+    i = code.index("async def seed_run")
+    body = code[i:i + 900]
+    assert "action = 'seed'" in body
+    assert "rows_written" in body
+    svc = code_of_file(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
+    assert "seed_run" in svc

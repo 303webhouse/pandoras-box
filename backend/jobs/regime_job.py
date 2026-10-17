@@ -278,6 +278,28 @@ async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[st
     return {"snapshot": cur, "diff": diff, "rules_version": version}
 
 
+async def seed_run(conn) -> Optional[Dict[str, Any]]:
+    """The audit row for the run that seeded the history, if one exists.
+
+    R-IV.1195(b) asks for "the seed count actually executed at deploy", and the first time I
+    went looking for it the answer was only in a deploy log that had already rolled off. A
+    number a ruling asks to be reported should be readable from the thing that produced it.
+    """
+    try:
+        r = await conn.fetchrow(
+            """SELECT as_of, action, detail, rows_written, created_at
+                 FROM regime_audit
+                WHERE action = 'seed'
+                ORDER BY created_at DESC LIMIT 1""")
+    except Exception as exc:
+        return {"error": "regime_audit unreadable (%s)" % type(exc).__name__}
+    if r is None:
+        return None
+    return {"sessions_written": r["rows_written"], "detail": r["detail"],
+            "through": str(r["as_of"])[:10] if r["as_of"] else None,
+            "at": r["created_at"].isoformat() if r["created_at"] else None}
+
+
 async def health(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
     """Health states for the card (R-IV.1195(b)).
 
