@@ -26,35 +26,21 @@ logger = logging.getLogger(__name__)
 #: Served on every payload. The card prints it; nothing computes from it.
 DISPLAY_ONLY = "display only"
 
-#: R-IV.1198(d). The classifier reads `stable_daily_bars`, and until the designated source is
-#: wired the card must NAME the source it is actually showing -- because the three candidates
-#: measured for 2026-10-16 do not agree:
+#: R-IV.1203(b)4. The designated source, now WIRED. Measured for 2026-10-16:
 #:
-#:   Polygon daily aggregate   SPY 763.25   QQQ 709.80   IWM 270.44
-#:   UW chart close            SPY 763.25   QQQ 709.80   IWM 270.44   <- matches
-#:   stable_daily_bars         SPY 764.29   QQQ 712.57   IWM 270.67   <- matches nothing
+#:   Polygon daily aggregate   SPY 763.25   QQQ 709.80   IWM 270.44   <- designated, and served
+#:   UW chart close            SPY 763.25   QQQ 709.80   IWM 270.44   <- agrees, and verifies it
+#:   stable_daily_bars         SPY 764.29   QQQ 712.57   IWM 270.67   <- superseded
 #:
-#: And yfinance, which is `stable_daily_bars`' OWN vendor, returns Polygon's numbers exactly on
-#: a fresh fetch. So the disagreement is in the stored table, not in the source it came from:
-#: 764.29 is not any session's close (10-14 was 769.60, 10-15 771.79) but it does sit inside
-#: 10-16's intraday range, which is what an unsettled capture in a settled-looking row looks
-#: like. Filed for a ruling of its own; not substituted here (the ruling forbids substitution).
-CLOSE_SOURCE = "stable_daily_bars"
+#: The series is SPLIT-ADJUSTED AND NOT DIVIDEND-ADJUSTED (Polygon `adjusted=true`), which is
+#: the basis a settled close has to be on. `stable_daily_bars` stays fully adjusted and is still
+#: what the SECTOR BREADTH is read from -- R-IV.1203(c) rules that basis correct for moving
+#: averages and breadth, so only the settled close moved.
+CLOSE_SOURCE = "polygon"
 CLOSE_SOURCE_NOTE = (
-    "stable_daily_bars; the designated source is the UW chart close (R-IV.1198(d)), which "
-    "matches the Polygon daily aggregate on SPY/QQQ/IWM for 2026-10-16 where this table does "
-    "not. Not yet wired: the classifier needs a bar SERIES and the chart route serves only the "
-    "newest reading.")
-
-
-#: §2's ten keys, mapped to the display labels the registered playbook file uses. Taken from
-#: the playbook, not invented here (R-IV.925(b)).
-_LABELS = {
-    "crash_liquidation": "CRASH / LIQUIDATION", "bear_market": "BEAR MARKET",
-    "bear_market_rally": "BEAR-MARKET RALLY", "breakdown": "BREAKDOWN",
-    "recovery": "RECOVERY", "correction": "CORRECTION", "range_chop": "RANGE / CHOP",
-    "melt_up": "MELT-UP", "uptrend": "UPTREND", "narrow_uptrend": "NARROW UPTREND",
-}
+    "polygon daily aggregate, split-adjusted and not dividend-adjusted, verified against the "
+    "UW chart close before each nightly write (R-IV.1203(b)). Sector breadth is still read "
+    "from stable_daily_bars on a fully-adjusted basis, which is correct for moving averages.")
 
 
 def _unavailable(reason: str) -> Dict[str, Any]:
@@ -179,7 +165,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
     """
     try:
         from jobs.regime_job import (audit_notes, flip_history, health as regime_health,
-                                     latest_with_diff, seed_run)
+                                     label_diff, latest_with_diff, seed_run)
     except Exception as exc:
         return _unavailable("regime module unavailable (%s)" % type(exc).__name__)
 
@@ -196,6 +182,8 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             flips = await flip_history(conn, rules_version)
             # R-IV.1198(c)/(e): the standing notes, readable rather than only recorded.
             notes = await audit_notes(conn)
+            # R-IV.1203(b)2: where the re-seed changed a label, as a list of dates.
+            ldiff = await label_diff(conn, rules_version)
     except Exception as exc:
         logger.warning("[regime_strategy] read failed: %s", type(exc).__name__)
         return _unavailable("regime_snapshots unreadable (%s)" % type(exc).__name__)
@@ -254,4 +242,5 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "seed_run": seeded_run,
         "flip_history": flips,
         "audit_notes": notes,
+        "label_diff": ldiff,
     }

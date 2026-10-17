@@ -514,7 +514,7 @@ def test_the_seed_writer_is_APPEND_ONLY():
     # so the nightly job could reuse it, and this test kept asking `seed` -- it failed on a
     # clause that had moved three lines away, not on a property that had changed.
     src = inspect.getsource(rs)
-    assert "ON CONFLICT (as_of, rules_version) DO NOTHING" in src
+    assert "ON CONFLICT (as_of, rules_version, close_source) DO NOTHING" in src
     assert "INSERT INTO regime_snapshots" in inspect.getsource(rs._write_snapshot)
     assert not _re.search(r"\bUPDATE\s+regime_snapshots", src, _re.I)
 

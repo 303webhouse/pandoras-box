@@ -176,7 +176,7 @@ def test_the_writer_is_APPEND_ONLY_and_a_conflict_is_RECORDED():
     """Not just "does not UPDATE" -- a disagreement with a stored row is itself worth keeping,
     so the conflict path writes an audit entry saying what this run would have said."""
     code = code_of_file(os.path.join(BACKEND, "jobs", "regime_seed.py"))
-    assert "ON CONFLICT (as_of, rules_version) DO NOTHING" in code
+    assert "ON CONFLICT (as_of, rules_version, close_source) DO NOTHING" in code
     assert not re.search(r"\bUPDATE\s+regime_snapshots", code, re.I)
     job = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
     assert "would have said" in job
@@ -194,10 +194,17 @@ def test_the_bars_are_read_OLDEST_FIRST():
     """The vendor-order landmine in this repo came from a descending series meeting a positional
     slice. The query orders DESC and the code reverses, so the function returns ascending --
     asserted because "it happens to be sorted" is how that bug survived."""
-    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
-    i = code.index("async def load_series")
-    body = code[i:i + 900]
-    assert "ORDER BY date DESC" in body and "reversed(" in body
+    # THE PROPERTY MOVED WITH THE SOURCE (R-IV.1203(b)). The designated series is read by
+    # bars_polygon.load_series; the old loader survives as _load_adjusted_series for the sector
+    # breadth, which stays on the fully-adjusted basis per R-IV.1203(c). BOTH are checked,
+    # because either one returning descending bars reintroduces the landmine.
+    for parts, fn in ((("stable_engine", "bars_polygon.py"), "async def load_series"),
+                      (("jobs", "regime_job.py"), "async def _load_adjusted_series")):
+        code = code_of_file(os.path.join(BACKEND, *parts))
+        i = code.index(fn)
+        body = code[i:i + 900]
+        assert "ORDER BY date DESC" in body, parts
+        assert "reversed(" in body, parts
 
 
 # ── the diff ────────────────────────────────────────────────────────────────
@@ -284,16 +291,23 @@ def test_the_ddl_columns_match_what_the_writer_inserts():
     m = re.search(r"INSERT INTO regime_snapshots\s*\(([^)]*)\)", writer, re.S)
     assert m, "the insert statement moved"
     cols = [c.strip() for c in m.group(1).replace("\n", " ").split(",") if c.strip()]
-    assert len(cols) == 16, cols
+    assert len(cols) == 17, cols   # 17 since R-IV.1203(b): close_source is on every row
     ddl = code_of_file(CLIENT)
     i = ddl.index("CREATE TABLE IF NOT EXISTS regime_snapshots")
-    block = ddl[i:i + 1400]
+    # THE CREATE BLOCK PLUS THE ALTERS. `close_source` and `superseded` arrive by ALTER, not in
+    # the original CREATE -- R-IV.1203(b)2 added them to a table that already held 321 rows, and
+    # a CREATE ... IF NOT EXISTS cannot add a column to an existing table. What the test is
+    # about is unchanged: every column the writer names must be created SOMEWHERE at startup.
+    block = ddl[i:i + 4000]
     for c in cols:
         assert c in block, c
-    mig = read_source(MIGRATION)
-    j = mig.index("CREATE TABLE IF NOT EXISTS regime_snapshots")
+    # ACROSS BOTH MIGRATION FILES. 053 creates the table; 055 adds close_source and superseded,
+    # because R-IV.1203(b)2 widened a table that already held 321 rows. A reviewer reading only
+    # 053 would not see the current shape, which is what this assertion is for.
+    mig = read_source(MIGRATION) + "\n" + read_source(
+        os.path.join(ROOT, "migrations", "055_regime_polygon_series.sql"))
     for c in cols:
-        assert c in mig[j:j + 2400], "%s missing from the migration copy" % c
+        assert c in mig, "%s missing from the migration copies" % c
 
 
 # ── the inputs builder: no lookahead ───────────────────────────────────────
@@ -674,7 +688,7 @@ def test_the_seed_is_IDEMPOTENT_in_two_independent_ways():
     would do; both means a race between a deploy and a nightly cannot double-write."""
     assert "SELECT COUNT(*) FROM regime_snapshots" in read_source(
         os.path.join(BACKEND, "main.py"))
-    assert "ON CONFLICT (as_of, rules_version) DO NOTHING" in code_of_file(
+    assert "ON CONFLICT (as_of, rules_version, close_source) DO NOTHING" in code_of_file(
         os.path.join(BACKEND, "jobs", "regime_seed.py"))
 
 
@@ -1027,7 +1041,7 @@ def test_THE_SETTLED_LINE_NAMES_ITS_CLOSE_SOURCE():
 def test_the_close_source_is_served_on_BOTH_payload_paths():
     """An unavailable card still shows the settled line, so it still has to name the source."""
     from services.read_only.regime_strategy import CLOSE_SOURCE, _unavailable
-    assert CLOSE_SOURCE == "stable_daily_bars"
+    assert CLOSE_SOURCE == "polygon"   # R-IV.1203(b)4: the designated source is wired
     assert _unavailable("x")["close_source"] == CLOSE_SOURCE
     svc = code_of_file(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
     assert svc.count("'close_source': CLOSE_SOURCE") == 2
@@ -1037,28 +1051,30 @@ def test_the_MEASURED_NUMBERS_are_recorded_with_the_designation():
     """All three per ticker, as the ruling asks, written where the next reader of this code
     will find them rather than only in a report."""
     svc = read_source(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
-    i = svc.index("R-IV.1198(d)")
+    i = svc.index("R-IV.1203(b)4")   # the header block that carries the measured numbers
     block = svc[i:i + 1800]
     for n in ("763.25", "709.80", "270.44"):        # Polygon, and the UW chart close
         assert n in block, n
     for n in ("764.29", "712.57", "270.67"):        # stable_daily_bars
         assert n in block, n
     assert "Polygon" in block
-    assert "designated source is the UW chart close" in block
+    assert "designated, and served" in block and "superseded" in block
 
 
 def test_NO_SUBSTITUTION_was_made():
-    """R-IV.1198(d): "If neither matches Polygon, stop and report: no substitution." One DID
-    match, and the designated source is still not wired -- the classifier needs a bar SERIES and
-    the chart route serves only the newest reading. So the card names what it shows and nothing
-    quietly swaps a number."""
-    svc = read_source(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
-    assert "Not yet wired" in svc
-    # The inputs builder still reads the one source it always read; nothing was spliced.
+    """R-IV.1198(d): "no substitution." R-IV.1203(b) then WIRED the designated source, so
+    "not yet wired" is gone -- but the property it was protecting is not. Each basis is used
+    for the thing it is right for, and the Polygon fetcher REFUSES rather than falling back:
+    PolygonUnavailable is raised, and nothing in it knows how to reach another vendor."""
     inputs = code_of_file(os.path.join(BACKEND, "models", "regime_inputs.py"))
     assert "stable_daily_bars" not in inputs, "the builder takes bars as an argument"
     job = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
-    assert job.count("FROM stable_daily_bars") == 1, "exactly one bar source, still"
+    assert job.count("FROM stable_daily_bars") == 1, (
+        "one read of the fully-adjusted table, for the sector breadth only (R-IV.1203(c))")
+    poly = code_of_file(os.path.join(BACKEND, "stable_engine", "bars_polygon.py"))
+    assert "class PolygonUnavailable" in poly
+    for banned in ("yfinance", "stable_daily_bars", "fallback"):
+        assert banned not in poly, banned
 
 
 def test_THE_STANDING_AUDIT_NOTES_ARE_READABLE():
@@ -1074,3 +1090,15 @@ def test_THE_STANDING_AUDIT_NOTES_ARE_READABLE():
     assert "FROM regime_audit" in body
     svc = code_of_file(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
     assert "audit_notes" in svc
+
+
+def test_THE_SEED_IS_SCHEDULED_NOT_AWAITED_AT_STARTUP():
+    """R-IV.1203(b): the seed now backfills the designated series first, so it makes three
+    throttled Polygon calls and sleeps between them. Awaiting that in the lifespan would hold
+    the app closed for half a minute while Railway's health check waits on a vendor."""
+    src = read_source(os.path.join(BACKEND, "main.py"))
+    assert "asyncio.ensure_future(_regime_seed_task())" in src
+    i = src.index("async def _regime_seed_task")
+    body = src[i:src.index("asyncio.ensure_future(_regime_seed_task())")]
+    assert "except Exception" in body, "the task must swallow its own failures"
+    assert "get_postgres_client" in body, "the task owns its own connection"

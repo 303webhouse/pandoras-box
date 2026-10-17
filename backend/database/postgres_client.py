@@ -2480,6 +2480,65 @@ async def init_database():
                 ON regime_audit (created_at DESC)
         """)
 
+        # Regime v1 settled-close series + room for two seeds (R-IV.1203(b), mirrors
+        # migrations/055).
+        #
+        # A SECOND BAR TABLE, not a repair of stable_daily_bars, because they answer different
+        # questions and R-IV.1203 rules on both separately. stable_daily_bars is FULLY ADJUSTED
+        # (splits and dividends) and stays that way -- (c) says that is correct for moving
+        # averages and breadth. This series is SPLIT-ADJUSTED AND NOT DIVIDEND-ADJUSTED, which
+        # is the basis a settled close has to be on. One table cannot be both bases at once.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS regime_daily_bars (
+                ticker        TEXT NOT NULL,
+                date          DATE NOT NULL,
+                o             DOUBLE PRECISION,
+                h             DOUBLE PRECISION,
+                l             DOUBLE PRECISION,
+                c             DOUBLE PRECISION,
+                v             BIGINT,
+                close_source  TEXT NOT NULL,
+                uw_verified   BOOLEAN NOT NULL DEFAULT FALSE,
+                fetched_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (ticker, date)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_regime_daily_bars_date
+                ON regime_daily_bars (date DESC)
+        """)
+        # R-IV.1203(b)2: "Keep the old seed rows, marked superseded; do not delete them." The
+        # old key (as_of, rules_version) makes a second row for the same session impossible, so
+        # re-seeding could only have happened by deleting -- which the ruling forbids. The key
+        # gains the source the row was computed from.
+        await conn.execute("""
+            ALTER TABLE regime_snapshots
+                ADD COLUMN IF NOT EXISTS close_source TEXT
+        """)
+        await conn.execute("""
+            ALTER TABLE regime_snapshots
+                ADD COLUMN IF NOT EXISTS superseded BOOLEAN NOT NULL DEFAULT FALSE
+        """)
+        # Guarded on close_source IS NULL, so a re-run cannot re-mark rows written since --
+        # which would supersede the NEW seed with its own marker.
+        await conn.execute("""
+            UPDATE regime_snapshots
+               SET close_source = 'stable_daily_bars', superseded = TRUE
+             WHERE close_source IS NULL
+        """)
+        await conn.execute("""
+            ALTER TABLE regime_snapshots
+                DROP CONSTRAINT IF EXISTS regime_snapshots_as_of_rules_version_key
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_regime_snapshots_asof_rules_source
+                ON regime_snapshots (as_of, rules_version, close_source)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_regime_snapshots_current
+                ON regime_snapshots (as_of DESC) WHERE superseded = FALSE
+        """)
+
         # UW budget watchdog (Fable 2026-07-09): durable per-day UW-burn snapshot so
         # the 48h Redis counter TTL can never blind us (mirrors migrations/022; the
         # snapshot job also creates this defensively). day='_TOTAL' caller = grand total.

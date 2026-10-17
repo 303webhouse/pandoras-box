@@ -38,6 +38,11 @@ logger = logging.getLogger("regime_seed")
 #: The 200dma is the deepest input any §2 row needs, so it sets the floor.
 MIN_BARS_FOR_A_LABEL = 200
 
+#: Which close series a snapshot was computed from. Part of the unique key since R-IV.1203(b)2,
+#: because the ruling keeps the old seed and adds a new one: without the source in the key, a
+#: re-seed could only happen by deleting, which the ruling forbids.
+DEFAULT_CLOSE_SOURCE = "polygon"
+
 #: What the hysteresis needs behind the newest session. The widest lookback in §2's block is
 #: Bear's "15 closes below a falling 200dma"; Range's 10 and the 5-session hold sit inside it.
 MIN_SEEDED_SESSIONS = 15
@@ -111,7 +116,8 @@ def replay(sessions: List[Dict[str, Any]],
 
 async def seed(conn, sessions: List[Dict[str, Any]],
                rules: Optional[Dict[str, Any]] = None, *,
-               seeded: bool = True) -> Dict[str, Any]:
+               seeded: bool = True,
+               close_source: str = DEFAULT_CLOSE_SOURCE) -> Dict[str, Any]:
     """Write the replayed series to `regime_snapshots`, append-only.
 
     DELIBERATELY SEPARATE FROM `replay`. The replay is pure and testable; this is the only part
@@ -128,7 +134,7 @@ async def seed(conn, sessions: List[Dict[str, Any]],
         # A session before the first label qualified is still WRITTEN, with shown_regime NULL.
         # Skipping it would leave a hole indistinguishable from a session the job never ran on,
         # and that ambiguity is the R-IV.1175 fault.
-        r = await _write_snapshot(conn, row, seeded=seeded)
+        r = await _write_snapshot(conn, row, seeded=seeded, close_source=close_source)
         if r is None:
             conflicts += 1
         else:
@@ -161,7 +167,8 @@ def as_date(v):
         return None
 
 
-async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool):
+async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool,
+                          close_source: str = DEFAULT_CLOSE_SOURCE):
     """One append-only snapshot row, or None when (as_of, rules_version) is already present.
 
     `ON CONFLICT DO NOTHING` makes a re-run idempotent WITHOUT rewriting a row (section 8). A
@@ -175,13 +182,14 @@ async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool):
         """INSERT INTO regime_snapshots
                (as_of, rules_version, regime, shown_regime, label, tags, basis,
                 not_evaluable, settled, pending, pending_closes, held_sessions,
-                change, blocked, inputs_json, seeded)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16)
-           ON CONFLICT (as_of, rules_version) DO NOTHING
+                change, blocked, inputs_json, seeded, close_source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb,
+                   $16, $17)
+           ON CONFLICT (as_of, rules_version, close_source) DO NOTHING
            RETURNING as_of""",
         as_date(row.get("as_of")), row.get("rules_version"), row.get("regime"),
         row.get("shown_regime"), row.get("label"), list(row.get("tags") or []),
         row.get("basis"), list(row.get("not_evaluable_rows") or []),
         bool(row.get("settled")), row.get("pending"), row.get("pending_closes"),
         row.get("held_sessions"), row.get("change"), row.get("blocked"),
-        _json.dumps(row.get("inputs") or {}, default=str), bool(seeded))
+        _json.dumps(row.get("inputs") or {}, default=str), bool(seeded), close_source)
