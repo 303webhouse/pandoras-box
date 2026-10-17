@@ -959,7 +959,10 @@ async def _run_regime_pass() -> dict:
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
         seeded = {"written": 0, "skipped": "history already present"}
-        have = await conn.fetchval("SELECT COUNT(*) FROM regime_snapshots")
+        # Current seed only -- the superseded stable_daily_bars rows must not read as
+        # "already seeded" (R-IV.1203(b)2).
+        have = await conn.fetchval(
+            "SELECT COUNT(*) FROM regime_snapshots WHERE superseded = FALSE")
         if not have:
             seeded = await regime_job.run_seed(conn)
         out = await regime_job.run_nightly(conn)

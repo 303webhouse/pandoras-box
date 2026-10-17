@@ -22,6 +22,7 @@ DISPLAY ONLY (#42). Nothing gates on what this writes.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import date as _date
@@ -33,6 +34,10 @@ from models.regime_inputs import INDICES, MIN_BARS, SECTORS, Bar, sessions_from_
 
 logger = logging.getLogger("regime_job")
 
+#: The designated settled-close source (R-IV.1198(d), wired by R-IV.1203(b)). Stamped on
+#: every snapshot this job writes, and part of the unique key.
+CLOSE_SOURCE = "polygon"
+
 #: Enough history for the deepest §2 lookback (a 200dma) plus the seed window on top.
 BARS_TO_LOAD = 520
 
@@ -43,7 +48,33 @@ BARS_TO_LOAD = 520
 LOAD_TICKERS = tuple(INDICES) + tuple(SECTORS)
 
 
-async def load_series(conn, tickers=LOAD_TICKERS, limit: int = BARS_TO_LOAD) -> Dict[str, List[Bar]]:
+async def load_designated_series(conn, tickers=LOAD_TICKERS,
+                                 limit: int = BARS_TO_LOAD) -> Dict[str, List[Bar]]:
+    """The DESIGNATED settled-close series (R-IV.1203(b)): Polygon, from `regime_daily_bars`.
+
+    One switch point, called by both the seed and the nightly, so the two cannot end up reading
+    different sources -- which is how a seeded history and a live label come to disagree with
+    nothing reporting it.
+
+    THE SECTOR BREADTH STILL COMES FROM `stable_daily_bars`, deliberately. §2's Uptrend row
+    needs eleven sector ETFs above their 50dma, that is a MOVING-AVERAGE question, and
+    R-IV.1203(c) rules the fully-adjusted basis correct for moving averages and breadth. Only
+    the settled CLOSE had to move. Each source is used for the thing it is right for, and the
+    returned dict says which is which.
+    """
+    from stable_engine import bars_polygon
+
+    out: Dict[str, List[Bar]] = {}
+    index_tickers = [t for t in tickers if t in INDICES]
+    other = [t for t in tickers if t not in INDICES]
+    if index_tickers:
+        out.update(await bars_polygon.load_series(conn, index_tickers, limit))
+    if other:
+        out.update(await _load_adjusted_series(conn, other, limit))
+    return out
+
+
+async def _load_adjusted_series(conn, tickers, limit: int = BARS_TO_LOAD) -> Dict[str, List[Bar]]:
     """Oldest-first daily bars per ticker from `stable_daily_bars`.
 
     Ordered ASC in the query rather than reversed afterwards, because the vendor-order landmine
@@ -73,6 +104,62 @@ async def _audit(conn, *, action: str, detail: str, as_of=None, rows_written: in
         logger.warning("[regime_job] audit write failed (%s): %s", action, type(exc).__name__)
 
 
+async def label_diff(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
+    """Where the new seed's shown label differs from the superseded one, as a list of dates.
+
+    R-IV.1203(b)2 asks for exactly this. Joined on the SESSION, so a date present in only one
+    seed is reported as such rather than counted as a difference: the two series cover different
+    spans (stable_daily_bars reached 321 sessions, Polygon's entitlement 302), and treating a
+    missing session as a changed label would inflate the count with arithmetic.
+    """
+    version = rules_version or load_rules().get("version")
+    try:
+        # BOTH as_of COLUMNS ARE SELECTED, not COALESCEd into one. `shown_regime` is
+        # legitimately NULL on a session before the first label qualified, so a NULL label
+        # cannot distinguish "no row in that seed" from "a row with no label yet". The join
+        # key can: when a side contributed no row, that side's as_of is NULL.
+        rows = await conn.fetch(
+            """SELECT o.as_of AS old_as_of, n.as_of AS new_as_of,
+                      o.shown_regime AS old_shown,
+                      n.shown_regime AS new_shown
+                 FROM (SELECT as_of, shown_regime FROM regime_snapshots
+                        WHERE rules_version = $1 AND superseded = TRUE) o
+                 FULL OUTER JOIN
+                      (SELECT as_of, shown_regime FROM regime_snapshots
+                        WHERE rules_version = $1 AND superseded = FALSE) n
+                   ON o.as_of = n.as_of
+                ORDER BY COALESCE(n.as_of, o.as_of) ASC""", version)
+    except Exception as exc:
+        return {"error": "regime_snapshots unreadable (%s)" % type(exc).__name__}
+
+    changed, only_old, only_new, same = [], [], [], 0
+    for r in rows:
+        in_old = r["old_as_of"] is not None
+        in_new = r["new_as_of"] is not None
+        day = str(r["new_as_of"] or r["old_as_of"])[:10]
+        # A session in only ONE seed is a SPAN difference, not a label change. The two series
+        # cover different spans (stable_daily_bars reached 321 sessions, Polygon's entitlement
+        # 302), and counting a missing session as a changed label would inflate the answer with
+        # arithmetic rather than with findings.
+        if in_new and not in_old:
+            only_new.append(day)
+        elif in_old and not in_new:
+            only_old.append(day)
+        elif r["old_shown"] != r["new_shown"]:
+            changed.append({"as_of": day, "old": r["old_shown"], "new": r["new_shown"]})
+        else:
+            same += 1
+    return {
+        "changed": changed,
+        "changed_count": len(changed),
+        "changed_dates": [c["as_of"] for c in changed],
+        "unchanged_count": same,
+        "sessions_only_in_old_seed": only_old,
+        "sessions_only_in_new_seed": only_new,
+        "overlap": len(changed) + same,
+    }
+
+
 async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Backfill the label history by replaying the classifier over every classifiable session.
 
@@ -80,10 +167,34 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
     the unique key, and says so rather than reporting a fresh success.
     """
     rules = rules or load_rules()
+
+    # THE SERIES IS FETCHED BEFORE IT IS READ. R-IV.1203(b)1-2: the seed replays the DESIGNATED
+    # source, and on a first run `regime_daily_bars` is empty -- so the backfill happens here
+    # rather than being a step someone has to remember. Idempotent: the bar store upserts, so a
+    # re-run refreshes the same rows instead of multiplying them.
+    try:
+        from stable_engine import bars_polygon
+        have_bars = await conn.fetchval(
+            "SELECT COUNT(*) FROM regime_daily_bars WHERE close_source = $1",
+            bars_polygon.SOURCE)
+        if not have_bars:
+            bf = await bars_polygon.backfill(conn, INDICES)
+            logger.info("[regime_job] polygon backfill wrote %s bar(s): %s",
+                        bf.get("written"), bf.get("per_ticker"))
+            await _audit(conn, action="backfill",
+                         detail=("polygon backfill: %s" % json.dumps(bf.get("per_ticker") or {})),
+                         rows_written=int(bf.get("written") or 0),
+                         rules_version=rules.get("version"))
+    except Exception as exc:
+        detail = "polygon backfill failed: %s: %s" % (type(exc).__name__, exc)
+        await _audit(conn, action="refused", detail=detail, rules_version=rules.get("version"))
+        logger.error("[regime_job] %s", detail)
+        return {"sessions": 0, "written": 0, "refused": detail}
+
     # THE LOAD CAN FAIL, and a raised exception is an absence again. Audited so the one thing a
     # reader can see -- "no snapshot" -- comes with the reason attached.
     try:
-        series = await load_series(conn)
+        series = await load_designated_series(conn)
     except Exception as exc:
         detail = "load_series failed: %s: %s" % (type(exc).__name__, exc)
         await _audit(conn, action="refused", detail=detail, rules_version=rules.get("version"))
@@ -122,7 +233,7 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
     # row at all: the route could say "no snapshot" and nothing could say why. Finding that
     # needed a dig through deploy logs, which is exactly what the audit table exists to avoid.
     try:
-        out = await seed(conn, sessions, rules, seeded=True)
+        out = await seed(conn, sessions, rules, seeded=True, close_source=CLOSE_SOURCE)
     except Exception as exc:
         detail = ("seed write failed after %d session(s) replayed: %s: %s"
                   % (len(sessions), type(exc).__name__, exc))
@@ -152,17 +263,38 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
 
     from stable_engine.market_calendar import is_session_settled, settlement_reason
 
+    # THE TARGET COMES FROM THE CALENDAR, NOT FROM THE BAR TABLE. It used to be the newest
+    # stored bar's date, and that breaks the moment the capture below exists: on a nightly run
+    # the newest STORED bar is yesterday's, because today's is what this run is about to fetch.
+    # The job would have targeted yesterday every single night and never captured a session.
     target = session_date
-    series = await load_series(conn)
-    spy = series.get("SPY") or []
-    if not spy:
-        detail = "no SPY bars in stable_daily_bars"
-        await _audit(conn, action="refused", detail=detail, rules_version=version)
-        return {"written": 0, "refused": detail}
-
     if target is None:
-        newest = spy[-1].date
-        target = newest if isinstance(newest, _date) else _date.fromisoformat(str(newest)[:10])
+        from stable_engine.market_calendar import CalendarHorizonError, last_settled_session
+        try:
+            target = last_settled_session()
+        except CalendarHorizonError as exc:
+            detail = "cannot establish the last settled session (%s)" % exc
+            await _audit(conn, action="refused", detail=detail, rules_version=version)
+            return {"written": 0, "refused": detail}
+
+    # CAPTURE THE SESSION FROM THE DESIGNATED SOURCE FIRST, VERIFIED (R-IV.1203(b)1).
+    # The bar has to exist and agree with the UW chart close before any label is computed from
+    # it. A mismatch writes nothing and reports DEGRADED -- and the label step then declines
+    # too, because labelling an unverified close is the fault this whole ruling is about.
+    capture: Dict[str, Any] = {}
+    try:
+        from stable_engine import bars_polygon
+        capture = await bars_polygon.capture_session(conn, target, INDICES)
+    except Exception as exc:
+        capture = {"degraded": True, "written": 0,
+                   "reason": "capture raised: %s: %s" % (type(exc).__name__, exc)}
+    if capture.get("degraded"):
+        detail = "DEGRADED, no label written: %s" % capture.get("reason")
+        await _audit(conn, action="degraded", detail=detail, as_of=target,
+                     rules_version=version)
+        logger.error("[regime_job] nightly %s", detail)
+        return {"written": 0, "degraded": True, "reason": capture.get("reason"),
+                "as_of": target.isoformat()}
 
     settled = is_session_settled(target)
     if settled is not True:
@@ -171,6 +303,15 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
                   % (settlement_reason(target), settled))
         await _audit(conn, action="refused", detail=detail, as_of=target, rules_version=version)
         logger.info("[regime_job] nightly %s", detail)
+        return {"written": 0, "refused": detail, "as_of": target.isoformat()}
+
+    # READ AFTER THE CAPTURE, so the series includes the session just verified and written.
+    series = await load_designated_series(conn)
+    spy = series.get("SPY") or []
+    if not spy:
+        detail = "no SPY bars in regime_daily_bars after the capture"
+        await _audit(conn, action="refused", detail=detail, as_of=target,
+                    rules_version=version)
         return {"written": 0, "refused": detail, "as_of": target.isoformat()}
 
     sessions = sessions_from_series(series, settled_through=target.isoformat())
@@ -190,7 +331,7 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
         return {"written": 0, "refused": detail, "as_of": target.isoformat()}
 
     from jobs.regime_seed import _write_snapshot
-    r = await _write_snapshot(conn, row, seeded=False)
+    r = await _write_snapshot(conn, row, seeded=False, close_source=CLOSE_SOURCE)
     if r is None:
         detail = ("%s already has a %s row; append-only, so nothing was rewritten "
                   "(this run would have said: %s)"
@@ -230,7 +371,7 @@ async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[st
                   pending, pending_closes, held_sessions, change, blocked, seeded,
                   inputs_json, created_at
              FROM regime_snapshots
-            WHERE rules_version = $1
+            WHERE rules_version = $1 AND superseded = FALSE
             ORDER BY as_of DESC
             LIMIT 2""", version)
     if not rows:
@@ -316,10 +457,11 @@ async def flip_history(conn, rules_version: Optional[str] = None) -> Dict[str, A
             """SELECT as_of, shown_regime, regime, change, blocked,
                       pending_closes, held_sessions, tags
                  FROM regime_snapshots
-                WHERE rules_version = $1 AND change IS NOT NULL
+                WHERE rules_version = $1 AND change IS NOT NULL AND superseded = FALSE
                 ORDER BY as_of ASC""", version)
         total = await conn.fetchval(
-            "SELECT COUNT(*) FROM regime_snapshots WHERE rules_version = $1", version)
+            "SELECT COUNT(*) FROM regime_snapshots WHERE rules_version = $1 "
+            "AND superseded = FALSE", version)
     except Exception as exc:
         return {"flips": [], "error": "regime_snapshots unreadable (%s)" % type(exc).__name__}
 
@@ -487,7 +629,7 @@ async def health(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
         row = await conn.fetchrow(
             """SELECT as_of, shown_regime, settled, created_at
                  FROM regime_snapshots
-                WHERE rules_version = $1
+                WHERE rules_version = $1 AND superseded = FALSE
                 ORDER BY as_of DESC LIMIT 1""", version)
     except Exception as exc:
         return {"state": "unavailable", "reason": "regime_snapshots unreadable (%s)"

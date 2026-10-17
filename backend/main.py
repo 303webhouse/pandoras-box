@@ -62,30 +62,44 @@ async def lifespan(app: FastAPI):
     # weekdays at 21:30 ET: seeded at the nightly alone, a Friday deploy would leave the card
     # saying "cannot confirm" until Monday night. Never raises -- a failed seed leaves the card
     # unavailable with a reason, which is the correct state, not a reason to fail startup.
-    try:
-        from database.postgres_client import get_postgres_client as _gpc
-        from jobs.regime_job import run_seed
-        _pool = await _gpc()
-        async with _pool.acquire() as _conn:
-            _have = await _conn.fetchval("SELECT COUNT(*) FROM regime_snapshots")
-            if _have:
-                logger.info("✅ Regime v1: %s snapshot(s) already stored, seed skipped", _have)
-            else:
-                _out = await run_seed(_conn)
-                logger.info("✅ Regime v1 seeded %s session(s) of %s classifiable (%s)",
-                            _out.get("written"), _out.get("sessions"), _out.get("reason"))
-            # R-IV.1198(c) and (e): put the flip-rate gap and the INTERIM family status on the
-            # record, not only in a ruling. Both are idempotent on their action, so a redeploy
-            # does not bury the finding under its own restatements.
-            from jobs.regime_job import record_interim_families, record_known_gap
-            _gap = await record_known_gap(_conn)
-            if _gap:
-                logger.info("📌 Regime v1 KNOWN GAP recorded: %s", _gap)
-            _int = await record_interim_families(_conn)
-            if _int:
-                logger.info("📌 Regime v1 families recorded INTERIM (R-IV.1198(e))")
-    except Exception as e:
-        logger.warning(f"⚠️ Regime v1 seed skipped: {type(e).__name__}: {e}")
+    # SCHEDULED, NOT AWAITED (R-IV.1203(b)). Since the seed backfills the designated series
+    # first, it makes three throttled Polygon calls and sleeps between them -- so awaiting it
+    # here would hold the lifespan open for half a minute before the app starts serving, and
+    # Railway's health check would be waiting on a vendor. The task owns its own connection and
+    # swallows its own failures, so a seed that cannot run leaves the card unavailable with a
+    # reason, which is the correct state and not a reason to fail startup.
+    async def _regime_seed_task():
+        try:
+            from database.postgres_client import get_postgres_client as _gpc
+            from jobs.regime_job import (record_interim_families, record_known_gap, run_seed)
+            _pool = await _gpc()
+            async with _pool.acquire() as _conn:
+                # COUNTS THE CURRENT SEED ONLY. R-IV.1203(b)2 keeps the 321 stable_daily_bars
+                # rows, marked superseded -- so an unfiltered COUNT(*) reads them as "the seed
+                # has run" and the new Polygon seed never happens. The marker has to be
+                # honoured by the guard that decides whether to seed, not only by the reads.
+                _have = await _conn.fetchval(
+                    "SELECT COUNT(*) FROM regime_snapshots WHERE superseded = FALSE")
+                if _have:
+                    logger.info("✅ Regime v1: %s current snapshot(s) stored, seed skipped",
+                                _have)
+                else:
+                    _out = await run_seed(_conn)
+                    logger.info("✅ Regime v1 seeded %s session(s) of %s classifiable (%s)",
+                                _out.get("written"), _out.get("sessions"), _out.get("reason"))
+                # R-IV.1198(c) and (e): put the flip-rate gap and the INTERIM family status on
+                # the record, not only in a ruling. Both are idempotent on their action, so a
+                # redeploy does not bury the finding under its own restatements.
+                _gap = await record_known_gap(_conn)
+                if _gap:
+                    logger.info("📌 Regime v1 KNOWN GAP recorded: %s", _gap)
+                _int = await record_interim_families(_conn)
+                if _int:
+                    logger.info("📌 Regime v1 families recorded INTERIM (R-IV.1198(e))")
+        except Exception as e:
+            logger.warning(f"⚠️ Regime v1 seed skipped: {type(e).__name__}: {e}")
+
+    asyncio.ensure_future(_regime_seed_task())
 
     # Initialize watchlist config table
     try:
