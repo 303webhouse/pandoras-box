@@ -38,6 +38,7 @@ ALLOWED_READERS = {
     "backend/jobs/stable_jobs.py": "schedules the pass and asks whether history exists",
     "backend/services/read_only/regime_strategy.py": "serves the card (the only reader)",
     "backend/database/postgres_client.py": "owns the DDL",
+    "backend/main.py": "runs the seed at startup behind an empty-table guard",
 }
 
 
@@ -626,3 +627,44 @@ def test_the_settled_line_STILL_SAYS_DISPLAY_ONLY():
     assert "display only" in js
     # Both paths: the rendered card and the unavailable card.
     assert js.count("display only") >= 2, "the unavailable path needs it too"
+
+
+# ── the seed runs at deploy, once (R-IV.1195(b)) ───────────────────────────
+
+def test_THE_SEED_RUNS_AT_STARTUP_BEHIND_AN_EMPTY_TABLE_GUARD():
+    """R-IV.1195(b) asks for "the seed count actually executed at deploy", and the nightly only
+    fires on weekdays at 21:30 ET -- seeded at the nightly alone, a Friday deploy would leave the
+    card saying "cannot confirm" until Monday night.
+
+    THE GUARD IS THE POINT. An unguarded startup seed is DEF-SEED-RESURRECTION:
+    init_database()'s account_balances seed re-created deliberately deleted rows on every
+    deploy. This writes only into an empty table."""
+    src = read_source(os.path.join(BACKEND, "main.py"))
+    i = src.index("Regime v1 seed")
+    body = src[i:i + 1800]
+    assert "SELECT COUNT(*) FROM regime_snapshots" in body
+    assert "if _have:" in body and "seed skipped" in body
+    assert "run_seed" in body
+    assert "except Exception" in body, "a failed seed must not fail startup"
+    assert "DEF-SEED-RESURRECTION" in body, "the guard names what it is guarding against"
+
+
+def test_the_seed_is_BOUNDED_BY_THE_CALENDAR_not_by_the_bar_table():
+    """Left unbounded, `sessions_from_series` marks every session settled -- including today's
+    bar if a provisional snapshot wrote one -- so the seed would stamp an UNSETTLED close as
+    settled. That is the R-IV.1176 fault committed by the thing meant to avoid it."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def run_seed")
+    body = code[i:code.index("async def run_nightly")]
+    assert "last_settled_session" in body
+    assert "settled_through=through" in body
+    assert "CalendarHorizonError" in body, "the bounded walk can refuse; that is handled"
+
+
+def test_the_seed_is_IDEMPOTENT_in_two_independent_ways():
+    """The startup guard (empty table) and the unique key (ON CONFLICT DO NOTHING). Either alone
+    would do; both means a race between a deploy and a nightly cannot double-write."""
+    assert "SELECT COUNT(*) FROM regime_snapshots" in read_source(
+        os.path.join(BACKEND, "main.py"))
+    assert "ON CONFLICT (as_of, rules_version) DO NOTHING" in code_of_file(
+        os.path.join(BACKEND, "jobs", "regime_seed.py"))

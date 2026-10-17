@@ -90,7 +90,19 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
         logger.warning("[regime_job] seed refused -- %s", detail)
         return dict(report, written=0, refused=detail)
 
-    sessions = sessions_from_series(series)
+    # BOUNDED BY THE CALENDAR, not by what the bar table happens to hold. Left unbounded,
+    # `sessions_from_series` marks every session settled -- including today's bar if a
+    # provisional snapshot wrote one -- and the seed would stamp an unsettled close as settled,
+    # which is the R-IV.1176 fault committed by the thing meant to avoid it.
+    from stable_engine.market_calendar import CalendarHorizonError, last_settled_session
+    try:
+        through = last_settled_session().isoformat()
+    except CalendarHorizonError as exc:
+        detail = "cannot establish the last settled session (%s)" % exc
+        await _audit(conn, action="refused", detail=detail, rules_version=rules.get("version"))
+        return dict(report, written=0, refused=detail)
+
+    sessions = sessions_from_series(series, settled_through=through)
     out = await seed(conn, sessions, rules, seeded=True)
     detail = ("seeded %d of %d classifiable session(s); %d already present; %d flip(s); %s"
               % (out["written"], report["sessions"], out.get("conflicts", 0), out["flips"],
