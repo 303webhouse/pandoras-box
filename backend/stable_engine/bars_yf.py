@@ -7,6 +7,12 @@ execution-path data). Zero UW calls.
 Coverage contract (house rule): every batch logs fetched/missing counts; callers
 mark a run degraded when coverage < 90% and log which tickers failed. We NEVER fill
 gaps with fabricated or stale-as-fresh values — a missing ticker is simply absent.
+
+BASIS: fully adjusted (`auto_adjust=True`, so splits AND dividends). Correct for moving
+averages and breadth, which is what this table feeds — and not a returns basis
+(strategy-lab §3.3). R-IV.1203(c) keeps it. A return measured across a dividend on these
+prices is understated by the dividend; the settled-close series for that purpose is
+`regime_daily_bars`, which is split-adjusted and dividend-unadjusted.
 """
 
 from __future__ import annotations
