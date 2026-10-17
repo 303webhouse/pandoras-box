@@ -750,13 +750,34 @@
       const c = ctx.composite || {}, r = ctx.regime || {};
       const v1 = lens1View(ctx.composite), v2 = lens2View(ctx.regime);
       const tf = c.timeframe_scores || {};
-      const tfRow = (name, key) => { const x = tf[key]; return kv(name, x ? (x.sub_score != null ? (x.sub_score >= 0 ? '+' : '') + Number(x.sub_score).toFixed(3) : '—') + ' · ' + levelWords(x.bias_level) : '—'); };
+      // TA-193 R1: NUMBERS ONLY on a sub-score, and the ACTIVE WEIGHT beside it. The label
+      // was dropped because the call belongs to the composite; the weight was added because
+      // a sub-score of -0.4 over 8% of the factor weight and one over 40% are not comparable,
+      // and nothing on this panel said which it was.
+      const tfRow = (name, key) => {
+        const x = tf[key];
+        if (!x) return kv(name, '—');
+        const sc = x.sub_score != null ? (x.sub_score >= 0 ? '+' : '') + Number(x.sub_score).toFixed(3) : '—';
+        const w = x.active_weight != null ? Math.round(x.active_weight * 100) + '% of factor weight' : 'weight unknown';
+        const n = x.active_factor_count != null ? x.active_factor_count + ' active' : '';
+        return kv(name, sc + ' · ' + w + (n ? ' · ' + n : ''));
+      };
       const sec = (t) => `<div style="margin:12px 0 4px;color:var(--text-3);font-family:var(--mono);font-size:11px;letter-spacing:1px">${t}</div>`;
       // The kill switch has its own drawer (top-bar beacon); it is not repeated here, and never as
       // a bare CLEAR — that was the fail-open read of default-since-boot.
       body.innerHTML = sec('MARKET MIX · 20 FACTORS · EVERY 15 MIN') +
         kv('Call', v1.call + (v1.num ? ' · ' + v1.num : '')) + kv('Distance', v1.dist || '—') +
-        kv('Raw score', c.composite_score != null ? Number(c.composite_score).toFixed(3) : '—') +
+        // TA-193 R1: THIS ROW WAS CAPTIONED "Raw score" AND HELD THE MODIFIED ONE.
+        // `composite_score` is the score after the velocity multiplier, RVOL and the circuit
+        // breaker. Captioning it "raw" is what sent a reader to recompute the blend, get
+        // -0.080 against a displayed -0.105, and report the engine as broken. Both figures are
+        // shown now, and the stages between them are listed underneath.
+        kv('Weighted blend', c.raw_score != null ? Number(c.raw_score).toFixed(3) : '—') +
+        (c.score_modifiers || []).filter((m) => m.applied).map((m) =>
+          kv('  × ' + String(m.name).replace(/_/g, ' '),
+             String(m.value) + ' → ' + Number(m.score_after).toFixed(3)
+             + (m.reason ? ' · ' + esc(String(m.reason)) : ''))).join('') +
+        kv('Score after modifiers', c.composite_score != null ? Number(c.composite_score).toFixed(3) : '—') +
         tfRow('Intraday', 'intraday') + tfRow('Swing', 'swing') + tfRow('Macro', 'macro') +
         kv('Coverage', c.coverage_ratio != null ? Math.round(c.coverage_ratio * 100) + '% of factor weight' : '—') +
         kv('Stale factors', (c.stale_factors || []).length ? c.stale_factors.join(', ') : 'none') +
