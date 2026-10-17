@@ -431,6 +431,28 @@ async def record_interim_families(conn, rules_version: Optional[str] = None) -> 
         return None
 
 
+async def audit_notes(conn) -> Dict[str, Any]:
+    """The standing notes on the record: the flip-rate known gap and the INTERIM family status.
+
+    R-IV.1198(c) and (e) say to RECORD these. A record nobody can read is a weak record -- and
+    checking that they were written at all meant grepping a deploy log that had already stopped
+    carrying the line, which is the same problem the seed count had.
+    """
+    out: Dict[str, Any] = {}
+    for action in ("known_gap", "interim_families"):
+        try:
+            r = await conn.fetchrow(
+                """SELECT detail, created_at FROM regime_audit
+                    WHERE action = $1 ORDER BY created_at DESC LIMIT 1""", action)
+        except Exception as exc:
+            out[action] = {"error": "regime_audit unreadable (%s)" % type(exc).__name__}
+            continue
+        out[action] = (None if r is None else
+                       {"detail": r["detail"],
+                        "at": r["created_at"].isoformat() if r["created_at"] else None})
+    return out
+
+
 async def seed_run(conn) -> Optional[Dict[str, Any]]:
     """The audit row for the run that seeded the history, if one exists.
 
