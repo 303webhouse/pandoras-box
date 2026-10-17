@@ -144,8 +144,14 @@ async def audit(conn, tickers=CORE8, sessions: int = 5) -> Dict[str, Any]:
                 continue
             stored = {"o": r["o"], "h": r["h"], "l": r["l"], "c": r["c"]}
             v = classify_row(stored, tb)
+            # THE STORED OHLC RIDES ALONG, not just the close. Without it an unexplained
+            # mismatch cannot be adjudicated by anyone reading the report -- which is exactly
+            # what happened to TSLA on 2026-10-16: its stored CLOSE sits inside the settled
+            # range, so it looks like its seven convicted siblings, but its stored RANGE does
+            # not, and the four numbers are what tell those two cases apart.
             findings.append({"ticker": t, "date": day, "verdict": v["verdict"],
                              "why": v["why"], "stored_c": r["c"], "vendor_c": tb["c"],
+                             "stored": stored,
                              "vendor": {k: tb[k] for k in ("o", "h", "l", "c", "v")}})
 
     counts: Dict[str, int] = {}
