@@ -270,3 +270,15 @@ def test_the_core8_is_CITED_not_restated():
     assert len(CORE8) == 8
     code = code_of_file(os.path.join(BACKEND, "jobs", "bars_audit.py"))
     assert "from api.darkpool_backfill_status import CENSUS" in code
+
+
+def test_THE_FINDING_CARRIES_THE_STORED_OHLC_NOT_JUST_THE_CLOSE():
+    """An unexplained mismatch cannot be adjudicated from a close alone, and that is exactly
+    what happened: TSLA 2026-10-16's stored CLOSE sits inside the settled range, so it looks
+    like its seven convicted siblings -- but its stored RANGE does not, and the four numbers
+    are what tell those two cases apart."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "bars_audit.py"))
+    i = code.index("findings.append({'ticker': t, 'date': day, 'verdict': v['verdict']")
+    body = code[i:i + 600]
+    assert "'stored': stored" in body
+    assert "'vendor':" in body
