@@ -426,33 +426,61 @@ def test_flip_count_is_the_only_history_check_and_is_never_pnl():
 # ── 7. the seed depth (R-IV.1193(d): "state how many sessions you seeded") ──
 
 def test_the_200dma_bounds_how_many_sessions_can_carry_a_label():
+    """THE BOUNDARY IS INCLUSIVE, and these assertions were wrong until the first live seed
+    reported "seeded 321 of 320 classifiable session(s)". The written count was right. The 200th
+    bar CAN carry a label: `latest_moving_averages` returns a 200dma from exactly 200 closes
+    (measured: 200 closes -> 199.5, 199 closes -> None)."""
     assert MIN_BARS_FOR_A_LABEL == 200
-    assert classifiable_sessions(252) == 52
-    assert classifiable_sessions(200) == 0
-    assert classifiable_sessions(199) == 0, "never negative"
+    assert classifiable_sessions(199) == 0, "199 closes cannot produce a 200dma"
+    assert classifiable_sessions(200) == 1, "exactly 200 closes CAN; the first one counts"
+    assert classifiable_sessions(201) == 2
+    assert classifiable_sessions(252) == 53
+    assert classifiable_sessions(0) == 0, "never negative"
 
 
-def test_the_seed_depth_from_the_LIVE_bar_counts_is_52_sessions():
-    """SPY and IWM each carry 252 daily bars, read live from hub_get_chart_indicators on
-    2026-10-17. 252 - 200 = 52."""
-    rep = seed_depth_report({"SPY": 252, "IWM": 252})
-    assert rep["sessions"] == 52
-    assert rep["sufficient"] is True
+def test_the_depth_matches_what_the_REPLAY_actually_yields():
+    """THE TEST THAT WOULD HAVE CAUGHT THE OFF-BY-ONE. The arithmetic and the loop are two
+    implementations of one question, and only the loop was right. Now they are checked against
+    each other rather than each being checked against my expectation of it."""
+    import datetime as _dt
+
+    from models.regime_inputs import SECTORS, Bar, sessions_from_series
+    bars, d, i = [], _dt.date(2024, 1, 2), 0
+    while len(bars) < 230:
+        if d.weekday() < 5:
+            c = 300.0 + i * 0.5
+            bars.append(Bar(d, c, c * 1.004, c * 0.996, c, 1_000_000))
+            i += 1
+        d += _dt.timedelta(days=1)
+    series = {"SPY": bars, "QQQ": bars, "IWM": bars}
+    for t in SECTORS:
+        series[t] = bars
+    yielded = len(sessions_from_series(series))
+    assert yielded == classifiable_sessions(230) == 31, (yielded, classifiable_sessions(230))
+
+
+def test_the_seed_depth_from_the_bar_table_is_the_one_that_counts():
+    """252 was the wrong instrument. `hub_get_chart_indicators` reported bar_count 252, but that
+    is the CHART ENDPOINT'S window -- `stable_daily_bars`, which the seed actually reads, held
+    enough history for 321 sessions. An instrument answering about something other than what was
+    asked, for the sixth or seventh time in this lane."""
+    assert seed_depth_report({"SPY": 252, "IWM": 252})["sessions"] == 53
+    assert seed_depth_report({"SPY": 520})["sessions"] == 321
 
 
 def test_the_depth_is_the_MINIMUM_across_the_indices():
     """A session the classifier cannot build inputs for on every index is not a session it can
     label, so the shortest series sets the depth."""
     rep = seed_depth_report({"SPY": 252, "QQQ": 252, "IWM": 230})
-    assert rep["sessions"] == 30
+    assert rep["sessions"] == 31
     assert rep["limited_by"] == "IWM"
 
 
 def test_a_depth_below_the_hysteresis_lookback_reports_INSUFFICIENT():
     """Bear's "15 closes below a falling 200dma" is the widest lookback in §2's block."""
     assert MIN_SEEDED_SESSIONS == 15
-    assert seed_depth_report({"SPY": 210})["sufficient"] is False
-    assert seed_depth_report({"SPY": 215})["sufficient"] is True
+    assert seed_depth_report({"SPY": 213})["sufficient"] is False
+    assert seed_depth_report({"SPY": 214})["sufficient"] is True
 
 
 def test_the_replay_is_PURE_and_needs_no_database():
