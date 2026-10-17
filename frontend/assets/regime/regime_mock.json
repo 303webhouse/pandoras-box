@@ -1,42 +1,91 @@
 {
   "fixture": true,
-  "fixture_note": "MOCK DATA. R-IV.1186(b): v0 renders from this file and wires to nothing. No regime table is read or written, and no live feed touches it. The values are the 10-16 state transcribed from section 9 and section 5 of REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md.",
+  "fixture_note": "MOCK DATA. R-IV.1186(b) and R-IV.1190(d): the card renders from this file and wires to nothing. No regime table is read or written. Closes are the 2026-10-16 settled session. In v1 the per-index numbers come live from hub_get_chart_indicators and market_state (fix-first #5), and the card's arithmetic does not change.",
   "source": "REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md sha256 61940f0264a91839b8c47353b25a5cd421ee0bdba8f35c99d8cc8670eec0247b",
   "rules_version": "v2",
-
   "registered": true,
   "registered_at": "2026-10-16",
   "registered_by": "Nick, 2026-10-16 19:07 MT (R-IV.1189(c))",
   "registration_note": "Registered makes the labels RULES. It does not make the card a GATE: nothing in the hub reads this label to change caps, gates, the kill-switch or the journal (convention 42, section 1). That is why the badge still says display only.",
   "badge": "REGISTERED 10-16 · display only",
-
   "regime_key": "correction",
   "regime_label": "CORRECTION",
-  "tags": ["narrow", "credit-stress"],
+  "tags": [
+    "narrow",
+    "credit-stress"
+  ],
   "settled_close": "2026-10-16",
   "health": "PARTIAL",
   "health_reason": "The crash check is not evaluable and the credit spread level is not measured. Section 5.",
-
   "per_index": [
-    {"ticker": "SPY", "state": "RANGE", "uncertain": false},
-    {"ticker": "QQQ", "state": "CORRECTION", "uncertain": false},
-    {"ticker": "IWM", "state": "DOWNTREND", "uncertain": true,
-     "uncertain_why": "the RVOL leg of the confirmed-break test is unverified"}
+    {
+      "ticker": "SPY",
+      "state": "RANGE",
+      "price": 763.25,
+      "ma50": 768.5,
+      "ma200": 725.01,
+      "uncertain": false
+    },
+    {
+      "ticker": "QQQ",
+      "state": "CORRECTION",
+      "price": 709.8,
+      "ma50": 726.77,
+      "ma200": 674.91,
+      "uncertain": false
+    },
+    {
+      "ticker": "IWM",
+      "state": "DOWNTREND",
+      "price": 270.44,
+      "ma50": 289.07,
+      "ma200": 277.65,
+      "uncertain": true,
+      "uncertain_why": "the RVOL leg of the confirmed-break test is unverified"
+    }
   ],
-
   "evidence": {
     "families_risk_off": 3,
     "families_total": 5,
-    "families_named": ["structure", "breadth", "credit"],
-    "families_unavailable": ["carry"],
+    "families_named": [
+      "structure",
+      "breadth",
+      "credit"
+    ],
+    "families_unavailable": [
+      "carry"
+    ],
     "bull_intact": null,
     "bull_intact_total": 7,
     "bull_intact_reason": "not computed in v0; the evidence strip arrives in v2 with the free feeds",
     "crash_check": "NOT EVALUABLE",
     "crash_check_reason": "the hub has no raw VIX/VIX3M series, only a scaled factor score, so the hard requirement cannot be tested. Section 5.",
-    "premium_posture": "FAIR → EXPENSIVE"
+    "premium_posture": "FAIR → EXPENSIVE",
+    "families": [
+      {
+        "key": "STRUCT",
+        "state": "risk_off"
+      },
+      {
+        "key": "BREADTH",
+        "state": "risk_off"
+      },
+      {
+        "key": "CREDIT",
+        "state": "risk_off"
+      },
+      {
+        "key": "VOL",
+        "state": null,
+        "why": "no raw VIX/VIX3M series; only a scaled factor score"
+      },
+      {
+        "key": "CARRY",
+        "state": null,
+        "why": "the FX strip is not wired into the evidence count"
+      }
+    ]
   },
-
   "lens_split": {
     "present": true,
     "watchlist_alarm": "RISK-OFF",
@@ -44,47 +93,106 @@
     "macro": "NEUTRAL",
     "headline_rule": "Lens 2 is the watchlist (high-beta) alarm and is NEVER the headline. Section 1 and section 5."
   },
-
   "intraday": {
     "kill_switch": "ACTIVE",
     "trigger": "vix_spike",
     "at": "2026-10-16T18:01:00Z",
     "note": "The intraday layer is the existing kill-switch, shown and not touched (R-IV.1186(c))."
   },
-
   "overlays": [
-    {"key": "credit_stress", "state": "WATCH",
-     "detail": "factor pinned at -1.0; the spread level itself is not measured yet"},
-    {"key": "ai_capex_unwind", "state": "WATCH",
-     "detail": "WATCH candidate, bias flag on - it is Nick's own thesis"},
-    {"key": "war_middle_east", "state": "CLEAR",
-     "detail": "no dated source could be verified; see section 3"},
-    {"key": "taiwan_strait", "state": "CLEAR", "detail": ""},
-    {"key": "oil_shock", "state": "CLEAR", "detail": ""},
-    {"key": "carry_unwind", "state": "CLEAR", "detail": ""},
-    {"key": "macro_slowdown", "state": "CLEAR", "detail": ""}
+    {
+      "key": "war_middle_east",
+      "short": "WAR",
+      "state": "CLEAR",
+      "detail": ""
+    },
+    {
+      "key": "taiwan_strait",
+      "short": "TAIWAN",
+      "state": "CLEAR",
+      "detail": ""
+    },
+    {
+      "key": "oil_shock",
+      "short": "OIL",
+      "state": "CLEAR",
+      "detail": ""
+    },
+    {
+      "key": "credit_stress",
+      "short": "CREDIT",
+      "state": "WATCH",
+      "detail": "factor pinned at -1.0; the spread level itself is not measured yet"
+    },
+    {
+      "key": "carry_unwind",
+      "short": "CARRY",
+      "state": "CLEAR",
+      "detail": ""
+    },
+    {
+      "key": "ai_capex_unwind",
+      "short": "AI",
+      "state": "CANDIDATE",
+      "detail": "WATCH candidate, bias flag on - it is Nick's own thesis"
+    },
+    {
+      "key": "macro_slowdown",
+      "short": "MACRO",
+      "state": "CLEAR",
+      "detail": ""
+    }
   ],
-
   "watch_now": [
     "Credit spreads: the swing input",
     "SPY 50dma: a confirmed break means BREAKDOWN",
     "VIX term: backwardation unlocks the crash check"
   ],
-
   "proves_me_wrong": "QQQ and IWM both back over their 50dma on 2 closes.",
-
   "tape_rewarding": {
     "heading": "What the tape is rewarding in your watchlist (context)",
-    "leaders": ["Energy"],
-    "laggards": ["AI / semis"],
+    "leaders": [
+      "Energy"
+    ],
+    "laggards": [
+      "AI / semis"
+    ],
     "counterexample": "Most corrections without a credit or recession confirmation have not become bear markets [MKT]."
   },
-
   "costs": [
     "Late at V-shaped bottoms, by design.",
     "Fast-toward-risk flatters a bearish lean."
   ],
-
-  "excluded_inputs": ["market_breadth", "Robotics theme score"],
-  "news_watch": "E0 push-only"
+  "excluded_inputs": [
+    "market_breadth",
+    "Robotics theme score"
+  ],
+  "news_watch": "E0 push-only",
+  "tripwires": {
+    "bear": {
+      "text": "SPY < 768.50",
+      "basis": "a confirmed SPY 50dma break moves the label to BREAKDOWN (section 2 row 4, section 4 Correction ending-signs)"
+    },
+    "bull": {
+      "text": "QQQ > 726.77 · IWM > 289.07",
+      "basis": "QQQ and IWM both reclaiming their 50dma on 2 closes returns the label to UPTREND (section 4 Correction proves-wrong)"
+    }
+  },
+  "lights": {
+    "shorts": {
+      "value": "EARLY · B3/TAIL",
+      "basis": "SPY has not broken, so a market-level short is still before-the-turn under C5 (section 5); the before-the-turn bucket ceiling is B3 or TAIL (strategy-lab section 6.3)"
+    },
+    "longs": {
+      "value": "NARROW",
+      "basis": "the regime's own `narrow` tag (section 5): SPY is within 5% of its high while 2 of 3 indices sit below their 50dma"
+    },
+    "premium": {
+      "value": "PRICEY",
+      "band": 3,
+      "bands": 3,
+      "position_pct": 72,
+      "basis": "the regime's premium posture, FAIR to EXPENSIVE (section 4, Correction). The three segments are cheap / fair / expensive and the marker sits in the third"
+    }
+  }
 }
