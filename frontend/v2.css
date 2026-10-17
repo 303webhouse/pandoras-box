@@ -1363,6 +1363,14 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   white-space: nowrap;
   cursor: help;
 }
+/* Registered is not a warning. The amber badge said "these labels are not rules yet"; now
+   they are, so the chip goes teal -- while still carrying "display only", because registration
+   changed what the labels ARE and not what the card may DO. */
+.rs-badge.rs-registered {
+  background: rgba(78, 205, 196, .12);
+  border-color: rgba(78, 205, 196, .45);
+  color: var(--accent, #4ecdc4);
+}
 .rs-open {
   background: transparent;
   border: 1px solid rgba(78, 205, 196, .45);

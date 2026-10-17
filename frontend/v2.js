@@ -1025,7 +1025,9 @@
     try {
       const [m, p] = await Promise.all([
         fetch('/assets/regime/regime_mock.json', { cache: 'no-store' }).then((r) => r.json()),
-        fetch('/assets/regime/playbooks.v1.json', { cache: 'no-store' }).then((r) => r.json()),
+        // R-IV.1189(b): v2. The version is in the URL, so a reader of the card's "playbook vN"
+        // line and a reader of the network tab see the same number.
+        fetch('/assets/regime/playbooks.v2.json', { cache: 'no-store' }).then((r) => r.json()),
       ]);
       _rsMock = m; _rsPlaybooks = p;
     } catch (e) {
