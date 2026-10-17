@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Orbit&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack.min.css">
-    <link rel="stylesheet" href="/v2.css?v=53">
+    <link rel="stylesheet" href="/v2.css?v=54">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -45,7 +45,7 @@
         <div class="grid-stack" id="v2Grid">
 
             <!-- Regime band (full width) -->
-            <div class="grid-stack-item" gs-id="regime-band" gs-x="0" gs-y="0" gs-w="12" gs-h="3" gs-min-h="3">
+            <div class="grid-stack-item" gs-id="regime-band" gs-x="0" gs-y="0" gs-w="12" gs-h="6" gs-min-h="5">
                 <div class="grid-stack-item-content">
                     <div class="tile">
                         <div class="tile-header">
@@ -74,7 +74,7 @@
                             <span class="dead-badge" id="rsKill" hidden>KILL</span>
                             <span class="rs-settled" id="rsSettled">settled &mdash;</span>
                             <span class="health-dot" id="rsHealth"></span>
-                            <button type="button" class="rs-open" id="rsOpen" aria-expanded="false">Open &#9656;</button>
+                            <button type="button" class="rs-open" id="rsOpen" aria-expanded="false">&#9666; DETAILS</button>
                             <span class="tile-grip" data-gloss="GRIP">&#10239;</span>
                         </div>
                         <div class="tile-body">
@@ -114,6 +114,7 @@
                     <div class="tile">
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="THEMES">Themes</span>
+                            <button type="button" class="btn-add" id="themesDrawerBtn" title="Open the full theme list (the chip list left the Regime tile in A2; R-IV.1209(c))">all</button>
                             <span class="tile-sub" id="themesAsOf"></span>
                             <div class="spacer"></div>
                             <span class="health-dot" id="themesHealthDot"></span>
@@ -171,22 +172,12 @@
                 </div>
             </div>
 
-            <!-- b5 Yield curve mini -->
-            <div class="grid-stack-item" gs-id="curve" gs-x="0" gs-y="20" gs-w="4" gs-h="5">
-                <div class="grid-stack-item-content">
-                    <div class="tile">
-                        <div class="tile-header">
-                            <span class="tile-title" data-gloss="CURVE">Yield Curve</span>
-                            <div class="spacer"></div>
-                            <span class="tile-grip" data-gloss="GRIP">⠿</span>
-                        </div>
-                        <div class="tile-body">
-                            <div class="chart-host sm"><canvas id="curveChart"></canvas></div>
-                            <div class="mini-vals" id="curveVals"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- b5 Yield curve mini — A2 (R-IV.1209(c)): MOVED INTO THE REGIME BAR.
+                 Its canvas and value row keep the SAME ids (curveChart / curveVals), so
+                 loadRates() is untouched: the R-IV.1210(b) census found those two to be its
+                 only readers, and renaming them would have broken a live read for no reason.
+                 The grid item is gone; a saved layout naming "curve" finds no such tile, which
+                 GridStack ignores. -->
 
             <!-- b6 USD carry-check mini -->
             <div class="grid-stack-item" gs-id="usd" gs-x="4" gs-y="20" gs-w="4" gs-h="5">
@@ -368,6 +359,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=67"></script>
+    <script src="/v2.js?v=68"></script>
 </body>
 </html>

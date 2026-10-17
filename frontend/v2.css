@@ -1650,3 +1650,141 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .mock-chip, .ag-g b, .ev-chip { animation: none !important; }
 }
+
+/* NOTE on what A2 supersedes: the .regime-band 4-column grid above, and the .rc-regime /
+   .rc-themes / .rc-tide / .rc-vol / .lens-* cell rules, are no longer reached -- the band is a
+   2x2 .rb-grid now and the only surviving user of .regime-cell is the loading placeholder in
+   v2.html. They are left in place rather than deleted in this pass: unused selectors are inert,
+   and a blind sweep of 60 lines is risk with no functional gain. Flagged as a follow-up. */
+
+/* ===========================================================================
+   AGORA ADDITIONS, PHASE A2 (R-IV.1209(c)) - regime bar v2 + the left drawer.
+   Tokens only. PHONE FIRST: the base rules are the phone's and the query widens.
+   =========================================================================== */
+
+/* Orbit, the font the PANDORA logo already loads (v2.html:11). Nick's first tweak:
+   every regime label wears it. Declared once as a var so a label cannot drift onto
+   the mono stack by being written out by hand. */
+:root { --orbit: 'Orbit', var(--mono); }
+
+/* -- the band: the 2x2 grid, then the curve. Phone: one column, stacked. -- */
+.regime-band { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; }
+.rb-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+
+.rb-cell {
+  position: relative; display: flex; flex-direction: column; gap: 3px;
+  padding: 7px 9px 8px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--panel-2); cursor: pointer;
+}
+.rb-cap {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  font: 9px var(--mono); letter-spacing: 1.1px; color: var(--text-3);
+}
+.rb-lab-row { display: flex; align-items: baseline; gap: 7px; }
+.rb-lab {
+  font-family: var(--orbit); font-size: 19px; letter-spacing: 1.4px; line-height: 1;
+}
+.rb-num { font: 600 12px var(--mono); color: var(--text-2); margin-left: auto; }
+.rb-g { height: 12px; margin-top: 2px; }
+.rb-g b {
+  position: absolute; top: -1px; width: 4px; height: 12px; border-radius: 2px;
+  background: var(--text); transform: translateX(-2px);
+}
+/* No reading, no marker. An empty track is honest; a marker at zero is a reading. */
+.rb-g-none { height: 12px; }
+
+.rb-det {
+  align-self: flex-start; margin-top: 2px; padding: 0;
+  background: none; border: 0; cursor: pointer;
+  font: 9px var(--mono); letter-spacing: .8px; color: var(--text-3);
+}
+.rb-det:hover { color: var(--teal); }
+.rb-fine {
+  font: 9px var(--mono); color: var(--text-3); line-height: 1.4;
+  padding-top: 3px; border-top: 1px dashed var(--border);
+}
+
+/* -- (d)4: group outlines. Grey when mixed; the side's colour when consistent. -- */
+.rb-grp-grey { border-color: var(--border); }
+.rb-grp.rb-grp-bull, .rb-grp-pulse.rb-grp-bull { border-color: var(--up); }
+.rb-grp.rb-grp-bear, .rb-grp-pulse.rb-grp-bear { border-color: var(--down); }
+
+@keyframes rbGrpBull {
+  0%, 100% { box-shadow: 0 0 0 1px var(--up), 0 0 5px color-mix(in srgb, var(--up) 20%, transparent); }
+  50% { box-shadow: 0 0 0 1px var(--up), 0 0 17px color-mix(in srgb, var(--up) 55%, transparent); }
+}
+@keyframes rbGrpBear {
+  0%, 100% { box-shadow: 0 0 0 1px var(--down), 0 0 5px color-mix(in srgb, var(--down) 20%, transparent); }
+  50% { box-shadow: 0 0 0 1px var(--down), 0 0 17px color-mix(in srgb, var(--down) 55%, transparent); }
+}
+.rb-grp-pulse.rb-grp-bull { animation: rbGrpBull 2.2s ease-in-out infinite; }
+.rb-grp-pulse.rb-grp-bear { animation: rbGrpBear 2.2s ease-in-out infinite; }
+
+/* -- (d)3: a read at an extreme pulses its OWN box and label, whatever the others say.
+      Listed after the group rules so it wins on equal specificity. -- */
+.rb-cell.rb-x-bull { border-color: var(--up) !important; animation: rbGrpBull 2.2s ease-in-out infinite; }
+.rb-cell.rb-x-bear { border-color: var(--down) !important; animation: rbGrpBear 2.2s ease-in-out infinite; }
+@keyframes rbGlowBull {
+  0%, 100% { text-shadow: 0 0 4px color-mix(in srgb, var(--up) 28%, transparent); }
+  50% { text-shadow: 0 0 15px color-mix(in srgb, var(--up) 80%, transparent); }
+}
+@keyframes rbGlowBear {
+  0%, 100% { text-shadow: 0 0 4px color-mix(in srgb, var(--down) 28%, transparent); }
+  50% { text-shadow: 0 0 15px color-mix(in srgb, var(--down) 80%, transparent); }
+}
+.rb-x-bull .rb-lab-x { animation: rbGlowBull 2.2s ease-in-out infinite; }
+.rb-x-bear .rb-lab-x { animation: rbGlowBear 2.2s ease-in-out infinite; }
+
+/* -- (d)5: the kill switch beats (d)4. Red alarm on the whole tile. -- */
+.tile.rb-alarm { border-color: var(--down) !important; animation: kodiak-pulse 2.2s ease-in-out infinite; }
+
+/* -- the curve, now inside the bar -- */
+.rb-curve {
+  display: flex; flex-direction: column; gap: 4px;
+  padding-top: 7px; border-top: 1px solid var(--border);
+}
+.rb-ch { display: flex; align-items: center; gap: 6px; }
+.rb-cl { font: 9px var(--mono); letter-spacing: 1.1px; color: var(--text-3); }
+
+/* -- the left DETAILS drawer (board 8) -- */
+.rd-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.rd-lab { font-family: var(--orbit); font-size: 24px; letter-spacing: 1.5px; line-height: 1.1; }
+.rd-sub { font: 9px var(--mono); color: var(--text-3); letter-spacing: .4px; }
+.rd-diff { font: 9px var(--mono); color: var(--teal); }
+.rd-ctx {
+  font: 10px var(--mono); color: var(--text-2); line-height: 1.5;
+  padding: 7px 9px; border-radius: 6px; background: var(--panel-2);
+  border: 1px solid var(--border); margin-bottom: 10px;
+}
+.rd-sec {
+  font: 9px var(--mono); letter-spacing: 1.3px; color: var(--text-3);
+  margin: 12px 0 4px; padding-bottom: 3px; border-bottom: 1px solid var(--border);
+}
+/* The per-section MOCK marker. Phase A sections are placeholders and each says so where a
+   reader is looking, not only in the ruling. */
+.rd-mock {
+  font: 9px var(--mono); color: var(--amber); letter-spacing: .5px;
+  padding: 4px 0 2px;
+}
+.rd-foot {
+  margin-top: 14px; font: 9px var(--mono); color: var(--text-3); line-height: 1.5;
+}
+
+@media (min-width: 769px) {
+  .rb-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
+  .rb-lab { font-size: 22px; }
+  .regime-band { flex-direction: row; align-items: stretch; gap: 12px; }
+  .rb-grid { flex: 1 1 auto; }
+  .rb-curve {
+    flex: 0 0 240px; padding-top: 0; border-top: 0;
+    padding-left: 12px; border-left: 1px solid var(--border);
+  }
+}
+
+/* (d)7: every animation above, off. */
+@media (prefers-reduced-motion: reduce) {
+  .rb-grp-pulse.rb-grp-bull, .rb-grp-pulse.rb-grp-bear,
+  .rb-cell.rb-x-bull, .rb-cell.rb-x-bear,
+  .rb-x-bull .rb-lab-x, .rb-x-bear .rb-lab-x,
+  .tile.rb-alarm { animation: none !important; }
+}
