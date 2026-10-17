@@ -1102,3 +1102,88 @@ def test_THE_SEED_IS_SCHEDULED_NOT_AWAITED_AT_STARTUP():
     body = src[i:src.index("asyncio.ensure_future(_regime_seed_task())")]
     assert "except Exception" in body, "the task must swallow its own failures"
     assert "get_postgres_client" in body, "the task owns its own connection"
+
+
+# ── the assembled payload must be constructible ────────────────────────────
+
+@pytest.mark.asyncio
+async def test_THE_AVAILABLE_PAYLOAD_ASSEMBLES_END_TO_END():
+    """THE TEST THAT WOULD HAVE CAUGHT A LIVE 500. The R-IV.1203(b) edit replaced a block by two
+    computed offsets and swallowed the `_LABELS` dict sitting between them, so the route raised
+    NameError on every request -- and the whole suite stayed green, because every other test
+    here exercises `_unavailable` or `_families` and nothing assembled the AVAILABLE branch.
+
+    A fake pool stands in for the database: the point is that every name the branch touches
+    exists, which is what was actually broken."""
+    from services.read_only import regime_strategy as rs
+
+    snap = {"as_of": "2026-10-16", "regime": "correction", "shown_regime": "narrow_uptrend",
+            "label": "CORRECTION", "tags": ["narrow"], "basis": "b", "not_evaluable": [],
+            "pending": None, "pending_closes": 1, "held_sessions": 19, "change": None,
+            "blocked": None, "seeded": True, "inputs_json": "{}"}
+
+    async def _latest(conn, v=None):
+        return {"snapshot": dict(snap), "diff": {"changed": False, "detail": "no change"},
+                "rules_version": "v1"}
+
+    async def _health(conn, v=None):
+        return {"state": "current", "reason": "ok"}
+
+    async def _seed_run(conn):
+        return {"sessions_written": 302}
+
+    async def _flips(conn, v=None):
+        return {"flips": [], "count": 0}
+
+    async def _notes(conn):
+        return {}
+
+    async def _ldiff(conn, v=None):
+        return {"changed_count": 0}
+
+    class _Conn:
+        pass
+
+    class _Acq:
+        async def __aenter__(self):
+            return _Conn()
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Pool:
+        def acquire(self):
+            return _Acq()
+
+    async def _pool():
+        return _Pool()
+
+    import jobs.regime_job as rj
+    saved = (rj.latest_with_diff, rj.health, rj.seed_run, rj.flip_history,
+             rj.audit_notes, rj.label_diff, rs.get_postgres_client)
+    rj.latest_with_diff, rj.health, rj.seed_run = _latest, _health, _seed_run
+    rj.flip_history, rj.audit_notes, rj.label_diff = _flips, _notes, _ldiff
+    rs.get_postgres_client = _pool
+    try:
+        got = await rs.get_regime_strategy()
+    finally:
+        (rj.latest_with_diff, rj.health, rj.seed_run, rj.flip_history,
+         rj.audit_notes, rj.label_diff, rs.get_postgres_client) = saved
+
+    assert got["available"] is True
+    assert got["regime_key"] == "narrow_uptrend"
+    assert got["regime_label"] == "NARROW UPTREND", "the _LABELS lookup must resolve"
+    assert got["close_source"] == "polygon"
+    assert got["display_only"] == "display only"
+    assert got["health"] == "ok"
+    for field in ("per_index", "evidence", "seed_run", "flip_history", "label_diff",
+                  "audit_notes", "diff", "settled_close", "close_source_note"):
+        assert field in got, field
+
+
+def test_every_section_2_key_has_a_display_label():
+    """A key with no label renders as None on the face of the card."""
+    from models.regime_classifier import load_rules
+    from services.read_only.regime_strategy import _LABELS
+    for key in load_rules()["order"]:
+        assert _LABELS.get(key), key
