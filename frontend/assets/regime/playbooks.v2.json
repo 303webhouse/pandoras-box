@@ -1,0 +1,215 @@
+{
+  "version": "v2",
+  "source": "REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md sha256 61940f0264a91839b8c47353b25a5cd421ee0bdba8f35c99d8cc8670eec0247b",
+  "source_sections": "regimes from section 4, overlays from section 3",
+  "registered": true,
+  "registration_note": "REGISTERED 2026-10-16 - display only. The 10 regimes and 7 overlays are registered as written. Registration makes the labels rules; it does NOT make the card a gate. Nothing in the hub reads this label to change caps, gates, the kill-switch or the journal (convention 42, section 1).",
+  "not_a_signal": "Section 1: this is context and a risk governor, not a signal. It never says buy X or short Y, never ranks tickers, and nothing in the hub uses its label to change caps, gates, the kill-switch or the journal (convention 42).",
+  "held_policy": "No text is held in v2. The policy stands for any future text: a line whose wording reads as an instruction is NOT reworded by BUILD and NOT shipped - it is withheld, counted, and reported for the ruled rewording. v1 held three such sentences and R-IV.1189 supplied their pricing-fact form.",
+  "regimes": {
+    "crash_liquidation": {
+      "n": 1,
+      "label": "Crash / Liquidation",
+      "matters_now": [
+        "credit spreads and the funding/carry crosses",
+        "whether backwardation persists",
+        "liquidity: bid-ask spreads widen, stops gap"
+      ],
+      "tape": "Everything correlated falls; cash, short-dated Treasuries and the dollar/yen hold; quality defensives fall less [MKT]. Counterexample: snap-back days of +3-5% inside crashes.",
+      "premium": "EXPENSIVE. Premium is at its most expensive here: options bought in a spike are priced for the move that already happened. This is the regime where tails bought earlier are worth the most. Existing rules that apply: the two-contract rule, and X3 (60–70% of max value under 21 DTE).",
+      "held_sentences": 0,
+      "ending_signs": "Backwardation resolving to contango; VIX lower highs on new index lows; credit stops widening; a breadth thrust.",
+      "proves_wrong": "Contango back on 2 closes with credit stable, and the label exits."
+    },
+    "bear_market": {
+      "n": 2,
+      "label": "Bear Market",
+      "matters_now": [
+        "the falling 200dma",
+        "lower highs; credit trend",
+        "the recession tag"
+      ],
+      "tape": "Defensives (staples, health care, utilities) lead on a relative basis; cyclicals and high beta lag. Counterexample: 2022 energy led.",
+      "premium": "Fair-to-expensive. Defined-risk structures. The C5/Z2 gates allow B1/B2 shorts only after a confirmed downtrend.",
+      "held_sentences": 0,
+      "ending_signs": "A breadth thrust; credit healing; 2 closes above the 50dma with the 20 > 50 cross.",
+      "proves_wrong": "SPY back above a flattening 200dma for 5 closes."
+    },
+    "bear_market_rally": {
+      "n": 3,
+      "label": "Bear-Market Rally",
+      "matters_now": [
+        "where the rally stalls versus the falling 200dma and the prior breakdown zone (PYTHIA's acceptance test)",
+        "whether credit confirms"
+      ],
+      "tape": "short squeezes, with the most-beaten-down names ripping hardest. Counterexample: some rallies become the real bottom (Recovery).",
+      "premium": "puts lose twice, on direction and on falling vol. A -3x inverse ETF loses about 9% on a +3% index day [MKT]. The bounce is the trap for both sides.",
+      "held_sentences": 0,
+      "ending_signs": "Rejection at the falling 200dma (bear resumes), or acceptance above it with credit healing (Recovery).",
+      "proves_wrong": "Recovery's entry test passes."
+    },
+    "breakdown": {
+      "n": 4,
+      "label": "Breakdown",
+      "matters_now": [
+        "the 50dma break was confirmed; does it follow through to the 200dma?",
+        "credit",
+        "VIX term"
+      ],
+      "tape": "Leadership narrows further; small caps and high beta lag.",
+      "premium": "Fair to expensive. Debit spreads over outright puts. This is the first regime where a market-level short stops being before-the-turn under C5 (it is shown as a meter).",
+      "held_sentences": 0,
+      "ending_signs": "A failed breakdown: 2 closes back above the 50dma with volume.",
+      "proves_wrong": "The reclaim, which moves the label to Correction or Recovery."
+    },
+    "recovery": {
+      "n": 5,
+      "label": "Recovery",
+      "matters_now": [
+        "breadth thrust follow-through",
+        "credit healing",
+        "the 200dma"
+      ],
+      "tape": "Early cyclicals and small caps often lead off a bottom [MKT]. Counterexample: rallies that fail become a Bear-Market Rally.",
+      "premium": "CRUSHING. Long premium loses value fastest as volatility deflates. Tails have historically been cheapest again once VIX is back in its low band with normal contango.",
+      "held_sentences": 0,
+      "ending_signs": "To Uptrend after 5 closes above the 200dma; back to Bear on rejection.",
+      "proves_wrong": "New lows within 30 sessions."
+    },
+    "correction": {
+      "n": 6,
+      "label": "Correction",
+      "matters_now": [
+        "credit spreads (the swing input)",
+        "the SPY 50dma flip line: a confirmed break means Breakdown",
+        "VIX term structure: backwardation unlocks the crash check"
+      ],
+      "tape": "Defensives and energy relatively stronger, high beta weaker. Counterexample: most corrections without a credit or recession confirmation have not become bear markets [MKT].",
+      "premium": "Fair to expensive. Debit spreads beat outright puts. Short dated puts cost the most.",
+      "held_sentences": 0,
+      "ending_signs": "QQQ and IWM back above their 50dma (back to Uptrend), or a confirmed SPY 50dma break (Breakdown).",
+      "proves_wrong": "QQQ and IWM both reclaim their 50dma on 2 closes."
+    },
+    "range_chop": {
+      "n": 7,
+      "label": "Range / Chop",
+      "matters_now": [
+        "the range edges",
+        "which index breaks first",
+        "RVOL on the break"
+      ],
+      "tape": "Mean reversion works, breakouts fail.",
+      "premium": "sellers' market. The worst regime for leveraged ETFs, because daily-reset decay is highest when the index chops flat. A -3x fund loses roughly 6 x variance, about 0.15% a day at 25% vol [MKT]. Long options decay without paying.",
+      "held_sentences": 0,
+      "ending_signs": "ADX above 25, with a confirmed break either side.",
+      "proves_wrong": "A confirmed break."
+    },
+    "melt_up": {
+      "n": 8,
+      "label": "Melt-Up",
+      "matters_now": [
+        "extension above the 200dma",
+        "RSI",
+        "spot-up/vol-up: VIX rising while SPY rises = fragility"
+      ],
+      "tape": "Momentum and the most-loved themes lead. Counterexample: melt-ups end abruptly, usually after a breadth divergence.",
+      "premium": "calls get expensive; puts are cheap. Tails are cheapest here, but a before-the-turn short is still capped at B3/TAIL (C5), with the entering-parabolic-shorts-too-early flag on its face.",
+      "held_sentences": 0,
+      "ending_signs": "Breadth divergence (index up, % above 50dma down); failed breakout; credit widening.",
+      "proves_wrong": "Nothing; it is a state. The exit is to Uptrend or Narrow Uptrend."
+    },
+    "uptrend": {
+      "n": 9,
+      "label": "Uptrend",
+      "matters_now": [
+        "breadth participation",
+        "pullbacks to the 20/50dma",
+        "credit calm"
+      ],
+      "tape": "Trend followers rewarded; dips bought.",
+      "premium": "CHEAP. Tails are cheapest here: longer-dated far-OTM tickets cost the least decay per day. A bearish view in this regime is early, not wrong-by-price; C5 applies.",
+      "held_sentences": 0,
+      "ending_signs": "Sector count falls below 5 of 11; IWM loses its 50dma; new lows outnumber new highs.",
+      "proves_wrong": "Narrow Uptrend or Correction triggers."
+    },
+    "narrow_uptrend": {
+      "n": 10,
+      "label": "Narrow Uptrend",
+      "matters_now": [
+        "the index is held up by a few leaders while participation shrinks",
+        "which leader breaks first"
+      ],
+      "tape": "A handful of mega-caps; everything else lags. Counterexample: narrow markets can run for months.",
+      "premium": "cheap to fair.",
+      "held_sentences": 0,
+      "ending_signs": "A leader breaks its 50dma; IWM downtrend deepens; credit widens.",
+      "proves_wrong": "Broadening, with 5 or more sectors above their 50dma and IWM reclaiming."
+    }
+  },
+  "overlays": {
+    "war_middle_east": {
+      "label": "War - Middle East",
+      "type": "news",
+      "watch_when": "2 whitelisted, dated sources within 12h report a kinetic event, strait incident or hit on oil infrastructure.",
+      "active_needs": "Measured confirmation from 2 or more different families: Brent +5% on the session; VIX-spike breaker; USDJPY -1% with gold up; SPY gap of -1% or worse.",
+      "clears_when": "Brent gives back half its spike, VIX back in contango, and PYTHIA's gap test fails (price back inside prior value)."
+    },
+    "taiwan_strait": {
+      "label": "Taiwan Strait",
+      "type": "news (judgement)",
+      "watch_when": "Formal quarantine, blockade or inspection announcement, or a shipping advisory. Drills alone are logged only.",
+      "active_needs": "SMH -4% with TSM lagging; USDJPY -1%; VIX breaker - plus Nick's acknowledgement. This overlay is the one exception that also needs his acknowledgement to go ACTIVE.",
+      "clears_when": "Stand-down announced and SMH recovers half its drop."
+    },
+    "oil_shock": {
+      "label": "Oil shock",
+      "type": "computed",
+      "watch_when": "Brent +15% over 20 sessions.",
+      "active_needs": "Brent +25% over 20 sessions with crack spread widening, plus one non-oil family.",
+      "clears_when": "Brent back under +10% versus 20 sessions earlier."
+    },
+    "credit_stress": {
+      "label": "Credit stress",
+      "type": "computed",
+      "watch_when": "Credit factor at -1.0 for 3 settled sessions, or HY spread +50bp in a month.",
+      "active_needs": "HY spread +100bp in a month (or +25bp in a week), plus XLF/KRE new 20-day lows.",
+      "clears_when": "Spread narrows for 2 weeks, or a backstop is announced."
+    },
+    "carry_unwind": {
+      "label": "Carry unwind",
+      "type": "computed (FX strip already exists)",
+      "watch_when": "AUDJPY and MXNJPY each -1.5% in a session.",
+      "active_needs": "Plus USDJPY -1.5%, VIX in backwardation on a close.",
+      "clears_when": "Crosses steady for 3 sessions and VIX back in contango."
+    },
+    "ai_capex_unwind": {
+      "label": "AI-capex unwind",
+      "type": "partly news",
+      "watch_when": "A hyperscaler capex-guidance cut (primary filing or call), or SMH below its 50dma with 3 or more AI themes fading.",
+      "active_needs": "SMH confirmed C5 break, plus a credit family.",
+      "clears_when": "Guidance restored, or SMH back above its 50dma. Carries a permanent bias flag: it is Nick's thesis."
+    },
+    "macro_slowdown": {
+      "label": "Macro slowdown (recession / stagflation flavour)",
+      "type": "computed, monthly",
+      "watch_when": "Sahm 0.4 or more, or 4-week claims +15% off their low, or ISM below 48.",
+      "active_needs": "Sahm 0.5 or more and claims +20%. Flavour is stagflation if breakevens are rising.",
+      "clears_when": "Two monthly prints reverse."
+    }
+  },
+  "overlay_state_machine": {
+    "states": "CLEAR -> WATCH -> ACTIVE -> FADING -> CLEAR, plus a grey STALE state if the watcher misses a check-in. A STALE chip can never read CLEAR.",
+    "news_cannot_activate": "News can only raise WATCH. ACTIVE fires automatically when the market confirms. No person can force it.",
+    "timers": "WATCH with no market confirmation expires after 72h, logged as expired-unconfirmed. ACTIVE fades after 5 trading sessions unless both keys fire again.",
+    "buttons": "Acknowledge silences repeat pushes. Dismiss (with a logged reason) clears it. There is no Upgrade and no Extend - the person who forecast the event should not be the one who activates it."
+  },
+  "costs_on_the_card": {
+    "hysteresis": "Entering a regime takes 2 settled closes, and a regime lasts 5 sessions before it can change again - except a move toward more risk, which can happen any time but still needs 2 closes. Range needs 10 sessions.",
+    "stated_cost": "This makes the module late at V-shaped bottoms, and fast-toward-risk flatters a bearish lean.",
+    "excluded_inputs": "market_breadth (RSP-SPY, sign-unaware per TA-193) and the Robotics theme score (corrupted) are excluded, and the card says so."
+  },
+  "supersedes": "v1, built from the same document at sha256 37dff5af7faa3843f33722d6c2827fee6d9532c79980ff8fd21375217a657d3e",
+  "changes_from_v1": "R-IV.1189(b): the two premium lines withheld in v1 are restored in the reworded pricing-fact form supplied by SPINE, so nothing is held any more. R-IV.1189(c): the labels are REGISTERED (Nick, 2026-10-16 19:07 MT). Every other regime and overlay text is byte-identical to v1 - v2 was derived from v1 rather than retyped.",
+  "registered_at": "2026-10-16",
+  "registered_by": "Nick, 2026-10-16 19:07 MT (R-IV.1189(c))"
+}

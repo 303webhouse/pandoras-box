@@ -37,7 +37,11 @@ BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND = os.path.join(os.path.dirname(BACKEND), "frontend")
 ASSETS = os.path.join(FRONTEND, "assets", "regime")
 
-SOURCE_SHA = "37dff5af7faa3843f33722d6c2827fee6d9532c79980ff8fd21375217a657d3e"
+# R-IV.1189(b) supersedes R-IV.1186's hash. BOTH are kept: v2 cites the new document
+# and v1 must go on citing the old one, or the audit trail says a superseded file came
+# from a document it never saw.
+SOURCE_SHA = "61940f0264a91839b8c47353b25a5cd421ee0bdba8f35c99d8cc8670eec0247b"
+SOURCE_SHA_V1 = "37dff5af7faa3843f33722d6c2827fee6d9532c79980ff8fd21375217a657d3e"
 
 
 def _read(path: str) -> str:
@@ -175,11 +179,29 @@ def _raise_on_dirty():
 
 # ── the versioned files ─────────────────────────────────────────────────────
 
-def test_the_playbook_is_a_versioned_file():
-    """R-IV.1186(b): "stored as versioned files, not editable from the UI". The version is in
-    the FILENAME, so two versions can exist side by side and a card names which it read."""
+def test_the_playbook_is_a_versioned_file_AND_BOTH_VERSIONS_EXIST():
+    """R-IV.1186(b): "stored as versioned files". The version is in the FILENAME, and
+    R-IV.1189 is what makes that matter: v1 and v2 now sit side by side, so "playbook v1" on a
+    card can never mean two different texts."""
     assert os.path.exists(os.path.join(ASSETS, "playbooks.v1.json"))
-    assert rp.load_playbooks()["version"] == "v1"
+    assert os.path.exists(os.path.join(ASSETS, "playbooks.v2.json"))
+    assert rp.load_playbooks()["version"] == "v2"
+    assert rp.load_playbooks("v1")["version"] == "v1"
+    assert rp.playbook_versions() == ["v1", "v2"]
+
+
+def test_THE_BUILD_GATE_COVERS_EVERY_VERSION_ON_DISK():
+    """A superseded file stays in the repository for audit, and "it is not the live one" is not
+    a reason for it to hold an order."""
+    rp.assert_no_orders_any_version()
+
+
+def test_v1_names_the_OLD_document_hash_and_v2_the_new():
+    """A superseded version that silently claimed the new document would make the audit trail
+    useless."""
+    assert SOURCE_SHA_V1 in rp.load_playbooks("v1")["source"]
+    assert SOURCE_SHA in rp.load_playbooks("v2")["source"]
+    assert SOURCE_SHA_V1 in rp.load_playbooks("v2")["supersedes"]
 
 
 def test_nothing_in_the_hub_writes_the_playbook_or_the_fixture():
@@ -221,17 +243,61 @@ def test_every_overlay_carries_its_three_state_columns():
             assert o.get(field), "%s is missing %s" % (key, field)
 
 
-def test_a_held_line_is_COUNTED_AND_EXPLAINED_never_silently_dropped():
-    """THREE SENTENCES ARE WITHHELD. A playbook that silently drops one reads as complete,
-    which is the one thing a held text must not do — so the count and the reason are on the
-    row, and the card renders them."""
+def test_NOTHING_IS_HELD_IN_V2():
+    """R-IV.1189(b) supplied the reworded pricing-fact form of all three sentences v1 withheld,
+    so v2 holds nothing. The POLICY survives, because the next text that reads as an order gets
+    the same treatment."""
     pb = rp.load_playbooks()
     held = {k: v["held_sentences"] for k, v in pb["regimes"].items()
             if v.get("held_sentences")}
+    assert held == {}, held
+    assert pb["held_policy"], "the policy must survive having nothing to apply to"
+
+
+def test_V1_STILL_RECORDS_WHAT_IT_HELD():
+    """The superseded version is the audit trail. If v1 were edited to look clean, there would
+    be no record that three sentences were ever withheld or why."""
+    v1 = rp.load_playbooks("v1")
+    held = {k: v["held_sentences"] for k, v in v1["regimes"].items()
+            if v.get("held_sentences")}
     assert held == {"crash_liquidation": 2, "recovery": 1}
     for key in held:
-        assert pb["regimes"][key].get("held_reason"), "%s holds a line with no reason" % key
-    assert pb["held_policy"]
+        assert v1["regimes"][key].get("held_reason")
+
+
+def test_the_reworded_premium_lines_are_the_ruled_text():
+    """Verbatim from the document at R-IV.1189's hash, lines 118 and 146 - bold markers
+    stripped as they were for every other line, and the editorial "(Reworded...)" note excluded
+    because that is a changelog entry, not a pricing fact."""
+    pb = rp.load_playbooks()
+    crash = pb["regimes"]["crash_liquidation"]["premium"]
+    rec = pb["regimes"]["recovery"]["premium"]
+    assert crash.startswith("EXPENSIVE. Premium is at its most expensive here:")
+    assert "priced for the move that already happened" in crash
+    assert "the two-contract rule, and X3 (60\u201370% of max value under 21 DTE)" in crash
+    assert "Reworded" not in crash, "the editorial note is not playbook text"
+    assert rec.startswith("CRUSHING. Long premium loses value fastest as volatility deflates.")
+    assert "cheapest again once VIX is back in its low band with normal contango" in rec
+    assert "Reworded" not in rec
+
+
+def test_the_reworded_text_is_LINT_CLEAN_which_is_the_point_of_the_rewording():
+    """The sentences were withheld BECAUSE they read as orders. The replacements must not."""
+    pb = rp.load_playbooks()
+    for key in ("crash_liquidation", "recovery"):
+        assert rp.order_findings(pb["regimes"][key]["premium"]) == [], key
+
+
+def test_v2_is_derived_from_v1_and_only_the_two_lines_moved():
+    """v2 was DERIVED from v1, not retyped. Eight regimes and all seven overlays must be
+    byte-identical, or 200 lines of prose went back through someone's fingers for no reason and
+    a dropped clause would be invisible."""
+    v1, v2 = rp.load_playbooks("v1"), rp.load_playbooks("v2")
+    assert v1["overlays"] == v2["overlays"]
+    untouched = set(v1["regimes"]) - {"crash_liquidation", "recovery"}
+    assert len(untouched) == 8
+    for key in untouched:
+        assert v1["regimes"][key] == v2["regimes"][key], key
 
 
 def test_the_playbook_names_its_source_and_that_source_s_hash():
@@ -303,12 +369,16 @@ def test_the_fixture_is_also_lint_clean():
 
 # ── the badge, the lens rule, and v0's "no wiring" ──────────────────────────
 
-def test_the_UNREGISTERED_badge_is_in_the_markup_beside_the_title():
-    """R-IV.1186(b) asks for it VISIBLE. At the foot of a scrolling card it is not."""
+def test_the_badge_says_REGISTERED_AND_STILL_SAYS_DISPLAY_ONLY():
+    """R-IV.1189(c). "display only" SURVIVES registration, and that is the half of this test
+    that matters: a test checking only for "REGISTERED" would pass a badge that had quietly
+    dropped it, which is the reading §1 and convention #42 both forbid."""
     html = _read(os.path.join(FRONTEND, "v2.html"))
     i = html.index('id="rsBadge"')
-    assert "UNREGISTERED" in html[i:i + 220]
-    assert "display only" in html[i:i + 220]
+    block = html[i:i + 520]
+    assert "REGISTERED 10-16" in block
+    assert "display only" in block
+    assert "UNREGISTERED" not in block
     # The TITLE ELEMENT, not the first occurrence of the words -- which is the HTML comment
     # above the tile, 456 characters earlier. Measuring from there made this test fail on a
     # badge that is correctly placed: the same "anchor matched the wrong occurrence" fault
@@ -317,9 +387,30 @@ def test_the_UNREGISTERED_badge_is_in_the_markup_beside_the_title():
     assert title < i < title + 400, "the badge must sit beside the title"
 
 
-def test_the_fixture_is_not_registered():
-    assert rp.load_mock()["registered"] is False
-    assert rp.load_playbooks()["registered"] is False
+def test_the_labels_are_REGISTERED_with_who_and_when():
+    """R-IV.1189(c): Nick, 2026-10-16 19:07 MT. A flipped boolean with no author is a claim
+    nobody can check later."""
+    for doc in (rp.load_mock(), rp.load_playbooks()):
+        assert doc["registered"] is True
+        assert doc["registered_at"] == "2026-10-16"
+        assert "19:07" in doc["registered_by"]
+        assert "R-IV.1189" in doc["registered_by"]
+
+
+def test_V1_IS_STILL_UNREGISTERED():
+    """v1 was built before the labels were registered and must go on saying so."""
+    assert rp.load_playbooks("v1")["registered"] is False
+
+
+def test_REGISTRATION_DID_NOT_MAKE_THE_CARD_A_GATE():
+    """THE DISTINCTION THE BADGE HAS TO CARRY. Registration changed what the labels ARE (rules);
+    it did not change what the card may DO. §1 and convention #42 are untouched, and both
+    documents say so in their own words rather than leaving it to be inferred."""
+    for doc in (rp.load_mock(), rp.load_playbooks()):
+        note = doc.get("registration_note", "")
+        assert "display only" in note.lower()
+        assert "gate" in note.lower()
+        assert "42" in note
 
 
 def test_LENS_2_IS_LABELLED_AN_ALARM_AND_IS_NOT_THE_HEADLINE():
@@ -346,7 +437,9 @@ def test_v0_READS_NO_HUB_ROUTE_AT_ALL():
     body = js[i:js.index("function rsChip", i)]
     assert body.count("fetch(") == 2
     assert "/assets/regime/regime_mock.json" in body
-    assert "/assets/regime/playbooks.v1.json" in body
+    assert "/assets/regime/playbooks.v2.json" in body, (
+        "the card must fetch the CURRENT version; the URL and the card's 'playbook vN' line "
+        "have to agree")
     assert "apiFetch" not in body, "v0 must not call a hub route"
     assert "/api/" not in body
 
@@ -417,7 +510,7 @@ def test_every_class_the_renderer_uses_has_a_style():
 
 def test_the_pins_moved_for_both_changed_assets():
     html = _read(os.path.join(FRONTEND, "v2.html"))
-    for asset, floor in (("v2.js", 62), ("v2.css", 49)):
+    for asset, floor in (("v2.js", 63), ("v2.css", 50)):
         m = re.search(re.escape(asset) + r"\?v=(\d+)", html)
         assert m and int(m.group(1)) >= floor, (asset, m and m.group(1))
 
@@ -425,7 +518,7 @@ def test_the_pins_moved_for_both_changed_assets():
 def test_the_other_pages_pinning_v2_css_moved_too():
     """v2.css is pinned by three pages at independent values; the page missed keeps serving
     whatever was cached under its unchanged pin."""
-    for page, floor in (("stater.html", 45), ("abacus.html", 44)):
+    for page, floor in (("stater.html", 46), ("abacus.html", 45)):
         m = re.search(r"v2\.css\?v=(\d+)", _read(os.path.join(FRONTEND, page)))
         assert m and int(m.group(1)) >= floor, (page, m and m.group(1))
 
@@ -436,6 +529,6 @@ def test_the_assets_live_where_the_server_serves_them_wholesale():
     404 and the card would render its "did not load" message in production."""
     assert os.path.isdir(ASSETS)
     assert ASSETS.replace("\\", "/").endswith("frontend/assets/regime")
-    for fn in ("playbooks.v1.json", "regime_mock.json"):
+    for fn in ("playbooks.v1.json", "playbooks.v2.json", "regime_mock.json"):
         assert os.path.exists(os.path.join(ASSETS, fn))
         json.loads(_read(os.path.join(ASSETS, fn)))

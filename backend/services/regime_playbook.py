@@ -44,7 +44,11 @@ ASSETS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "frontend", "assets", "regime")
 
-PLAYBOOK_VERSION = "v1"
+#: R-IV.1189(b): v2 restores the two premium lines v1 withheld, in the reworded
+#: pricing-fact form. v1 STAYS ON DISK so the pre-rewording text remains auditable --
+#: and the lint below covers EVERY version present, so keeping it cannot become a way
+#: for unchecked text to sit in the repository.
+PLAYBOOK_VERSION = "v2"
 PLAYBOOK_FILE = "playbooks.%s.json" % PLAYBOOK_VERSION
 MOCK_FILE = "regime_mock.json"
 
@@ -263,6 +267,29 @@ def lint_playbooks(version: str = PLAYBOOK_VERSION) -> List[str]:
     return out
 
 
+def playbook_versions() -> List[str]:
+    """Every playbook version on disk, oldest first. Read from the FILENAMES, so a version
+    added without telling this module is still linted."""
+    out = []
+    for fn in sorted(os.listdir(ASSETS)):
+        m = re.fullmatch(r"playbooks\.(v\d+)\.json", fn)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def lint_all_versions() -> List[str]:
+    """Every instruction-shaped text in EVERY playbook version on disk.
+
+    The current version is not the only one a reader can reach: a superseded file stays in the
+    repository for audit, and "it is not the live one" is not a reason for it to hold an order.
+    """
+    out: List[str] = []
+    for v in playbook_versions():
+        out.extend("[%s] %s" % (v, f) for f in lint_playbooks(v))
+    return out
+
+
 def assert_no_orders(version: str = PLAYBOOK_VERSION) -> None:
     """Raise `PlaybookLintError` if any playbook text reads as an instruction."""
     findings = lint_playbooks(version)
@@ -270,3 +297,13 @@ def assert_no_orders(version: str = PLAYBOOK_VERSION) -> None:
         raise PlaybookLintError(
             "playbook %s contains %d instruction-shaped text(s):\n  %s"
             % (version, len(findings), "\n  ".join(findings)))
+
+
+def assert_no_orders_any_version() -> None:
+    """THE BUILD GATE. Raises if ANY version on disk holds an instruction."""
+    findings = lint_all_versions()
+    if findings:
+        raise PlaybookLintError(
+            "%d instruction-shaped text(s) across %s:%s%s"
+            % (len(findings), ", ".join(playbook_versions()), chr(10) + "  ",
+               (chr(10) + "  ").join(findings)))

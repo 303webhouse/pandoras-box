@@ -1,11 +1,14 @@
 {
   "fixture": true,
   "fixture_note": "MOCK DATA. R-IV.1186(b): v0 renders from this file and wires to nothing. No regime table is read or written, and no live feed touches it. The values are the 10-16 state transcribed from section 9 and section 5 of REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md.",
-  "source": "REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md sha256 37dff5af7faa3843f33722d6c2827fee6d9532c79980ff8fd21375217a657d3e",
-  "rules_version": "v1",
+  "source": "REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md sha256 61940f0264a91839b8c47353b25a5cd421ee0bdba8f35c99d8cc8670eec0247b",
+  "rules_version": "v2",
 
-  "registered": false,
-  "badge": "UNREGISTERED · display only",
+  "registered": true,
+  "registered_at": "2026-10-16",
+  "registered_by": "Nick, 2026-10-16 19:07 MT (R-IV.1189(c))",
+  "registration_note": "Registered makes the labels RULES. It does not make the card a GATE: nothing in the hub reads this label to change caps, gates, the kill-switch or the journal (convention 42, section 1). That is why the badge still says display only.",
+  "badge": "REGISTERED 10-16 · display only",
 
   "regime_key": "correction",
   "regime_label": "CORRECTION",
