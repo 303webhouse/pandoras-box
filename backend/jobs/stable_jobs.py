@@ -575,6 +575,14 @@ NIGHTLY_RETRY_EVERY_S = 15 * 60          # a failed pass is re-attempted every 1
 NIGHTLY_RETRY_UNTIL_HOUR_ET = 23         # ...until 23:59 ET; past that it is tomorrow's
 _nightly_attempted_at: dict = {}         # session key -> last attempt (rate limit only)
 
+#: Regime v1 (R-IV.1195(b)). It runs AFTER the nightly, because it classifies from the bars the
+#: nightly writes: on a session where the nightly has not yet advanced `stable_daily_bars`, the
+#: newest bar is yesterday's and the label would be stamped with yesterday's `as_of`. The
+#: offset is not a guess about how long the nightly takes -- `_maybe_run_regime` asks the
+#: nightly's own durable ledger whether this session's pass completed, and declines if not.
+REGIME_TIME = (21, 30)
+_regime_attempted_at: dict = {}
+
 
 # S8 (R-IV.361). 15:45 ET is a CHOICE: late enough that the session's IV is
 # meaningful, early enough that quotes are still live. A post-close capture would
@@ -891,6 +899,73 @@ async def _maybe_run_nightly(et, key_prefix: str) -> None:
     await _record("nightly", run_nightly_close_recompute, session_date=et.date())
 
 
+async def _maybe_run_regime(et, key_prefix: str) -> None:
+    """Run the v1 regime classifier for this session, once it can be done honestly.
+
+    TWO GATES, and both are refusals rather than waits:
+
+      1. THE NIGHTLY MUST HAVE COMPLETED. This job classifies from `stable_daily_bars`, which
+         the nightly writes. Run first and the newest bar is yesterday's, so the label would be
+         stamped with yesterday's `as_of` and look like a successful run. UNKNOWN is not YES
+         here either -- if the ledger cannot answer, the regime pass declines and retries,
+         because a wrong `as_of` is worse than a missing label and there is no hurry.
+      2. THE SESSION MUST BE SETTLED, which `run_nightly` checks against the calendar and
+         records as an audit row when it refuses.
+
+    Never raises: `_record` swallows, and a regime failure must not touch the stable nightly.
+    """
+    from jobs.job_runs import JOB_NIGHTLY, JOB_REGIME, has_completed
+
+    last = _regime_attempted_at.get(key_prefix)
+    if last is not None and (et - last).total_seconds() < NIGHTLY_RETRY_EVERY_S:
+        return
+
+    try:
+        regime_done = await has_completed(JOB_REGIME, et.date())
+    except Exception as exc:
+        logger.warning("[stable_jobs] regime completion check failed: %s", exc)
+        regime_done = None
+    if regime_done is True:
+        return
+
+    try:
+        nightly_done = await has_completed(JOB_NIGHTLY, et.date())
+    except Exception as exc:
+        logger.warning("[stable_jobs] regime: nightly completion check failed: %s", exc)
+        nightly_done = None
+    if nightly_done is not True:
+        # Declines without consuming the rate limit, so it re-asks on the next tick.
+        logger.info("[stable_jobs] regime waits: nightly completed=%s for %s",
+                    nightly_done, et.date())
+        return
+
+    _regime_attempted_at[key_prefix] = et
+    if last is not None:
+        logger.warning("[stable_jobs] regime RETRY for %s (completed=%s)",
+                       key_prefix, regime_done)
+    await _record(JOB_REGIME, _run_regime_pass, session_date=et.date())
+
+
+async def _run_regime_pass() -> dict:
+    """One regime pass: seed first if the history is empty, then classify the settled close.
+
+    THE SEED IS PART OF THE PASS, not a separate deploy-time hook. R-IV.1193(d) asks for a
+    seeded count, and a seed that only ran if someone remembered to trigger it would leave the
+    hysteresis with no history and let a one-session blip become the label.
+    """
+    from database.postgres_client import get_postgres_client
+    from jobs import regime_job
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        seeded = {"written": 0, "skipped": "history already present"}
+        have = await conn.fetchval("SELECT COUNT(*) FROM regime_snapshots")
+        if not have:
+            seeded = await regime_job.run_seed(conn)
+        out = await regime_job.run_nightly(conn)
+        return {"seed": seeded, "nightly": out}
+
+
 async def stable_engine_loop():
     """One-minute ticker that fires the nightly recompute + provisional snapshots at
     their ET times (weekdays), each at most once per calendar day."""
@@ -932,6 +1007,15 @@ async def stable_engine_loop():
                 nh, nm = NIGHTLY_TIME
                 if (et.hour, et.minute) >= (nh, nm) and et.hour <= NIGHTLY_RETRY_UNTIL_HOUR_ET:
                     await _maybe_run_nightly(et, key_prefix)
+
+                # ── Regime v1 classifier (R-IV.1195(b)) ──────────────────────
+                # Same completion-backed retry as the nightly, and gated on the
+                # nightly's OWN completion: it classifies from the bars the
+                # nightly writes, so running first would stamp the label with
+                # yesterday's as_of and look like a success.
+                rh, rm = REGIME_TIME
+                if (et.hour, et.minute) >= (rh, rm) and et.hour <= NIGHTLY_RETRY_UNTIL_HOUR_ET:
+                    await _maybe_run_regime(et, key_prefix)
 
                 # ── CIRCE'S STEW daily pass (R-IV.429(b)) ────────────────────
                 # A market holiday is not a session, and a date the calendar cannot

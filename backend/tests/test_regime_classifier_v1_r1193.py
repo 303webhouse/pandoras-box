@@ -479,11 +479,16 @@ def test_the_seed_writer_is_APPEND_ONLY():
     """§8. A re-run that disagreed with an earlier one would otherwise overwrite the evidence of
     the disagreement."""
     import inspect
+    import re as _re
 
     import jobs.regime_seed as rs
-    src = inspect.getsource(rs.seed)
+    # SCOPED TO THE MODULE, not to `seed`. R-IV.1195(b) moved the INSERT into `_write_snapshot`
+    # so the nightly job could reuse it, and this test kept asking `seed` -- it failed on a
+    # clause that had moved three lines away, not on a property that had changed.
+    src = inspect.getsource(rs)
     assert "ON CONFLICT (as_of, rules_version) DO NOTHING" in src
-    assert "UPDATE" not in src.upper().replace("UPDATED", "")
+    assert "INSERT INTO regime_snapshots" in inspect.getsource(rs._write_snapshot)
+    assert not _re.search(r"\bUPDATE\s+regime_snapshots", src, _re.I)
 
 
 def test_the_seed_job_states_why_the_depth_is_what_it_is():

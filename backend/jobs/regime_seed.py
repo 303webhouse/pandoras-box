@@ -88,7 +88,10 @@ def replay(sessions: List[Dict[str, Any]],
     from models.regime_classifier import classify
     from models.regime_hysteresis import apply_hysteresis, flip_count
 
-    raw = [classify(s, rules) for s in sessions]
+    # The inputs ride along with the verdict so a stored row can be re-derived later. A label
+    # without the numbers behind it is a claim a reader has to take on trust, and six months from
+    # now nobody can rebuild the bar slice that produced it.
+    raw = [dict(classify(s, rules), inputs=s) for s in sessions]
     # An unsettled session produces no label and must not occupy a slot in the series: the
     # hysteresis counts CLOSES, and a refused session is not one.
     settled = [r for r in raw if r.get("settled")]
@@ -97,7 +100,8 @@ def replay(sessions: List[Dict[str, Any]],
 
 
 async def seed(conn, sessions: List[Dict[str, Any]],
-               rules: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+               rules: Optional[Dict[str, Any]] = None, *,
+               seeded: bool = True) -> Dict[str, Any]:
     """Write the replayed series to `regime_snapshots`, append-only.
 
     DELIBERATELY SEPARATE FROM `replay`. The replay is pure and testable; this is the only part
@@ -109,22 +113,44 @@ async def seed(conn, sessions: List[Dict[str, Any]],
     """
     out = replay(sessions, rules)
     written = 0
+    conflicts = 0
     for row in out["shown"]:
-        if row.get("shown_regime") is None:
-            # A session before the first label qualified. Recorded as a session with no label
-            # rather than skipped, so the series has no silent gaps.
-            pass
-        r = await conn.fetchrow(
-            """INSERT INTO regime_snapshots
-                   (as_of, regime, shown_regime, tags, basis, rules_version, inputs_json)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-               ON CONFLICT (as_of, rules_version) DO NOTHING
-               RETURNING as_of""",
-            row.get("as_of"), row.get("regime"), row.get("shown_regime"),
-            row.get("tags") or [], row.get("basis"), row.get("rules_version"), "{}")
-        if r is not None:
+        # A session before the first label qualified is still WRITTEN, with shown_regime NULL.
+        # Skipping it would leave a hole indistinguishable from a session the job never ran on,
+        # and that ambiguity is the R-IV.1175 fault.
+        r = await _write_snapshot(conn, row, seeded=seeded)
+        if r is None:
+            conflicts += 1
+        else:
             written += 1
     out["written"] = written
-    logger.info("[regime_seed] replayed %d session(s), wrote %d, %d flip(s)",
-                out["depth"], written, out["flips"])
+    out["conflicts"] = conflicts
+    logger.info("[regime_seed] replayed %d session(s), wrote %d, %d already present, %d flip(s)",
+                out["depth"], written, conflicts, out["flips"])
     return out
+
+
+async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool):
+    """One append-only snapshot row, or None when (as_of, rules_version) is already present.
+
+    `ON CONFLICT DO NOTHING` makes a re-run idempotent WITHOUT rewriting a row (section 8). A
+    re-run that disagrees with an earlier one therefore leaves both the original row and -- via
+    the caller's audit entry -- the fact that it disagreed. Overwriting would destroy exactly
+    the evidence a disagreement is worth having.
+    """
+    import json as _json
+
+    return await conn.fetchrow(
+        """INSERT INTO regime_snapshots
+               (as_of, rules_version, regime, shown_regime, label, tags, basis,
+                not_evaluable, settled, pending, pending_closes, held_sessions,
+                change, blocked, inputs_json, seeded)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16)
+           ON CONFLICT (as_of, rules_version) DO NOTHING
+           RETURNING as_of""",
+        row.get("as_of"), row.get("rules_version"), row.get("regime"),
+        row.get("shown_regime"), row.get("label"), list(row.get("tags") or []),
+        row.get("basis"), list(row.get("not_evaluable_rows") or []),
+        bool(row.get("settled")), row.get("pending"), row.get("pending_closes"),
+        row.get("held_sessions"), row.get("change"), row.get("blocked"),
+        _json.dumps(row.get("inputs") or {}, default=str), bool(seeded))
