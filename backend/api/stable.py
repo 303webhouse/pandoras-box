@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from database.postgres_client import get_postgres_client
 from services.read_only import stable as stable_read
+from utils.pivot_auth import require_api_key
 from services.read_only.stable import _age_seconds, _envelope, _strip_rows
 
 logger = stable_read.logger
@@ -88,6 +89,33 @@ async def get_regime_strategy():
     from services.read_only.regime_strategy import get_regime_strategy as _get
 
     return await _get()
+
+
+@router.post("/bars-audit")
+async def post_bars_audit(
+    sessions: int = Query(5, ge=1, le=30),
+    repair: bool = Query(False),
+    _auth=Depends(require_api_key),
+):
+    """Compare the last `sessions` stored bars for the CORE8 against Polygon. R-IV.1203(c).
+
+    AUTHED, AND READ-ONLY BY DEFAULT. `repair=true` rewrites rows -- so it sits behind
+    require_api_key like every other write on this hub, and the audit can be run and read
+    without the power to change anything.
+
+    Only rows convicted as UNSETTLED CAPTURES are rewritten. A basis difference is correct data
+    on a different basis (this table is fully adjusted by design, R-IV.1203(c)) and an
+    unexplained mismatch is not understood -- repairing either would turn a correct row wrong.
+    """
+    from database.postgres_client import get_postgres_client
+    from jobs import bars_audit
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        report = await bars_audit.audit(conn, sessions=sessions)
+        if repair:
+            report["repair"] = await bars_audit.repair(conn, report)
+    return report
 
 
 @router.get("/theme/{theme}/members")
