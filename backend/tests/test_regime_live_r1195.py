@@ -326,7 +326,13 @@ def test_the_family_definitions_are_FLAGGED_not_asserted():
     for the two v1 can measure, so these reuse the Correction row's own clauses and say so."""
     from models.regime_classifier import load_rules
     fam = load_rules()["families_v1"]
-    assert "pending ratification" in fam["status"]
+    # R-IV.1198(e) RATIFIED these as INTERIM, so "pending ratification" is no longer the
+    # status -- the ruling moved it, not the code drifting. What the test is really about is
+    # unchanged: the two measured families declare that their test is provisional, and the
+    # three with no feed declare that they have none.
+    assert fam["status"].startswith("INTERIM")
+    assert "R-IV.1198(e)" in fam["status"]
+    assert "no per-family test" in fam["status"]
     assert fam["credit"] is None and fam["vol"] is None and fam["carry"] is None
     assert "50dma" in fam["structure"] and "50dma" in fam["breadth"]
     assert "never inferred" in fam["absent_rule"]
@@ -641,7 +647,9 @@ def test_THE_SEED_RUNS_AT_STARTUP_BEHIND_AN_EMPTY_TABLE_GUARD():
     deploy. This writes only into an empty table."""
     src = read_source(os.path.join(BACKEND, "main.py"))
     i = src.index("Regime v1 seed")
-    body = src[i:i + 1800]
+    # To the NEXT startup step, not a fixed width. A fixed 1800 characters stopped reaching the
+    # handler as soon as R-IV.1198(c)/(e)'s audit calls were added between them.
+    body = src[i:src.index("Initialize watchlist config table", i)]
     assert "SELECT COUNT(*) FROM regime_snapshots" in body
     assert "if _have:" in body and "seed skipped" in body
     assert "run_seed" in body
@@ -765,11 +773,11 @@ def test_NO_FEED_IN_V1_is_claimed_ONLY_for_the_families_that_have_none():
     with no feed, and only the rules file gets to say which is which."""
     from services.read_only.regime_strategy import _families
     # Nothing recorded at all: structure and breadth must NOT claim "no feed".
-    rows = {r["name"]: r for r in _families({})}
+    rows = {r["key"]: r for r in _families({})}
     assert rows["STRUCTURE"]["why"] == "not recorded for this session"
     assert rows["BREADTH"]["why"] == "not recorded for this session"
     # With the rules file's own absence reasons present, those ARE quoted.
-    rows2 = {r["name"]: r for r in _families(
+    rows2 = {r["key"]: r for r in _families(
         {"families": {"structure": True},
          "families_basis": {"structure": "SPY below its 50dma"},
          "families_absent_in_v1": {"vol": "no VIX/VIX3M series in v1"}})}
@@ -782,10 +790,12 @@ def test_a_measured_risk_ON_family_is_not_confused_with_an_absent_one():
     """False means measured-and-risk-on. None means nobody measured. Both render without a
     colour, so the distinction has to live in the data."""
     from services.read_only.regime_strategy import _families
-    rows = {r["name"]: r for r in _families(
+    rows = {r["key"]: r for r in _families(
         {"families": {"structure": False}, "families_basis": {"structure": "SPY above 50dma"}})}
     assert rows["STRUCTURE"]["state"] == "risk_on"
-    assert rows["STRUCTURE"]["why"] == "SPY above 50dma"
+    # The basis is still there; R-IV.1198(e)'s interim mark is APPENDED, not substituted.
+    assert rows["STRUCTURE"]["why"].startswith("SPY above 50dma")
+    assert "interim test" in rows["STRUCTURE"]["why"]
 
 
 def test_THE_SEED_COUNT_IS_READABLE_FROM_THE_ROUTE():
@@ -800,3 +810,142 @@ def test_THE_SEED_COUNT_IS_READABLE_FROM_THE_ROUTE():
     assert "rows_written" in body
     svc = code_of_file(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
     assert "seed_run" in svc
+
+
+# ── the families' field name is the RENDERER'S (R-IV.1198 pass) ────────────
+
+def test_THE_FAMILY_FIELD_IS_KEY_BECAUSE_THAT_IS_WHAT_V2JS_READS():
+    """A live defect found while wiring R-IV.1198(e). v2.js reads `f.key`; the service served
+    `name`. `esc(undefined)` renders the literal word "undefined" rather than failing, so the
+    card carried five dots labelled "undefined" and nothing errored.
+
+    The server and the renderer are two ends of one contract, and only the renderer gets to
+    name it -- so this test reads the NAME OUT OF v2.js rather than restating it."""
+    js = read_source(os.path.join(ROOT, "frontend", "v2.js"))
+    i = js.index("(m.evidence || {}).families")
+    block = js[i:i + 600]
+    field = re.search(r"esc\(f\.(\w+)\)", block)
+    assert field, "could not read which field the renderer prints"
+    from services.read_only.regime_strategy import _families
+    served = _families({"families": {"structure": True},
+                        "families_basis": {"structure": "x"}})[0]
+    assert field.group(1) in served, (
+        "the renderer prints f.%s and the service does not serve it" % field.group(1))
+
+
+# ── (e) the interim mark ───────────────────────────────────────────────────
+
+def test_THE_INTERIM_MARK_IS_ON_THE_TOOLTIP():
+    """R-IV.1198(e): "Mark them interim ... on the family dot's tooltip." The tooltip is the
+    `why` string, which is what v2.js puts in the title attribute."""
+    from services.read_only.regime_strategy import _families
+    rows = {r["key"]: r for r in _families(
+        {"families": {"structure": True, "breadth": False},
+         "families_basis": {"structure": "SPY below its 50dma", "breadth": "1 of 3 below"}})}
+    for k in ("STRUCTURE", "BREADTH"):
+        assert rows[k]["interim"] is True, k
+        assert "interim test (R-IV.1198(e))" in rows[k]["why"], k
+    # And the basis is still there -- the mark is added, not substituted.
+    assert "SPY below its 50dma" in rows["STRUCTURE"]["why"]
+
+
+def test_only_STRUCTURE_and_BREADTH_are_interim():
+    """The three with no feed are not "interim tests" -- they are absent. Marking them interim
+    would imply a test exists that someone merely has not ratified."""
+    from services.read_only.regime_strategy import INTERIM_FAMILIES, _families
+    assert set(INTERIM_FAMILIES) == {"structure", "breadth"}
+    rows = {r["key"]: r for r in _families(
+        {"families_absent_in_v1": {"credit": "no HY OAS feed in v1",
+                                   "vol": "no VIX/VIX3M series in v1",
+                                   "carry": "no carry strip in v1"}})}
+    for k in ("CREDIT", "VOL", "CARRY"):
+        assert rows[k]["interim"] is False, k
+        assert "interim" not in rows[k]["why"], k
+
+
+def test_the_rules_file_says_INTERIM_and_cites_the_ruling():
+    from models.regime_classifier import load_rules
+    f = load_rules()["families_v1"]
+    assert f["status"].startswith("INTERIM")
+    assert "R-IV.1198(e)" in f["status"]
+    assert "flip rate" in f["status"] or "flip rate" in f.get("flip_rate_review", "")
+
+
+def test_the_INTERIM_status_is_RECORDED_IN_THE_AUDIT():
+    """R-IV.1198(e): "Mark them interim in regime_audit". On the record, not only in a ruling
+    and a comment."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    assert "async def record_interim_families" in code
+    i = code.index("async def record_interim_families")
+    body = code[i:i + 1400]
+    assert "interim_families" in body
+    assert "R-IV.1198(e)" in body
+    assert "LIMIT 1" in body, "idempotent: one row, not one per deploy"
+    main = read_source(os.path.join(BACKEND, "main.py"))
+    assert "record_interim_families" in main
+
+
+# ── (c) the flip list and the known gap ────────────────────────────────────
+
+def test_THE_FLIP_LIST_IS_READABLE_and_says_whether_a_flip_is_CHATTER():
+    """R-IV.1198(c) asks for the list so a reader can see whether the flips are real regime
+    changes or chatter between two neighbouring labels. The count alone cannot tell those
+    apart, so the FROM and TO are published with their positions in §2's bear-to-bull order:
+    a Correction/Narrow-uptrend pair one step apart is a different fact from a Bear/Melt-up
+    pair six apart."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    assert "async def flip_history" in code
+    i = code.index("async def flip_history")
+    body = code[i:i + 2600]
+    assert "change IS NOT NULL" in body
+    assert "ORDER BY as_of ASC" in body, "oldest-first, so the series reads forward"
+    for field in ("from_index", "to_index", "steps", "neighbours", "closes_held"):
+        assert field in body, field
+
+
+def test_the_flip_rate_is_computed_against_SECTION_2s_TARGET():
+    import jobs.regime_job as rj
+    assert rj.FLIPS_PER_YEAR_TARGET == 6
+    assert rj.SESSIONS_PER_YEAR == 252
+
+
+def test_NO_THRESHOLD_OR_HYSTERESIS_CHANGE_was_made_for_the_flip_rate():
+    """R-IV.1198(c) rules this explicitly. Tuning on observed flips is a fitted parameter
+    wearing a rule's name, so the gap is RECORDED and nothing adjusts itself to meet it."""
+    from models.regime_classifier import load_rules
+    h = load_rules()["hysteresis"]
+    # The numbers §2 states, unchanged.
+    assert h["enter_requires_settled_closes"] == 2
+    assert h["min_sessions_before_change"] == 5
+    assert h["range_requires_sessions"] == 10
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def flip_history")
+    body = code[i:i + 3000]
+    # The rate is reported; it must not feed back into any threshold.
+    assert "FLIPS_PER_YEAR_TARGET" in body
+    for banned in ("enter_requires_settled_closes =", "min_sessions_before_change =",
+                   "range_requires_sessions ="):
+        assert banned not in code, banned
+
+
+def test_the_KNOWN_GAP_is_recorded_once_and_names_both_numbers():
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    assert "async def record_known_gap" in code
+    i = code.index("async def record_known_gap")
+    body = code[i:i + 1600]
+    assert "action = 'known_gap'" in body
+    assert "LIMIT 1" in body, "idempotent on the action, so a redeploy does not restate it"
+    j = code.index("async def flip_history")
+    gap = code[j:j + 3000]
+    assert "design target" in gap and "fitted parameter" in gap
+    main = read_source(os.path.join(BACKEND, "main.py"))
+    assert "record_known_gap" in main
+
+
+def test_the_gap_is_NONE_when_the_rate_is_within_target():
+    """A "known gap" that is always present is not a finding. The field is None when the
+    observed rate sits at or under §2's target."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    i = code.index("async def flip_history")
+    body = code[i:i + 3000]
+    assert "rate <= FLIPS_PER_YEAR_TARGET" in body

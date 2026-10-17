@@ -61,6 +61,11 @@ def _unavailable(reason: str) -> Dict[str, Any]:
 #: The three display blocks §1 shows that v1 has no feed for. Served as an explicit statement
 #: rather than omitted, so the card can print the reason instead of an empty panel the reader
 #: has to interpret.
+#: R-IV.1198(e). Ratified as INTERIM, not final: §2 names five families but states no
+#: per-family test, so these two reuse the Correction row's own clauses. Nothing gates on them
+#: (#42), and per-family tests get designed at the same review as the flip rate.
+INTERIM_FAMILIES = ("structure", "breadth")
+
 NO_FEED_IN_V1 = {
     "lights": "no ruled discipline feed in v1",
     "tripwires": "no intraday tripwire feed in v1",
@@ -107,6 +112,11 @@ def _families(inputs: Dict[str, Any]) -> list:
 
     R-IV.1193(d): "Any family with no feed yet (VOL, CARRY until v2) renders as no data. Never
     infer it." Omitting the row would read as "not risk-off", which is a claim nobody measured.
+
+    THE FIELD IS `key`, NOT `name`. v2.js reads `f.key`, and `esc(undefined)` renders the
+    literal word "undefined" rather than failing -- so serving `name` put five dots labelled
+    "undefined" on the live card. The server and the renderer are two ends of one contract and
+    only the renderer gets to name it.
     """
     fams = inputs.get("families") or {}
     basis = inputs.get("families_basis") or {}
@@ -114,18 +124,27 @@ def _families(inputs: Dict[str, Any]) -> list:
     rows = []
     for name in ("structure", "breadth", "credit", "vol", "carry"):
         if name in fams and fams[name] is not None:
-            rows.append({"name": name.upper(), "state": "risk_off" if fams[name] else "risk_on",
-                         "why": basis.get(name)})
+            # INTERIM, per R-IV.1198(e). These two reuse the Correction row's own clauses
+            # because §2 names five families and states no per-family test; per-family tests
+            # get designed at the same review as the flip rate. The mark goes on the TOOLTIP
+            # and not only in a ruling, so the reader of the dot knows what it is standing on.
+            why = basis.get(name)
+            rows.append({"key": name.upper(),
+                         "state": "risk_off" if fams[name] else "risk_on",
+                         "why": ("%s · interim test (R-IV.1198(e))" % why) if why
+                                else "interim test (R-IV.1198(e))",
+                         "interim": name in INTERIM_FAMILIES})
         elif name in absent:
-            rows.append({"name": name.upper(), "state": None, "why": absent[name]})
+            rows.append({"key": name.upper(), "state": None, "why": absent[name],
+                         "interim": False})
         else:
             # NOT "no feed in v1". That claim belongs only to the families the rules file names
             # as having no feed. A family that HAS a feed but no value for this session is a
             # different fact, and saying "no feed" about it is a caption asserting an absence
             # that is not real -- which is what the first live payload did for STRUCTURE and
             # BREADTH, because the read-back had not selected inputs_json.
-            rows.append({"name": name.upper(), "state": None,
-                         "why": "not recorded for this session"})
+            rows.append({"key": name.upper(), "state": None,
+                         "why": "not recorded for this session", "interim": False})
     return rows
 
 
@@ -137,7 +156,8 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
     screen would be the one nobody tested.
     """
     try:
-        from jobs.regime_job import health as regime_health, latest_with_diff, seed_run
+        from jobs.regime_job import (flip_history, health as regime_health,
+                                     latest_with_diff, seed_run)
     except Exception as exc:
         return _unavailable("regime module unavailable (%s)" % type(exc).__name__)
 
@@ -149,6 +169,9 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # R-IV.1195(b) asks for the seed count executed at deploy. Served here so the
             # number outlives the deploy log it was first read from.
             seeded_run = await seed_run(conn)
+            # R-IV.1198(c): the flip list, so a reader can see whether the churn is real
+            # regime change or chatter between two neighbouring labels.
+            flips = await flip_history(conn, rules_version)
     except Exception as exc:
         logger.warning("[regime_strategy] read failed: %s", type(exc).__name__)
         return _unavailable("regime_snapshots unreadable (%s)" % type(exc).__name__)
@@ -201,4 +224,5 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "display_only": DISPLAY_ONLY,
         "diff": got.get("diff"),
         "seed_run": seeded_run,
+        "flip_history": flips,
     }

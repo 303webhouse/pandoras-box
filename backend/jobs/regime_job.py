@@ -278,6 +278,124 @@ async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[st
     return {"snapshot": cur, "diff": diff, "rules_version": version}
 
 
+#: §2's design target for label churn. R-IV.1198(c) rules NO threshold or hysteresis change on
+#: the observed rate -- tuning on observed flips is a fitted parameter wearing a rule's name --
+#: so this is recorded as a known gap and nothing adjusts itself to meet it.
+FLIPS_PER_YEAR_TARGET = 6
+SESSIONS_PER_YEAR = 252
+
+
+async def flip_history(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
+    """Every session where the shown label changed, oldest-first, with the rate beside it.
+
+    R-IV.1198(c) asks for the list so a reader can see whether the flips are real regime changes
+    or chatter between two neighbouring labels. That question needs the FROM and the TO adjacent
+    in §2's bear-to-bull order, which is why `from_index`/`to_index`/`neighbours` are published:
+    a Correction/Narrow-uptrend pair sitting one step apart is a different fact from a
+    Bear/Melt-up pair sitting six apart, and the count alone cannot tell them apart.
+    """
+    version = rules_version or load_rules().get("version")
+    order = list((load_rules().get("order") or []))
+    try:
+        rows = await conn.fetch(
+            """SELECT as_of, shown_regime, regime, change, blocked,
+                      pending_closes, held_sessions, tags
+                 FROM regime_snapshots
+                WHERE rules_version = $1 AND change IS NOT NULL
+                ORDER BY as_of ASC""", version)
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM regime_snapshots WHERE rules_version = $1", version)
+    except Exception as exc:
+        return {"flips": [], "error": "regime_snapshots unreadable (%s)" % type(exc).__name__}
+
+    flips = []
+    prev: Optional[str] = None
+    for r in rows:
+        to = r["shown_regime"]
+        fi = order.index(prev) if prev in order else None
+        ti = order.index(to) if to in order else None
+        flips.append({
+            "as_of": str(r["as_of"])[:10],
+            "from": prev,
+            "to": to,
+            "from_index": fi,
+            "to_index": ti,
+            "steps": (abs(ti - fi) if fi is not None and ti is not None else None),
+            "neighbours": (fi is not None and ti is not None and abs(ti - fi) == 1),
+            "closes_held": r["pending_closes"],
+            "held_sessions_before": r["held_sessions"],
+            "change": r["change"],
+        })
+        prev = to
+
+    sessions = int(total or 0)
+    years = (sessions / SESSIONS_PER_YEAR) if sessions else None
+    rate = (len(flips) / years) if years else None
+    return {
+        "flips": flips,
+        "count": len(flips),
+        "sessions": sessions,
+        "per_year": (round(rate, 1) if rate is not None else None),
+        "design_target_per_year": FLIPS_PER_YEAR_TARGET,
+        "known_gap": (
+            None if rate is None or rate <= FLIPS_PER_YEAR_TARGET else
+            ("observed ~%.0f/yr vs section 2's design target <=%d/yr -- recorded as a KNOWN GAP "
+             "(R-IV.1198(c)): no threshold or hysteresis change, because tuning on observed "
+             "flips is a fitted parameter wearing a rule's name"
+             % (rate, FLIPS_PER_YEAR_TARGET))),
+    }
+
+
+async def record_known_gap(conn, rules_version: Optional[str] = None) -> Optional[str]:
+    """Write the flip-rate gap to `regime_audit` once. R-IV.1198(c).
+
+    Idempotent on the ACTION, not on the text: a second call finds the existing row and returns
+    None rather than appending a near-duplicate every deploy. The rate moves as sessions
+    accumulate, and a row per boot would bury the finding in its own restatements.
+    """
+    version = rules_version or load_rules().get("version")
+    try:
+        existing = await conn.fetchval(
+            "SELECT id FROM regime_audit WHERE action = 'known_gap' LIMIT 1")
+        if existing:
+            return None
+        hist = await flip_history(conn, version)
+        if not hist.get("known_gap"):
+            return None
+        await _audit(conn, action="known_gap", detail=hist["known_gap"],
+                     rules_version=version, rows_written=0)
+        return hist["known_gap"]
+    except Exception as exc:
+        logger.warning("[regime_job] known_gap record failed: %s", type(exc).__name__)
+        return None
+
+
+async def record_interim_families(conn, rules_version: Optional[str] = None) -> Optional[str]:
+    """Write the INTERIM status of the STRUCTURE and BREADTH tests to `regime_audit`. R-IV.1198(e).
+
+    Ratified as interim, not as final: §2 names five families and states no per-family test, so
+    these two reuse the Correction row's own clauses. Per-family tests get designed at the same
+    review as the flip rate. Recorded in the audit so the status is on the record and not only
+    in a comment.
+    """
+    version = rules_version or load_rules().get("version")
+    try:
+        existing = await conn.fetchval(
+            "SELECT id FROM regime_audit WHERE action = 'interim_families' LIMIT 1")
+        if existing:
+            return None
+        fam = load_rules().get("families_v1") or {}
+        detail = ("INTERIM (ratified R-IV.1198(e)): STRUCTURE = %s; BREADTH = %s. "
+                  "CREDIT/VOL/CARRY have no feed in v1. Per-family tests are designed at the "
+                  "same review as the flip rate. Nothing gates on them (#42)."
+                  % (fam.get("structure"), fam.get("breadth")))
+        await _audit(conn, action="interim_families", detail=detail, rules_version=version)
+        return detail
+    except Exception as exc:
+        logger.warning("[regime_job] interim_families record failed: %s", type(exc).__name__)
+        return None
+
+
 async def seed_run(conn) -> Optional[Dict[str, Any]]:
     """The audit row for the run that seeded the history, if one exists.
 
