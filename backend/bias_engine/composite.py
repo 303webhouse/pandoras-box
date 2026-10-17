@@ -206,6 +206,16 @@ class CompositeResult(BaseModel):
     stale_factors: List[str]
     velocity_multiplier: float
     rvol_modifier: float = 1.0
+    # TA-193 R1. THE WEIGHTED BLEND, BEFORE ANY MODIFIER -- the figure a recompute of
+    # SUM(score x weight) reproduces. It was computed and then overwritten in place by three
+    # successive multiplications, so the only score anyone could see was the final one, and a
+    # reader comparing their own blend against it had no way to account for the difference.
+    # None (never 0.0) on a cached pre-fix payload: an absent measurement is not a real zero.
+    raw_score: Optional[float] = None
+    #: Every stage that moved the score, in order, each with its name, its value and the score
+    #: either side of it. Report-only: nothing reads this to decide anything (#42 -- it is
+    #: DERIVED), and it exists so "where did -0.105 come from" is answerable from the payload.
+    score_modifiers: List[Dict[str, Any]] = Field(default_factory=list)
     override: Optional[str] = None
     override_expires: Optional[datetime] = None
     timestamp: datetime
@@ -807,6 +817,27 @@ async def compute_composite() -> CompositeResult:
 
         adjusted_score = _clamp_score(raw_score * velocity_multiplier)
 
+    # TA-193 R1: the trail starts here, at the blend, and every stage below appends to it.
+    _trail: List[Dict[str, Any]] = []
+
+    def _stage(name: str, value, before: float, after: float, reason: str = None) -> None:
+        """Record one stage. `applied` is whether it MOVED the score, which is not the same
+        question as whether the stage ran -- a modifier of 1.0 ran and did nothing, and the
+        difference is what tells a reader a stage was evaluated rather than skipped."""
+        _trail.append({
+            "name": name,
+            "value": value,
+            "score_before": round(before, 4),
+            "score_after": round(after, 4),
+            "applied": round(before, 4) != round(after, 4),
+            "reason": reason,
+        })
+
+    _blend = raw_score
+
+    _stage("velocity_multiplier", velocity_multiplier, _blend, adjusted_score,
+           "1.3 when 3 or more bearish shifts were logged in 24h, else 1.0")
+
     # --- RVOL Conviction Modifier ---
     # Applied after velocity multiplier, before circuit breaker.
     active_count = len(active)
@@ -819,6 +850,7 @@ async def compute_composite() -> CompositeResult:
 
     rvol_modifier = 1.0
     rvol_meta: Dict[str, Any] = {}
+    _before_rvol = adjusted_score
     try:
         rvol_modifier, rvol_meta = await compute_rvol_modifier(adjusted_score, _conf)
         if rvol_modifier != 1.0:
@@ -827,6 +859,11 @@ async def compute_composite() -> CompositeResult:
                         rvol_modifier, rvol_meta.get("rvol", 0), rvol_meta.get("reason", ""))
     except Exception as exc:
         logger.warning("RVOL modifier failed: %s", exc)
+    # The RVOL stage carries its own `reason`, which is the field that would have settled
+    # TA-193 on its own: "dead_zone" says the modifier was EVALUATED and declined, and at a
+    # blend of -0.080 that is what it must say, because |score| <= 0.10 forces 1.0.
+    _stage("rvol_modifier", rvol_modifier, _before_rvol, adjusted_score,
+           rvol_meta.get("reason") if rvol_meta else "not computed")
 
     bias_level, bias_numeric = score_to_bias(adjusted_score)
 
@@ -877,6 +914,7 @@ async def compute_composite() -> CompositeResult:
             #   - If score is negative (already bearish): AMPLIFY the bearishness
             # For bullish CB events (spy_up_2pct, spy_recovery):
             #   - Additive offset toward bullish direction
+            _before_cb = adjusted_score
             if scoring_mod != 1.0:
                 is_bullish_trigger = trigger in ("spy_up_2pct", "spy_recovery")
                 if is_bullish_trigger:
@@ -893,6 +931,27 @@ async def compute_composite() -> CompositeResult:
                         amplifier = 2.0 - scoring_mod
                         adjusted_score = _clamp_score(adjusted_score * amplifier)
                 bias_level, bias_numeric = score_to_bias(adjusted_score)
+                # THE SECOND SOURCE OF A 1.3x, and the reason this stage has to be named
+                # separately from the velocity multiplier: on an already-bearish score a
+                # bearish trigger applies `2.0 - scoring_modifier`, so a scoring_modifier of
+                # 0.7 amplifies by exactly 1.3 -- indistinguishable from velocity in the final
+                # number, and applied at a different stage for a different reason.
+                _stage("circuit_breaker", scoring_mod, _before_cb, adjusted_score,
+                       "trigger=%s, %s" % (trigger, "additive toward bullish"
+                                           if is_bullish_trigger
+                                           else ("dampened (score was bullish)"
+                                                 if _before_cb > 0
+                                                 else "amplified by 2.0 - scoring_modifier")))
+            else:
+                # RECORDED EVEN WHEN IT DOES NOTHING. An ACTIVE breaker whose modifier has
+                # faded to 1.0 is a different state from no breaker at all, and the trail's
+                # whole purpose is to say which stages were evaluated -- leaving this one out
+                # would make a live breaker invisible exactly when a reader is asking what
+                # moved the score.
+                _stage("circuit_breaker", scoring_mod, _before_cb, adjusted_score,
+                       "trigger=%s, active but scoring_modifier is 1.0%s" % (
+                           trigger, " (faded by pending_reset)"
+                           if cb_state.get("pending_reset") else ""))
 
             # Enforce bias cap (max bullishness allowed)
             if bias_cap_name:
@@ -951,17 +1010,24 @@ async def compute_composite() -> CompositeResult:
     for tf_name in ("intraday", "swing", "macro"):
         tf_active = {fid: r for fid, r in active.items()
                      if FACTOR_CONFIG[fid].get("timeframe") == tf_name}
+        tf_weight_sum = 0.0
         if tf_active:
             tf_weight_sum = sum(FACTOR_CONFIG[f]["weight"] for f in tf_active)
             tf_score = sum(tf_active[f].score * FACTOR_CONFIG[f]["weight"] for f in tf_active) / tf_weight_sum if tf_weight_sum > 0 else 0.0
             tf_score = _clamp_score(tf_score)
         else:
             tf_score = 0.0
-        tf_bias, tf_numeric = score_to_bias(tf_score)
+        # TA-193 R1: NUMBERS ONLY. `bias_level` and `bias_numeric` were a second and third
+        # rendering of `sub_score`, and a label on a sub-score invites it to be read as a call
+        # in its own right -- which it is not: the call comes from the composite.
+        #
+        # ACTIVE WEIGHT IS THE FIELD A READER WAS MISSING. `tf_score` is normalised over
+        # `tf_weight_sum`, so a sub-score of -0.4 resting on 8% of the book's factor weight and
+        # one resting on 40% are not comparable figures, and nothing said which was which.
         timeframe_scores[tf_name] = {
             "sub_score": round(tf_score, 3),
-            "bias_level": tf_bias,
-            "bias_numeric": tf_numeric,
+            "active_weight": round(tf_weight_sum, 4) if tf_active else 0.0,
+            "active_factor_count": len(tf_active),
         }
 
     # Attach RVOL metadata to circuit breaker dict for frontend visibility
@@ -989,6 +1055,8 @@ async def compute_composite() -> CompositeResult:
         stale_factors=stale_factors,
         velocity_multiplier=velocity_multiplier,
         rvol_modifier=rvol_modifier,
+        raw_score=round(raw_score, 4),
+        score_modifiers=_trail,
         override=override.get("level") if override else None,
         override_expires=override.get("expires") if override else None,
         timestamp=now,

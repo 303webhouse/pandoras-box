@@ -31,6 +31,19 @@ Timeframe = Literal["swing", "daily", "intraday"]
 _VALID_TIMEFRAMES = {"swing", "daily", "intraday"}
 
 
+#: Factor weights, read from the engine's own config so there is one author for them. A copy
+#: pasted here would be a second place for a weight to drift, and the weights are the thing
+#: convention #42's original defect was about.
+try:
+    from bias_engine.composite import FACTOR_CONFIG as _FC
+
+    _FACTOR_WEIGHTS = {k: v.get("weight") for k, v in _FC.items()}
+except Exception:                                                   # noqa: BLE001
+    # A weight that cannot be read is served as None, never as 0.0 -- a zero weight is a
+    # statement that the factor does not count, which is a different claim from "unknown".
+    _FACTOR_WEIGHTS = {}
+
+
 def _build_timeframe_payload(composite: Dict[str, Any]) -> Dict[str, Any]:
     """Map a CompositeResult dict into the per-timeframe payload shape."""
     factors_raw = composite.get("factors", {}) or {}
@@ -64,7 +77,10 @@ def _build_timeframe_payload(composite: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "name": name,
                 "score": reading.get("score"),
-                "weight": None,
+                # TA-193 R1: THE WEIGHT, which was hard-coded None. Without it a reader has a
+                # list of scores and no way to see which of them the blend actually rests on,
+                # so a -0.9 reading at 2% weight looks like a -0.9 reading at 12%.
+                "weight": _FACTOR_WEIGHTS.get(name),
                 "staleness_seconds": staleness,
                 "is_stale": is_stale,
             }
@@ -83,6 +99,21 @@ def _build_timeframe_payload(composite: Dict[str, Any]) -> Dict[str, Any]:
         # actually rests on. None = unknown (pre-fix cached payload), never 0.0.
         "coverage_ratio": composite.get("coverage_ratio"),
         "excluded_factors": composite.get("excluded_factors") or [],
+        # TA-193 R1 — HOW composite_score WAS REACHED, so the question "why does my recompute
+        # disagree" is answerable from the payload instead of from the source.
+        #
+        # `raw_score` is the weighted blend BEFORE any modifier: the figure
+        # SUM(score x weight / active_weight_sum) reproduces. `score_modifiers` is every stage
+        # that touched it afterwards, in order, each with its name, its value and the score
+        # either side. Two different stages can produce the same 1.3x -- the velocity
+        # multiplier, and the circuit breaker's `2.0 - scoring_modifier` on an already-bearish
+        # score -- so the name is the only thing that distinguishes them.
+        "raw_score": composite.get("raw_score"),
+        "score_modifiers": composite.get("score_modifiers") or [],
+        # The engine's per-timeframe sub-scores, each with the active weight it was normalised
+        # over. NUMBERS ONLY, as ruled: a sub-score carries no bias label, because the call is
+        # the composite's to make and a labelled sub-score reads as a second opinion.
+        "sub_scores": composite.get("timeframe_scores") or {},
     }
 
 
@@ -93,15 +124,28 @@ def _bias_label(level: Optional[str]) -> str:
 
 
 def _summary(payload: Dict[str, Any], override: Optional[Dict[str, Any]]) -> str:
+    # TA-193 R1: ONE LABEL, ONCE. This printed the same label and the same score three times
+    # -- "Swing: URSA MINOR (-0.11). Daily: URSA MINOR (-0.11). Intraday: URSA MINOR (-0.11)"
+    # -- because all three slots are one reading. Three identical clauses read as three
+    # independent horizons agreeing, which is the strongest-looking and emptiest claim the
+    # tool could make.
+    blocks = [payload["timeframes"][tf] for tf in ("swing", "daily", "intraday")
+              if payload["timeframes"].get(tf) is not None]
     parts: List[str] = []
-    for tf in ("swing", "daily", "intraday"):
-        tf_block = payload["timeframes"].get(tf)
-        if tf_block is None:
-            continue
-        score = tf_block.get("composite_score")
-        label = _bias_label(tf_block.get("bias_level"))
+    if blocks:
+        b = blocks[0]
+        score = b.get("composite_score")
         score_str = f"{score:+.2f}" if isinstance(score, (int, float)) else "n/a"
-        parts.append(f"{tf.title()}: {label} ({score_str})")
+        parts.append(f"{_bias_label(b.get('bias_level'))} ({score_str}), one reading across "
+                     f"{len(blocks)} timeframe slot(s)")
+        raw = b.get("raw_score")
+        moved = [m for m in (b.get("score_modifiers") or []) if m.get("applied")]
+        if isinstance(raw, (int, float)) and isinstance(score, (int, float)):
+            if moved:
+                parts.append("blend %+.3f moved by %s" % (
+                    raw, ", ".join("%s %s" % (m.get("name"), m.get("value")) for m in moved)))
+            else:
+                parts.append("blend %+.3f, unmodified" % raw)
     base = ". ".join(parts) if parts else "No bias reading available"
     if override and override.get("level"):
         base += f". Manual override active: {_bias_label(override.get('level'))}."
@@ -138,10 +182,23 @@ async def hub_get_bias_composite(
     for tf in ("swing", "daily", "intraday"):
         if timeframe is None or timeframe == tf:
             timeframes[tf] = snapshot
+    # TA-193 R1: SAID IN THE PAYLOAD, not only in the comment above. These three slots are the
+    # SAME reading -- one object assigned three times -- so a reader comparing "swing" against
+    # "intraday" is comparing a number with itself and will find agreement that means nothing.
+    # The engine's real per-horizon figures are in `sub_scores` on each slot, and they are
+    # keyed intraday / swing / MACRO, which is a third vocabulary again: `daily` here has no
+    # counterpart there.
+    timeframes_basis = (
+        "THE THREE SLOTS ARE ONE READING. The v1 engine emits a single composite, and it is "
+        "assigned to swing/daily/intraday unchanged, so they are identical by construction "
+        "and their agreement carries no information. Per-horizon numbers live in "
+        "`sub_scores` (keyed intraday/swing/macro -- note `daily` has no counterpart)."
+    )
 
     override = await get_manual_override()
     data = {
         "timeframes": timeframes,
+        "timeframes_basis": timeframes_basis,
         "manual_override_active": bool(override and override.get("level")),
         "override_level": (override or {}).get("level"),
         # B1 GEX regime — daily series, identical across timeframes; surfaced once.
