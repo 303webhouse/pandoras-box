@@ -941,6 +941,10 @@
     // known set (see applyMobileOrder), so leaving `regime-strategy` out would bury the one
     // card Nick is being asked to look at.
     'regime-band', 'regime-strategy', 'movers-tape', 'kairos', 'book', 'river',
+    // A1 (R-IV.1209(c)): LISTED, because an unlisted tile sorts AFTER the known set -- so
+    // leaving these out would bury the four new boards below every legacy tile on a phone,
+    // which is the same trap `regime-strategy` was in.
+    'event-strip', 'fear', 'crowd',
     'themes', 'divergence', 'breadth', 'index', 'curve', 'usd',
   ];
 
@@ -1308,6 +1312,269 @@
     box.hidden = !_rsOpen;
     btn.setAttribute('aria-expanded', String(_rsOpen));
     btn.innerHTML = _rsOpen ? 'Close \u25be' : 'Open \u25b8';
+  }
+
+  // ===========================================================================
+  // AGORA ADDITIONS, PHASE A1 (R-IV.1209(c)) \u2014 the four boards, as MOCK tiles.
+  //
+  // EVERY VALUE IN THESE FIXTURES IS FAKE (R-IV.1209(b)), and the MOCK chip is the
+  // only honest thing on each tile until Phase B wires it. The chip is driven by the
+  // FIXTURE'S OWN `_mock` flag rather than hard-coded in the markup: when B replaces a
+  // fixture with a live read, the flag goes and the chip goes with it. A chip that had to
+  // be removed by hand is a chip that outlives its truth.
+  //
+  // DISPLAY ONLY (#42). Nothing here gates, grades or feeds Kairos.
+  // ===========================================================================
+
+  const AGORA_FIXTURES = {
+    crowd: '/assets/agora/crowd_mock.json',
+    fear: '/assets/agora/fear_mock.json',
+    bookStress: '/assets/agora/book_stress_mock.json',
+    eventStrip: '/assets/agora/event_strip_mock.json',
+  };
+  const _agora = { crowd: null, fear: null, bookStress: null, eventStrip: null };
+
+  // The lean -> colour scale of R-IV.1209(d)2, as CSS custom-property expressions so the
+  // mixes live in one place and follow the theme. Not hexes (R-IV.1190(b)).
+  const LEAN_COLOR = {
+    'strong-bear': 'var(--down)',
+    'bear': 'color-mix(in srgb, var(--down) 60%, var(--text-2))',
+    'neutral': 'var(--text-2)',
+    'notable': 'var(--teal)',
+    'bull': 'color-mix(in srgb, var(--up) 55%, var(--text-2))',
+    'strong-bull': 'var(--up)',
+  };
+
+  function leanColor(lean) {
+    return LEAN_COLOR[String(lean || 'neutral')] || LEAN_COLOR.neutral;
+  }
+
+  function setMockChip(id, fixture) {
+    const el = $(id);
+    if (!el) return;
+    const isMock = !!(fixture && fixture._mock);
+    el.hidden = !isMock;
+    el.title = isMock
+      ? 'Mock fixture (R-IV.1209(c) Phase A). Every value on this tile is fake.'
+      : '';
+  }
+
+  async function loadAgoraMocks() {
+    const keys = Object.keys(AGORA_FIXTURES);
+    await Promise.all(keys.map(async (k) => {
+      try {
+        const r = await fetch(AGORA_FIXTURES[k], { cache: 'no-store' });
+        _agora[k] = r.ok ? await r.json() : null;
+      } catch (_) {
+        // Left null. Each renderer says the fixture did not load rather than drawing an
+        // empty shell, which would read as "no crowding" / "no events" \u2014 a claim.
+        _agora[k] = null;
+      }
+    }));
+    renderCrowd();
+    renderFearPrice();
+    renderBookStress();
+    renderEventStrip();
+  }
+
+  function agoraWait(host, what) {
+    host.innerHTML = '<div class="rs-wait">' + esc(what)
+      + ' fixture did not load</div>';
+  }
+
+  // \u2500\u2500 board 1: Crowd \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  function renderCrowd() {
+    const host = $('crowdGauge');
+    if (!host) return;
+    const m = _agora.crowd;
+    setMockChip('crowdMock', m);
+    if (!m) return agoraWait(host, 'crowd');
+    const st = $('crowdSettled');
+    if (st) st.textContent = 'close ' + (m.settled_close || '\u2014');
+
+    const rows = (m.rows || []).map((r) => {
+      // A THIN HISTORY STARS THE PERCENTILE AND GOES AMBER. R-IV.1194(f): short history shows
+      // amber "n / N" with the percentile starred -- amber is "cannot confirm", which is
+      // exactly what a percentile over 9 weeks is.
+      const cls = r.thin ? 'ag-thin' : (r.extreme ? 'ag-extreme' : '');
+      const pos = Math.max(0, Math.min(100, Number(r.pct) || 0));
+      return '<div class="ag-row">'
+        + '<div class="ag-rk"><b>' + esc(r.key) + '</b><i>' + esc(r.sub || '') + '</i></div>'
+        + '<div class="ag-rv">' + esc(r.value) + '</div>'
+        + '<div class="vc-gauge ag-g"><b class="' + cls + '" style="left:'
+        + pos.toFixed(1) + '%"></b></div>'
+        + '<div class="ag-rp ' + cls + '">' + esc(r.pct_label || '') + '</div>'
+        + '</div>';
+    }).join('');
+
+    host.innerHTML =
+      '<div class="ag-head" style="color:' + leanColor(m.headline_lean) + '">'
+      + esc(m.headline || '\u2014') + '</div>'
+      + '<div class="ag-sub">' + esc(m.headline_basis || '') + '</div>'
+      + '<div class="ag-scale"><span>\u25c2 BEARS</span><span>BULLS \u25b8</span></div>'
+      + rows
+      + '<div class="ag-foot">' + (m.footnotes || []).map(esc).join(' \u00b7 ') + '</div>'
+      + '<div class="ag-cap">' + esc(m.caption || '') + '</div>';
+  }
+
+  // \u2500\u2500 board 2: Fear Price \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  function renderFearPrice() {
+    const host = $('fearPrice');
+    if (!host) return;
+    const m = _agora.fear;
+    setMockChip('fearMock', m);
+    if (!m) return agoraWait(host, 'fear price');
+    const st = $('fearSettled');
+    if (st) st.textContent = 'close ' + (m.settled_close || '\u2014');
+
+    const gaps = (m.gaps || []).map((g) => {
+      const pts = Number(g.pts) || 0;
+      const w = Math.min(Math.abs(pts), 10) * 5;
+      const left = pts >= 0 ? 50 : 50 - w;
+      // Positive gap = implied over realized = premium rich. Teal, not lime: rich premium is
+      // notable, not bullish (R-IV.1209(d)2's "neutral-but-notable").
+      const col = pts >= 0 ? 'var(--teal)' : 'var(--text-2)';
+      return '<div class="ag-gap">'
+        + '<span class="ag-gt">' + esc(g.ticker) + '</span>'
+        + '<span class="ag-gb"><i style="left:' + left.toFixed(1) + '%;width:'
+        + w.toFixed(1) + '%;background:' + col + '"></i></span>'
+        + '<span class="ag-gv">' + (pts >= 0 ? '+' : '\u2212')
+        + Math.abs(pts).toFixed(1) + '</span>'
+        + '</div>';
+    }).join('');
+
+    const cv = m.curve || {};
+    const curve = (cv.tenors || []).map((t, i) => {
+      const vals = cv.values || [];
+      const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+      const h = hi > lo ? 6 + ((vals[i] - lo) / (hi - lo)) * 14 : 12;
+      return '<span class="ag-ct"><i style="height:' + h.toFixed(1) + 'px"></i>'
+        + esc(t) + '</span>';
+    }).join('');
+
+    const sk = m.skew || {};
+    const em = m.expected_move || {};
+    host.innerHTML =
+      '<div class="ag-head" style="color:' + leanColor(m.headline_lean) + '">'
+      + esc(m.headline || '\u2014') + '</div>'
+      + '<div class="ag-sub">' + esc(m.headline_basis || '') + '</div>'
+      + '<div class="ag-gaps"><span class="ag-ends">CHEAP</span>' + gaps
+      + '<span class="ag-ends ag-right">RICH</span></div>'
+      + '<div class="ag-blk"><span class="ag-bl">VIX CURVE</span>'
+      + '<b>' + esc(cv.label || '\u2014') + '</b>'
+      + '<span class="ag-curve">' + curve + '</span></div>'
+      + '<div class="ag-blk"><span class="ag-bl">SKEW \u00b7 PUT DEMAND</span>'
+      + '<b>' + esc(sk.pct_label || '\u2014') + '</b>'
+      + '<span class="ag-sk"><span>' + esc(sk.left || '') + '</span>'
+      + '<span>' + esc(sk.right || '') + '</span></span></div>'
+      + '<div class="ag-blk"><span class="ag-bl">' + esc(em.label || '') + '</span>'
+      + '<b>' + (em.approx ? '\u2248 ' : '') + esc(em.value || '\u2014') + '</b>'
+      + '<span class="ag-days">' + esc(em.days || '') + '</span></div>'
+      + '<div class="ag-cap">' + esc(m.caption || '') + '</div>';
+  }
+
+  // \u2500\u2500 board 3: Book Reality Check (a SECTION inside BOOK) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  function renderBookStress() {
+    const host = $('bookStress');
+    if (!host) return;
+    const m = _agora.bookStress;
+    if (!m) { host.innerHTML = ''; return; }
+
+    const all = [];
+    (m.rows || []).forEach((r) => (r.cells || []).forEach((c) => all.push(Math.abs(c))));
+    const max = all.length ? Math.max.apply(null, all) : 1;
+
+    const rows = (m.rows || []).map((r) => {
+      const cells = (r.cells || []).map((v) => {
+        const a = Math.round(Math.min(Math.abs(v) / max, 1) * 55 + 8);
+        const col = v >= 0 ? 'var(--up)' : 'var(--down)';
+        const txt = (v >= 0 ? '+' : '\u2212') + '$'
+          + Math.abs(v).toLocaleString('en-US');
+        return '<span class="bs-c" style="background:color-mix(in srgb, ' + col + ' '
+          + a + '%, var(--bg-2, #0b1122))">' + esc(txt) + '</span>';
+      }).join('');
+      return '<div class="bs-row' + (r.total ? ' bs-total' : '') + '">'
+        + '<span class="bs-k">' + esc(r.key) + '</span>' + cells + '</div>';
+    }).join('');
+
+    const w = m.worst || {};
+    const tr = m.trend || {};
+    const trows = (tr.rows || []).map((t) => {
+      const against = String(t.verdict).toUpperCase() === 'AGAINST';
+      return '<div class="bs-t">'
+        + '<span class="bs-tk">' + esc(t.ticker) + '</span>'
+        + '<span class="bs-td">' + esc(t.dir) + '</span>'
+        + '<span class="bs-dot ' + esc('bs-' + t.daily) + '"></span>'
+        + '<span class="bs-dot ' + esc('bs-' + t.weekly) + '"></span>'
+        + '<span class="bs-tv" style="color:'
+        + (against ? 'var(--down)' : 'var(--text-2)') + '">' + esc(t.verdict) + '</span>'
+        + '</div>';
+    }).join('');
+
+    host.innerHTML =
+      '<div class="bs-head"><span class="bs-title">Reality Check</span>'
+      + '<span class="mock-chip" title="Mock fixture (R-IV.1209(c) Phase A). Every value '
+      + 'in this section is fake.">MOCK</span>'
+      + '<span class="bs-vol">' + esc(m.vol_mode || '') + '</span></div>'
+      + '<div class="bs-cols"><span class="bs-k">SPY</span>'
+      + (m.columns || []).map((c) => '<span class="bs-col">' + esc(c) + '</span>').join('')
+      + '</div>'
+      + rows
+      + '<div class="bs-worst"><span class="bs-wl">WORST</span>'
+      + '<b>' + esc(w.value || '\u2014') + '</b>'
+      + '<i>' + esc(w.where || '') + (w.pct_of_sleeve ? ' \u00b7 '
+        + esc(w.pct_of_sleeve) : '') + '</i></div>'
+      + '<div class="bs-trend"><span class="bs-wl">VS. ITS TREND</span>'
+      + '<b>' + esc(tr.headline || '') + '</b><span class="bs-dw">D W</span></div>'
+      + trows
+      // NOT SILENTLY DROPPED (R-IV.1194(g)): anything unmodellable is listed as such.
+      + ((m.not_modelled || []).length
+        ? '<div class="bs-nm">not modelled: '
+          + (m.not_modelled || []).map(esc).join(' \u00b7 ') + '</div>' : '')
+      + '<div class="ag-cap">' + esc(m.caption || '') + '</div>';
+  }
+
+  // \u2500\u2500 board 4: Event Strip (full width) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  function renderEventStrip() {
+    const host = $('eventStrip');
+    if (!host) return;
+    const m = _agora.eventStrip;
+    setMockChip('evMock', m);
+    if (!m) return agoraWait(host, 'event strip');
+    const t = $('evTitle');
+    if (t && m.title) t.textContent = m.title;
+    const op = $('evOpex');
+    if (op) op.textContent = m.next_opex || '';
+
+    const maxEarn = Math.max.apply(null,
+      (m.days || []).map((d) => Number(d.earn) || 0).concat([1]));
+
+    const days = (m.days || []).map((d, i, arr) => {
+      const evs = (d.events || []).map((e) => {
+        const k = String(e.kind || 'macro');
+        return '<span class="ev-chip ev-' + esc(k) + '">' + esc(e.k) + '</span>';
+      }).join('');
+      const earn = Number(d.earn) || 0;
+      const h = Math.max(2, Math.round((earn / maxEarn) * 16));
+      const yours = Number(d.book_earn) || 0;
+      return '<div class="ev-day' + (d.blackout ? ' ev-blackout' : '')
+        + (i === arr.length - 1 ? ' ev-last' : '') + '">'
+        + '<div class="ev-dow">' + esc(d.dow) + '<b>' + esc(d.dd) + '</b></div>'
+        + '<div class="ev-evs">' + evs + '</div>'
+        + '<div class="ev-earn"><i style="height:' + h + 'px;background:'
+        + (yours ? 'var(--teal)' : 'var(--border-strong)') + '"></i>'
+        + '<span>' + earn + (yours ? ' \u00b7 ' + yours + ' yours' : '') + '</span></div>'
+        + '</div>';
+    }).join('');
+
+    host.innerHTML =
+      '<div class="ev-legend">'
+      + '<span class="ev-chip ev-macro">MACRO</span>'
+      + '<span class="ev-chip ev-book">YOUR BOOK</span>'
+      + '<span class="ev-bl">' + esc(m.blackout_label || '') + '</span>'
+      + '</div>'
+      + '<div class="ev-grid">' + days + '</div>'
+      + '<div class="ag-cap">' + esc(m.caption || '') + '</div>';
   }
 
   function initGrid() {
@@ -3716,6 +3983,10 @@
     // not give. The Open button is bound here rather than inline so the markup carries no
     // behaviour.
     loadRegimeStrategy();
+    // A1 (R-IV.1209(c)): the four Agora boards as mock fixtures. Loaded ONCE and never polled,
+    // for the same reason as the regime card above -- a refresh interval on a static file would
+    // imply the tiles are tracking something, and in Phase A they are not.
+    loadAgoraMocks();
     const rso = $('rsOpen');
     if (rso) rso.addEventListener('click', toggleRegimePlaybook);
     loadMoversTape(); managedInterval(loadMoversTape, 5 * 60 * 1000);

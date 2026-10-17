@@ -1483,3 +1483,170 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   .rs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rs-list { columns: 2; column-gap: 24px; }
 }
+
+/* ===========================================================================
+   AGORA ADDITIONS, PHASE A1 (R-IV.1209(c)) - boards 1-4 as MOCK tiles.
+   Tokens, never hexes (R-IV.1190(b)), so these follow the theme like everything
+   else and a palette change does not leave four tiles behind.
+   =========================================================================== */
+
+/* The MOCK chip. Deliberately the loudest small thing on the tile: every value
+   behind it is fake, and a quiet chip on a confident-looking tile is worse than
+   no chip at all. */
+.mock-chip {
+  font: 9px var(--mono); letter-spacing: 1.2px; padding: 1px 5px; border-radius: 4px;
+  color: var(--bg); background: var(--amber); font-weight: 700; cursor: help;
+}
+
+.ag-head { font: 700 15px var(--mono); letter-spacing: 1px; margin-bottom: 1px; }
+.ag-sub { font: 10px var(--mono); color: var(--text-3); margin-bottom: 7px; }
+.ag-cap { font: 9px var(--mono); color: var(--text-3); margin-top: 7px; letter-spacing: .2px; }
+.ag-foot { font: 9px var(--mono); color: var(--text-3); margin-top: 6px; }
+.ag-scale {
+  display: flex; justify-content: space-between;
+  font: 9px var(--mono); color: var(--text-3); letter-spacing: 1px; margin-bottom: 4px;
+}
+
+.ag-row {
+  display: grid; grid-template-columns: 74px 46px 1fr 34px;
+  gap: 6px; align-items: center; margin-bottom: 5px;
+}
+.ag-rk { display: flex; flex-direction: column; line-height: 1.15; }
+.ag-rk b { font: 10px var(--mono); letter-spacing: .8px; color: var(--text-2); }
+.ag-rk i { font: 8px var(--mono); color: var(--text-3); font-style: normal; }
+.ag-rv { font: 600 12px var(--mono); color: var(--text); text-align: right; }
+.ag-g { height: 18px; }
+.ag-g b {
+  position: absolute; top: 1px; width: 4px; height: 16px; border-radius: 2px;
+  background: var(--text); transform: translateX(-2px);
+}
+.ag-g b.ag-extreme { background: var(--teal); }
+/* Amber is "cannot confirm" and nothing else (R-IV.1209(d)2). A percentile over nine
+   weeks of history is exactly that, so a thin read wears it. */
+.ag-g b.ag-thin { background: var(--amber); }
+.ag-rp { font: 10px var(--mono); color: var(--text-3); text-align: right; }
+.ag-rp.ag-extreme { color: var(--teal); }
+.ag-rp.ag-thin { color: var(--amber); }
+
+.ag-gaps { position: relative; padding: 2px 0 4px; }
+.ag-ends {
+  position: absolute; top: -11px; font: 8px var(--mono); color: var(--text-3);
+  letter-spacing: 1px;
+}
+.ag-ends.ag-right { right: 0; }
+.ag-gap {
+  display: grid; grid-template-columns: 34px 1fr 40px; gap: 6px;
+  align-items: center; margin-bottom: 4px;
+}
+.ag-gt { font: 10px var(--mono); color: var(--text-2); letter-spacing: .8px; }
+.ag-gb {
+  position: relative; height: 14px; border-radius: 3px;
+  background: var(--border); overflow: hidden;
+}
+.ag-gb i { position: absolute; top: 4px; height: 6px; border-radius: 3px; }
+.ag-gv { font: 600 11px var(--mono); color: var(--text); text-align: right; }
+
+.ag-blk {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 8px;
+  align-items: baseline; padding: 6px 0; border-top: 1px solid var(--border);
+}
+.ag-bl { font: 9px var(--mono); color: var(--text-3); letter-spacing: 1px; }
+.ag-blk b { font: 600 12px var(--mono); color: var(--text); }
+.ag-curve, .ag-sk, .ag-days { grid-column: 1 / -1; }
+.ag-curve { display: flex; gap: 10px; align-items: flex-end; }
+.ag-ct {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font: 8px var(--mono); color: var(--text-3);
+}
+.ag-ct i { width: 7px; border-radius: 2px; background: var(--teal); }
+.ag-sk { display: flex; justify-content: space-between; font: 8px var(--mono); color: var(--text-3); }
+.ag-days { font: 9px var(--mono); color: var(--text-3); text-align: right; }
+
+/* -- board 3: Book Reality Check, a section inside BOOK -- */
+.bs-wrap { padding: 8px 10px 10px; border-top: 1px solid var(--border-strong); }
+.bs-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.bs-title { font: 10px var(--mono); letter-spacing: 1.2px; color: var(--text-2); }
+.bs-vol { margin-left: auto; font: 9px var(--mono); color: var(--teal); letter-spacing: 1px; }
+.bs-cols, .bs-row {
+  display: grid; grid-template-columns: 40px repeat(5, minmax(0, 1fr));
+  gap: 2px; align-items: center;
+}
+.bs-cols { margin-bottom: 3px; }
+.bs-col, .bs-k { font: 9px var(--mono); color: var(--text-3); letter-spacing: .8px; text-align: center; }
+.bs-k { text-align: left; }
+.bs-row { margin-bottom: 3px; }
+.bs-row .bs-k { color: var(--text-2); }
+.bs-c {
+  display: flex; align-items: center; justify-content: center; height: 24px;
+  border-radius: 5px; font: 600 10px var(--mono); color: var(--text);
+}
+.bs-total { border-top: 1px solid var(--border-strong); padding-top: 5px; margin-top: 2px; }
+.bs-total .bs-k, .bs-total .bs-c { color: var(--text); font-weight: 700; }
+.bs-worst, .bs-trend {
+  display: grid; grid-template-columns: auto auto 1fr; gap: 6px;
+  align-items: baseline; margin-top: 7px;
+}
+.bs-wl { font: 9px var(--mono); color: var(--text-3); letter-spacing: 1px; }
+.bs-worst b { font: 700 13px var(--mono); color: var(--down); }
+.bs-worst i { font: 9px var(--mono); color: var(--text-3); font-style: normal; }
+.bs-trend b { font: 600 11px var(--mono); color: var(--text-2); }
+.bs-dw { font: 8px var(--mono); color: var(--text-3); letter-spacing: 3px; text-align: right; }
+.bs-t {
+  display: grid; grid-template-columns: 44px 44px 12px 12px 1fr;
+  gap: 5px; align-items: center; margin-top: 3px;
+}
+.bs-tk { font: 600 10px var(--mono); color: var(--text); }
+.bs-td { font: 9px var(--mono); color: var(--text-3); }
+.bs-tv { font: 9px var(--mono); letter-spacing: .8px; text-align: right; }
+.bs-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+.bs-dot.bs-up { background: var(--up); }
+.bs-dot.bs-down { background: var(--down); }
+.bs-dot.bs-flat { background: var(--text-3); }
+/* Never silently dropped (R-IV.1194(g)). */
+.bs-nm { font: 9px var(--mono); color: var(--amber); margin-top: 6px; }
+
+/* -- board 4: Event Strip, full width -- */
+.ev-legend {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px 4px;
+  font: 9px var(--mono); color: var(--text-3);
+}
+.ev-bl { margin-left: auto; letter-spacing: 1px; }
+.ev-opex { font: 9px var(--mono); color: var(--text-3); letter-spacing: .8px; }
+.ev-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ev-day {
+  display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 8px;
+  border-right: 1px solid var(--border); min-width: 0;
+}
+.ev-day.ev-last { border-right: 0 !important; }
+/* Shaded AND labelled "est." in the legend (R-IV.1194(d)): a shade with no label is a
+   claim the reader has to guess at. */
+.ev-day.ev-blackout { background: color-mix(in srgb, var(--text-2) 7%, transparent); }
+.ev-dow { font: 9px var(--mono); color: var(--text-3); letter-spacing: 1px; }
+.ev-dow b { display: block; font: 700 13px var(--mono); color: var(--text); letter-spacing: 0; }
+.ev-evs { display: flex; flex-direction: column; gap: 3px; min-height: 16px; }
+.ev-chip {
+  font: 9px var(--mono); padding: 1px 4px; border-radius: 4px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.ev-chip.ev-macro { color: var(--text); border: 1px solid var(--border-strong); }
+.ev-chip.ev-book { color: var(--teal); border: 1px solid color-mix(in srgb, var(--teal) 50%, transparent); }
+/* A top-tier event is the one thing on the strip that should stop the eye. */
+.ev-chip.ev-top { color: var(--bg); background: var(--text); font-weight: 700; }
+.ev-earn { display: flex; align-items: flex-end; gap: 4px; margin-top: auto; }
+.ev-earn i { width: 5px; border-radius: 2px; }
+.ev-earn span { font: 8px var(--mono); color: var(--text-3); }
+
+/* PHONE FIRST. The base rules below are the phone's and the query WIDENS, which is this
+   repo's convention -- a max-width query would make the desktop rules the base. The card's
+   own guards caught the inverted version of this block. */
+@media (min-width: 769px) {
+  .ev-grid { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+  .ev-day:nth-child(5) { border-right: 1px solid var(--border); }
+  .bs-cols, .bs-row { grid-template-columns: 50px repeat(5, minmax(0, 1fr)); gap: 3px; }
+  .bs-c { height: 28px; font-size: 11px; }
+}
+
+/* R-IV.1209(d)7. Every animation on these tiles, off. */
+@media (prefers-reduced-motion: reduce) {
+  .mock-chip, .ag-g b, .ev-chip { animation: none !important; }
+}

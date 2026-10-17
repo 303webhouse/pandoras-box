@@ -1,0 +1,19 @@
+{
+  "_mock": true,
+  "_source": "AGORA-MOCK-FearPrice.dc.html sha256 2c0d8962ac20a0c775db15132dc3e54f2a446e5f79536da505d420aface7eeae",
+  "_note": "R-IV.1209(c) A1. EVERY VALUE HERE IS FAKE (R-IV.1209(b)).",
+  "badge": "MOCK",
+  "settled_close": "2026-10-16",
+  "headline": "PREMIUM RICH",
+  "headline_lean": "bear",
+  "headline_basis": "implied − realized",
+  "gaps": [
+    {"ticker": "SPY", "pts": 6.1},
+    {"ticker": "QQQ", "pts": 4.3},
+    {"ticker": "IWM", "pts": -1.2}
+  ],
+  "curve": {"label": "FLAT", "tenors": ["9D", "1M", "3M", "6M"], "values": [18.2, 19.0, 19.4, 20.1]},
+  "skew": {"pct": 81, "pct_label": "81st", "left": "CHEAP HEDGES", "right": "CROWDED HEDGES"},
+  "expected_move": {"label": "SPY MOVE → FOMC", "value": "±$18 · ±2.4%", "days": "8d", "approx": false},
+  "caption": "implied minus 20d realized · display only"
+}

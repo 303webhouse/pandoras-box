@@ -1,0 +1,17 @@
+{
+  "_mock": true,
+  "_source": "AGORA-MOCK-CrowdGauge.dc.html sha256 1c931cf87504afa7b8efca3266c33e3201bb92a89e3c9b4ad7c60269105cb6d7",
+  "_note": "R-IV.1209(c) A1. EVERY VALUE HERE IS FAKE (R-IV.1209(b)). Phase B1-B7 replaces this file with a live read; until then the MOCK chip is the only honest thing on the tile.",
+  "badge": "MOCK",
+  "settled_close": "2026-10-16",
+  "headline": "BEARS CROWDED",
+  "headline_lean": "bear",
+  "headline_basis": "2 of 3 at extreme",
+  "rows": [
+    {"key": "PUT/CALL", "sub": "EQUITY · 5D", "value": "0.78", "pct": 92, "pct_label": "92nd", "extreme": true, "thin": false},
+    {"key": "FUTURES", "sub": "CFTC · ES+NQ", "value": "net −", "pct": 35, "pct_label": "35th", "extreme": false, "thin": false},
+    {"key": "AAII", "sub": "BULL − BEAR", "value": "−18", "pct": 9, "pct_label": "9th*", "extreme": true, "thin": true}
+  ],
+  "footnotes": ["AAII history 9 / 52 wk", "COT as of Tue 10-13"],
+  "caption": "percentile · 1 yr · display only"
+}
