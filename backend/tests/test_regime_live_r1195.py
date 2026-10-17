@@ -1059,3 +1059,18 @@ def test_NO_SUBSTITUTION_was_made():
     assert "stable_daily_bars" not in inputs, "the builder takes bars as an argument"
     job = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
     assert job.count("FROM stable_daily_bars") == 1, "exactly one bar source, still"
+
+
+def test_THE_STANDING_AUDIT_NOTES_ARE_READABLE():
+    """R-IV.1198(c)/(e) say to RECORD the known gap and the INTERIM family status. A record
+    nobody can read is a weak record -- and checking they were written at all meant grepping a
+    deploy log that had already stopped carrying the line, which is the same problem the seed
+    count had."""
+    code = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
+    assert "async def audit_notes" in code
+    i = code.index("async def audit_notes")
+    body = code[i:i + 1200]
+    assert "known_gap" in body and "interim_families" in body
+    assert "FROM regime_audit" in body
+    svc = code_of_file(os.path.join(BACKEND, "services", "read_only", "regime_strategy.py"))
+    assert "audit_notes" in svc

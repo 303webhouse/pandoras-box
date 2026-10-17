@@ -178,7 +178,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
     screen would be the one nobody tested.
     """
     try:
-        from jobs.regime_job import (flip_history, health as regime_health,
+        from jobs.regime_job import (audit_notes, flip_history, health as regime_health,
                                      latest_with_diff, seed_run)
     except Exception as exc:
         return _unavailable("regime module unavailable (%s)" % type(exc).__name__)
@@ -194,6 +194,8 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # R-IV.1198(c): the flip list, so a reader can see whether the churn is real
             # regime change or chatter between two neighbouring labels.
             flips = await flip_history(conn, rules_version)
+            # R-IV.1198(c)/(e): the standing notes, readable rather than only recorded.
+            notes = await audit_notes(conn)
     except Exception as exc:
         logger.warning("[regime_strategy] read failed: %s", type(exc).__name__)
         return _unavailable("regime_snapshots unreadable (%s)" % type(exc).__name__)
@@ -251,4 +253,5 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "diff": got.get("diff"),
         "seed_run": seeded_run,
         "flip_history": flips,
+        "audit_notes": notes,
     }
