@@ -38,6 +38,49 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+#: R-IV.1195(d). Terminal, so the row leaves the PENDING queue instead of being re-selected on
+#: every 15-minute pass forever.
+OUTCOME_UNGRADEABLE = "UNGRADEABLE"
+
+#: NOT 'BAR_WALK', and this is load-bearing. b2_options_resolver selects on
+#: `s.outcome IS NOT NULL AND s.outcome_source = 'BAR_WALK'` and then treats any outcome outside
+#: ("WIN","HIT_T1","HIT_T2") as the losing side -- so tagging an ungradeable row BAR_WALK would
+#: fabricate a losing options P&L for a signal that was never graded. Its own source keeps it
+#: out of that query by the predicate already there.
+UNGRADEABLE_SOURCE = "UNGRADEABLE"
+
+
+def _has_usable_fire_time(signal_ts) -> bool:
+    """Can this timestamp place the signal INSIDE its session?
+
+    A stamp of exactly 00:00:00 cannot: it is a DATE stored in a timestamp column, which is
+    Convention #39's finding about `entry_date`/`exit_date` holding three conventions. Grading on
+    it means grading from the top of the session, which is pre-fire price action for every
+    signal that did not fire at the open.
+    """
+    if signal_ts is None:
+        return False
+    t = getattr(signal_ts, "time", None)
+    if not callable(t):
+        return False
+    tt = t()
+    return not (tt.hour == 0 and tt.minute == 0 and tt.second == 0)
+
+
+async def _mark_ungradeable(pool, signal_id: str, reason: str) -> None:
+    """Retire a row that can never be graded honestly, with its reason in the source field."""
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE signals
+            SET outcome = $1,
+                outcome_resolved_at = NOW(),
+                outcome_source = $2
+            WHERE signal_id = $3
+              AND outcome IS NULL
+        """, OUTCOME_UNGRADEABLE, UNGRADEABLE_SOURCE, signal_id)
+    logger.info("Outcome resolver: %s UNGRADEABLE — %s", signal_id, reason)
+
+
 def _walk_touch(
     bars: List[Tuple[datetime, float, float]],
     direction: str,
@@ -273,7 +316,21 @@ async def resolve_signal_outcomes(backfill_days: int = 60, asset_class_filter: O
         signal_ts = sig["timestamp"]
         asset_class = (sig["asset_class"] or "EQUITY").upper()
 
-        if not (entry and stop and target and signal_ts):
+        # R-IV.1195(d): "A row with no usable fire timestamp is marked UNGRADEABLE."
+        #
+        # IT WAS A BARE `continue`, which is not the same thing. A row that can never be graded
+        # stayed PENDING and was re-selected on every 15-minute pass, forever: a silent hole in
+        # the book that also spent a vendor call each time. UNGRADEABLE is terminal and visible.
+        #
+        # `signal_ts` is the one of these four that makes a row UNGRADEABLE rather than merely
+        # incomplete. A midnight-exact stamp is a DATE in a timestamp column (Convention #39)
+        # and cannot place the signal inside its session, so the walk below could only grade it
+        # by using pre-fire price action.
+        if not signal_ts or not _has_usable_fire_time(signal_ts):
+            await _mark_ungradeable(pool, sig["signal_id"],
+                                    "no usable fire timestamp (%r)" % (signal_ts,))
+            continue
+        if not (entry and stop and target):
             continue
         if direction not in ("LONG", "SHORT"):
             continue

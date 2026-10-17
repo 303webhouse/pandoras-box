@@ -9,7 +9,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
-from typing import Any
+from typing import Any, Optional
 
 import yfinance as yf
 
@@ -91,6 +91,51 @@ def is_trading_day() -> bool:
     return today not in holiday_dates
 
 
+#: The outcome for a row that can never be graded honestly. R-IV.1195(d): "A row with no usable
+#: fire timestamp is marked UNGRADEABLE. Never fall back to the full signal-day bar."
+#:
+#: It is a TERMINAL outcome, not a skip. Left PENDING, such a row is re-selected on every run
+#: forever -- a silent hole in the book that also costs a vendor call each time.
+OUTCOME_UNGRADEABLE = "UNGRADEABLE"
+
+
+def has_usable_fire_time(created_at) -> bool:
+    """Can this timestamp tell us WHERE IN THE SESSION the signal fired?
+
+    A stamp of exactly 00:00:00 cannot. It is a DATE that happens to be stored in a timestamp
+    column -- Convention #39's finding, that `entry_date`/`exit_date` hold three conventions and
+    UTC-midnight stamps are misread by a whole session. Grading on it means grading on the full
+    signal-day bar, which is the fallback this ruling forbids by name.
+    """
+    if created_at is None:
+        return False
+    t = getattr(created_at, "time", None)
+    if not callable(t):
+        return False
+    tt = t()
+    return not (tt.hour == 0 and tt.minute == 0 and tt.second == 0)
+
+
+def first_gradeable_bar_index(df, created_at) -> Optional[int]:
+    """The first row of `df` whose price action is entirely AFTER the fire. None = none yet.
+
+    THE WHOLE POINT OF R-IV.1195(d). This grader walks DAILY bars, and a daily bar for the
+    session the signal fired in contains the pre-fire part of that session. Evaluating it is how
+    a short fired at 11:00 gets "stopped" by its own 10:00 rally -- the stop was never touched
+    after the signal existed.
+
+    So for an intraday fire the signal-day bar is DROPPED and grading starts at the next
+    session. That is the ruling's "first finest-available bar after fired_at" when the finest
+    available bar is a day: the next one.
+    """
+    fired_day = created_at.date()
+    for i, ts in enumerate(df.index):
+        day = ts.date() if hasattr(ts, "date") else ts
+        if day > fired_day:
+            return i
+    return None
+
+
 async def _fetch_history(symbol: str, start: str):
     def _sync_fetch():
         ticker = yf.Ticker(symbol)
@@ -144,9 +189,33 @@ async def score_pending_signals() -> None:
                 await _update_outcome(pool, row["signal_id"], "EXPIRED", None, age_days)
                 continue
 
+            # R-IV.1195(d). A row whose fire time cannot place the signal inside its session is
+            # UNGRADEABLE and terminal -- not skipped, which would leave it PENDING forever.
+            if not has_usable_fire_time(row["created_at"]):
+                await _update_outcome(pool, row["signal_id"], OUTCOME_UNGRADEABLE, None,
+                                      age_days)
+                logger.info("score_signals: %s UNGRADEABLE (no usable fire time: %r)",
+                            row["signal_id"], row["created_at"])
+                continue
+
             start = created_at.strftime("%Y-%m-%d")
             df = await _fetch_history(row["symbol"], start)
             if df is None or df.empty:
+                continue
+
+            # ONLY PRICE ACTION AFTER THE FIRE (R-IV.1195(d)). The frame starts at the signal
+            # DAY, and that day's bar contains the pre-fire part of the session: walking it is
+            # how a short fired at 11:00 gets "stopped" by its own 10:00 rally. The slice also
+            # feeds max_favorable/max_adverse below, which had the same fault -- df["High"].max()
+            # over a frame including the signal day is a favourable excursion that may never
+            # have happened after the signal existed.
+            first = first_gradeable_bar_index(df, created_at)
+            if first is None:
+                # No session has completed since the fire. Still PENDING -- a different state
+                # from UNGRADEABLE, and conflating them would retire rows that grade tomorrow.
+                continue
+            df = df.iloc[first:]
+            if df.empty:
                 continue
 
             direction = row["direction"]
@@ -321,9 +390,13 @@ async def get_hit_rates() -> dict[str, Any]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
+            -- UNGRADEABLE IS EXCLUDED, and it matters because `total` below is a denominator.
+            -- R-IV.1195(d) introduced the value, and counting it here would inflate the
+            -- denominator of every hit rate on the dashboard with rows that have no outcome.
+            -- It is not an outcome; it is the admission that there isn't one.
             SELECT signal_type, cta_zone, outcome, COUNT(*) as cnt
             FROM signal_outcomes
-            WHERE outcome != 'PENDING'
+            WHERE outcome NOT IN ('PENDING', 'UNGRADEABLE')
             GROUP BY signal_type, cta_zone, outcome
             ORDER BY signal_type, cta_zone
             """
