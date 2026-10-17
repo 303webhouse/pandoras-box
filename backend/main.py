@@ -51,6 +51,32 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Could not initialize database schema: {e}")
 
+    # Regime v1 seed (R-IV.1195(b)): "Report the seed count actually executed at deploy."
+    #
+    # THE EMPTY-TABLE GUARD IS LOAD-BEARING. A startup seed with no guard is
+    # DEF-SEED-RESURRECTION: init_database()'s account_balances seed re-created rows that had
+    # been deliberately deleted, on every single deploy. This one writes only when the table
+    # holds nothing, so a re-deploy is a no-op and a row removed on purpose stays removed.
+    #
+    # It runs here rather than waiting for the nightly because the nightly only fires on
+    # weekdays at 21:30 ET: seeded at the nightly alone, a Friday deploy would leave the card
+    # saying "cannot confirm" until Monday night. Never raises -- a failed seed leaves the card
+    # unavailable with a reason, which is the correct state, not a reason to fail startup.
+    try:
+        from database.postgres_client import get_postgres_client as _gpc
+        from jobs.regime_job import run_seed
+        _pool = await _gpc()
+        async with _pool.acquire() as _conn:
+            _have = await _conn.fetchval("SELECT COUNT(*) FROM regime_snapshots")
+            if _have:
+                logger.info("✅ Regime v1: %s snapshot(s) already stored, seed skipped", _have)
+            else:
+                _out = await run_seed(_conn)
+                logger.info("✅ Regime v1 seeded %s session(s) of %s classifiable (%s)",
+                            _out.get("written"), _out.get("sessions"), _out.get("reason"))
+    except Exception as e:
+        logger.warning(f"⚠️ Regime v1 seed skipped: {type(e).__name__}: {e}")
+
     # Initialize watchlist config table
     try:
         from api.watchlist import init_watchlist_table
