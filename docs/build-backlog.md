@@ -54,7 +54,7 @@ Everything in this queue is **display only (#42)**: nothing gates, grades or fee
 
 | # | Item | State |
 |---|------|-------|
-| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only, **12 today**), 26 batched calls/session. Creates `position_watch_events`. Level break is an **EVENT**, the session's **first closed bar beyond counts** (R-IV.1224(c)), **one level-type push per ticker per session, literal** (R-IV.1224(b)), and **phone pushes stay OFF through the completion deploy** unless R-IV.1223(d) has ruled by then (R-IV.1224(d)). | **IN PROGRESS** — source R-IV.1215(b), detector R-IV.1220(a) + R-IV.1224(b,c,d) |
+| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only, **12 today**), 26 batched calls/session. Creates `position_watch_events`. Level break is an **EVENT**, the session's **first closed bar beyond counts** (R-IV.1224(c)), **one level-type push per ticker per session, literal** (R-IV.1224(b)), a **gap-open break needs a second bar beyond to be pushable** (R-IV.1226(b)), and **phone pushes stay OFF through the completion deploy** unless SPINE has ruled on QUERY's (b) recount by then (R-IV.1226(c)). | **IN PROGRESS** — source R-IV.1215(b), detector R-IV.1220(a) + R-IV.1224(b,c,d) + R-IV.1226(b,c) |
 | **B3** | Yield curve upgrade — FRED DGS2/DGS3MO/DGS10/DGS30/T10Y2Y/T10Y3M; 3m10s + 2s10s big numbers with 60-day sparklines; shape word; per-tenor z-scores (**UNUSUAL ≥2σ, EXTREME ≥3σ or 10Y ≥10bp** — R-IV.1220(b) **retires "RARE"**); EXTREME still pulses; **every tooltip states that label's measured fires per year**; UN-INVERTED flag. FRED key confirmed present, never printed. | queued |
 | **B4** | Event Strip live — FOMC/CPI/jobs/GDP/PCE, monthly OpEx, book expiries, CHRONOS earnings counts, buyback blackout (est.). | queued |
 | **B5** | Fear Price live — ^VIX/^VXN/^RVX minus 20-day realized; VIX curve; ^SKEW percentile; SPY ATM straddle expected move. | queued |
@@ -515,3 +515,33 @@ because a stock row is refused *before* the whitelist by design (shares have no 
 shape), **the B2 cut currently evaluates no stock rows at all.** Each refusal states its reason,
 so this is visible rather than silent — but the visible reason reads as a per-row omission when
 it is in fact book-wide.
+
+---
+
+## R-IV.1226 record — the gap-open amendment, and what it is queued behind
+
+**The measurement that drove it (QUERY's recount under R-IV.1223(d), as of 2026-10-18).** With
+R-IV.1224(c)'s gap-open rule live, the median day carried **5.0 pushes — exactly at the design
+bar — and p90 8.2**. **Gap-open supplied 59% of all pushes (175 of 295)**, and **MSFT alone
+fired on 29 of 59 sessions**. A rule written for the case most worth knowing about had become
+the majority of the traffic.
+
+**So a gap must confirm (R-IV.1226(b)), and the panel still shows the unconfirmed bar:**
+
+| bar | event | panel | phone |
+|---|---|---|---|
+| first closed bar beyond | `LEVEL_BREAK`, `confirmed: false` | **logged** (b)3 | **no** (b)1 |
+| second bar also beyond | `LEVEL_BREAK`, `confirmed: true` — **event time is this bar's close** | logged | yes, if AGAINST |
+| second bar back inside | `FAILED_BREAKOUT` | logged | only if AGAINST (b)2 |
+
+One push per ticker per session is unchanged (b)4, and the unconfirmed bar **does not spend
+that slot** — if it did, a gap that confirmed on bar 2 would find its slot already gone.
+
+**Pushes stay OFF (R-IV.1226(c))** until B2's completion deploy, and switch on there only if
+SPINE has by then ruled on QUERY's recount under (b). Not the recount under (a) — that one is
+already in and is what produced the amendment above.
+
+**Queued after B2 (R-IV.1226(e)):** transcribe **Conventions #33–#45** into
+`docs/conventions/conventions.md` from BUILD's own lane records. Any convention whose text
+BUILD does not hold is marked **"ruled; text not in BUILD's record"** — not reconstructed. The
+register currently stops at #32 plus the #37 clarification appended under R-IV.1224(g).

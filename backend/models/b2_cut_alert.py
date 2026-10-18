@@ -269,6 +269,25 @@ def _structure_parts(row: Dict[str, Any]) -> Tuple[str, ...]:
     return tuple(p.strip() for p in raw.split("+") if p.strip())
 
 
+#: R-IV.1226(d)2 — DISPLAY TEXT ONLY, no logic change. Every refusal below that turns on the
+#: two orientation sources appends this clause, because WITHOUT IT A BOOK-WIDE CAUSE READS AS A
+#: FACT ABOUT ONE POSITION. The old wording ("it is not recorded", "held until
+#: position_orientation exists") invited exactly the wrong next action: go and look at that row,
+#: or wait for a column that is not coming. QUERY found source 1 NULL on every open row, and no
+#: migration anywhere creates source 2, so no row in the book can be resolved by either today.
+#:
+#: One constant rather than the same sentence written at four call sites — four copies drift,
+#: and the drift would be invisible because each one is only ever read one row at a time.
+#: It names its source and its as-of in the same sentence as the claim (Convention #37, as
+#: clarified by R-IV.1224(g)).
+BOOK_WIDE = (
+    "orientation_at_entry is NULL on EVERY open row (QUERY's census, 2026-10-18) and "
+    "position_orientation is created by no migration, so neither source can resolve ANY row "
+    "today: this is a BOOK-WIDE gap awaiting a TA-161 spec, not a fact about this position, "
+    "and orientation is UNDETERMINED so the row is held"
+)
+
+
 def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     """(+1 for a DEBIT-opened position, -1 for CREDIT, None if not stated) + the reason.
 
@@ -332,7 +351,7 @@ def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     whole = (row.get("structure") or "").strip().lower()
     if not whole:
         return None, ("no structure recorded, and neither orientation_at_entry nor "
-                      "position_orientation is set")
+                      "position_orientation is set. %s" % BOOK_WIDE)
 
     # R-IV.1043(f), the second half: **A STOCK ROW IS EVALUATED ONLY WITH
     # `orientation_at_entry` RECORDED.** Checked BEFORE the whitelist, not after, so the rule
@@ -343,8 +362,7 @@ def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
     if whole in _STOCK_STRUCTURES or all(p in _STOCK_STRUCTURES
                                          for p in whole.split("+") if p):
         return None, ("structure %r is SHARES, and a stock row is evaluated only with "
-                      "orientation_at_entry recorded (R-IV.1043(f)); it is not recorded, so "
-                      "orientation is UNDETERMINED and the row is held" % whole)
+                      "orientation_at_entry recorded (R-IV.1043(f)); %s" % (whole, BOOK_WIDE))
 
     if whole in DEBIT_WHITELIST:
         return 1, "structure %r is on DEBIT_WHITELIST (exact match, whole value)" % whole
@@ -352,10 +370,11 @@ def orientation(row: Dict[str, Any]) -> Tuple[Optional[int], str]:
         return None, ("structure %r is a COMPOSITE, held by TA-161 §1.6 whatever its legs are; "
                       "orientation is UNDETERMINED" % whole)
     if whole in _KNOWN_CREDIT_SHAPES:
-        return None, ("structure %r is credit-opened and so is not on DEBIT_WHITELIST; held "
-                      "until position_orientation exists" % whole)
+        return None, ("structure %r is credit-opened and so is not on DEBIT_WHITELIST; %s"
+                      % (whole, BOOK_WIDE))
     return None, ("structure %r is not on DEBIT_WHITELIST %s; orientation is UNDETERMINED and "
-                  "the row is held (TA-168)" % (whole, sorted(DEBIT_WHITELIST)))
+                  "the row is held (TA-168). %s"
+                  % (whole, sorted(DEBIT_WHITELIST), BOOK_WIDE))
 
 
 def contract_multiplier(row: Dict[str, Any]) -> Tuple[Optional[int], str]:

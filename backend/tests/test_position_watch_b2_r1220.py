@@ -36,8 +36,11 @@ def test_A_SECOND_BAR_BEYOND_THE_LEVEL_DOES_NOT_FIRE_AGAIN():
     where 270 fires a day came from. The event test says nothing on the second, because the
     bar before it was not inside, and it needs no fired-set to get that right.
     """
-    assert pw.level_break([101.5, 101.9], H, L) is None
-    assert pw.level_break([101.5, 101.9, 102.4, 102.1], H, L) is None
+    assert pw.level_break([100.2, 101.5, 101.9], H, L) is None
+    assert pw.level_break([100.2, 101.5, 101.9, 102.4, 102.1], H, L) is None
+    # The series must START INSIDE to test this. Bare [101.5, 101.9] is now a gap-open session
+    # whose second bar CONFIRMS the gap (R-IV.1226(b)1), so it fires by design -- see
+    # test_A_GAP_THAT_HOLDS_PUSHES_ONCE_AT_BAR_TWO.
 
 
 def test_THE_TRANSITION_INTO_THE_BREAK_DOES_FIRE():
@@ -76,16 +79,17 @@ def test_gap_open_beyond_IS_the_break_event():
     The deeming is a theorem rather than an assumption: a session's close lies within that
     session's own high and low, and those are exactly `prior_high` / `prior_low`.
 
-    The REST of the session must still be silent -- one break, once per direction -- or this
-    fix would reintroduce the 270-fires-a-day state test on gap days only.
+    AMENDED BY R-IV.1226(b): the first bar is still the event and still reaches the PANEL, but
+    it is no longer pushable on its own -- the push waits for a second bar beyond. What this
+    test now pins is the half the later ruling did NOT change: bar 1 produces a real event
+    rather than silence. The push side is pinned by
+    test_A_GAP_THAT_HOLDS_PUSHES_ONCE_AT_BAR_TWO.
     """
     gap = [101.4, 101.8, 102.2, 102.0]
     first = pw.level_break(gap[:1], H, L)
     assert first is not None and first["event"] == "LEVEL_BREAK"
     assert first["side"] == "above" and first["close"] == 101.4
-    for n in range(2, len(gap) + 1):
-        assert pw.level_break(gap[:n], H, L) is None, "bar %d re-reported the gap break" % n
-    # And it is the same once-per-session-per-direction event, so the fired-set still holds it.
+    # Once per session per direction, held by the fired-set on the CONFIRMED event.
     assert pw.level_break(gap[:1], H, L, fired_sides=["above"]) is None
     # A gap DOWN is the same event on the other side.
     assert pw.level_break([98.2], H, L)["side"] == "below"
@@ -301,3 +305,97 @@ def test_POSITION_WATCH_NEVER_READS_orientation_at_entry():
     # The positive control: the scan CAN see a name that really is in the executable source,
     # so a pass above is not the scan quietly matching nothing.
     assert "LEVERAGE_MAP" in code
+
+
+# ── 7. R-IV.1226(b): a gap has to confirm before it can reach the phone ───
+
+def _hold():
+    """A gap that HOLDS: opens above, second bar closes above too, then stays out."""
+    return [101.4, 101.8, 102.2, 102.0]
+
+
+def _fade():
+    """A gap that FADES: opens above, second bar closes back inside."""
+    return [101.4, 100.6, 100.4]
+
+
+def test_A_GAP_THAT_HOLDS_PUSHES_ONCE_AT_BAR_TWO():
+    """(b)1: pushable only if the first TWO closed bars both close beyond, and the event time
+    is the SECOND bar's close. QUERY's recount is why: gap-open was supplying 59% of all pushes
+    (175 of 295), with MSFT firing on 29 of 59 sessions."""
+    s = _hold()
+    bar1 = pw.level_break(s[:1], H, L)
+    assert bar1["gap_open"] is True and bar1["confirmed"] is False
+    assert bar1["pushable"] is False, "bar 1 must not reach the phone"
+    assert "unconfirmed" in bar1["basis"]
+
+    bar2 = pw.level_break(s[:2], H, L)
+    assert bar2["confirmed"] is True and bar2["pushable"] is True
+    assert bar2["close"] == s[1], "the event time is the SECOND bar's close"
+    assert "confirming the gap" in bar2["basis"]
+
+    # ONCE. The caller records the side on the CONFIRMED event, and the rest is silent.
+    for n in range(3, len(s) + 1):
+        assert pw.level_break(s[:n], H, L) is None, "bar %d re-reported the gap" % n
+    assert pw.level_break(s[:2], H, L, fired_sides=["above"]) is None
+
+
+def test_AN_UNCONFIRMED_GAP_CANNOT_PUSH_EVEN_WHEN_EVERYTHING_ELSE_PASSES():
+    """The flag has to be enforced, not merely reported. Relation AGAINST, wire on, cap empty,
+    no cooldown -- and it still does not push, because bar 2 has not closed."""
+    ev = pw.level_break(_hold()[:1], H, L)
+    ok, why = pw.may_push_event(ev, relation="AGAINST", ticker="QQQ", recent=[], now=T,
+                                pushed_today=0, pushes_enabled=True)
+    assert ok is False and "not pushable yet" in why
+    # The control: the same call on the CONFIRMED bar-2 event does push.
+    ev2 = pw.level_break(_hold()[:2], H, L)
+    assert pw.may_push_event(ev2, relation="AGAINST", ticker="QQQ", recent=[], now=T,
+                             pushed_today=0, pushes_enabled=True)[0] is True
+
+
+def test_THE_UNCONFIRMED_GAP_DOES_NOT_SPEND_THE_SESSIONS_ONE_SLOT():
+    """Gate order, and it decides whether a confirmed gap can ever push. If the unconfirmed bar
+    consumed the one level-type slot, bar 2 would arrive to find it already spent."""
+    ev = pw.level_break(_hold()[:1], H, L)
+    ok, why = pw.may_push_event(ev, relation="AGAINST", ticker="QQQ", recent=[], now=T,
+                                pushed_today=0, pushes_enabled=True)
+    assert ok is False
+    assert "not pushable yet" in why and "level-type" not in why
+
+
+def test_A_GAP_THAT_FADES_PRODUCES_ONLY_THE_FAILED_BREAKOUT_PATH():
+    """(b)2: no break push, and the failure is the ordinary failed-breakout event, which
+    pushes only if AGAINST."""
+    s = _fade()
+    assert pw.level_break(s[:1], H, L)["pushable"] is False
+    # Bar 2 closed back inside, so there is no break event at all on it.
+    assert pw.level_break(s[:2], H, L) is None
+    # It is a failed breakout, by the ordinary transition rule.
+    fb = pw.failed_breakout(s[:2], H, L)
+    assert fb["event"] == "FAILED_BREAKOUT" and fb["side"] == "above" and fb["bars_ago"] == 1
+    # AGAINST pushes it; WITH does not.
+    assert pw.may_push_event(fb, relation="AGAINST", ticker="QQQ", recent=[], now=T,
+                             pushed_today=0, pushes_enabled=True)[0] is True
+    assert pw.may_push_event(fb, relation="WITH", ticker="QQQ", recent=[], now=T,
+                             pushed_today=0, pushes_enabled=True)[0] is False
+    # And the rest of the session stays silent on both paths.
+    assert pw.level_break(s, H, L) is None
+    assert pw.failed_breakout(s, H, L) is None
+
+
+def test_THE_PANEL_STILL_LOGS_THE_FIRST_BAR_GAP():
+    """(b)3. The unconfirmed break is a real event with a real panel row -- it is only the
+    PHONE that waits. A detector that returned None on bar 1 would leave the panel blank on
+    exactly the session the panel is for."""
+    ev = pw.level_break(_hold()[:1], H, L)
+    row = pw.panel_text(ticker="QQQ", event=ev["event"], close=ev["close"],
+                        basis=ev["basis"], action=pw.ACTION_LOGGED, shown_regime="RISK-OFF")
+    assert "QQQ" in row["title"] and "101.40" in row["title"]
+    assert "unconfirmed" in row["body"]
+
+
+def test_CROSSING_THE_WHOLE_RANGE_IN_TWO_BARS_IS_NOT_A_CONFIRMATION():
+    """Fail closed rather than pick a side: bar 1 below the low, bar 2 above the high confirms
+    neither break and is not a transition from inside."""
+    assert pw.level_break([98.0], H, L)["side"] == "below"
+    assert pw.level_break([98.0, 101.5], H, L) is None

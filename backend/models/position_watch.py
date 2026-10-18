@@ -280,6 +280,27 @@ def level_break(session_closes: List[float], prior_high: Optional[float],
     `session_closes` must begin at the session's first closed bar and not be a trailing window.
     Before R-IV.1224(c) a truncated list could only under-report; now it can manufacture a gap
     break that never happened. B2's job passes the session's bars from the open, and asserts it.
+
+    A GAP NOW HAS TO CONFIRM BEFORE IT CAN REACH THE PHONE, R-IV.1226(b), and the measurement
+    is why: QUERY's recount put the median at 5.0 pushes -- exactly at the bar -- and found that
+    GAP-OPEN SUPPLIED 59% OF ALL PUSHES (175 of 295), with MSFT alone firing on 29 of 59
+    sessions. A rule meant for the case most worth knowing about had become the majority of the
+    traffic. So:
+
+      * first bar beyond  -> the event exists and is LOGGED ON THE PANEL (b)3, `pushable` False;
+      * second bar also beyond -> `confirmed`, `pushable`, and the EVENT TIME IS THE SECOND
+        BAR'S CLOSE (b)1, which is what this returns on;
+      * second bar back inside -> no break push at all (b)2; that is `failed_breakout`'s path,
+        and it pushes only if AGAINST like any other.
+
+    `fired_sides` RECORDS CONFIRMED BREAKS ONLY. The caller adds a side when the returned dict
+    says `confirmed`, never on the unconfirmed first bar -- recording it there would suppress
+    the bar-2 confirmation and the phone would never ring on a gap at all, which is the failure
+    this clause is trying to avoid, arrived at from the other direction.
+
+    One case is deliberately fail-closed: a first bar beyond the LOW and a second beyond the
+    HIGH (price crossing the whole prior-day range in two bars) is not a confirmation of either
+    break and not a transition from inside, so it returns None rather than picking one.
     """
     if not session_closes:
         return None
@@ -288,12 +309,28 @@ def level_break(session_closes: List[float], prior_high: Optional[float],
     side = _beyond(c, prior_high, prior_low)
     if side is None or side in already:
         return None
-    if len(session_closes) > 1 and not _is_inside(session_closes[-2], prior_high, prior_low):
-        return None
+    n = len(session_closes)
     level = prior_high if side == "above" else prior_low
     word = "high" if side == "above" else "low"
-    return {"event": "LEVEL_BREAK", "side": side, "level": level, "close": c,
-            "basis": "closed %.4f %s the prior-day %s %.4f" % (c, side, word, level)}
+    out: Dict[str, Any] = {"event": "LEVEL_BREAK", "side": side, "level": level, "close": c}
+
+    if n == 1:
+        out.update(gap_open=True, confirmed=False, pushable=False,
+                   basis=("opened %.4f %s the prior-day %s %.4f; unconfirmed until the second "
+                          "bar closes" % (c, side, word, level)))
+        return out
+
+    prev_side = _beyond(session_closes[-2], prior_high, prior_low)
+    if prev_side is None:
+        out.update(gap_open=False, confirmed=True, pushable=True,
+                   basis="closed %.4f %s the prior-day %s %.4f" % (c, side, word, level))
+        return out
+    if n == 2 and prev_side == side:
+        out.update(gap_open=True, confirmed=True, pushable=True,
+                   basis=("opened %s the prior-day %s %.4f and the second bar closed %.4f %s "
+                          "it, confirming the gap" % (side, word, level, c, side)))
+        return out
+    return None
 
 
 def failed_breakout(session_closes: List[float], prior_high: Optional[float],
@@ -441,6 +478,7 @@ def _level_push_this_session(recent: Iterable[Dict[str, Any]], ticker: str,
 def may_push(*, relation: Optional[str], event: str, ticker: str,
              recent: Iterable[Dict[str, Any]], now: _dt.datetime,
              pushed_today: int, session_date: Optional[_dt.date] = None,
+             pushable: bool = True,
              pushes_enabled: bool = PUSHES_ENABLED) -> Tuple[bool, str]:
     """(f)4 as amended by R-IV.1220(a)3 and (a)5, with the reason -- because a suppressed push
     that says nothing is indistinguishable from a detector that never fired.
@@ -451,6 +489,9 @@ def may_push(*, relation: Optional[str], event: str, ticker: str,
          row, no "already pushed" state that would still be there when the wire is switched on.
       2. The relation gate (f)4, so a WITH alert never consumes a cap slot. A cap spent on
          alerts that were never going to be pushed is a cap that silences the ones that would.
+      2a. `pushable` (R-IV.1226(b)1), BEFORE the session limit, because an unconfirmed gap-open
+         break must not consume the one level-type slot the session has. If it did, a gap that
+         confirmed on bar 2 would find its own slot already spent by bar 1.
       3. ONE LEVEL-TYPE PUSH PER TICKER PER SESSION (a)3, before the cap for the same reason.
          LEVEL_BREAK and FAILED_BREAKOUT share this one slot: they are two readings of the same
          prior-day level, and a break followed by its failure is the commonest pair there is.
@@ -469,6 +510,9 @@ def may_push(*, relation: Optional[str], event: str, ticker: str,
         return False, "phone pushes are OFF for B2's ship (R-IV.1220(a)5); the panel is live"
     if relation != "AGAINST":
         return False, "not AGAINST, so it goes to the panel log (f)4"
+    if not pushable:
+        return False, ("the event is not pushable yet (R-IV.1226(b)1: an unconfirmed gap-open "
+                       "break is logged on the panel and waits for the second bar)")
     if str(event).upper() in LEVEL_TYPE_EVENTS:
         prior = _level_push_this_session(recent, ticker, session_date)
         if prior is not None:
@@ -487,6 +531,22 @@ def may_push(*, relation: Optional[str], event: str, ticker: str,
             return False, ("%s %s was pushed at %s, inside the %d-minute window"
                            % (ticker, event, at.isoformat(), PUSH_COOLDOWN_MIN))
     return True, "AGAINST, within the cap and outside the cooldown"
+
+
+def may_push_event(event: Dict[str, Any], **kw: Any) -> Tuple[bool, str]:
+    """`may_push` with the detector's own dict supplying `event` and `pushable`.
+
+    THE JOB CALLS THIS ONE, and the reason is the fault class rather than convenience. A
+    `pushable` flag that the caller has to copy out of one dict and into another argument is a
+    flag that gets dropped -- and dropping it fails OPEN, pushing an unconfirmed gap break. Here
+    the flag travels with the event that carries it, so forgetting is not available.
+
+    `pushable` defaults True when the dict does not carry it, which is correct: the exit levels
+    and exhaustion never set it and are pushable on their own gates.
+    """
+    kw.setdefault("event", str(event.get("event", "")))
+    kw.setdefault("pushable", bool(event.get("pushable", True)))
+    return may_push(**kw)
 
 
 def cap_notice(*, pushed_today: int, suppressed_by_cap: bool, notice_sent: bool,
