@@ -54,8 +54,8 @@ Everything in this queue is **display only (#42)**: nothing gates, grades or fee
 
 | # | Item | State |
 |---|------|-------|
-| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only), 26 batched calls/session. Creates `position_watch_events`. | **IN PROGRESS** — source ruled R-IV.1215(b) |
-| **B3** | Yield curve upgrade — FRED DGS2/DGS3MO/DGS10/DGS30/T10Y2Y/T10Y3M; 3m10s + 2s10s big numbers with 60-day sparklines; shape word; per-tenor z-scores (UNUSUAL ≥2σ, RARE ≥3σ or 10Y ≥10bp); UN-INVERTED flag. FRED key confirmed present. | queued |
+| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only, **12 today**), 26 batched calls/session. Creates `position_watch_events`. Level break is an **EVENT** and **phone pushes ship OFF** (R-IV.1220(a)). | **IN PROGRESS** — source ruled R-IV.1215(b), detector ruled R-IV.1220(a) |
+| **B3** | Yield curve upgrade — FRED DGS2/DGS3MO/DGS10/DGS30/T10Y2Y/T10Y3M; 3m10s + 2s10s big numbers with 60-day sparklines; shape word; per-tenor z-scores (**UNUSUAL ≥2σ, EXTREME ≥3σ or 10Y ≥10bp** — R-IV.1220(b) **retires "RARE"**); EXTREME still pulses; **every tooltip states that label's measured fires per year**; UN-INVERTED flag. FRED key confirmed present, never printed. | queued |
 | **B4** | Event Strip live — FOMC/CPI/jobs/GDP/PCE, monthly OpEx, book expiries, CHRONOS earnings counts, buyback blackout (est.). | queued |
 | **B5** | Fear Price live — ^VIX/^VXN/^RVX minus 20-day realized; VIX curve; ^SKEW percentile; SPY ATM straddle expected move. | queued |
 | **B6** | Crowd live — CBOE equity put/call 5d, CFTC TFF ES+NQ, AAII bull−bear (only if its terms allow automated reads). | queued |
@@ -452,3 +452,30 @@ asset-class guard exists to prevent, and which Tier 2 #10 already flags for `hub
 **What the hub must do instead:** VIX is **listed as omitted, with this reason, in any delta
 publication.** An omission that names its cause is honest; a null with no explanation invites
 someone to go looking for a source.
+
+---
+
+## B9's amendments, recorded now and built when B9 comes up (R-IV.1220(c))
+
+**Not being built now.** B9 still sits after B8 (R-IV.1214(b)). Recorded here so the
+amendments reach the build rather than only the relay.
+
+1. **Recovery Race is EQUITY ONLY:** EWJ, FXI, EWY, EWT, INDA, EEM, VGK, SPY, QQQ. The four
+   commodity ETFs move to a **separate context list** and are not raced. A race is a comparison,
+   and comparing an equity index's recovery with gold's is a comparison of two different things
+   on one axis.
+2. **Every computation uses Adj Close, labelled "USD total return".** The label is the point:
+   the figure includes dividends, and a reader who assumes price return will misread a
+   year of a high-yielding index like VGK.
+3. **Labels are UNUSUAL / EXTREME** (as B3), **each with its measured fires per year** in the
+   tooltip: |z| ≥ 2 fires **14–16/yr**, |z| ≥ 3 fires **2.6–3.8/yr**. A threshold whose
+   frequency is not stated is a threshold nobody can calibrate against.
+4. **FXI stands; MCHI is superseded.** One China proxy, chosen, not both.
+5. The race panel's **footnote wording is to follow** from SPINE. Until it arrives the panel is
+   not built with a placeholder footnote — an invented caption is the thing R-IV.925(b) forbids.
+
+**Governing document (R-IV.1220(d)):** GLOBAL-MARKETS-TRACKER, sha256
+`75c4ba395836286ff88bbb57acc99ff2559002d5623fa2e63f19916660704ced`. The copy at
+`C:\temp\...` with sha256 `5c97eeea…` is **pre-correction and superseded**; the hash verified
+at handoff under R-IV.1214(a) was that superseded copy, so B9 must be built against the new
+one and re-verified before any work starts.

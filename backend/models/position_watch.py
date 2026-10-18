@@ -213,55 +213,115 @@ def bar_is_closed(bar_start: _dt.datetime, *, newest_bar_start: Optional[_dt.dat
 #: (f)1: a failed breakout is a break, then a close back inside WITHIN 4 BARS.
 FAILED_BREAKOUT_BARS = 4
 
+#: The prior-day-level family. R-IV.1220(a)3 caps these TWO TOGETHER at one push per ticker per
+#: session. The exit levels (STOP_LEVEL / TARGET_LEVEL) and EXHAUSTION are not in this family
+#: and are explicitly unchanged by that ruling.
+LEVEL_TYPE_EVENTS = ("LEVEL_BREAK", "FAILED_BREAKOUT")
 
-def level_break(closes: List[float], prior_high: Optional[float],
-                prior_low: Optional[float]) -> Optional[Dict[str, Any]]:
-    """Did the newest CLOSED bar close beyond the prior day's range? (f)1.
 
-    Returns None when there is nothing to test, never a False that reads as "no break" -- an
-    absent prior-day level and an intact one are different facts.
-    """
-    if not closes:
-        return None
-    c = closes[-1]
+def _beyond(c: float, prior_high: Optional[float],
+            prior_low: Optional[float]) -> Optional[str]:
+    """Which side of the prior-day range this close is beyond, or None for inside."""
     if prior_high is not None and c > prior_high:
-        return {"event": "LEVEL_BREAK", "side": "above", "level": prior_high, "close": c,
-                "basis": "closed %.4f above the prior-day high %.4f" % (c, prior_high)}
+        return "above"
     if prior_low is not None and c < prior_low:
-        return {"event": "LEVEL_BREAK", "side": "below", "level": prior_low, "close": c,
-                "basis": "closed %.4f below the prior-day low %.4f" % (c, prior_low)}
+        return "below"
     return None
 
 
-def failed_breakout(closes: List[float], prior_high: Optional[float],
+def _is_inside(c: float, prior_high: Optional[float],
+               prior_low: Optional[float]) -> bool:
+    """Within BOTH known bounds.
+
+    "Inside" means inside the range, not merely "not above the high". A bar below the prior-day
+    low is not inside, so it cannot serve as the inside bar a break event requires.
+    """
+    return ((prior_high is None or c <= prior_high)
+            and (prior_low is None or c >= prior_low))
+
+
+def level_break(session_closes: List[float], prior_high: Optional[float],
+                prior_low: Optional[float], *,
+                fired_sides: Iterable[str] = ()) -> Optional[Dict[str, Any]]:
+    """AN EVENT, NOT A STATE: the FIRST closed 15m bar beyond the prior-day level AFTER a
+    closed bar inside it. R-IV.1220(a)1, which replaces the state test this function was.
+
+    WHY IT CHANGED, measured rather than argued. QUERY's census (report sha12 8514413e1c48)
+    ran both forms over the same sessions: as a STATE test -- "is the newest close beyond the
+    level" -- it produced 270 raw fires a day and the 20/day cap bound on 59 of 59 days,
+    because one break re-reported itself on every remaining bar of the session. The same
+    detector as an EVENT produced 22 a day. A state test asked once a bar is a counter of bars,
+    not of breaks.
+
+    `session_closes` is THIS SESSION's closed bars, oldest first. The scoping is load-bearing
+    twice over: "at most once per session per direction" is meaningless against a list that
+    spans sessions, and a bar from yesterday could otherwise supply the "inside" bar for a
+    level that was already broken before today opened.
+
+    `fired_sides` is the directions already fired this session ("above" / "below"). The side is
+    the key, not the ticker: a session can legitimately break out above AND lose the low later
+    the same day, and those are two different things to know about.
+
+    A HOLE THIS LEAVES, STATED RATHER THAN PAPERED OVER: a session that gaps beyond the level
+    on its first bar and never closes back inside produces NO level-break event at all, because
+    the ruled definition requires a closed inside bar first. That is the ruling as written and
+    it is implemented as written; the gap-and-go case is reported to SPINE under R-IV.1220
+    rather than quietly widened here, and `test_gap_open_beyond_never_fires` pins the behaviour
+    so it cannot drift either way unnoticed.
+    """
+    if len(session_closes) < 2:
+        return None
+    already = {str(s).lower() for s in (fired_sides or ())}
+    c = session_closes[-1]
+    side = _beyond(c, prior_high, prior_low)
+    if side is None or side in already:
+        return None
+    if not _is_inside(session_closes[-2], prior_high, prior_low):
+        return None
+    level = prior_high if side == "above" else prior_low
+    word = "high" if side == "above" else "low"
+    return {"event": "LEVEL_BREAK", "side": side, "level": level, "close": c,
+            "basis": "closed %.4f %s the prior-day %s %.4f" % (c, side, word, level)}
+
+
+def failed_breakout(session_closes: List[float], prior_high: Optional[float],
                     prior_low: Optional[float],
                     within: int = FAILED_BREAKOUT_BARS) -> Optional[Dict[str, Any]]:
-    """A break, then a close back INSIDE the prior-day range within `within` bars. (f)1.
+    """ONCE PER BREAK, R-IV.1220(a)2 -- and once per break BY CONSTRUCTION, not by bookkeeping.
 
-    Scanned from the newest bar backwards so the most recent failure is the one reported, and
-    the break must be the LAST thing that happened before the return -- a break, three quiet
-    bars inside, then another break is not a failed breakout.
+    The event is the RETURN: the bar immediately before this one was beyond the level and this
+    one closed back inside. Because the test is that transition, a second inside bar after the
+    same break is not a transition and cannot re-fire. The alternative -- "a break happened
+    within 4 bars and we are inside now" -- is true on up to four bars in a row and needs a
+    fired-set to hold it to one. A rule that cannot double-fire beats a rule plus a guard
+    against its double-firing.
+
+    The break bar is then found by walking back over the CONSECUTIVE run of bars beyond that
+    same side, and the run must be no longer than `within` bars: a break that held for five
+    bars before failing is not this event.
+
+    `session_closes` is session-scoped and oldest-first, as in `level_break`.
     """
-    if len(closes) < 2:
+    if len(session_closes) < 2:
         return None
-    last = closes[-1]
-    inside = ((prior_high is None or last <= prior_high)
-              and (prior_low is None or last >= prior_low))
-    if not inside:
+    last = session_closes[-1]
+    if not _is_inside(last, prior_high, prior_low):
         return None
-    for back in range(1, min(within, len(closes) - 1) + 1):
-        c = closes[-1 - back]
-        if prior_high is not None and c > prior_high:
-            return {"event": "FAILED_BREAKOUT", "side": "above", "level": prior_high,
-                    "close": last, "bars_ago": back,
-                    "basis": ("broke above %.4f %d bar(s) ago and closed back inside at %.4f"
-                              % (prior_high, back, last))}
-        if prior_low is not None and c < prior_low:
-            return {"event": "FAILED_BREAKOUT", "side": "below", "level": prior_low,
-                    "close": last, "bars_ago": back,
-                    "basis": ("broke below %.4f %d bar(s) ago and closed back inside at %.4f"
-                              % (prior_low, back, last))}
-    return None
+    side = _beyond(session_closes[-2], prior_high, prior_low)
+    if side is None:
+        # The bar before was inside too, so nothing returned from anywhere.
+        return None
+    run = 1
+    while (run < len(session_closes) - 1
+           and _beyond(session_closes[-1 - (run + 1)], prior_high, prior_low) == side):
+        run += 1
+    if run > within:
+        return None
+    level = prior_high if side == "above" else prior_low
+    return {"event": "FAILED_BREAKOUT", "side": side, "level": level, "close": last,
+            "bars_ago": run,
+            "basis": ("broke %s %.4f %d bar(s) ago and closed back inside at %.4f"
+                      % (side, level, run, last))}
 
 
 def stop_or_target(close: Optional[float], position: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -327,19 +387,70 @@ def action_for(event: str, relation: Optional[str]) -> str:
 PUSH_COOLDOWN_MIN = 30
 PUSH_DAILY_CAP = 20
 
+#: R-IV.1220(a)5: B2 SHIPS WITH PHONE PUSHES OFF. The panel is live from the first deploy; the
+#: wire stays dark until SPINE rules on QUERY's re-run of the census against the event
+#: detector. This is a constant and not an env read on purpose -- flipping it is a code change
+#: that goes through a review, which is what "only after SPINE rules" means in practice.
+PUSHES_ENABLED = False
+
+#: R-IV.1220(a)4: the one push sent when the cap binds. It names no ticker, no level and no
+#: figure -- it points at the panel, which has every alert, because NOTHING is dropped from the
+#: panel. A cap that silently swallows the 21st alert is a cap that hides its own existence.
+CAP_NOTICE_TEXT = "Alert cap reached: see Position Watch panel"
+
+
+def _level_push_this_session(recent: Iterable[Dict[str, Any]], ticker: str,
+                             session_date: Optional[_dt.date]) -> Optional[Dict[str, Any]]:
+    """The level-type push already sent for this ticker this session, if there is one.
+
+    With `session_date` None, every row in `recent` is treated as in-session -- which is right
+    only if the caller passed a session-scoped list, and is documented on `may_push`.
+    """
+    want = str(ticker).upper()
+    for r in recent or []:
+        if str(r.get("ticker", "")).upper() != want:
+            continue
+        if str(r.get("event", "")).upper() not in LEVEL_TYPE_EVENTS:
+            continue
+        if session_date is not None:
+            at = r.get("pushed_at")
+            day = r.get("session_date") or (at.date() if at is not None else None)
+            if day != session_date:
+                continue
+        return r
+    return None
+
 
 def may_push(*, relation: Optional[str], event: str, ticker: str,
              recent: Iterable[Dict[str, Any]], now: _dt.datetime,
-             pushed_today: int) -> Tuple[bool, str]:
-    """(f)4, with the reason -- because a suppressed push that says nothing is indistinguishable
-    from a detector that never fired.
+             pushed_today: int, session_date: Optional[_dt.date] = None,
+             pushes_enabled: bool = PUSHES_ENABLED) -> Tuple[bool, str]:
+    """(f)4 as amended by R-IV.1220(a)3 and (a)5, with the reason -- because a suppressed push
+    that says nothing is indistinguishable from a detector that never fired.
 
-    Order matters: the relation gate comes FIRST, so a WITH alert never consumes a slot in the
-    daily cap. A cap spent on alerts that were never going to be pushed is a cap that silences
-    the ones that would have been.
+    THE ORDER OF THESE GATES IS THE DESIGN.
+
+      1. The OFF switch (a)5, first, so a dark wire consumes nothing: no cap slot, no cooldown
+         row, no "already pushed" state that would still be there when the wire is switched on.
+      2. The relation gate (f)4, so a WITH alert never consumes a cap slot. A cap spent on
+         alerts that were never going to be pushed is a cap that silences the ones that would.
+      3. ONE LEVEL-TYPE PUSH PER TICKER PER SESSION (a)3, before the cap for the same reason.
+         LEVEL_BREAK and FAILED_BREAKOUT share this one slot: they are two readings of the same
+         prior-day level, and a break followed by its failure is the commonest pair there is.
+      4. Then the daily cap, then the per-event cooldown.
+
+    The alert still reaches the PANEL in every one of these cases. This function decides the
+    phone, nothing else.
     """
+    if not pushes_enabled:
+        return False, "phone pushes are OFF for B2's ship (R-IV.1220(a)5); the panel is live"
     if relation != "AGAINST":
         return False, "not AGAINST, so it goes to the panel log (f)4"
+    if str(event).upper() in LEVEL_TYPE_EVENTS:
+        prior = _level_push_this_session(recent, ticker, session_date)
+        if prior is not None:
+            return False, ("%s already had a level-type push this session (%s), and (a)3 allows"
+                           " one" % (str(ticker).upper(), str(prior.get("event", "?")).upper()))
     if pushed_today >= PUSH_DAILY_CAP:
         return False, "the daily cap of %d is reached" % PUSH_DAILY_CAP
     cutoff = now - _dt.timedelta(minutes=PUSH_COOLDOWN_MIN)
@@ -353,6 +464,34 @@ def may_push(*, relation: Optional[str], event: str, ticker: str,
             return False, ("%s %s was pushed at %s, inside the %d-minute window"
                            % (ticker, event, at.isoformat(), PUSH_COOLDOWN_MIN))
     return True, "AGAINST, within the cap and outside the cooldown"
+
+
+def cap_notice(*, pushed_today: int, suppressed_by_cap: bool, notice_sent: bool,
+               pushes_enabled: bool = PUSHES_ENABLED) -> Tuple[bool, str]:
+    """R-IV.1220(a)4: ONE final push when the cap binds, and only then.
+
+    Three conditions, each there for its own reason:
+
+      * `suppressed_by_cap` -- the notice announces a cap that actually silenced something.
+        Firing it the moment the 20th push goes out would announce a loss that had not happened.
+        Note this must be a suppression BY THE CAP: an alert held back by the relation gate or
+        the cooldown is not an alert the cap ate.
+      * `notice_sent` -- once per session. A notice that repeats is itself the flood it reports.
+      * `pushes_enabled` -- the OFF switch covers this wire too, or B2 would ship dark except
+        for one message a day about a cap on messages that are not being sent.
+
+    The notice is EXTRA: it does not consume a cap slot, because it is the one message that
+    cannot be the thing the cap was protecting Nick from.
+    """
+    if not pushes_enabled:
+        return False, "phone pushes are OFF for B2's ship (R-IV.1220(a)5)"
+    if notice_sent:
+        return False, "the cap notice has already been sent this session"
+    if pushed_today < PUSH_DAILY_CAP:
+        return False, "the cap of %d is not reached (%d sent)" % (PUSH_DAILY_CAP, pushed_today)
+    if not suppressed_by_cap:
+        return False, "the cap is reached but nothing has been suppressed by it yet"
+    return True, "the cap is reached and at least one alert was suppressed by it"
 
 
 def exhaustion_push_gate(position: Dict[str, Any],

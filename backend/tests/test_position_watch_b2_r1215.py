@@ -97,7 +97,8 @@ def test_UNKNOWN_IS_NOT_WITH_AND_IS_NOT_PUSHED():
     """A push fires only on AGAINST (f)4. Collapsing "could not tell" into WITH silences an
     alert that might have mattered; into AGAINST pushes on a guess. It is its own answer."""
     ok, why = pw.may_push(relation=None, event="LEVEL_BREAK", ticker="X", recent=[],
-                          now=_dt.datetime(2026, 10, 19, 14, 0), pushed_today=0)
+                          now=_dt.datetime(2026, 10, 19, 14, 0), pushed_today=0,
+                          pushes_enabled=True)
     assert ok is False
     assert "not AGAINST" in why
 
@@ -197,8 +198,12 @@ def test_a_LEVEL_BREAK_needs_a_CLOSE_beyond_the_prior_day_range():
 
 def test_an_ABSENT_prior_level_is_not_an_intact_one():
     """None in, None out -- not a cheerful "no break". A missing prior-day high and an unbroken
-    one are different facts."""
-    assert pw.level_break([100.0], prior_high=None, prior_low=None) is None
+    one are different facts.
+
+    Two bars, not one, since R-IV.1220(a)1: a single bar returns None for want of an inside bar
+    before it, which would make this pass without ever reaching the absent-level path.
+    """
+    assert pw.level_break([100.0, 120.0], prior_high=None, prior_low=None) is None
     assert pw.level_break([], prior_high=1.0, prior_low=0.5) is None
 
 
@@ -210,8 +215,17 @@ def test_a_FAILED_BREAKOUT_is_a_break_THEN_a_close_back_inside():
 
 
 def test_a_failed_breakout_EXPIRES_after_four_bars():
-    closes = [101.8] + [100.4] * 5          # the break is 5 bars back
+    """The break held for FIVE bars before failing, so it is not this event.
+
+    Shape corrected under R-IV.1220(a)2. The old shape -- one break bar then five inside bars --
+    returned None for the wrong reason: the bar before the last was already inside, so nothing
+    returned on it. It asserted the right answer without exercising the run-length limit.
+    """
+    closes = [100.0] + [101.8] * 5 + [100.4]
     assert pw.failed_breakout(closes, prior_high=101.0, prior_low=99.0) is None
+    # Four bars beyond, then the return, is still inside the window.
+    assert pw.failed_breakout([100.0] + [101.8] * 4 + [100.4],
+                              prior_high=101.0, prior_low=99.0)["bars_ago"] == 4
 
 
 def test_a_close_still_OUTSIDE_is_not_a_failed_breakout():
@@ -324,38 +338,45 @@ def test_THE_PANEL_KEEPS_THE_LEVEL():
 # ── 7. the delivery limits (f)4 ───────────────────────────────────────────
 
 def test_THE_COOLDOWN_IS_PER_TICKER_AND_PER_EVENT_TYPE():
-    recent = [{"ticker": "QQQ", "event": "LEVEL_BREAK",
+    """Shown on EXHAUSTION, which R-IV.1220(a)3 leaves alone.
+
+    It used to be shown on LEVEL_BREAK. It cannot be any more, and the reason is worth keeping
+    in writing: for the level family (a)3's one-push-per-ticker-per-session gate sits in front
+    of the cooldown and is strictly stronger, so the cooldown is now unreachable there. It is
+    still the live gate for EXHAUSTION, STOP_LEVEL and TARGET_LEVEL.
+    """
+    recent = [{"ticker": "QQQ", "event": "EXHAUSTION",
                "pushed_at": T - _dt.timedelta(minutes=10)}]
-    assert pw.may_push(relation="AGAINST", event="LEVEL_BREAK", ticker="QQQ", recent=recent,
-                       now=T, pushed_today=0)[0] is False
-    # A DIFFERENT event on the same ticker is not throttled by it.
     assert pw.may_push(relation="AGAINST", event="EXHAUSTION", ticker="QQQ", recent=recent,
-                       now=T, pushed_today=0)[0] is True
+                       now=T, pushed_today=0, pushes_enabled=True)[0] is False
+    # A DIFFERENT event on the same ticker is not throttled by it.
+    assert pw.may_push(relation="AGAINST", event="STOP_LEVEL", ticker="QQQ", recent=recent,
+                       now=T, pushed_today=0, pushes_enabled=True)[0] is True
     # Nor the same event on a different ticker.
-    assert pw.may_push(relation="AGAINST", event="LEVEL_BREAK", ticker="IWM", recent=recent,
-                       now=T, pushed_today=0)[0] is True
+    assert pw.may_push(relation="AGAINST", event="EXHAUSTION", ticker="IWM", recent=recent,
+                       now=T, pushed_today=0, pushes_enabled=True)[0] is True
 
 
 def test_THE_COOLDOWN_EXPIRES():
-    recent = [{"ticker": "QQQ", "event": "LEVEL_BREAK",
+    recent = [{"ticker": "QQQ", "event": "EXHAUSTION",
                "pushed_at": T - _dt.timedelta(minutes=31)}]
-    assert pw.may_push(relation="AGAINST", event="LEVEL_BREAK", ticker="QQQ", recent=recent,
-                       now=T, pushed_today=0)[0] is True
+    assert pw.may_push(relation="AGAINST", event="EXHAUSTION", ticker="QQQ", recent=recent,
+                       now=T, pushed_today=0, pushes_enabled=True)[0] is True
 
 
 def test_THE_DAILY_CAP_IS_TWENTY():
     assert pw.PUSH_DAILY_CAP == 20
     assert pw.may_push(relation="AGAINST", event="X", ticker="Q", recent=[], now=T,
-                       pushed_today=20)[0] is False
+                       pushed_today=20, pushes_enabled=True)[0] is False
     assert pw.may_push(relation="AGAINST", event="X", ticker="Q", recent=[], now=T,
-                       pushed_today=19)[0] is True
+                       pushed_today=19, pushes_enabled=True)[0] is True
 
 
 def test_A_NON_AGAINST_ALERT_DOES_NOT_CONSUME_A_CAP_SLOT():
     """Order matters. A cap spent on alerts that were never going to be pushed is a cap that
     silences the ones that would have been."""
     ok, why = pw.may_push(relation="WITH", event="X", ticker="Q", recent=[], now=T,
-                          pushed_today=20)
+                          pushed_today=20, pushes_enabled=True)
     assert ok is False
     assert "not AGAINST" in why, "the relation gate must be reached before the cap"
 

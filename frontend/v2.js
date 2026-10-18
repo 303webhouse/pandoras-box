@@ -568,7 +568,7 @@
   //
   // FIVE READS LEAN, and the agreement check counts them: the Strategy label, Market mix,
   // Theme breadth, Tide and Vol curve. The yield curve is NOT counted ((d)6) and carries its
-  // own RARE pulse.
+  // own EXTREME pulse (R-IV.1220(b) retired the word RARE; see B3 in docs/build-backlog.md).
   //
   // THE TWO THINGS MOST EASILY GOT WRONG, both stated in the ruling and both asserted in tests:
   //   - CALM and PREMIUM SELLING are 0, not bull. Calm is not a bull call ((d)1), and a quiet
