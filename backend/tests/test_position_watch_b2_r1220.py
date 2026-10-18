@@ -64,25 +64,39 @@ def test_EACH_DIRECTION_FIRES_AT_MOST_ONCE_PER_SESSION():
     assert pw.level_break([100.2, 98.4], H, L, fired_sides=("below",)) is None
 
 
-def test_gap_open_beyond_never_fires():
-    """THE HOLE THE RULED DEFINITION LEAVES, pinned so it cannot drift either way unnoticed.
+def test_gap_open_beyond_IS_the_break_event():
+    """R-IV.1224(c), REPLACING test_gap_open_beyond_never_fires.
 
-    A session that opens beyond the prior-day high and never closes back inside produces NO
-    level-break event, because the definition requires a closed inside bar before the break.
-    This is the ruling as written and it is implemented as written. It is reported to SPINE
-    under R-IV.1220 rather than widened here -- widening a ruled definition because I think the
-    case matters is how a detector stops being the thing that was registered.
+    Under R-IV.1220(a)1 alone this session fired nothing all day: it opened beyond the
+    prior-day high and never closed back inside, so no bar ever had an inside predecessor. The
+    gap-and-go is the case most worth knowing about, so the ruling makes the session's FIRST
+    closed bar the break event, with the prior session's final close counting as the preceding
+    inside bar.
 
-    The control underneath proves the function is not simply mute on this series: insert one
-    inside bar and it speaks.
+    The deeming is a theorem rather than an assumption: a session's close lies within that
+    session's own high and low, and those are exactly `prior_high` / `prior_low`.
+
+    The REST of the session must still be silent -- one break, once per direction -- or this
+    fix would reintroduce the 270-fires-a-day state test on gap days only.
     """
     gap = [101.4, 101.8, 102.2, 102.0]
+    first = pw.level_break(gap[:1], H, L)
+    assert first is not None and first["event"] == "LEVEL_BREAK"
+    assert first["side"] == "above" and first["close"] == 101.4
     for n in range(2, len(gap) + 1):
-        assert pw.level_break(gap[:n], H, L) is None, "bar %d of a gap-and-go session" % n
-    # The control: the same opening bar, with one inside bar before it, fires. The detector
-    # judges the NEWEST bar only -- it is called once per closed bar -- so the control has to
-    # be the bar on which the break would have happened, not the end of the session.
-    assert pw.level_break([100.5, gap[0]], H, L) is not None
+        assert pw.level_break(gap[:n], H, L) is None, "bar %d re-reported the gap break" % n
+    # And it is the same once-per-session-per-direction event, so the fired-set still holds it.
+    assert pw.level_break(gap[:1], H, L, fired_sides=["above"]) is None
+    # A gap DOWN is the same event on the other side.
+    assert pw.level_break([98.2], H, L)["side"] == "below"
+
+
+def test_A_FIRST_BAR_INSIDE_THE_RANGE_IS_NOT_A_BREAK():
+    """The control for the test above: the first-bar path is not "fire on bar one", it is
+    "bar one is judged against the prior close like any other bar"."""
+    assert pw.level_break([100.3], H, L) is None
+    assert pw.level_break([101.0], H, L) is None, "a close AT the high has not gone beyond it"
+    assert pw.level_break([99.0], H, L) is None
 
 
 def test_INSIDE_MEANS_INSIDE_BOTH_BOUNDS():
@@ -95,9 +109,13 @@ def test_INSIDE_MEANS_INSIDE_BOTH_BOUNDS():
     assert pw.level_break([98.0, 101.5], H, None) is not None
 
 
-def test_ONE_BAR_CANNOT_BE_AN_EVENT():
-    """An event is a change between two closed bars. One bar is a state."""
-    assert pw.level_break([101.9], H, L) is None
+def test_NO_BARS_IS_NOT_AN_EVENT():
+    """Nothing in, nothing out.
+
+    This test used to assert that ONE bar could not be an event either -- "an event is a change
+    between two closed bars". R-IV.1224(c) overrode that reasoning: the session's first closed
+    bar has a predecessor, it just isn't in the list. An empty list still has nothing to judge.
+    """
     assert pw.level_break([], H, L) is None
 
 
@@ -249,3 +267,37 @@ def test_NOTHING_IS_DROPPED_FROM_THE_PANEL():
                         basis="closed 101.5000 above the prior-day high 101.0000",
                         action=pw.ACTION_LOGGED, shown_regime="RISK-ON")
     assert "101.50" in row["title"] and "alert, not a signal" in row["tag"]
+
+
+# ── 6. R-IV.1224(e): the column Position Watch must not read ──────────────
+
+def test_POSITION_WATCH_NEVER_READS_orientation_at_entry():
+    """R-IV.1224(e). QUERY found `orientation_at_entry` NULL on EVERY open row, so a detector
+    reading it would answer "no orientation" for the whole book and go quiet. Position Watch
+    uses the sign of net delta instead, which is computed from the structure and the leverage
+    map and cannot be null for a row it watches.
+
+    Scanned on the PARSED source with comments and docstrings removed, not on the raw text --
+    the comment explaining why the column is not read contains the column's name, and a plain
+    substring scan would fail on its own prose. That trap has been hit eight times in this
+    repo; `ast.unparse` drops comments but KEEPS docstrings, so they are stripped by identity.
+    """
+    import ast
+    import pathlib
+
+    src = pathlib.Path(pw.__file__).read_text(encoding="utf-8-sig")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list) or not body:
+            continue
+        first = body[0]
+        if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            body.remove(first)
+    code = ast.unparse(tree)
+    for col in ("orientation_at_entry", "position_orientation"):
+        assert col not in code, "%s is read in executable code, not just explained" % col
+    # The positive control: the scan CAN see a name that really is in the executable source,
+    # so a pass above is not the scan quietly matching nothing.
+    assert "LEVERAGE_MAP" in code
