@@ -426,10 +426,13 @@ def test_the_drawer_reads_the_SAME_payload_the_card_does():
     js = _js()
     i = js.index("function openRegimeDetails")
     body = js[i:js.index("\n  }", i)]
-    assert "_rsMock" in body
+    # `_rsLive`, renamed from `_rsMock` in B1: it has held the LIVE regime-strategy
+    # payload since R-IV.1203, and a variable called Mock holding live data is the
+    # caption-lies-about-its-field fault.
+    assert "_rsLive" in body
     # And the band's fifth read comes from the same place.
     k = js.index("const stratWord")
-    assert "_rsMock" in js[k:k + 200]
+    assert "_rsLive" in js[k:k + 200]
 
 
 # ── housekeeping ───────────────────────────────────────────────────────────
