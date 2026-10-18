@@ -2,7 +2,12 @@
 
 Authoritative queue of in-flight, near-term, and deferred build work for Pandora's Box. Maintained as ATHENA's canonical reference for priority arbitration during Titans review passes.
 
-**Last updated:** 2026-10-09 (v5 — queue section replaced wholesale with SPINE R-IV.820(h): Nemesis wiring (R-IV.809 + R-IV.820(e)) at the top, then Hermes phase 2 alone, then fee-write path / boot-silence watchdog at 2x SLO / gap-3 / notional field / book delta. CC-LAB lane created with its merge gate; R-IV.809(f) and (g) moved to LAB. The 2026-07-15 ZEUS Phase II queue is closed or displaced.)
+**Last updated:** 2026-10-18 (v6 — the CC-BUILD Agora queue B2→B9 added at the top per
+R-IV.1215(d), which is H2 from 10-09. Phase A and B1 are done; B9 was added by R-IV.1214 and
+sits after B8. NOTE on the ruling's premise: this file's Last-updated line already read
+2026-10-09, not 2026-07-15 — that date appears below as a reference to a *closed* ZEUS Phase II
+queue, not as this file's own vintage. v5 follows.)
+**Previously:** 2026-10-09 (v5 — queue section replaced wholesale with SPINE R-IV.820(h): Nemesis wiring (R-IV.809 + R-IV.820(e)) at the top, then Hermes phase 2 alone, then fee-write path / boot-silence watchdog at 2x SLO / gap-3 / notional field / book delta. CC-LAB lane created with its merge gate; R-IV.809(f) and (g) moved to LAB. The 2026-07-15 ZEUS Phase II queue is closed or displaced.)
 **Maintained by:** ATHENA (Olympus Titans synthesis lane). Nick or CC may update directly when items are added, promoted, demoted, or closed.
 
 ---
@@ -36,6 +41,41 @@ Items deeper in Tier 2 / Tier 3 that previously anchored on "post-ZEUS" now anch
 - Promotions/demotions noted in the **Update log** at the bottom with date and reason.
 - Closure: move to **Recent closures** with commit SHA and closure note path. Do not delete history.
 - Cross-cutting framework debt lives in its own section, not the tiers.
+
+---
+
+## CC-BUILD queue: the Agora additions, B2 → B9
+
+**Authority: SPINE R-IV.1209(e), extended by R-IV.1214(b)–(c) and ruled on by R-IV.1215(b).
+Written here per R-IV.1215(d) (H2 from 10-09).** One deploy per item, in this order. Phase A
+(A1 the four mock tiles, A2 regime bar v2, A3 Position Watch mock) and **B1** are DONE.
+
+Everything in this queue is **display only (#42)**: nothing gates, grades or feeds Kairos.
+
+| # | Item | State |
+|---|------|-------|
+| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only), 26 batched calls/session. Creates `position_watch_events`. | **IN PROGRESS** — source ruled R-IV.1215(b) |
+| **B3** | Yield curve upgrade — FRED DGS2/DGS3MO/DGS10/DGS30/T10Y2Y/T10Y3M; 3m10s + 2s10s big numbers with 60-day sparklines; shape word; per-tenor z-scores (UNUSUAL ≥2σ, RARE ≥3σ or 10Y ≥10bp); UN-INVERTED flag. FRED key confirmed present. | queued |
+| **B4** | Event Strip live — FOMC/CPI/jobs/GDP/PCE, monthly OpEx, book expiries, CHRONOS earnings counts, buyback blackout (est.). | queued |
+| **B5** | Fear Price live — ^VIX/^VXN/^RVX minus 20-day realized; VIX curve; ^SKEW percentile; SPY ATM straddle expected move. | queued |
+| **B6** | Crowd live — CBOE equity put/call 5d, CFTC TFF ES+NQ, AAII bull−bear (only if its terms allow automated reads). | queued |
+| **B7** | Book Reality live — beta-mapped reprice, Black-Scholes options, VOL REACTS/FLAT, worst cell, trend column. | queued |
+| **B8** | Drawer sections, one at a time — flip triggers, credit, breadth+Zweig, leadership ratios, rates/cross-asset, auction state, ribbon, lamps. | queued |
+| **B9** | Global & Commodities pop-out (R-IV.1214) — 7 equity + 4 commodity ETFs as SPY/QQQ ratios, trend+leadership states, z-scores, currency-gap flag, overnight tape, commodity cross-reads, MELTDOWN MODE + RECOVERY RACE, "a new leader is real if" dots. **One deploy for the mock, then one for live. Does not jump ahead of B2–B8.** | queued |
+
+**Standing rule for B3–B9:** report the source, its terms of use and one sample row **before**
+wiring each. No new spend. A source that turns out to need a paid plan or forbids automated use
+stops the item and is reported — never substituted.
+
+**Deferred, with their conditions:**
+
+- **Leledc on 15m for 0–3 DTE** (R-IV.1215(c)) — reopens only when LAB's HYPNOS-LELEDC v1 has
+  reported *and* an eligible 0–3 DTE holding with a usable underlying series exists. Today the
+  only 0–3 DTE row is a VIX spread, which has no usable underlying series, so the rule has no
+  eligible instrument. Daily Leledc on Set B ships inside B2.
+- **Daily ATM IV percentile for FXI/EEM/EWJ/KWEB** (R-IV.1214(c)12) — ask SPINE when a free
+  source is verified.
+- **Add step 2** — waits on Nick's preview check.
 
 ---
 
