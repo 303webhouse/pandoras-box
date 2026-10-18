@@ -1288,3 +1288,41 @@ opening balance whose source cannot be identified is a guess wearing a timestamp
 
 **Kin:** the gate-hash convention for authored text (LF normalisation before comparison), and the
 broker-PDF whitelist (what may be read OUT of an outside file, as against how it is identified).
+
+---
+
+## #37 (CLARIFIED, R-IV.1224(g)) A PUBLISHED FIGURE NAMES ITS SOURCE AND ITS UNIVERSE IN THE SAME SENTENCE AS ITS AS-OF
+
+**Note on this file's numbering, stated rather than quietly implied.** The register above runs
+to **#32**. Conventions **#33–#45 were ruled later and are not transcribed here yet** — they
+live in the rulings and in the lanes' own memory. This section is appended out of sequence
+because R-IV.1224(g) clarifies #37 *for all lanes*, and a lane looking for a convention looks
+here first. The gap is a transcription backlog, not a numbering error.
+
+### The rule
+
+Every published figure states, **in the same sentence**: what it measures, **its source**, **its
+universe**, and **its as-of**. Not in a footnote, not in a caption two lines down, not "as
+described above" — the same sentence, because that is the unit that gets quoted onward.
+
+### Why the same sentence
+
+A figure and its qualifiers get separated the moment anyone copies the figure. The relay is the
+proof: a number lifted into a brief arrives without the caption that bounded it, and then reads
+as a claim about everything rather than about nine episodes of equity ETFs. Keeping the four
+facts in one sentence makes the quotable unit the honest one.
+
+### The worked example, which is also a ruled verbatim string
+
+R-IV.1224(f)7's race-panel footnote:
+
+> US selloffs since 2003 (9 episodes; equity ETFs; USD total return; QUERY 2026-10-18): the
+> 'gained most' leader still led SPY 6 months later in 8 of 9, 'fell least' in 2 of 9.
+> History, not a forecast.
+
+Source (QUERY), universe (9 episodes, equity ETFs, USD total return), as-of (2026-10-18) and the
+figure, in one sentence — plus the standing of the claim ("history, not a forecast").
+
+**Kin:** #38 (name the scope — four statuses mean OPEN+CLOSED is never "all"), strategy-lab §3.4
+(n and n distinct dates beside every figure) and §3.6 (every return figure names its price
+source and basis).

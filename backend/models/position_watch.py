@@ -262,21 +262,33 @@ def level_break(session_closes: List[float], prior_high: Optional[float],
     the key, not the ticker: a session can legitimately break out above AND lose the low later
     the same day, and those are two different things to know about.
 
-    A HOLE THIS LEAVES, STATED RATHER THAN PAPERED OVER: a session that gaps beyond the level
-    on its first bar and never closes back inside produces NO level-break event at all, because
-    the ruled definition requires a closed inside bar first. That is the ruling as written and
-    it is implemented as written; the gap-and-go case is reported to SPINE under R-IV.1220
-    rather than quietly widened here, and `test_gap_open_beyond_never_fires` pins the behaviour
-    so it cannot drift either way unnoticed.
+    THE GAP-OPEN CASE, closed by R-IV.1224(c). Under R-IV.1220(a)1 alone, a session that opened
+    beyond the level and never closed back inside fired NOTHING all day, because there was no
+    preceding inside bar -- the gap-and-go, which is the case most worth knowing about. The
+    ruling now makes the session's FIRST closed bar a break event in its own right, with THE
+    PRIOR SESSION'S FINAL CLOSE COUNTING AS THE PRECEDING INSIDE BAR.
+
+    That deeming asserts nothing that was not already true, and the reason is worth writing
+    down: a session's closing price lies within that same session's own high and low by
+    construction, and `prior_high` / `prior_low` ARE the prior session's high and low. So the
+    prior close cannot be outside them. No value needs to be fetched or passed to establish it.
+    It holds only while those two levels are the prior SESSION's range, which is what the
+    ruling specifies -- feed this function a weekly or multi-day level and the deeming is no
+    longer a theorem, it is an assumption.
+
+    THE SHARP EDGE THIS CREATES, and it is new: a one-element list now FIRES. So
+    `session_closes` must begin at the session's first closed bar and not be a trailing window.
+    Before R-IV.1224(c) a truncated list could only under-report; now it can manufacture a gap
+    break that never happened. B2's job passes the session's bars from the open, and asserts it.
     """
-    if len(session_closes) < 2:
+    if not session_closes:
         return None
     already = {str(s).lower() for s in (fired_sides or ())}
     c = session_closes[-1]
     side = _beyond(c, prior_high, prior_low)
     if side is None or side in already:
         return None
-    if not _is_inside(session_closes[-2], prior_high, prior_low):
+    if len(session_closes) > 1 and not _is_inside(session_closes[-2], prior_high, prior_low):
         return None
     level = prior_high if side == "above" else prior_low
     word = "high" if side == "above" else "low"
@@ -387,10 +399,15 @@ def action_for(event: str, relation: Optional[str]) -> str:
 PUSH_COOLDOWN_MIN = 30
 PUSH_DAILY_CAP = 20
 
-#: R-IV.1220(a)5: B2 SHIPS WITH PHONE PUSHES OFF. The panel is live from the first deploy; the
-#: wire stays dark until SPINE rules on QUERY's re-run of the census against the event
-#: detector. This is a constant and not an env read on purpose -- flipping it is a code change
-#: that goes through a review, which is what "only after SPINE rules" means in practice.
+#: R-IV.1220(a)5, with the switch-on condition fixed by R-IV.1224(d): B2 SHIPS WITH PHONE
+#: PUSHES OFF. The panel is live from the first deploy. The wire stays dark until B2's
+#: COMPLETION deploy, and turns on at that deploy ONLY IF SPINE has by then ruled on QUERY's
+#: Set B recount with the R-IV.1224(c) gap-open rule included (R-IV.1223(d)). If that ruling
+#: has not arrived, B2 completes with the panel live and this still False.
+#:
+#: A constant and not an env read on purpose: flipping it is a code change that goes through a
+#: review, which is what "only if SPINE has ruled" means in practice. An env var would let the
+#: wire come up because a deploy variable was set, which is not the same event.
 PUSHES_ENABLED = False
 
 #: R-IV.1220(a)4: the one push sent when the cap binds. It names no ticker, no level and no
@@ -437,7 +454,13 @@ def may_push(*, relation: Optional[str], event: str, ticker: str,
       3. ONE LEVEL-TYPE PUSH PER TICKER PER SESSION (a)3, before the cap for the same reason.
          LEVEL_BREAK and FAILED_BREAKOUT share this one slot: they are two readings of the same
          prior-day level, and a break followed by its failure is the commonest pair there is.
-      4. Then the daily cap, then the per-event cooldown.
+         R-IV.1224(b) rules this LITERAL -- one push per ticker per session across BOTH events,
+         which is what the branch below does.
+      4. Then the daily cap, then the per-event cooldown. MEASURED, so the order is not a
+         guess: with (a)3 in place QUERY counted 4.0 pushes on the median day, 7.0 at p90 and
+         10 at the maximum, and the 20/day cap bound on 0 of 57 days. The cap is now a
+         BACKSTOP rather than the thing doing the selecting -- which is the whole point of the
+         event rework, since as a state test it bound on 59 of 59.
 
     The alert still reaches the PANEL in every one of these cases. This function decides the
     phone, nothing else.

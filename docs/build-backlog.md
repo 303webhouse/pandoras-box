@@ -54,7 +54,7 @@ Everything in this queue is **display only (#42)**: nothing gates, grades or fee
 
 | # | Item | State |
 |---|------|-------|
-| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only, **12 today**), 26 batched calls/session. Creates `position_watch_events`. Level break is an **EVENT** and **phone pushes ship OFF** (R-IV.1220(a)). | **IN PROGRESS** — source ruled R-IV.1215(b), detector ruled R-IV.1220(a) |
+| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only, **12 today**), 26 batched calls/session. Creates `position_watch_events`. Level break is an **EVENT**, the session's **first closed bar beyond counts** (R-IV.1224(c)), **one level-type push per ticker per session, literal** (R-IV.1224(b)), and **phone pushes stay OFF through the completion deploy** unless R-IV.1223(d) has ruled by then (R-IV.1224(d)). | **IN PROGRESS** — source R-IV.1215(b), detector R-IV.1220(a) + R-IV.1224(b,c,d) |
 | **B3** | Yield curve upgrade — FRED DGS2/DGS3MO/DGS10/DGS30/T10Y2Y/T10Y3M; 3m10s + 2s10s big numbers with 60-day sparklines; shape word; per-tenor z-scores (**UNUSUAL ≥2σ, EXTREME ≥3σ or 10Y ≥10bp** — R-IV.1220(b) **retires "RARE"**); EXTREME still pulses; **every tooltip states that label's measured fires per year**; UN-INVERTED flag. FRED key confirmed present, never printed. | queued |
 | **B4** | Event Strip live — FOMC/CPI/jobs/GDP/PCE, monthly OpEx, book expiries, CHRONOS earnings counts, buyback blackout (est.). | queued |
 | **B5** | Fear Price live — ^VIX/^VXN/^RVX minus 20-day realized; VIX curve; ^SKEW percentile; SPY ATM straddle expected move. | queued |
@@ -471,11 +471,47 @@ amendments reach the build rather than only the relay.
    tooltip: |z| ≥ 2 fires **14–16/yr**, |z| ≥ 3 fires **2.6–3.8/yr**. A threshold whose
    frequency is not stated is a threshold nobody can calibrate against.
 4. **FXI stands; MCHI is superseded.** One China proxy, chosen, not both.
-5. The race panel's **footnote wording is to follow** from SPINE. Until it arrives the panel is
-   not built with a placeholder footnote — an invented caption is the thing R-IV.925(b) forbids.
+5. ~~The race panel's footnote wording is to follow.~~ **It arrived in R-IV.1224(f)7** — see 7.
+6. **Race column order (R-IV.1224(f)6), in this order:** gained most since SPY's low → first
+   back above 200d → first to accept higher prices → fell least.
+7. **The race panel's footnote, verbatim (R-IV.1224(f)7)** — not paraphrased, not reflowed:
 
-**Governing document (R-IV.1220(d)):** GLOBAL-MARKETS-TRACKER, sha256
-`75c4ba395836286ff88bbb57acc99ff2559002d5623fa2e63f19916660704ced`. The copy at
-`C:\temp\...` with sha256 `5c97eeea…` is **pre-correction and superseded**; the hash verified
-at handoff under R-IV.1214(a) was that superseded copy, so B9 must be built against the new
-one and re-verified before any work starts.
+   > US selloffs since 2003 (9 episodes; equity ETFs; USD total return; QUERY 2026-10-18): the
+   > 'gained most' leader still led SPY 6 months later in 8 of 9, 'fell least' in 2 of 9.
+   > History, not a forecast.
+
+   It is a worked example of Convention #37 as clarified by R-IV.1224(g): source, universe and
+   as-of in the same sentence as the figure. Note it also **reorders the race's own columns'
+   authority** — the first column is the one history supports, the last is the one it does not.
+
+**Governing document (R-IV.1224(f)):** GLOBAL-MARKETS-TRACKER, sha256
+`3c9c2850825f4477b7885f0dd160c0ab4d129169611e72e3dcbb39681784fd1c`
+(project `claude/global-markets-tracker-2026-10-18.md`). It **supersedes
+`75c4ba39…`**, which in turn superseded the `5c97eeea…` copy whose hash was the one verified at
+handoff under R-IV.1214(a). **Its dry-run line "1 of 10" is WITHDRAWN** — do not build a panel
+that states it. Three hashes have now governed this one document, so B9 re-verifies the
+`3c9c2850…` copy against this line before any work starts rather than trusting a handoff.
+
+---
+
+## Known gap, recorded with no action: `orientation_at_entry` is NULL book-wide (R-IV.1224(e))
+
+QUERY found **`orientation_at_entry` NULL on every open row.** Ruled a known gap, no action.
+
+**Position Watch does not read it and must not.** It uses the sign of net delta, computed from
+the structure and the leverage map (`backend/models/position_watch.py`), which cannot be null
+for a row it watches. A detector reading a book-wide-NULL column would answer "no orientation"
+for the whole book and go silent — the failure mode that looks like a quiet market.
+`test_POSITION_WATCH_NEVER_READS_orientation_at_entry` scans the parsed source, so the comment
+explaining the rule cannot satisfy it.
+
+**A CONSEQUENCE ELSEWHERE, verified by reading the code rather than inferred** — reported here,
+not acted on, because the no-action ruling covers the NULL itself. The **B2 cut alert** (a
+different B2: `backend/models/b2_cut_alert.py:300-340`) resolves orientation from three sources
+in a ruled order. With the column NULL book-wide, source 1 never answers; source 2
+(`position_orientation`) is created by no migration, so it never arrives from the database; so
+**every evaluated row is being resolved by the `DEBIT_WHITELIST` shape fallback alone.** And
+because a stock row is refused *before* the whitelist by design (shares have no debit/credit
+shape), **the B2 cut currently evaluates no stock rows at all.** Each refusal states its reason,
+so this is visible rather than silent — but the visible reason reads as a per-row omission when
+it is in fact book-wide.
