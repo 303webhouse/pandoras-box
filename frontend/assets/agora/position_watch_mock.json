@@ -1,0 +1,63 @@
+{
+  "_mock": true,
+  "_source": "AGORA-MOCK-PositionWatch.dc.html sha256 c3c65fc0d3fd13b970e84cf40dc24c388405da4185e037583aeae07563957942 + AGORA-MOCK-PhonePush.dc.html sha256 e041a80bfbd899d107f0b3eb48c2a695c7c4ff7ccd58911dcfbd218dc08b8bd2",
+  "_note": "R-IV.1209(c) A3. EVERY VALUE HERE IS FAKE and NO PUSH IS SENT. The phone block is a PICTURE of a notification, not a notification. B2 wires the live path under the R-IV.1209(f) spec.",
+  "badge": "MOCK",
+  "held_count": 4,
+  "quiet_count": 7,
+  "quiet_note": "7 quiet alerts on tickers you don't hold · not pushed",
+  "caption": "alerts, not signals · bar-close only · never graded",
+  "rows": [
+    {
+      "time": "10:42", "source": "HUB", "glyph": "▲", "glyph_lean": "bull",
+      "ticker": "IWM", "event": "EXHAUSTION", "tf": "5m · close",
+      "detail": "Bull exhaustion bar at 268.40 · your IWM 270P 10/19 is +0.8× implied move in profit",
+      "against": true, "shown_regime": "NARROW UP",
+      "action": "TIGHTEN / TRIM", "pushed": true
+    },
+    {
+      "time": "10:15", "source": "HUB", "glyph": "↺", "glyph_lean": "bull",
+      "ticker": "QQQ", "event": "FAILED BREAKDOWN", "tf": "15m · close",
+      "detail": "Swept prior-day low 702.10, closed back above · vs your QQQ 10/23 put spread",
+      "against": true, "shown_regime": "NARROW UP",
+      "action": "TIGHTEN / TRIM", "pushed": true
+    },
+    {
+      "time": "09:58", "source": "HUB", "glyph": "↓", "glyph_lean": "bear",
+      "ticker": "GUSH", "event": "LEVEL BREAK", "tf": "15m · close",
+      "detail": "Closed below prior-day low 31.20 · vs your GUSH holding (trading sleeve)",
+      "against": true, "shown_regime": "NARROW UP",
+      "action": "REVIEW STOP", "pushed": true
+    },
+    {
+      "time": "09:41", "source": "TV", "glyph": "▼", "glyph_lean": "bear",
+      "ticker": "SQQQ", "event": "EXHAUSTION", "tf": "daily · close",
+      "detail": "Bear exhaustion on QQQ = with your SQQQ (short Nasdaq) · logged, not pushed",
+      "against": false, "shown_regime": "NARROW UP",
+      "action": "LOGGED", "pushed": false
+    }
+  ],
+  "pushes": [
+    {
+      "ago": "now",
+      "title": "IWM · exhaustion ▲ · 268.40",
+      "body": "Against your IWM 270P (10/19), now +0.8× implied move in profit. Tighten or trim.",
+      "tag": "5m close"
+    },
+    {
+      "ago": "27m",
+      "title": "QQQ · failed breakdown ↺ · 702.10",
+      "body": "Swept yesterday's low and closed back above. Against your QQQ 10/23 put spread.",
+      "tag": "15m close"
+    },
+    {
+      "ago": "44m",
+      "title": "GUSH · broke yesterday's low ↓ · 31.20",
+      "body": "Against your GUSH holding. Review your stop.",
+      "tag": "15m close"
+    }
+  ],
+  "push_rule": "Pushed only when an alert goes against a position you hold. Everything else lands quietly on the hub.",
+  "allowed_actions": ["TIGHTEN / TRIM", "REVIEW STOP", "LOGGED"],
+  "_action_rule": "R-IV.1209(f)5: 'tighten / trim' for exhaustion or a failed breakout against you, 'review stop' for a level break against you. NEVER buy, sell or reverse."
+}

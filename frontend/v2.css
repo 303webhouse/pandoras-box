@@ -1788,3 +1788,105 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   .rb-x-bull .rb-lab-x, .rb-x-bear .rb-lab-x,
   .tile.rb-alarm { animation: none !important; }
 }
+
+/* ===========================================================================
+   AGORA ADDITIONS, PHASE A3 (R-IV.1209(c)) - Position Watch, boards 5 and 6.
+   Tokens only. PHONE FIRST: base rules are the phone's; the query widens.
+   =========================================================================== */
+
+.pw-panel { display: flex; flex-direction: column; }
+.pw-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 13px 14px; border-bottom: 1px solid var(--border);
+}
+.pw-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.pw-head .x { margin-left: auto; cursor: pointer; color: var(--text-3); font-size: 15px; }
+.pw-head .x:hover { color: var(--text); }
+.pw-tabs { display: flex; gap: 4px; }
+.pw-tab {
+  font: 9px var(--mono); letter-spacing: .9px; padding: 3px 8px; border-radius: 5px;
+  color: var(--text-3); background: none; border: 1px solid var(--border); cursor: pointer;
+}
+.pw-tab.on { color: var(--text); border-color: var(--border-strong); background: var(--panel-2); }
+.pw-body { padding: 10px 12px 16px; overflow-y: auto; display: flex;
+  flex-direction: column; gap: 6px; }
+
+/* -- a row. AGAINST is the routing decision ((f)3-4), so it is the loudest thing after
+      the ticker: tinted background, vermilion border, vermilion chip. -- */
+.pw-row {
+  display: grid; grid-template-columns: 46px 26px 1fr; gap: 9px;
+  align-items: center; padding: 8px 9px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel);
+}
+.pw-against {
+  border-color: color-mix(in srgb, var(--down) 45%, transparent);
+  background: color-mix(in srgb, var(--down) 6%, var(--panel));
+}
+.pw-time { font: 10px var(--mono); color: var(--text-2); line-height: 1.25; }
+.pw-time i { display: block; font-style: normal; font-size: 8px; color: var(--text-3); }
+.pw-icon {
+  width: 26px; height: 26px; border-radius: 6px; display: flex;
+  align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
+  border: 1px solid var(--border-strong);
+}
+.pw-icon.pw-bull { color: var(--up); }
+.pw-icon.pw-bear { color: var(--down); }
+.pw-icon.pw-neutral { color: var(--text-2); }
+.pw-main { min-width: 0; }
+.pw-top { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.pw-top b { font: 600 13px var(--mono); color: var(--text); }
+.pw-ev { font: 9px var(--mono); letter-spacing: 1px; color: var(--text-2); }
+.pw-tf { font: 8px var(--mono); color: var(--text-3); }
+.pw-det { font: 10px var(--mono); color: var(--text-3); line-height: 1.45; margin-top: 2px; }
+.pw-rel {
+  font: 700 9px var(--mono); letter-spacing: .9px; padding: 1px 6px;
+  border-radius: 4px; white-space: nowrap; justify-self: start;
+}
+.pw-rel-a { color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 60%, transparent); }
+.pw-rel-w { color: var(--up); border: 1px solid color-mix(in srgb, var(--up) 45%, transparent); }
+/* (f)5: the regime tag rides on every row. */
+.pw-reg { font: 8px var(--mono); letter-spacing: .8px; color: var(--text-3); cursor: help; }
+.pw-act {
+  font: 9px var(--mono); letter-spacing: .9px; padding: 4px 7px; border-radius: 6px;
+  color: var(--text-2); border: 1px solid var(--border-strong); text-align: center;
+  white-space: nowrap; justify-self: start;
+}
+/* A pushed row is filled, a logged one outlined: the difference between "your phone buzzed"
+   and "it is on the hub" is worth seeing at a glance. */
+.pw-act.pw-pushed { color: var(--bg); background: var(--text); border-color: var(--text); font-weight: 700; }
+
+.pw-quiet {
+  font: 10px var(--mono); color: var(--text-3); line-height: 1.5;
+  padding: 10px; border-radius: 7px; border: 1px dashed var(--border); background: var(--panel);
+}
+.pw-cap { font: 9px var(--mono); color: var(--text-3); line-height: 1.5; margin-top: 2px; }
+/* The one line that must not be missed: nothing is sent. */
+.pw-warn { color: var(--amber); }
+.pw-sec {
+  font: 9px var(--mono); letter-spacing: 1.3px; color: var(--text-3);
+  margin: 12px 0 2px; padding-bottom: 3px; border-bottom: 1px solid var(--border);
+}
+
+/* -- board 6: the phone push, as a picture -- */
+.pw-pushes { display: flex; flex-direction: column; gap: 7px; }
+.pw-push {
+  padding: 9px 10px; border-radius: 10px;
+  border: 1px solid var(--border-strong); background: var(--panel-2);
+}
+.pw-ph { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.pw-pi {
+  width: 16px; height: 16px; border-radius: 4px; background: var(--teal);
+  color: var(--bg); font: 700 10px var(--mono); display: flex;
+  align-items: center; justify-content: center;
+}
+.pw-pn { font: 8px var(--mono); letter-spacing: 1px; color: var(--text-3); }
+.pw-pa { margin-left: auto; font: 8px var(--mono); color: var(--text-3); }
+.pw-pt { font: 600 12px var(--mono); color: var(--text); }
+.pw-pb { font: 10px var(--mono); color: var(--text-2); line-height: 1.45; margin-top: 2px; }
+.pw-pf { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
+.pw-ptag { font: 8px var(--mono); color: var(--text-3); }
+
+@media (min-width: 769px) {
+  .pw-row { grid-template-columns: 50px 26px 1fr 92px 72px 96px; }
+  .pw-det { margin-top: 1px; }
+}

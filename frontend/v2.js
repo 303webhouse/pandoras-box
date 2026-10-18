@@ -5264,3 +5264,167 @@ const X = (function () {
   window.addEventListener('popstate', sync); window.addEventListener('hashchange', sync);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', sync); else sync();
 })();
+
+/* ===========================================================================
+   A3 — POSITION WATCH (R-IV.1209(c), boards 5 and 6). MOCK LIST ONLY.
+   =========================================================================== */
+(() => {
+  'use strict';
+
+  // NO PUSH IS SENT FROM THIS FILE, and nothing here can send one. The phone block is a
+  // PICTURE of a notification. The live path -- ntfy, the 30-minute per-ticker throttle, the
+  // 20-a-day cap -- is B2's, server side, under R-IV.1209(f).
+  //
+  // THE NTFY TOPIC IS NEVER PRINTED OR LOGGED (R-IV.1209(f)6, R-IV.901(b)1). It is not in this
+  // file, it is not in the fixture, and it cannot be: the browser never learns it.
+  //
+  // WHAT THE WORDING MAY SAY (f)5: "tighten / trim" and "review stop". NEVER buy, sell or
+  // reverse. Every row carries its shown_regime and the panel says "alerts, not signals" --
+  // and the backend test runs the EXISTING no-orders lint over every string in the fixture,
+  // the same lint that guards the registered playbooks.
+  //
+  // NOT A SIGNAL, EVER (f)6: nothing here writes to `signals`, nothing is graded, and the rows
+  // do not reach Kairos or the River's actionable lanes.
+
+  const FIXTURE = '/assets/agora/position_watch_mock.json';
+  let panel = null, backdrop = null, data = null, tab = 'held', opener = null, isOpen = false;
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function rowHtml(r) {
+    const against = !!r.against;
+    return '<div class="pw-row' + (against ? ' pw-against' : '') + '">'
+      + '<div class="pw-time">' + esc(r.time) + '<i>' + esc(r.source) + '</i></div>'
+      + '<div class="pw-icon pw-' + esc(r.glyph_lean || 'neutral') + '">'
+      + esc(r.glyph) + '</div>'
+      + '<div class="pw-main">'
+      + '<div class="pw-top"><b>' + esc(r.ticker) + '</b>'
+      + '<span class="pw-ev">' + esc(r.event) + '</span>'
+      + '<span class="pw-tf">' + esc(r.tf) + '</span></div>'
+      + '<div class="pw-det">' + esc(r.detail) + '</div>'
+      + '</div>'
+      // AGAINST / WITH is the whole routing decision ((f)3-4), so it is the loudest thing on
+      // the row after the ticker.
+      + '<div class="pw-rel' + (against ? ' pw-rel-a' : ' pw-rel-w') + '">'
+      + (against ? 'AGAINST YOU' : 'WITH YOU') + '</div>'
+      // (f)5: every alert is tagged with shown_regime.
+      + '<div class="pw-reg" title="the regime label at the time of the alert">'
+      + esc(r.shown_regime || '—') + '</div>'
+      + '<div class="pw-act' + (r.pushed ? ' pw-pushed' : '') + '">'
+      + esc(r.action) + '</div>'
+      + '</div>';
+  }
+
+  function pushHtml(p) {
+    return '<div class="pw-push">'
+      + '<div class="pw-ph"><span class="pw-pi">P</span>'
+      + '<span class="pw-pn">PANDORA · POSITION WATCH</span>'
+      + '<span class="pw-pa">' + esc(p.ago) + '</span></div>'
+      + '<div class="pw-pt">' + esc(p.title) + '</div>'
+      + '<div class="pw-pb">' + esc(p.body) + '</div>'
+      + '<div class="pw-pf"><span class="pw-rel pw-rel-a">AGAINST YOU</span>'
+      + '<span class="pw-ptag">' + esc(p.tag) + '</span></div>'
+      + '</div>';
+  }
+
+  function render() {
+    if (!panel) return;
+    if (!data) {
+      panel.innerHTML = '<div class="pw-head"><h3>Position Watch</h3>'
+        + '<span class="x pw-x">✕</span></div>'
+        + '<div class="pw-body"><div class="rs-wait">'
+        + 'the Position Watch fixture did not load</div></div>';
+      return;
+    }
+    const rows = (data.rows || []);
+    const held = tab === 'held';
+    panel.innerHTML =
+      '<div class="pw-head">'
+      + '<h3>Position Watch</h3>'
+      + '<span class="mock-chip" title="A3 is a mock list (R-IV.1209(c)). Every value is fake '
+      + 'and NO PUSH IS SENT.">MOCK</span>'
+      + '<div class="pw-tabs">'
+      + '<button type="button" class="pw-tab' + (held ? ' on' : '') + '" data-tab="held">'
+      + 'HELD · ' + esc(data.held_count) + '</button>'
+      + '<button type="button" class="pw-tab' + (held ? '' : ' on') + '" data-tab="quiet">'
+      + 'QUIET · ' + esc(data.quiet_count) + '</button>'
+      + '</div>'
+      + '<span class="x pw-x" title="Close">✕</span>'
+      + '</div>'
+      + '<div class="pw-body">'
+      + (held
+        ? rows.map(rowHtml).join('')
+        // (f)4: a non-held ticker goes to the QUIET tab and is never pushed. The tab shows the
+        // COUNT and says so, rather than listing alerts about things Nick does not own as if
+        // they were his.
+        : '<div class="pw-quiet">' + esc(data.quiet_note || '') + '</div>')
+      + '<div class="pw-cap">' + esc(data.caption || '') + '</div>'
+      + '<div class="pw-sec">PHONE · LOCK SCREEN · MOCK</div>'
+      + '<div class="pw-pushes">' + (data.pushes || []).map(pushHtml).join('') + '</div>'
+      + '<div class="pw-cap">' + esc(data.push_rule || '') + '</div>'
+      + '<div class="pw-cap pw-warn">A3 sends nothing. The block above is a picture of a '
+      + 'notification, not a notification — the live path is B2.</div>'
+      + '</div>';
+  }
+
+  function build() {
+    if (panel) return;
+    backdrop = document.createElement('div');
+    backdrop.className = 'rp-backdrop pw-backdrop';
+    panel = document.createElement('aside');
+    panel.className = 'rp-panel pw-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Position Watch (mock list, no live pushes)');
+    document.body.appendChild(backdrop);
+    document.body.appendChild(panel);
+    backdrop.addEventListener('click', close);
+    panel.addEventListener('click', (e) => {
+      if (e.target.closest('.pw-x')) return close();
+      const t = e.target.closest('[data-tab]');
+      if (t) { tab = t.dataset.tab; render(); }
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen) close(); });
+  }
+
+  async function load() {
+    if (data) return;
+    try {
+      const r = await fetch(FIXTURE, { cache: 'no-store' });
+      data = r.ok ? await r.json() : null;
+    } catch (_) {
+      data = null;      // render() then says the fixture did not load, rather than drawing
+    }                   // an empty list, which would read as "no alerts" -- a claim.
+  }
+
+  async function openIt() {
+    if (isOpen) return;
+    opener = document.activeElement;
+    build();
+    await load();
+    isOpen = true;
+    render();
+    const v2 = window.__v2;
+    if (v2 && v2.setSide) {
+      v2.setSide(panel, v2.popSide(opener && opener.isConnected ? opener : null, 'book'));
+    }
+    requestAnimationFrame(() => {
+      backdrop.classList.add('open');
+      panel.classList.add('open');
+      const x = panel.querySelector('.pw-x');
+      if (x) x.focus();
+    });
+  }
+
+  function close() {
+    if (!isOpen) return;
+    isOpen = false;
+    if (backdrop) { backdrop.classList.remove('open'); panel.classList.remove('open'); }
+    if (opener && opener.focus) { try { opener.focus(); } catch (_) {} }
+  }
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest && e.target.closest('#posWatchBtn')) { e.preventDefault(); openIt(); }
+  });
+})();
