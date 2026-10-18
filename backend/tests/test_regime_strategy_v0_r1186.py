@@ -464,7 +464,10 @@ def test_v0_TOUCHES_NO_KILL_SWITCH_NO_CAPS_NO_JOURNAL():
     """R-IV.1186(c). The kill-switch line is a DISPLAY of a value the fixture carries, so the
     module must contain no write and no kill-switch call."""
     js = _code(_js())
-    i = js.index("let _rsMock = null")
+    # `_rsLive`, renamed from `_rsMock` in B1: it has held the LIVE regime-strategy
+    # payload since R-IV.1203, and a variable called Mock holding live data is the
+    # caption-lies-about-its-field fault.
+    i = js.index("let _rsLive = null")
     j = js.index("function initGrid()", i)
     module = js[i:j]
     # The read ban moved under R-IV.1195(b); the WRITE ban and the kill-switch ban did not.

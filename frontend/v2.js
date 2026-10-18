@@ -416,6 +416,20 @@
   // DISPLAY ONLY: the backend regime_label (RISK-ON / RISK-OFF, which Olympus reads via MCP) is
   // unchanged. The 60/40 lines are the backend's own (>= 60 / <= 40, stable.py); 70/30 add the
   // STRONG tier (Nick, 2026-09-30).
+  /**
+   * The four breadth cut-offs as gauge positions, FROM THE PAYLOAD. B1 (R-IV.1209(e)): "gauges
+   * from the real thresholds". The backend owns 60/40 (`risk_on_pct_above_50dma` /
+   * `risk_off_pct_above_50dma`) and can move them; 70/30 add the STRONG tier. A tick drawn at a
+   * number the backend no longer uses is worse than no tick -- it is a scale that lies.
+   *
+   * The percentage IS the position here, because the gauge runs 0-100% above the 50-day.
+   */
+  function lens2Ticks(th) {
+    const on = (th && th.risk_on_pct_above_50dma) || 60;
+    const off = (th && th.risk_off_pct_above_50dma) || 40;
+    return [30, off, on, 70].sort((a, b) => a - b);
+  }
+
   function lens2Call(p, th) {
     const on = (th && th.risk_on_pct_above_50dma) || 60, off = (th && th.risk_off_pct_above_50dma) || 40;
     if (p >= 70) return ['STRONG BUY', 2];
@@ -481,18 +495,28 @@
   // VOL CURVE — VIX ÷ VIX3M from the composite's own vix_term factor (the same number the
   // kill switch will use). Classified on the DISPLAYED two decimals, so "0.90" never reads CALM.
   // CALM is --text, never lime: calm volatility is not a bullish call (HELIOS).
+  // B1 (R-IV.1209(e)): ONE SOURCE FOR THE VOL BANDS. The WORDS came from 0.90 / 1.00 and the
+  // gauge's ticks were hard-coded 33.33% / 66.67% in the markup -- two numbers for one
+  // threshold, which drift the moment either is tuned. `volPct` is the only mapping from a
+  // ratio to a gauge position, and the ticks are that mapping applied to the band edges.
+  const VOL_FIRMING_AT = 0.90, VOL_STRESS_AT = 1.00;
+  const VOL_GAUGE_LO = 0.80, VOL_GAUGE_SPAN = 0.30;
+  const volPct = (r) => Math.max(0, Math.min(100, (r - VOL_GAUGE_LO) / VOL_GAUGE_SPAN * 100));
+  const VOL_TICKS = [volPct(VOL_FIRMING_AT), volPct(VOL_STRESS_AT)];
+
   function volCurveView(c) {
     const f = c && c.factors && c.factors.vix_term;
     const raw = f && f.raw_data;
     const ratio = raw && Number.isFinite(Number(raw.ratio)) ? Number(raw.ratio) : null;
     if (ratio == null) return { value: '—', word: '', cls: 'val-muted', sub: 'VIX term structure not read', pct: null, iso: null, stale: true };
     const shown = Math.round(ratio * 100) / 100;
-    const word = shown >= 1.00 ? 'STRESS' : shown >= 0.90 ? 'FIRMING' : 'CALM';
+    const word = shown >= VOL_STRESS_AT ? 'STRESS'
+      : shown >= VOL_FIRMING_AT ? 'FIRMING' : 'CALM';
     const stale = (c.stale_factors || []).includes('vix_term') || JSON.stringify(c.excluded_factors || []).includes('vix_term');
     return {
       value: shown.toFixed(2), word, cls: word === 'STRESS' ? 'val-down' : word === 'FIRMING' ? 'val-teal' : 'val-quiet',
       sub: 'VIX ' + (raw.vix != null ? Number(raw.vix).toFixed(1) : '--') + ' ÷ 3M ' + (raw.vix3m != null ? Number(raw.vix3m).toFixed(1) : '--'),
-      pct: Math.max(0, Math.min(100, (ratio - 0.80) / 0.30 * 100)), iso: isoUtc(f.timestamp), stale,
+      pct: volPct(ratio), iso: isoUtc(f.timestamp), stale,
     };
   }
 
@@ -677,7 +701,7 @@
     // bar -- but it is counted in the agreement check ((d)1 lists five reads), so it is read
     // from the card's own last payload rather than re-derived here. Two derivations of one
     // label would eventually disagree, and the one on screen would be the untested one.
-    const stratWord = (_rsMock && _rsMock.regime_label) || null;
+    const stratWord = (_rsLive && _rsLive.regime_label) || null;
     const reads = [
       { key: 'strategy', word: stratWord, lean: leanOf(stratWord) },
       { key: 'mix', word: v1.call, lean: leanOf(v1.call) },
@@ -704,14 +728,14 @@
       <div class="rb-grid">
         ${rbCell('mix', 'MARKET MIX · 20 FACTORS', v1.call, v1.num, leanFor('mix'),
           boxCls('mix'), chip1 + (split ? '<span class="split-chip" data-gloss="DIVERGE">LENSES SPLIT</span>' : ''),
-          v1.dist, 'regime', v1.pct)}
+          v1.dist, 'regime', v1.pct, LENS1_CUTS)}
         ${rbCell('breadth', 'THEME BREADTH · &gt;50D', v2.call, v2.num, leanFor('breadth'),
           boxCls('breadth'), chip2, esc(total) + ' names · nightly · ' + v2.dist,
-          'breadth', v2.pct)}
+          'breadth', v2.pct, lens2Ticks(r.thresholds))}
         ${rbCell('tide', 'TIDE · OPTIONS FLOW', tv.word, tv.lean || '', leanFor('tide'),
-          boxCls('tide'), chipTide, tv.line2, null, null)}
+          boxCls('tide'), chipTide, tv.line2, null, null, null)}
         ${rbCell('vol', 'VOL CURVE · VIX/VIX3M', vc.word, vc.value, leanFor('vol'),
-          boxCls('vol'), chipVc, vc.sub, 'volcurve', vc.pct)}
+          boxCls('vol'), chipVc, vc.sub, 'volcurve', vc.pct, VOL_TICKS)}
       </div>
       <div class="rb-curve" id="rbCurve">
         <div class="rb-ch"><span class="rb-cl">YIELD CURVE</span>
@@ -749,7 +773,7 @@
    * reading falls; and the fine print is behind a `details` toggle rather than printed under
    * every cell, which is what Nick's third tweak asked for.
    */
-  function rbCell(key, cap, word, num, lean, cls, chip, fine, drawer, pct) {
+  function rbCell(key, cap, word, num, lean, cls, chip, fine, drawer, pct, ticks) {
     const col = leanColor(lean === 'notable' ? 'notable' : lean);
     return '<div class="rb-cell' + cls + '"' + (drawer ? ' data-drawer="' + drawer + '"' : '')
       + '>'
@@ -760,9 +784,15 @@
       + esc(word || '—') + '</b>'
       + (num ? '<span class="rb-num">' + esc(String(num)) + '</span>' : '')
       + '</div>'
+      // B1: the TICKS are the real cut-offs that decide the word, so a reader can see how far
+      // the marker sits from the next call rather than taking the word on trust. A gauge with
+      // a marker and no scale shows a position against nothing.
       + (pct != null
-        ? '<div class="vc-gauge rb-g" aria-hidden="true"><b style="left:'
-          + Math.max(0, Math.min(100, Number(pct))).toFixed(1) + '%"></b></div>'
+        ? '<div class="vc-gauge rb-g" aria-hidden="true">'
+          + (ticks || []).map((t) => '<i style="left:'
+            + Math.max(0, Math.min(100, Number(t))).toFixed(2) + '%"></i>').join('')
+          + '<b style="left:' + Math.max(0, Math.min(100, Number(pct))).toFixed(1)
+          + '%"></b></div>'
         : '<div class="rb-g rb-g-none" aria-hidden="true"></div>')
       + '<button type="button" class="rb-det" aria-expanded="false">details ▾</button>'
       + '<div class="rb-fine" hidden>' + esc(fine || '') + '</div>'
@@ -984,7 +1014,7 @@
     const title = $('drawerTitle'), body = $('drawerBody');
     title.textContent = 'REGIME STRATEGY';
 
-    const m = _rsMock || {};
+    const m = _rsLive || {};
     const sec = (n, name) => '<div class="rd-sec">' + n + ' · ' + esc(name) + '</div>';
     const mock = (why) => '<div class="rd-mock">MOCK · ' + esc(why) + '</div>';
     const kv = (k, v) => '<div class="kv"><span class="k">' + esc(k)
@@ -1251,7 +1281,11 @@
   //
   // Lens 2 is never the headline (§1, §5). In v0.1 the whole face of the card is visuals and
   // the lens reading is one labelled row; the base regime is the only headline.
-  let _rsMock = null, _rsPlaybooks = null, _rsOpen = false;
+  // `_rsLive`, renamed from `_rsMock` in B1 (R-IV.1209(e)). It has held the LIVE
+  // /api/stable/regime-strategy payload since R-IV.1203 wired the designated close
+  // source, and a variable called `Mock` holding live data is the caption-lies-about-
+  // its-field fault in a place a reader trusts without checking.
+  let _rsLive = null, _rsPlaybooks = null, _rsOpen = false;
 
   // R-IV.1190(b)2: the BEAR -> BULL order of the ten registered labels. A FIXED presentation
   // order, not per-reading data -- in v1 it must not vary with the reading, which is why it is
@@ -1276,7 +1310,7 @@
         // line and a reader of the network tab see the same number.
         fetch('/assets/regime/playbooks.v2.json', { cache: 'no-store' }).then((r) => r.json()),
       ]);
-      _rsMock = m; _rsPlaybooks = p;
+      _rsLive = m; _rsPlaybooks = p;
     } catch (e) {
       // Says what is missing. A card that renders an empty shell reads as "no regime", which
       // is a claim; "the read failed" is the fact.
@@ -1284,17 +1318,17 @@
         + esc(String(e && e.message || e)) + '</div>';
       return;
     }
-    if (_rsMock && _rsMock.available === false) {
+    if (_rsLive && _rsLive.available === false) {
       // The server said so itself, with a reason. Printing the reason beats an empty card:
       // "cannot confirm" plus why is a fact, an unpopulated card is an invitation to guess.
       host.innerHTML = '<div class="rs-wait">cannot confirm \u2014 '
-        + esc(String(_rsMock.unavailable_reason || 'no label stored')) + '</div>';
+        + esc(String(_rsLive.unavailable_reason || 'no label stored')) + '</div>';
       const stx = $('rsSettled');
       if (stx) stx.textContent = 'no settled label \u00b7 display only';
       const dotx = $('rsHealth');
       if (dotx) {
         dotx.className = 'health-dot unconfirmed';
-        dotx.title = String(_rsMock.unavailable_reason || '');
+        dotx.title = String(_rsLive.unavailable_reason || '');
       }
       return;
     }
@@ -1328,7 +1362,7 @@
   }
 
   function renderRegimeStrategy() {
-    const m = _rsMock, host = $('regimeStrategy');
+    const m = _rsLive, host = $('regimeStrategy');
     if (!host || !m) return;
 
     // header bits live outside the body, so they are written straight into their slots
@@ -1505,10 +1539,10 @@
   // is where ALL the prose lives, so the face of the card carries none.
   function renderRegimePlaybook() {
     const box = $('rsPlaybook');
-    if (!box || !_rsMock || !_rsPlaybooks) return;
-    const r = (_rsPlaybooks.regimes || {})[_rsMock.regime_key];
+    if (!box || !_rsLive || !_rsPlaybooks) return;
+    const r = (_rsPlaybooks.regimes || {})[_rsLive.regime_key];
     if (!r) { box.innerHTML = '<div class="rs-wait">no playbook for '
-      + esc(_rsMock.regime_key || '?') + '</div>'; return; }
+      + esc(_rsLive.regime_key || '?') + '</div>'; return; }
     box.innerHTML =
       '<div class="rs-pb-title">' + esc(r.label) + ' \u00b7 playbook '
       +   esc(_rsPlaybooks.version) + '</div>'
@@ -1527,10 +1561,10 @@
       + '<div class="rs-h">WHAT WOULD PROVE THIS WRONG</div>'
       + '<div class="rs-row">' + esc(r.proves_wrong || '') + '</div>'
       + '<div class="rs-h">COSTS, STATED</div><ul class="rs-list">'
-      +   (_rsMock.costs || []).map((c) => '<li>' + esc(c) + '</li>').join('') + '</ul>'
+      +   (_rsLive.costs || []).map((c) => '<li>' + esc(c) + '</li>').join('') + '</ul>'
       + '<div class="rs-foot">Excluded: '
-      +   esc((_rsMock.excluded_inputs || []).join(', '))
-      +   ' \u00b7 News watch: ' + esc(_rsMock.news_watch || '\u2014')
+      +   esc((_rsLive.excluded_inputs || []).join(', '))
+      +   ' \u00b7 News watch: ' + esc(_rsLive.news_watch || '\u2014')
       +   ' \u00b7 ' + esc(_rsPlaybooks.not_a_signal || '') + '</div>';
   }
 

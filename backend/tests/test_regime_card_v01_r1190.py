@@ -501,7 +501,10 @@ def test_v0_1_STILL_TOUCHES_NO_KILL_SWITCH_NO_CAPS_NO_JOURNAL():
     """The half of R-IV.1186(c) that NO ruling has lifted: the card reads, it never writes, and
     it never calls the kill-switch. Only the read ban moved."""
     js = _js_code()
-    i = js.index("let _rsMock = null")
+    # `_rsLive`, renamed from `_rsMock` in B1: it has held the LIVE regime-strategy
+    # payload since R-IV.1203, and a variable called Mock holding live data is the
+    # caption-lies-about-its-field fault.
+    i = js.index("let _rsLive = null")
     module = js[i:js.index("function initGrid()", i)]
     for banned in ("method: 'POST'", 'method: "POST"', "XMLHttpRequest", "apiFetch",
                    "kill_switch =", "killSwitch("):
