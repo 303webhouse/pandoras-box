@@ -58,6 +58,14 @@ ORDER_VERBS = (
     "buy", "sell", "short", "long", "enter", "exit", "add", "trim", "close", "open",
     "take", "harvest", "re-arm", "rearm", "roll", "hedge", "scale", "size", "allocate",
     "cut", "stop", "cover", "write", "sweep",
+    # "reverse" added for R-IV.1209(f)5, which names it alongside buy and sell for the
+    # Position Watch wording. The playbooks are held to the same bar -- a lint that forbids a
+    # word on one surface and allows it on another is two rules wearing one name.
+    #
+    # The intransitive use survives, and must: playbooks.v2 says "Two monthly prints reverse",
+    # where `prints` is the SUBJECT and there is no object, so the imperative-head rule does
+    # not fire. "Reverse the position" has an object and does.
+    "reverse",
 )
 
 #: Things an order would be aimed at. A directive verb within range of one of these is an
