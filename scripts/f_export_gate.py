@@ -92,10 +92,25 @@ def _last_exported():
 
 
 def _record(run_id, eligible: int, mismatches: int) -> None:
+    """Write the run's bookkeeping, temp-then-replace (Convention #45, R-IV.1213(c)).
+
+    FOUND BY #45's OWN SELF-CHECK, not by a failure. This file is a small JSON regenerated on
+    every run, so truncating it loses one run's bookkeeping rather than thousands of lines of
+    history -- nothing like the BUILD.md incident. But the hazard is identical in shape:
+    `open(STATE, "w")` truncates before anything is serialised, so an exception while building
+    the payload leaves an empty file where a reader expects JSON, and the next read fails on a
+    file that exists.
+
+    Serialise first, then write a temp, then replace. A payload that cannot be built cannot
+    destroy the previous one.
+    """
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    with open(STATE, "w", encoding="utf-8") as fh:
-        json.dump({"run_id": run_id, "eligible": eligible, "mismatches": mismatches,
-                   "exported_at": datetime.now(timezone.utc).isoformat()}, fh, indent=2)
+    payload = json.dumps({"run_id": run_id, "eligible": eligible, "mismatches": mismatches,
+                          "exported_at": datetime.now(timezone.utc).isoformat()}, indent=2)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(payload)
+    os.replace(tmp, STATE)
 
 
 def main() -> int:
