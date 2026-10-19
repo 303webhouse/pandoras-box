@@ -253,3 +253,35 @@ def test_THE_HIGH_BETA_CLAUSE_IS_STILL_ABSENT_AND_DOES_NOT_BLOCK_NARROW_UPTREND(
     out = classify(row, RULES)
     nu = [r for r in out["rows"] if r["regime"] == "narrow_uptrend"][0]
     assert nu["verdict"] != "NOT_EVALUABLE", nu
+
+
+# ── the shape production actually hands us ────────────────────────────────
+
+def test_V2_ACCEPTS_DATE_OBJECTS_BECAUSE_POSTGRES_HANDS_BACK_DATES():
+    """THIS COST A DEPLOY. Every fixture above builds bars with ISO-STRING dates; production
+    reads DATE objects out of a Postgres DATE column. `sectors_above_50dma` compares
+    `_day(bar.date) <= as_of`, so `as_of` must be a string -- and the first v2 seed died on
+    "'<=' not supported between instances of 'str' and 'datetime.date'", with the reason
+    invisible until the session build was audited.
+
+    So this test uses date OBJECTS, like the database does. A fixture that cannot reproduce
+    production's types is a fixture that passes while the deploy fails.
+    """
+    def dbars(n, start=400.0):
+        return [Bar(_dt.date(2024, 1, 1) + _dt.timedelta(days=i),
+                    start + i * 0.3, (start + i * 0.3) * 1.01,
+                    (start + i * 0.3) * 0.99, start + i * 0.3, 1e6)
+                for i in range(n)]
+
+    series = {t: dbars(260) for t in list(INDICES) + list(SECTORS)}
+    # The builder itself must cope, which is what the seed calls.
+    from models.regime_inputs import build_inputs as _bi
+
+    row = _bi(series, 259, settled=True)
+    assert row is not None
+    v2.fill(row, series, 259, rules=RULES)
+    assert row["spy"]["adx_below_20_sessions"] is not None
+    assert "thrust" in row["breadth"], "the thrust must not raise on date objects"
+    # And the thrust called directly with date objects both ways.
+    dates = [b.date for b in series["SPY"]]
+    assert v2.breadth_thrust(series, dates[-1], RULES, dates) in (True, False, None)
