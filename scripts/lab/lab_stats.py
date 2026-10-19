@@ -17,6 +17,21 @@ import math
 import numpy as np
 
 
+BETA_MIN_VALID = 50              # skill §3.3: >= 50 valid sessions in the 60
+BETA_RAW_LO, BETA_RAW_HI = 0.0, 4.0   # R-IV.1245(c): raw beta <= 0 or > 4 is not a usable hedge ratio
+
+
+def guard_beta(b_raw, n_valid, min_valid=BETA_MIN_VALID):
+    """(beta_adj, flagged) from a raw OLS beta series and its valid-session counts.
+    flagged = too few valid sessions (skill §3.3) OR no estimate OR raw beta <= 0 OR raw beta > 4
+    (R-IV.1245(c): QUERY found shrunk betas from -13.3 to +70.7 with nothing flagged, because the old
+    guard checked the session count and never the value). A flagged row uses beta = 1.
+    beta_adj = 0.67 * beta + 0.33."""
+    flagged = ~(n_valid >= min_valid) | b_raw.isna() | (b_raw <= BETA_RAW_LO) | (b_raw > BETA_RAW_HI)
+    b = b_raw.where(~flagged, 1.0)
+    return 0.67 * b + 0.33, flagged
+
+
 def _ols_diff(y, d):
     y = np.asarray(y, float)
     d = np.asarray(d, float)
