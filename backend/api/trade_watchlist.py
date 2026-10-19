@@ -402,9 +402,19 @@ async def check_watchlist_price_alerts():
 
 async def _fire_watchlist_alert(entry: dict):
     """Push watchlist target hit to all connected clients via WebSocket."""
+    # THE MODULE THIS IMPORTED DOES NOT EXIST. R-IV.1239(g): `api.websocket_manager` is defined
+    # nowhere in the tree, so `broadcast_event` raised ModuleNotFoundError on every call -- and
+    # the `except Exception` below logged it at DEBUG and moved on. app.js:1074 HAS a
+    # `watchlist_alert` handler that refreshes the watchlist, so this is not a dead event with
+    # no listener: it is a live feature that has never once fired.
+    #
+    # `websocket.broadcaster.manager` is the real broadcaster, and its own `type` key is how
+    # app.js dispatches -- which is why the event name moves INTO the payload rather than
+    # staying a first positional argument that nothing here ever accepted.
     try:
-        from api.websocket_manager import broadcast_event
-        await broadcast_event("watchlist_alert", {
+        from websocket.broadcaster import manager
+        await manager.broadcast({
+            "type": "watchlist_alert",
             "ticker": entry["ticker"],
             "direction": entry["direction"],
             "entry_target": float(entry["entry_target"]),

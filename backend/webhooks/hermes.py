@@ -347,10 +347,21 @@ async def hermes_webhook(request: Request):
     except Exception as e:
         logger.debug("Hydra convergence check in Hermes failed: %s", e)
 
-    # Broadcast via WebSocket if available
+    # Broadcast via WebSocket if available.
+    #
+    # R-IV.1239(g): this imported `api.websocket_manager`, A MODULE THAT DOES NOT EXIST, so the
+    # call raised ModuleNotFoundError every time and `except Exception: pass` ate it. The real
+    # broadcaster is `websocket.broadcaster.manager`, and app.js dispatches on the payload's
+    # own `type` key.
+    #
+    # NO FRONTEND CONSUMER TODAY, and that is deliberate to state here: `hermes_flash` appears
+    # nowhere in the frontend (webhooks/hermes_push.py records the same finding as the reason
+    # the phone path was built). So fixing the import makes this code do what it says -- it
+    # does NOT make a breach visible anywhere. The alarm that reaches Nick is hermes_push.
     try:
-        from api.websocket_manager import broadcast_event
+        from websocket.broadcaster import manager
         ws_payload = {
+            "type": "hermes_flash",
             "event_id": str(event_id),
             "tier": tier,
             "trigger_ticker": ticker,
@@ -362,7 +373,7 @@ async def hermes_webhook(request: Request):
         }
         if convergence_alert:
             ws_payload["hydra_convergence"] = convergence_alert
-        await broadcast_event("hermes_flash", ws_payload)
+        await manager.broadcast(ws_payload)
     except Exception:
         pass
 
@@ -424,10 +435,16 @@ async def receive_hermes_analysis(request: Request):
     logger.info("HERMES ANALYSIS received for event %s: %s",
                 event_id, analysis.get("headline_summary", "")[:80])
 
-    # Broadcast update via WebSocket
+    # Broadcast update via WebSocket. Same dead import as above (R-IV.1239(g)), and the same
+    # standing: `hermes_analysis` has no frontend consumer either, so this is the code made
+    # honest, not a surface made visible. The note at the catalyst_manual broadcast below had
+    # already recorded that this path "does not exist, so those broadcasts are silent no-ops" --
+    # written in this same file, and the import left in place. A finding in a comment is not a
+    # fix, and nothing was checking.
     try:
-        from api.websocket_manager import broadcast_event
-        await broadcast_event("hermes_analysis", {
+        from websocket.broadcaster import manager
+        await manager.broadcast({
+            "type": "hermes_analysis",
             "event_id": event_id,
             "headline_summary": analysis.get("headline_summary", ""),
             "catalyst_category": analysis.get("catalyst_category", "unknown"),
@@ -547,8 +564,10 @@ async def catalyst_manual(payload: dict = Body(default=None), _=Depends(require_
         raise HTTPException(status_code=500, detail="store failed")
 
     # Best-effort live push for the Catalyst tab (must not fail the write).
-    # Use the real broadcaster (websocket.broadcaster.manager) — the api.websocket_manager
-    # path the Hermes handler uses does not exist, so those broadcasts are silent no-ops.
+    # Use the real broadcaster (websocket.broadcaster.manager). This note used to end "— the
+    # api.websocket_manager path the Hermes handler uses does not exist, so those broadcasts
+    # are silent no-ops"; those three sites are fixed as of R-IV.1239(g) and the registry test
+    # now fails if any route reintroduces an import that resolves to nothing.
     try:
         from websocket.broadcaster import manager
         await manager.broadcast({
