@@ -41,7 +41,15 @@ async function main() {
     url: base + '/app?notables=1',
     markers: MARKERS,
     settleMs: 11000,
-    count: { 'ticker symbols rendered': 'nb-sym', 'inert mock buttons': 'nb-btn' },
+    // COUNTED ON THE RENDERED ATTRIBUTE, not the bare class name. `runGate` counts substring
+    // occurrences in the whole DOM, and the injected stylesheet contains `.nb-sym{…}` and
+    // `.nb-btns{…}` too -- so counting "nb-sym" reported 9 symbols for 8 cards, and "nb-btn"
+    // reported 8 buttons for 5. A count that includes its own CSS rule is a caption lying
+    // about its field, however harmless the number.
+    count: {
+      'ticker symbols rendered': 'class="mono nb-sym"',
+      'inert mock buttons': '<button class="nb-btn"',
+    },
   });
   process.exit(ok ? 0 : 1);
 }
