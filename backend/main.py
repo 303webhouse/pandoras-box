@@ -2228,6 +2228,8 @@ from api.fear_price import router as fear_price_router  # B5
 app.include_router(fear_price_router, prefix="/api", tags=["fear-price"])
 from api.crowd import router as crowd_router  # B6
 app.include_router(crowd_router, prefix="/api", tags=["crowd"])
+from api.book_reality import router as book_reality_router  # B7 — flag OFF, R-IV.1239(e)4
+app.include_router(book_reality_router, prefix="/api", tags=["book-reality"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
