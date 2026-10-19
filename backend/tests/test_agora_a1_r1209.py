@@ -158,7 +158,7 @@ def test_the_chip_TITLE_says_the_values_are_fake():
 #: The A1 tiles that have gone live, and the ONE route each is allowed to read. B4 moved the
 #: Event Strip; B5/B6/B7 will move Fear Price, Crowd and Book Reality. Listed rather than
 #: open-ended, so a tile that starts reading a route it was not given still fails.
-LIVE_TILES = {"/api/event-strip", "/api/fear-price"}
+LIVE_TILES = {"/api/event-strip", "/api/fear-price", "/api/crowd"}
 
 
 def test_EACH_TILE_READS_ONLY_ITS_OWN_ROUTE_OR_ITS_FIXTURE():
@@ -203,7 +203,8 @@ def test_the_fixtures_are_under_assets_so_they_are_SERVED():
     # loader must NOT fall back to the mock, because a fixture served where live data belongs
     # looks exactly like the real thing. The file stays on disk as the layout reference, which
     # is what the existence check above is for.
-    live_fixtures = {"event_strip_mock.json", "fear_mock.json"}
+    live_fixtures = {"event_strip_mock.json", "fear_mock.json",
+                     "crowd_mock.json"}
     for fname in FIXTURES.values():
         if fname in live_fixtures:
             assert "/assets/agora/" + fname not in js, (

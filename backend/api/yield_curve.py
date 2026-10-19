@@ -35,9 +35,9 @@ def _tenor_block(tenor: str, series_id: str) -> Dict[str, Any]:
     changes = yc.diffs(values)
     z = yc.zscore(changes)
     change_bp = changes[-1] if changes else None
-    stats = yc.fires_per_year(changes, tenor=tenor)
+    stats = yc.fires_per_year(changes)
     stats["as_of"] = as_of.isoformat() if as_of else "unknown"
-    label = yc.label_for(z, tenor=tenor, change_bp=change_bp)
+    label = yc.label_for(z)
     return {
         "tenor": tenor,
         "series": series_id,
@@ -108,8 +108,9 @@ def payload() -> Dict[str, Any]:
                   "vocabulary_author": "BUILD (R-IV.1220(b) requires a shape word and does "
                                        "not enumerate the words)"},
         "labels": {"unusual_z": yc.UNUSUAL_Z, "extreme_z": yc.EXTREME_Z,
-                   "extreme_10y_bp": yc.EXTREME_10Y_BP, "z_window_sessions": yc.Z_WINDOW,
-                   "retired": "RARE (R-IV.1220(b))"},
+                   "z_window_sessions": yc.Z_WINDOW,
+                   "retired": ["RARE (R-IV.1220(b))",
+                               "the 10Y >= 10bp route to EXTREME (R-IV.1239(b))"]},
         "field_origin": {"tenors": "derived", "spreads": "derived", "shape": "derived",
                          "fires": "derived", "as_of": "stored"},
     }
