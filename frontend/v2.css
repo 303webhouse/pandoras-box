@@ -1907,3 +1907,7 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .yc-spark { display: block; }
 .yc-spark path { fill: none; stroke: var(--teal); stroke-width: 1.2; }
 .yc-spark .yc-zero { stroke: var(--text-3); stroke-width: .5; stroke-dasharray: 2 2; }
+
+/* B5: a VIX tenor with no reading draws a stub, not a full bar (see renderFearPrice). */
+.ag-ct-na { color: var(--text-3); }
+.ag-ct-na i { background: var(--text-3); }

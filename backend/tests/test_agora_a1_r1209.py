@@ -158,7 +158,7 @@ def test_the_chip_TITLE_says_the_values_are_fake():
 #: The A1 tiles that have gone live, and the ONE route each is allowed to read. B4 moved the
 #: Event Strip; B5/B6/B7 will move Fear Price, Crowd and Book Reality. Listed rather than
 #: open-ended, so a tile that starts reading a route it was not given still fails.
-LIVE_TILES = {"/api/event-strip"}
+LIVE_TILES = {"/api/event-strip", "/api/fear-price"}
 
 
 def test_EACH_TILE_READS_ONLY_ITS_OWN_ROUTE_OR_ITS_FIXTURE():
@@ -203,7 +203,7 @@ def test_the_fixtures_are_under_assets_so_they_are_SERVED():
     # loader must NOT fall back to the mock, because a fixture served where live data belongs
     # looks exactly like the real thing. The file stays on disk as the layout reference, which
     # is what the existence check above is for.
-    live_fixtures = {"event_strip_mock.json"}
+    live_fixtures = {"event_strip_mock.json", "fear_mock.json"}
     for fname in FIXTURES.values():
         if fname in live_fixtures:
             assert "/assets/agora/" + fname not in js, (
@@ -279,7 +279,11 @@ def test_the_fear_tile_can_say_CANNOT_CONFIRM_and_can_PREFIX_approx():
     them, or B arrives needing a renderer change nobody budgeted."""
     js = _js()
     i = js.index("function renderFearPrice")
-    body = js[i:i + 3000]
+    # TO THE END OF THE FUNCTION, not a fixed 3000 characters. The slice was a LENGTH, and
+    # B5's null-safe curve bars pushed `approx` past it -- so the guard failed while the thing
+    # it guards was still there, three lines further down. Fourth scope-by-distance guard found
+    # in this session; this file's own comment at line 427 records the same fault.
+    body = js[i:js.index("function renderBookStress", i)]
     assert "approx" in body
     assert "\\u2248" in body, "the approx prefix"
     fx = _fx("fear_mock.json")

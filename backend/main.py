@@ -2224,6 +2224,8 @@ from api.yield_curve import router as yield_curve_router  # B3, R-IV.1220(b)
 app.include_router(yield_curve_router, prefix="/api", tags=["yield-curve"])
 from api.event_strip import router as event_strip_router  # B4
 app.include_router(event_strip_router, prefix="/api", tags=["event-strip"])
+from api.fear_price import router as fear_price_router  # B5
+app.include_router(fear_price_router, prefix="/api", tags=["fear-price"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
