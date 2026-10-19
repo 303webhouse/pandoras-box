@@ -5397,6 +5397,11 @@ const X = (function () {
       + '<div class="pw-sec">PHONE · LOCK SCREEN · MOCK</div>'
       + '<div class="pw-pushes">' + (data.pushes || []).map(pushHtml).join('') + '</div>'
       + '<div class="pw-cap">' + esc(data.push_rule || '') + '</div>'
+      // R-IV.1228(d), VERBATIM. NOT from the mock fixture: it is a standing rule about the
+      // live path, not a fake value, and `models.position_watch.PANEL_FOOTER_PHONE_LINE`
+      // holds the same string with a test binding the two so they cannot drift apart.
+      + '<div class="pw-cap pw-phone-rule">Phone: one alert per ticker per day, '
+      + 'against-you only</div>'
       + '<div class="pw-cap pw-warn">A3 sends nothing. The block above is a picture of a '
       + 'notification, not a notification — the live path is B2.</div>'
       + '</div>';

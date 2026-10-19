@@ -346,7 +346,7 @@ def test_AN_UNCONFIRMED_GAP_CANNOT_PUSH_EVEN_WHEN_EVERYTHING_ELSE_PASSES():
     ev = pw.level_break(_hold()[:1], H, L)
     ok, why = pw.may_push_event(ev, relation="AGAINST", ticker="QQQ", recent=[], now=T,
                                 pushed_today=0, pushes_enabled=True)
-    assert ok is False and "not pushable yet" in why
+    assert ok is False and "not pushable" in why
     # The control: the same call on the CONFIRMED bar-2 event does push.
     ev2 = pw.level_break(_hold()[:2], H, L)
     assert pw.may_push_event(ev2, relation="AGAINST", ticker="QQQ", recent=[], now=T,
@@ -360,27 +360,81 @@ def test_THE_UNCONFIRMED_GAP_DOES_NOT_SPEND_THE_SESSIONS_ONE_SLOT():
     ok, why = pw.may_push_event(ev, relation="AGAINST", ticker="QQQ", recent=[], now=T,
                                 pushed_today=0, pushes_enabled=True)
     assert ok is False
-    assert "not pushable yet" in why and "level-type" not in why
+    assert "not pushable" in why and "level-type" not in why
 
 
-def test_A_GAP_THAT_FADES_PRODUCES_ONLY_THE_FAILED_BREAKOUT_PATH():
-    """(b)2: no break push, and the failure is the ordinary failed-breakout event, which
-    pushes only if AGAINST."""
+def test_A_GAP_THAT_FADES_PUSHES_NOTHING_AT_ALL():
+    """R-IV.1228(b) route (a), REPLACING this test's R-IV.1226(b)2 form, and the reason is the
+    whole lesson of this amendment.
+
+    R-IV.1226(b)2 sent a faded gap down the ordinary failed-breakout path, where it pushed if
+    AGAINST. This test asserted exactly that. QUERY then measured the change as INERT: the
+    identical push set, 56 labels swapped, 0 pushes removed -- because rule 4 spends the
+    ticker's one level-type slot either way, so relabelling WHICH event spent it changed
+    nothing that reached the phone. A rule can be correctly implemented, fully tested, and
+    still do nothing, and only a count over real sessions shows it.
+
+    Route (a) removes the push instead of renaming it. QUERY measured 4.0 median / 8.0 p90 /
+    10 max, removing 17 of 295 pushes -- each a session where the faded gap was the only
+    adverse event, so each one a notification Nick would have acted on and should not have.
+    """
     s = _fade()
     assert pw.level_break(s[:1], H, L)["pushable"] is False
-    # Bar 2 closed back inside, so there is no break event at all on it.
+    # Bar 2 closed back inside, so there is no break event on it.
     assert pw.level_break(s[:2], H, L) is None
-    # It is a failed breakout, by the ordinary transition rule.
-    fb = pw.failed_breakout(s[:2], H, L)
-    assert fb["event"] == "FAILED_BREAKOUT" and fb["side"] == "above" and fb["bars_ago"] == 1
-    # AGAINST pushes it; WITH does not.
-    assert pw.may_push_event(fb, relation="AGAINST", ticker="QQQ", recent=[], now=T,
-                             pushed_today=0, pushes_enabled=True)[0] is True
-    assert pw.may_push_event(fb, relation="WITH", ticker="QQQ", recent=[], now=T,
-                             pushed_today=0, pushes_enabled=True)[0] is False
+    # And the failure is GAP_FADED, which is a PANEL label carrying no push.
+    fade = pw.failed_breakout(s[:2], H, L)
+    assert fade["event"] == "GAP_FADED" and fade["side"] == "above"
+    assert fade["pushable"] is False
+    assert "faded unconfirmed" in fade["basis"]
+    for rel in ("AGAINST", "WITH", None):
+        ok, why = pw.may_push_event(fade, relation=rel, ticker="QQQ", recent=[], now=T,
+                                    pushed_today=0, pushes_enabled=True)
+        assert ok is False, "a faded gap pushed on relation %r" % rel
+    # AGAINST is the case that used to push, so it is the one worth naming the reason for.
+    assert "GAP_FADED" in pw.may_push_event(fade, relation="AGAINST", ticker="QQQ", recent=[],
+                                            now=T, pushed_today=0, pushes_enabled=True)[1]
+    # It carries no action either: there is nothing to advise about a level that did not hold.
+    assert pw.action_for(fade["event"], "AGAINST") == pw.ACTION_LOGGED
     # And the rest of the session stays silent on both paths.
     assert pw.level_break(s, H, L) is None
     assert pw.failed_breakout(s, H, L) is None
+
+
+def test_A_GAP_THAT_HELD_AND_FAILED_LATER_IS_STILL_A_FAILED_BREAKOUT():
+    """The control for the test above, and the boundary of the new label. GAP_FADED is the
+    ruling's words exactly: opened beyond, and the SECOND bar closed back inside. A gap that
+    HELD through bar 2 -- and therefore pushed at bar 2 -- and then failed on bar 3 is a
+    genuine failed breakout of a confirmed break, and keeps that name. It cannot push anyway,
+    because confirming at bar 2 already spent the ticker's one slot.
+    """
+    got = pw.failed_breakout([101.4, 101.8, 100.4], H, L)
+    assert got["event"] == "FAILED_BREAKOUT" and got["bars_ago"] == 2
+    assert got.get("pushable", True) is True
+    # An ordinary mid-session failed breakout is untouched by R-IV.1228 as well.
+    mid = pw.failed_breakout([100.0, 101.8, 100.4], H, L)
+    assert mid["event"] == "FAILED_BREAKOUT"
+
+
+def test_THE_PANEL_FOOTER_PHONE_LINE_IS_VERBATIM_AND_HAS_ONE_SOURCE():
+    """R-IV.1228(d). The string is ruled, so it is asserted character for character -- and the
+    frontend is bound to the SAME string, because a panel that states a rule the code does not
+    apply (or the reverse) is worse than no line at all."""
+    import pathlib
+    assert pw.PANEL_FOOTER_PHONE_LINE == (
+        "Phone: one alert per ticker per day, against-you only")
+    # ANCHORED ON THIS FILE, RESOLVED. The first version of this walked up from
+    # `pw.__file__`, which passed alone and raised FileNotFoundError in the full suite:
+    # another conftest inserts a RELATIVE sys.path entry, so the imported module's __file__
+    # came back as `backend/tests/integration/../..'-style and the walk landed nowhere. A
+    # module's __file__ is not a reliable repo anchor; the test's own resolved path is.
+    js = (pathlib.Path(__file__).resolve().parents[2]
+          .joinpath("frontend", "v2.js").read_text(encoding="utf-8"))
+    # v2.js splits the sentence across two concatenated string literals, so the line is
+    # reassembled before comparing rather than searched for whole -- searching for the whole
+    # sentence would fail on a formatting choice and say the rule was missing.
+    flat = js.replace("'\n      + '", "")
+    assert pw.PANEL_FOOTER_PHONE_LINE in flat, "v2.js and the model disagree about the wording"
 
 
 def test_THE_PANEL_STILL_LOGS_THE_FIRST_BAR_GAP():
