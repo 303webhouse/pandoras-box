@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence
 
-from models.regime_inputs import (Bar, MIN_BARS, _closes, latest_adx,
+from models.regime_inputs import (Bar, MIN_BARS, _closes, _day, latest_adx,
                                   latest_moving_averages, sectors_above_50dma)
 
 
@@ -222,7 +222,14 @@ def breadth_thrust(series: Dict[str, List[Bar]], as_of: str, rules: Dict[str, An
     lo = float(th.get("recovery_breadth_thrust_from_pct") or 15.0)
     hi = float(th.get("recovery_breadth_thrust_to_pct") or 60.0)
     within = int(th.get("recovery_breadth_thrust_within_sessions") or 10)
-    dates = list(window_dates)[-(within + 1):]
+    # NORMALISED AT THE BOUNDARY, and this cost a deploy. `sectors_above_50dma` compares
+    # `_day(bar.date) <= as_of`, so `as_of` must be an ISO STRING — its signature says so. My
+    # local fixtures built bars with ISO-string dates while production reads DATE objects out
+    # of Postgres, so the first v2 seed died on "'<=' not supported between instances of 'str'
+    # and 'datetime.date'" — and the reason was invisible until the session build was audited.
+    # Converting here rather than trusting the caller means no call site can get the shape
+    # wrong again, and the test for this uses date OBJECTS.
+    dates = [d for d in (_day(x) for x in list(window_dates)[-(within + 1):]) if d]
     if len(dates) < 2:
         return None
     pcts = []
@@ -264,7 +271,7 @@ def fill(inputs: Dict[str, Any], series: Dict[str, List[Bar]], i: int, *,
     put(spy_block, "closes_above_20_and_50", closes_above_20_and_50(bars))
     put(spy_block, "confirmed_break_up_50dma", confirmed_break_up_50dma(bars, rules))
     put(spy_block, "ma20_crossed_above_ma50", ma20_crossed_above_ma50(bars))
-    put(breadth, "thrust", breadth_thrust(series, bars[-1].date, rules,
+    put(breadth, "thrust", breadth_thrust(series, _day(bars[-1].date), rules,
                                           window_dates or [b.date for b in bars]))
     if inputs.get("prior_regime") is None:
         inputs["prior_regime"] = prior_regime
