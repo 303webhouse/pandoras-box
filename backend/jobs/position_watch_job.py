@@ -339,7 +339,7 @@ async def position_watch_loop() -> None:
     it cannot answer, and None is treated as "do not run" rather than as open. A watcher that
     ran on a holiday would compare today's absent bars against a stale prior day.
     """
-    from database.connection import get_postgres_client
+    from database.postgres_client import get_postgres_client
 
     logger.info("[pw] position watch loop started; pushes %s",
                 "ON" if pw.PUSHES_ENABLED else "OFF")

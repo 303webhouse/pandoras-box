@@ -124,10 +124,19 @@ async def payload(conn, *, now: Optional[_dt.datetime] = None) -> Dict[str, Any]
 
 @router.get("")
 async def get_position_watch() -> Dict[str, Any]:
-    """The panel. On failure it says so; it never serves the mock."""
-    from database.connection import get_postgres_client
+    """The panel. On failure it says so; it never serves the mock.
 
+    THE IMPORT IS INSIDE THE TRY, and that is the fix for a real outage this route had on its
+    first deploy: it read `database.connection`, which does not exist (the module is
+    `database.postgres_client`). A deferred import that cannot resolve raises at REQUEST time,
+    not at boot -- so the app was healthy, every other route worked, and this one returned a
+    bare 500 with no log line of its own, because the failing line was the one line OUTSIDE
+    the handler's own error path. Inside the try, the same mistake returns the honest payload
+    below and names the exception.
+    """
     try:
+        from database.postgres_client import get_postgres_client
+
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
             return await payload(conn)
