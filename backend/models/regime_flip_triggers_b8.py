@@ -196,8 +196,30 @@ def flip_triggers(snapshot: Dict[str, Any], rules: Dict[str, Any]) -> Dict[str, 
     if candidate and str(candidate).lower() != (shown or ""):
         in_progress = direction_block(str(candidate).lower(), rules=rules, candidate=candidate,
                                       banked=banked, direction="in progress")
+    # R-IV.1252(c)4's bull side: the segmented sector bar and ITS DASHED SEGMENT AT THE RULE'S
+    # REAL THRESHOLD. Both numbers come from the rules file and the snapshot rather than from
+    # the renderer, so the dash cannot drift from the threshold the classifier actually uses --
+    # a bar whose marker is in the wrong segment is worse than a bar with no marker.
+    th = rules.get("thresholds") or {}
+    breadth = (snapshot.get("breadth") or {}) if isinstance(snapshot.get("breadth"), dict) else {}
+    sectors = {
+        "above": breadth.get("sectors_above_50dma"),
+        "total": breadth.get("sectors_total") or th.get("uptrend_sectors_total"),
+        "threshold": th.get("uptrend_sectors_above_50dma_min"),
+        "basis": ("sectors above their own 50dma, against the uptrend row's own minimum of %s "
+                  "of %s" % (th.get("uptrend_sectors_above_50dma_min"),
+                             th.get("uptrend_sectors_total"))),
+    }
+    # An absent count is NOT zero sectors: `sectors_above_50dma` is omitted entirely when
+    # fewer than all eleven series were usable, because a partial count is a smaller sample
+    # wearing the same units.
+    if sectors["above"] is None:
+        sectors["reason"] = ("the sector count is not recorded for this session; it is "
+                             "omitted when fewer than all series were usable, so this is not "
+                             "a count of zero")
     return {
         "in_progress": in_progress,
+        "sectors": sectors,
         "shown": label_words(shown),
         "candidate": label_words(candidate) if candidate else None,
         "candidate_differs": bool(candidate and str(candidate).lower() != (shown or "")),

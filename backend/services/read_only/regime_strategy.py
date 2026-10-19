@@ -281,10 +281,22 @@ def _flip_triggers_block(snap: dict, shown) -> dict:
         from models.regime_classifier import load_rules
         from models.regime_flip_triggers_b8 import flip_triggers
 
+        blob = snap.get("inputs_json")
+        if isinstance(blob, str):
+            import json as _json
+
+            try:
+                blob = _json.loads(blob)
+            except ValueError:
+                blob = None
         return flip_triggers({"regime_label": shown,
                               "raw_regime_key": snap.get("regime"),
                               "pending_closes": snap.get("pending_closes"),
-                              "held_sessions": snap.get("held_sessions")},
+                              "held_sessions": snap.get("held_sessions"),
+                              # §4's bull side needs the sector count, which lives in the
+                              # snapshot's own inputs rather than in a column.
+                              "breadth": (blob or {}).get("breadth")
+                              if isinstance(blob, dict) else None},
                              load_rules())
     except Exception as exc:                                        # noqa: BLE001
         return {"error": "%s" % type(exc).__name__,

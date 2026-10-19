@@ -1,0 +1,64 @@
+{
+  "abacus.html": {
+    "abacus.css": {
+      "pin": 6,
+      "sha256": "0366d2663ac755f3c34e8f211c29d3b9ad79212e6266b8021b16eb68ec4e57b3"
+    },
+    "abacus.js": {
+      "pin": 7,
+      "sha256": "03abf5414b7edf42f9dc8ccbd9f4d17f62a2fcc082ca0c5756f65e2803e05721"
+    },
+    "v2.css": {
+      "pin": 62,
+      "sha256": "316d08a78ad418dd3385d94b0f1fc9b89bab37e5599d9ff4914dd4e905ca32ce"
+    }
+  },
+  "index.html": {
+    "app.js": {
+      "pin": 180,
+      "sha256": "ee1c8d923e27814f6158e6e9de6b1474f6f2e96da3f8a118b8fa9de0a0b83c4d"
+    },
+    "styles.css": {
+      "pin": 156,
+      "sha256": "1f6bacb7de3ba726bcd071287f6a3f42075bd0c72d7388c4ef22be5c135e6ecb"
+    }
+  },
+  "knowledgebase.html": {
+    "knowledgebase.js": {
+      "pin": 1,
+      "sha256": "b4fdc36370ae84cb52af308984ea9a9e60bb36a2a8ce7da7370c613d591377fb"
+    },
+    "styles.css": {
+      "pin": 31,
+      "sha256": "1f6bacb7de3ba726bcd071287f6a3f42075bd0c72d7388c4ef22be5c135e6ecb"
+    }
+  },
+  "stater.html": {
+    "stater.css": {
+      "pin": 2,
+      "sha256": "8ed571738568c3b6ad49146d69d76a729e68dfca35ccbfcfa371da59c15ec685"
+    },
+    "stater.js": {
+      "pin": 2,
+      "sha256": "75086aff28318c28a2a9a7f0deb2f2292a32db5ab24dbf45c4cd71a46278d4dc"
+    },
+    "v2.css": {
+      "pin": 63,
+      "sha256": "316d08a78ad418dd3385d94b0f1fc9b89bab37e5599d9ff4914dd4e905ca32ce"
+    }
+  },
+  "v2.html": {
+    "assets/agora-quotes.js": {
+      "pin": 3,
+      "sha256": "1f97b39c3af961830aea8f92195c1ea25eba3e6fb59cae37765d16e8cd6447fe"
+    },
+    "v2.css": {
+      "pin": 67,
+      "sha256": "316d08a78ad418dd3385d94b0f1fc9b89bab37e5599d9ff4914dd4e905ca32ce"
+    },
+    "v2.js": {
+      "pin": 86,
+      "sha256": "b1db0a820fe075f4c3cc76e4312ccbaec5b723209ff281ca8b31f169a7972e53"
+    }
+  }
+}

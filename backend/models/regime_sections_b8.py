@@ -47,6 +47,15 @@ def credit_block(points: Sequence[Tuple[Any, Optional[float]]]) -> Dict[str, Any
         chg = (now_pct - vals[-22]) * 100.0
     word = "WIDE" if bp >= HY_WIDE_BP else ("CALM" if bp <= HY_CALM_BP else "MIDDLING")
     as_of = next((d for d, v in reversed(points) if v is not None), None)
+    # R-IV.1252(c)5: the 1-year line and the shaded TOP-5% BAND. The band is a quantile of
+    # this series' OWN year, not a fixed level: "the widest 5% of the last year" is a
+    # statement about the distribution on screen, where a hard-coded 600bp would be a
+    # statement about a different decade.
+    spark = [round(v * 100.0, 1) for v in window]
+    top5 = None
+    if len(window) >= 20:
+        ranked = sorted(window)
+        top5 = round(ranked[int(round(0.95 * (len(ranked) - 1)))] * 100.0, 1)
     return {
         "available": True,
         "bp": round(bp, 0),
@@ -54,6 +63,8 @@ def credit_block(points: Sequence[Tuple[Any, Optional[float]]]) -> Dict[str, Any
         "change_20d_bp": None if chg is None else round(chg, 0),
         "pct_rank": pct_rank,
         "as_of": as_of.isoformat() if hasattr(as_of, "isoformat") else as_of,
+        "spark": spark,
+        "top5_bp": top5,
         "series": HY_SERIES,
         "basis": ("ICE BofA US High Yield option-adjusted spread, FRED %s, published in "
                   "percentage points and shown here in BASIS POINTS; percentile over the last "
@@ -92,6 +103,9 @@ def rates_block(series: Dict[str, Sequence[Tuple[Any, Optional[float]]]],
         out["rows"].append({
             "key": key, "series": sid, "available": True,
             "pct": round(vals[-1], 2),
+            # R-IV.1252(c)8's sparkline. 21 points for a 20-session change, so the line and
+            # the number beside it describe the same window.
+            "spark": [round(v, 3) for v in vals[-21:]],
             "change_20d_bp": None if chg is None else round(chg, 0),
             "as_of": as_of.isoformat() if hasattr(as_of, "isoformat") else as_of,
         })
@@ -138,9 +152,13 @@ def ratio_row(name: str, a: Sequence[Optional[float]], b: Sequence[Optional[floa
     now = av[-1] / bv[-1]
     then = av[-1 - lookback] / bv[-1 - lookback]
     pct = 100.0 * (now / then - 1.0) if then else None
+    # (c)7's sparkline: the RATIO's own 20-session path, not either leg's. A leg's line would
+    # move with the market and hide the relative story the bar is about.
+    spark = [round(av[i] / bv[i], 4) for i in range(-min(21, n), 0) if bv[i]]
     return {
         "name": name, "available": True,
         "ratio": round(now, 4),
+        "spark": spark,
         "change_pct": None if pct is None else round(pct, 1),
         "direction": None if pct is None else ("rising" if pct > 0 else
                                                ("flat" if abs(pct) < 0.25 else "falling")),

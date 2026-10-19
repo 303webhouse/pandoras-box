@@ -1252,6 +1252,332 @@
       + esc(rb.basis || '') + '</div>';
   }
 
+  // ═══ REGIME POP-OUT v2 (R-IV.1252, behind ?pop=v2) ═══════════════════════
+  //
+  // BEHIND A SWITCH, and the current drawer stays the default (R-IV.1257(b)1). It renders only
+  // for `?pop=v2`, so Nick can preview it beside the live one and it becomes the default in a
+  // separate one-line deploy after he approves — not by my judgement of whether it looks right.
+  //
+  // EVERY VALUE COMES FROM THE ROUTES ALREADY BUILT. The mock's numbers are illustrative
+  // (R-IV.1252(a)); nothing here carries a figure from it.
+  //
+  // THE TEXT IS BEHIND ⓘ (R-IV.1252(d)). Nothing on the face of the drawer runs longer than one
+  // line, which is the whole complaint the redesign answers: the v1 drawer explained itself in
+  // paragraphs and the reader had to find the number inside the prose.
+  const POP_V2 = (() => {
+    try { return new URLSearchParams(location.search).get('pop') === 'v2'; }
+    catch (_) { return false; }
+  })();
+
+  // The ⓘ affordance. `title` carries it on desktop AND on phone, where a long-press shows it:
+  // one mechanism, so there is no second code path that can disagree about what the note says.
+  function pvInfo(note) {
+    return '<span class="pv-i" tabindex="0" role="img" aria-label="about this section" title="'
+      + esc(note || '') + '">i</span>';
+  }
+
+  function pvHead(label, note, right) {
+    return '<div class="pv-h"><span>' + esc(label) + '</span>'
+      + '<span class="pv-hr">' + (right || '') + (note ? pvInfo(note) : '') + '</span></div>';
+  }
+
+  // "unavailable" is a FIRST-CLASS RENDERING, not an empty box: `pv-na` is what the headless
+  // gate counts, and every section routes its absent case through here so none of them can
+  // invent a quieter way to say nothing.
+  function pvNa(reason) {
+    return '<div class="pv-na">unavailable — ' + esc(reason || 'no reason given') + '</div>';
+  }
+
+  function pvSpark(vals, opts) {
+    const o = opts || {};
+    const pts = (vals || []).filter((v) => v != null && isFinite(v));
+    if (pts.length < 2) return '';
+    const w = o.w || 96, h = o.h || 20;
+    const min = Math.min.apply(null, pts), max = Math.max.apply(null, pts);
+    const rng = (max - min) || 1, step = w / (pts.length - 1);
+    const d = pts.map((v, i) =>
+      (i ? 'L' : 'M') + (i * step).toFixed(1) + ',' + (h - ((v - min) / rng) * h).toFixed(1)
+    ).join(' ');
+    // The shaded band is drawn FIRST so the line sits on top of it, and it is clipped to the
+    // box: a band drawn above the data's range would imply the series had been there.
+    let band = '';
+    if (o.bandFrom != null && max > min) {
+      const y = Math.max(0, Math.min(h, h - ((o.bandFrom - min) / rng) * h));
+      band = '<rect x="0" y="0" width="' + w + '" height="' + y.toFixed(1)
+        + '" class="pv-band"/>';
+    }
+    const dot = o.dot === false ? ''
+      : '<circle cx="' + w + '" cy="'
+        + (h - ((pts[pts.length - 1] - min) / rng) * h).toFixed(1) + '" r="2.2"/>';
+    return '<svg class="pv-sp" viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="'
+      + h + '" aria-hidden="true">' + band + '<path d="' + d + '"/>' + dot + '</svg>';
+  }
+
+  // ── 1. hero ──────────────────────────────────────────────────────────────
+  function pvHero(ft) {
+    if (!ft || ft.error) return '<div class="pv-hero" id="pv-hero">' + pvNa(ft && ft.error) + '</div>';
+    const pending = !!ft.candidate_differs;
+    const held = ft.held_sessions;
+    return '<div class="pv-hero" id="pv-hero">'
+      + '<div class="pv-lab o">' + esc(ft.shown || '—') + '</div>'
+      + '<div class="pv-sub m">'
+      + (held != null ? esc(held) + (Number(held) === 1 ? ' session' : ' sessions') : 'held —')
+      + ' · min hold ' + esc(ft.min_hold != null ? ft.min_hold : '—') + '</div>'
+      + (pending
+        ? '<div class="pv-next"><span class="pv-nk m">PROPOSED NEXT</span>'
+          + '<span class="pv-nv o pv-pend">' + esc(ft.candidate) + '</span></div>'
+        : '')
+      + '</div>';
+  }
+
+  // ── 2. ribbon ────────────────────────────────────────────────────────────
+  function pvRibbon(rb, pending) {
+    if (!rb || !rb.sessions || !rb.sessions.length) {
+      return '<div id="pv-ribbon">' + pvHead('40 SESSIONS', 'One square per settled session, '
+        + 'oldest left. From the stored snapshots, current generation only.')
+        + pvNa(rb && rb.error) + '</div>';
+    }
+    const last = rb.sessions.length - 1;
+    const sq = rb.sessions.map((s, i) => {
+      if (!s.label) {
+        return '<span class="pv-sq pv-gap" title="' + esc(s.as_of || '') + ' · no label stored">'
+          + '</span>';
+      }
+      // Today's square pulses when a flip is pending (R-IV.1252(c)2) — the pulse is on the
+      // square the reader is looking for, not on the whole strip.
+      const isToday = i === last;
+      return '<span class="pv-sq' + (s.flipped ? ' pv-flipped' : '')
+        + (isToday && pending ? ' pv-pend' : '') + '" style="background:'
+        + leanColor(leanOf(s.label)) + '" title="' + esc(s.as_of || '') + ' · ' + esc(s.label)
+        + (s.flipped ? ' · FLIPPED here' : '') + '"></span>';
+    }).join('');
+    const flips = rb.sessions.filter((s) => s.flipped).length;
+    return '<div id="pv-ribbon">'
+      + pvHead(rb.count + ' SESSIONS', rb.basis)
+      + '<div class="pv-strip">' + sq + '</div>'
+      + '<div class="pv-note m">' + flips + ' flip' + (flips === 1 ? '' : 's')
+      + (rb.short_history ? ' · short history' : '') + '</div>'
+      + '</div>';
+  }
+
+  // ── 3. lamps + suits ─────────────────────────────────────────────────────
+  function pvLamps(lamps) {
+    const v = _lastKillView;
+    const kill = v && v.state === 'armed'
+      ? '<span class="pv-chip pv-armed pv-pend">KILL ARMED</span>'
+      : (v && v.state === 'unknown'
+        ? '<span class="pv-chip pv-warn">KILL UNREADABLE</span>'
+        : '<span class="pv-chip pv-dim">kill clear</span>');
+    const ov = (lamps && lamps.overlays && lamps.overlays.available)
+      ? '<span class="pv-chip">overlays</span>'
+      : '<span class="pv-chip pv-dim" title="'
+        + esc((lamps && lamps.overlays && lamps.overlays.reason) || '') + '">no feed</span>';
+    // The "suits" line as chips (c)3. Context, not advice — the wording is the card's own.
+    const suits = ['debit spreads over naked longs', 'premium pricey',
+                   'shorts only early or as a tail']
+      .map((t) => '<span class="pv-chip pv-suit">' + esc(t) + '</span>').join('');
+    return '<div id="pv-lamps">'
+      + pvHead('LAMPS', 'A lamp is shown only where a feed exists. An unlit lamp would read as '
+        + '"checked, nothing firing"; "no feed" is the honest display.')
+      + '<div class="pv-chips">' + kill + ov + '</div>'
+      + pvHead('SUITS', 'Context, not a signal. What this regime usually suits.')
+      + '<div class="pv-chips">' + suits + '</div>'
+      + '</div>';
+  }
+
+  // ── 4. flip meter ────────────────────────────────────────────────────────
+  function pvFlip(ft) {
+    if (!ft || ft.error) return '<div id="pv-flip">' + pvHead('WHAT WOULD FLIP IT', '')
+      + pvNa(ft && ft.error) + '</div>';
+    const ip = ft.in_progress;
+    const need = ip && ip.counter ? ip.counter.needed : (ip ? ip.closes_needed : 2);
+    const have = ip && ip.counter ? ip.counter.banked : 0;
+    // Close pips: filled = banked, the next one pulsing = pending (c)4.
+    let pips = '';
+    for (let i = 0; i < (need || 0); i++) {
+      pips += '<span class="pv-pip' + (i < have ? ' on' : (i === have ? ' pv-pend' : ''))
+        + '"></span>';
+    }
+    const sec = ft.sectors || {};
+    let segs = '';
+    if (sec.above != null && sec.total) {
+      for (let i = 1; i <= sec.total; i++) {
+        const on = i <= sec.above;
+        // The dashed segment sits at the rule's REAL threshold, from the rules file.
+        const mark = (sec.threshold != null && i === sec.threshold) ? ' pv-seg-th' : '';
+        segs += '<span class="pv-seg' + (on ? ' on' : '') + mark + '"></span>';
+      }
+    }
+    const bear = '<div class="pv-side">'
+      + '<div class="pv-sk m">' + esc(ip ? ip.target_words : 'no candidate') + '</div>'
+      + '<div class="pv-pips">' + pips + '</div>'
+      + '<div class="pv-note m">' + (ip && ip.counter ? esc(ip.counter.text) : 'not proposed')
+      + '</div></div>';
+    const bull = '<div class="pv-side pv-right">'
+      + '<div class="pv-sk m">' + esc((ft.up_order && ft.up_order.target_words) || 'SECTORS')
+      + '</div>'
+      + (segs ? '<div class="pv-segs">' + segs + '</div>'
+        : pvNa(sec.reason || 'no sector count'))
+      + '<div class="pv-note m">'
+      + (sec.above != null ? esc(sec.above) + ' of ' + esc(sec.total) + ' above 50d · rule '
+        + esc(sec.threshold) : '') + '</div></div>';
+    return '<div id="pv-flip">'
+      + pvHead('WHAT WOULD FLIP IT', (ip ? ip.condition + ' — ' : '')
+        + (ft.no_distance_estimate || ''))
+      + '<div class="pv-meter">' + bear
+      + '<div class="pv-mid o">' + esc(ft.shown || '—') + '</div>' + bull + '</div>'
+      + '</div>';
+  }
+
+  // ── 5. credit ────────────────────────────────────────────────────────────
+  function pvCredit(c) {
+    if (!c || !c.available) return '<div id="pv-credit">' + pvHead('CREDIT · HY OAS', '')
+      + pvNa(c && c.reason) + '</div>';
+    const chg = c.change_20d_bp;
+    const gauge = c.pct_rank != null
+      ? '<div class="pv-gauge"><i style="left:' + Math.max(0, Math.min(100, c.pct_rank))
+        + '%"></i></div><div class="pv-gk m"><span>calm</span><span>stress</span></div>'
+      : '';
+    return '<div id="pv-credit">'
+      + pvHead('CREDIT · HY OAS', c.basis,
+        '<span class="pv-chip">' + esc(c.word) + '</span>')
+      + '<div class="pv-row"><b class="pv-big m">' + esc(c.bp) + 'bp</b>'
+      + (chg != null ? '<span class="pv-chg m ' + signCls(chg) + '">' + (chg > 0 ? '+' : '')
+        + esc(chg) + 'bp / 20d</span>' : '')
+      + pvSpark(c.spark, { w: 120, h: 26, bandFrom: c.top5_bp }) + '</div>'
+      + gauge
+      + '</div>';
+  }
+
+  // ── 6. breadth ───────────────────────────────────────────────────────────
+  function pvBreadth(z) {
+    const br = ((_lastRegime.regime || {}).breadth) || {};
+    const c = br.sectors_above_50dma, t = br.sectors_total;
+    const pct = (c != null && t) ? Math.round(100 * c / t) : null;
+    const bar = (label, value, reason) => '<div class="pv-brow">'
+      + '<span class="pv-bk m">' + esc(label) + '</span>'
+      + (value == null
+        ? '<span class="pv-na-inline" title="' + esc(reason || '') + '">unavailable</span>'
+        : '<span class="pv-bbar"><i style="width:' + Math.max(0, Math.min(100, value))
+          + '%"></i></span><span class="pv-bv m">' + esc(value) + '%</span>')
+      + '</div>';
+    // 20d and 200d ARE NOT STORED. The snapshot carries the 50d sector count only, so those
+    // two bars say unavailable rather than being drawn from the 50d number — three bars from
+    // one series would be the same fact three times wearing different labels.
+    const noMa = 'the stored snapshot carries the 50-day sector count only; no 20d or 200d '
+      + 'breadth series is recorded, and drawing them from the 50d number would be the same '
+      + 'fact three times';
+    const track = (z && z.available)
+      ? '<div class="pv-track" title="' + esc(z.note || '') + '">'
+        + '<i class="pv-tlow" style="left:' + Math.max(0, Math.min(100, z.low_in_window))
+        + '%"></i>'
+        + '<i class="pv-tnow" style="left:' + Math.max(0, Math.min(100, z.now_pct)) + '%"></i>'
+        + '<i class="pv-tth" style="left:' + z.to_pct + '%"></i></div>'
+        + '<div class="pv-note m">Zweig proxy · low ' + esc(z.low_in_window) + '% → '
+        + esc(z.now_pct) + '% · thrust line ' + esc(z.to_pct) + '%'
+        + (z.fired ? ' · FIRED' : '') + '</div>'
+      : pvNa((z && z.reason) || 'no breadth series');
+    return '<div id="pv-breadth">'
+      + pvHead('BREADTH', 'Sectors above their own 50-day average, from the stored snapshot.',
+        pct != null ? '<span class="pv-chip">' + esc(c) + ' of ' + esc(t) + '</span>' : '')
+      + '<div class="pv-row"><b class="pv-big m">' + (pct != null ? esc(pct) + '%' : '—')
+      + '</b></div>'
+      + bar('50d', pct) + bar('20d', null, noMa) + bar('200d', null, noMa)
+      + pvHead('ZWEIG THRUST', (z && z.note) || '',
+        '<span class="pv-chip pv-warn">PROXY</span>')
+      + track
+      + '</div>';
+  }
+
+  // ── 7. leadership ────────────────────────────────────────────────────────
+  function pvLead(l) {
+    if (!l || !l.available) return '<div id="pv-lead">' + pvHead('LEADERSHIP', '')
+      + pvNa(l && l.reason) + '</div>';
+    const live = (l.rows || []).filter((r) => r.available && r.change_pct != null);
+    // ONE SHARED SCALE across the five bars (c)7, so the lengths are comparable. Scaling each
+    // bar to its own range would make a 0.3% move look like a 6% one.
+    const span = Math.max(1, ...live.map((r) => Math.abs(r.change_pct)));
+    const rows = (l.rows || []).map((r) => {
+      if (!r.available) {
+        return '<div class="pv-lrow"><span class="pv-lk m">' + esc(r.name) + '</span>'
+          + '<span class="pv-na-inline" title="' + esc(r.reason || '') + '">unavailable</span>'
+          + '</div>';
+      }
+      const v = r.change_pct || 0;
+      const w = Math.min(50, Math.abs(v) / span * 50);
+      return '<div class="pv-lrow" title="rising = ' + esc(r.rising_means || '') + '">'
+        + '<span class="pv-lk m">' + esc(r.name) + '</span>'
+        + '<span class="pv-div"><i class="' + (v >= 0 ? 'pos' : 'neg') + '" style="'
+        + (v >= 0 ? 'left:50%;width:' + w.toFixed(1) + '%'
+          : 'right:50%;width:' + w.toFixed(1) + '%') + '"></i></span>'
+        + pvSpark(r.spark, { w: 54, h: 16, dot: false })
+        + '<span class="pv-lv m ' + signCls(v) + '">' + (v > 0 ? '+' : '') + esc(v) + '%</span>'
+        + '</div>';
+    }).join('');
+    return '<div id="pv-lead">'
+      + pvHead('LEADERSHIP', l.basis,
+        '<span class="pv-chip">' + esc(l.headline || '') + '</span>')
+      + '<div class="pv-lscale m"><span>lagging</span><span>leading</span></div>'
+      + rows + '</div>';
+  }
+
+  // ── 8. rates ─────────────────────────────────────────────────────────────
+  function pvRates(r) {
+    if (!r) return '<div id="pv-rates">' + pvHead('RATES', '') + pvNa('not read yet') + '</div>';
+    const name = { real_10y: '10y REAL', breakeven_10y: '10y BREAKEVEN' };
+    const tiles = (r.rows || []).map((x) => {
+      if (!x.available) {
+        return '<div class="pv-tile pv-dim"><span class="pv-tk m">' + esc(x.series)
+          + '</span>' + pvNa(x.reason) + '</div>';
+      }
+      const chg = x.change_20d_bp;
+      return '<div class="pv-tile"><span class="pv-tk m">'
+        + esc(name[x.key] || x.key) + '</span>'
+        + '<b class="pv-big m">' + esc(x.pct) + '%</b>'
+        + pvSpark(x.spark, { w: 72, h: 18, dot: false })
+        + (chg != null ? '<span class="pv-chg m ' + signCls(chg) + '">' + (chg > 0 ? '+' : '')
+          + esc(chg) + 'bp</span>' : '') + '</div>';
+    }).join('');
+    const mv = r.move || {};
+    const moveTile = mv.available
+      ? '<div class="pv-tile"><span class="pv-tk m">MOVE</span><b class="pv-big m">'
+        + esc(mv.value) + '</b></div>'
+      : '<div class="pv-tile pv-dim"><span class="pv-tk m">MOVE</span>'
+        + pvNa(mv.reason) + '</div>';
+    return '<div id="pv-rates">' + pvHead('RATES & CROSS-ASSET', r.basis)
+      + '<div class="pv-tiles">' + tiles + moveTile + '</div></div>';
+  }
+
+  // ── 9. auction ───────────────────────────────────────────────────────────
+  function pvAuction(a) {
+    if (!a || !a.available) {
+      return '<div id="pv-auction" class="pv-dim">'
+        + pvHead('AUCTION STATE', 'From the PYTHIA market-profile snapshot.')
+        + pvNa((a && a.reason) || 'no snapshot') + '</div>';
+    }
+    return '<div id="pv-auction">'
+      + pvHead('AUCTION STATE', a.basis,
+        '<span class="pv-chip">' + esc(a.where || '') + '</span>')
+      + '<div class="pv-note m">' + esc(a.where_basis || '') + '</div></div>';
+  }
+
+  function renderPopV2(body) {
+    const m = _rsLive || {};
+    const ft = m.flip_triggers;
+    const pending = !!(ft && ft.candidate_differs);
+    const S = _rsSections || {};
+    body.innerHTML =
+      pvHero(ft)
+      + '<div class="pv-card">' + pvRibbon(m.ribbon, pending) + '</div>'
+      + '<div class="pv-card">' + pvLamps(S.lamps) + '</div>'
+      + '<div class="pv-card">' + pvFlip(ft) + '</div>'
+      + '<div class="pv-card">' + pvCredit(S.credit) + '</div>'
+      + '<div class="pv-card">' + pvBreadth(S.zweig) + '</div>'
+      + '<div class="pv-card">' + pvLead(S.leadership) + '</div>'
+      + '<div class="pv-card">' + pvRates(S.rates) + '</div>'
+      + '<div class="pv-card">' + pvAuction(S.auction) + '</div>';
+  }
+
   async function openRegimeDetails(src) {
     closePopup();
     // Fetched on open, not on a poll: the drawer is the only reader, and these are daily
@@ -1263,6 +1589,19 @@
     const title = $('drawerTitle'), body = $('drawerBody');
     title.textContent = 'REGIME STRATEGY';
 
+    // R-IV.1257(b)1: v2 renders ONLY for ?pop=v2, and v1 below is untouched. Branching
+    // here rather than replacing the function keeps the default on the code Nick is
+    // using all week, so the preview cannot regress what it is compared against.
+    if (POP_V2) {
+      title.textContent = 'REGIME STRATEGY v2';
+      d.classList.add('pv-wide');
+      renderPopV2(body);
+      $('drawerBackdrop').classList.add('open');
+      d.classList.add('open');
+      const b2 = $('rsOpen');
+      if (b2) b2.setAttribute('aria-expanded', 'true');
+      return;
+    }
     const m = _rsLive || {};
     const sec = (n, name) => '<div class="rd-sec">' + n + ' · ' + esc(name) + '</div>';
     const mock = (why) => '<div class="rd-mock">MOCK · ' + esc(why) + '</div>';
@@ -4803,6 +5142,19 @@
     applyGlossary(document);
     initGrid();
     loadRegimeBand(); managedInterval(loadRegimeBand, 60 * 1000);
+    // R-IV.1257(b): with ?pop=v2 the drawer OPENS ITSELF once the data is in. Neither
+    // reason is convenience: Nick previews it from the URL alone, and the headless gate
+    // asserts nine rendered sections without driving a click. It awaits the band and the
+    // sections first, so what opens is the live payload rather than an empty shell that
+    // fills a second later -- the race that blanked the yield box.
+    if (POP_V2) {
+      (async () => {
+        await loadRegimeBand();
+        await loadRegimeSections();
+        const btn = $('rsOpen');
+        if (btn) openRegimeDetails(btn);
+      })();
+    }
     // R-IV.1186 v0: loaded ONCE and never polled. It is a fixture -- a refresh interval on a
     // static file would imply the card is tracking something, which is the impression v0 must
     // not give. The Open button is bound here rather than inline so the markup carries no
