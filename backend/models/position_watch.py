@@ -214,7 +214,7 @@ def bar_is_closed(bar_start: _dt.datetime, *, newest_bar_start: Optional[_dt.dat
 FAILED_BREAKOUT_BARS = 4
 
 #: The prior-day-level family. R-IV.1220(a)3 caps these TWO TOGETHER at one push per ticker per
-#: session. The exit levels (STOP_LEVEL / TARGET_LEVEL) and EXHAUSTION are not in this family
+#: session. The exit levels (STOP_LEVEL / TARGET_LEVEL) are not in this family
 #: and are explicitly unchanged by that ruling.
 LEVEL_TYPE_EVENTS = ("LEVEL_BREAK", "FAILED_BREAKOUT")
 
@@ -435,7 +435,10 @@ ACTION_TIGHTEN = "TIGHTEN / TRIM"
 ACTION_REVIEW_STOP = "REVIEW STOP"
 ACTION_LOGGED = "LOGGED"
 
-_TIGHTEN_EVENTS = ("EXHAUSTION", "FAILED_BREAKOUT", "TARGET_LEVEL")
+# EXHAUSTION is gone from this set under R-IV.1243(c)1 along with its push. An event name
+# left in a wording table after its detector is withdrawn would pair an action with
+# something nothing can emit.
+_TIGHTEN_EVENTS = ("FAILED_BREAKOUT", "TARGET_LEVEL")
 _REVIEW_EVENTS = ("LEVEL_BREAK", "STOP_LEVEL")
 
 
@@ -615,24 +618,11 @@ def cap_notice(*, pushed_today: int, suppressed_by_cap: bool, notice_sent: bool,
     return True, "the cap is reached and at least one alert was suppressed by it"
 
 
-def exhaustion_push_gate(position: Dict[str, Any],
-                         implied_move: Optional[float],
-                         open_profit: Optional[float]) -> Tuple[bool, str]:
-    """(f)4: an exhaustion pushes only once the position is at least 0.5x its implied move in
-    profit. If IV is unavailable, push WITH "vs implied: n/a".
-
-    THE UNAVAILABLE CASE PUSHES. That is the ruling and it is the right way round: an exhaustion
-    against a profitable position is worth saying even when the yardstick is missing, and the
-    label says the yardstick is missing rather than implying a measurement.
-    """
-    if implied_move is None or implied_move <= 0:
-        return True, "vs implied: n/a"
-    if open_profit is None:
-        return False, "the position's open profit is not known, so the gate cannot be applied"
-    ratio = open_profit / implied_move
-    if ratio >= 0.5:
-        return True, "+%.1fx implied move in profit" % ratio
-    return False, "only +%.1fx implied move in profit, under the 0.5x gate" % ratio
+# R-IV.1243(c)1: `exhaustion_push_gate` IS REMOVED, not disabled. It gated the Leledc
+# exhaustion push on the position being at least 0.5x its implied move in profit. QUERY found
+# HYPNOS-LELEDC NOT SUPPORTED on all five arms and R-IV.1241(c) pre-committed this consequence,
+# so the gate goes with the push it gated: a gate left behind for a detector that is not coming
+# is a thing the next author has to work out the status of.
 
 
 # ── the wording that reaches the phone ────────────────────────────────────

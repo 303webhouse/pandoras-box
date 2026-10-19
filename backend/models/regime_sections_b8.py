@@ -1,0 +1,212 @@
+"""B8's FRED-backed and ratio-backed drawer sections. R-IV.1246(b).
+
+§2 CREDIT (HY OAS), §5 RATES AND CROSS-ASSET, §4 LEADERSHIP RATIOS, §3's ZWEIG PROXY.
+
+PURE, except where noted: series in, reads out. The fetching lives in the API layer, which
+already owns the one FRED client and the one batched yfinance call.
+
+ONE RULE RUNS THROUGH ALL OF THEM: A SOURCE THAT FAILS SHOWS "unavailable", NEVER A MOCK VALUE
+(R-IV.1246(b)). So every builder here returns an `available` flag and a reason, and no builder
+has a default. The drawer prints the reason.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# ── §2 credit ─────────────────────────────────────────────────────────────
+
+HY_SERIES = "BAMLH0A0HYM2"
+#: ICE BofA US High Yield index option-adjusted spread, in PERCENTAGE POINTS on FRED. A reader
+#: who assumes basis points is out by a factor of 100, so the unit is converted once, here,
+#: and the payload states it.
+HY_WIDE_BP = 500.0
+HY_CALM_BP = 300.0
+#: The percentile window, in observations. One year of daily data.
+CREDIT_WINDOW = 252
+
+
+def credit_block(points: Sequence[Tuple[Any, Optional[float]]]) -> Dict[str, Any]:
+    """HY OAS now, its 20-day change, its one-year percentile, and a word.
+
+    The WORD is about the level, and the CHANGE is the thing that moves first: credit usually
+    widens before equities break, so a tight-but-widening read is a different fact from a
+    tight-and-flat one, and both are shown rather than collapsed into one label.
+    """
+    vals = [v for _, v in points if v is not None]
+    if not vals:
+        return {"available": False, "reason": "FRED returned no %s observation" % HY_SERIES}
+    now_pct = vals[-1]
+    bp = now_pct * 100.0
+    window = vals[-CREDIT_WINDOW:]
+    below = sum(1 for v in window if v < now_pct)
+    pct_rank = int(round(100.0 * below / len(window))) if len(window) > 1 else None
+    chg = None
+    if len(vals) > 21:
+        chg = (now_pct - vals[-22]) * 100.0
+    word = "WIDE" if bp >= HY_WIDE_BP else ("CALM" if bp <= HY_CALM_BP else "MIDDLING")
+    as_of = next((d for d, v in reversed(points) if v is not None), None)
+    return {
+        "available": True,
+        "bp": round(bp, 0),
+        "word": word,
+        "change_20d_bp": None if chg is None else round(chg, 0),
+        "pct_rank": pct_rank,
+        "as_of": as_of.isoformat() if hasattr(as_of, "isoformat") else as_of,
+        "series": HY_SERIES,
+        "basis": ("ICE BofA US High Yield option-adjusted spread, FRED %s, published in "
+                  "percentage points and shown here in BASIS POINTS; percentile over the last "
+                  "%d observations" % (HY_SERIES, len(window))),
+        "thresholds": {"wide_at_bp": HY_WIDE_BP, "calm_at_bp": HY_CALM_BP},
+    }
+
+
+# ── §5 rates and cross-asset ──────────────────────────────────────────────
+
+#: DFII10 is the 10-year TIPS yield (the real rate); T10YIE is the 10-year breakeven. Both FRED,
+#: both in percentage points. MOVE has no free series this lane could verify.
+RATES_SERIES = {"real_10y": "DFII10", "breakeven_10y": "T10YIE"}
+MOVE_UNAVAILABLE = ("MOVE: no free source this lane could verify returns it, so it is shown "
+                    "unavailable rather than substituted (R-IV.1246(b)3)")
+
+
+def rates_block(series: Dict[str, Sequence[Tuple[Any, Optional[float]]]],
+                move: Optional[float] = None) -> Dict[str, Any]:
+    """The real rate, the breakeven, their 20-day changes, and MOVE or its absence.
+
+    A RISING REAL RATE AND A RISING BREAKEVEN ARE DIFFERENT NEWS -- one is tightening, the
+    other is inflation expectation - so they are never summed or averaged into a single
+    "rates" number.
+    """
+    out: Dict[str, Any] = {"available": False, "rows": [], "move": None}
+    for key, sid in RATES_SERIES.items():
+        pts = series.get(sid) or []
+        vals = [v for _, v in pts if v is not None]
+        if not vals:
+            out["rows"].append({"key": key, "series": sid, "available": False,
+                                "reason": "FRED returned no %s observation" % sid})
+            continue
+        as_of = next((d for d, v in reversed(pts) if v is not None), None)
+        chg = (vals[-1] - vals[-22]) * 100.0 if len(vals) > 21 else None
+        out["rows"].append({
+            "key": key, "series": sid, "available": True,
+            "pct": round(vals[-1], 2),
+            "change_20d_bp": None if chg is None else round(chg, 0),
+            "as_of": as_of.isoformat() if hasattr(as_of, "isoformat") else as_of,
+        })
+    out["available"] = any(r.get("available") for r in out["rows"])
+    out["move"] = ({"available": True, "value": round(move, 1)} if move is not None
+                   else {"available": False, "reason": MOVE_UNAVAILABLE})
+    out["basis"] = ("DFII10 is the 10-year TIPS (real) yield and T10YIE the 10-year breakeven, "
+                    "both FRED, both percentage points. They are reported separately because a "
+                    "rising real rate and a rising breakeven are different news")
+    return out
+
+
+# ── §4 leadership ratios ──────────────────────────────────────────────────
+
+#: Each ratio and what a RISING value means, in the words the card shows. The pair is named so
+#: nobody has to remember which way up it is: "RSP/SPY rising" is breadth improving.
+LEADERSHIP = (
+    ("RSP/SPY", "RSP", "SPY", "equal-weight leading: breadth improving"),
+    ("IWM/SPY", "IWM", "SPY", "small caps leading"),
+    ("XLY/XLP", "XLY", "XLP", "discretionary over staples: risk appetite"),
+    ("SMH/SPY", "SMH", "SPY", "semis leading"),
+    ("COPPER/GOLD", "CPER", "GLD", "copper over gold: growth over fear"),
+)
+#: The lookback for "is this ratio rising", in sessions.
+LEADERSHIP_LOOKBACK = 20
+
+
+def ratio_row(name: str, a: Sequence[Optional[float]], b: Sequence[Optional[float]],
+              rising_means: str, lookback: int = LEADERSHIP_LOOKBACK) -> Dict[str, Any]:
+    """One ratio, its change over `lookback` sessions, and which way it points.
+
+    PAIRED AT THE SAME INDEX, so a missing session in one leg cannot silently shift the other
+    by a day: both series are trimmed to their common length from the RIGHT (the newest end).
+    """
+    av = [v for v in a if v is not None]
+    bv = [v for v in b if v is not None]
+    n = min(len(av), len(bv))
+    if n < lookback + 1:
+        return {"name": name, "available": False,
+                "reason": "fewer than %d paired sessions (%d)" % (lookback + 1, n)}
+    av, bv = av[-n:], bv[-n:]
+    if bv[-1] == 0 or bv[-1 - lookback] == 0:
+        return {"name": name, "available": False, "reason": "the denominator is zero"}
+    now = av[-1] / bv[-1]
+    then = av[-1 - lookback] / bv[-1 - lookback]
+    pct = 100.0 * (now / then - 1.0) if then else None
+    return {
+        "name": name, "available": True,
+        "ratio": round(now, 4),
+        "change_pct": None if pct is None else round(pct, 1),
+        "direction": None if pct is None else ("rising" if pct > 0 else
+                                               ("flat" if abs(pct) < 0.25 else "falling")),
+        "rising_means": rising_means,
+        "lookback": lookback,
+    }
+
+
+def leadership_block(closes: Dict[str, List[Optional[float]]]) -> Dict[str, Any]:
+    rows = [ratio_row(name, closes.get(a) or [], closes.get(b) or [], means)
+            for name, a, b, means in LEADERSHIP]
+    live = [r for r in rows if r.get("available")]
+    rising = [r for r in live if r.get("direction") == "rising"]
+    return {
+        "available": bool(live),
+        "rows": rows,
+        "headline": (None if not live else
+                     "%d of %d ratios rising" % (len(rising), len(live))),
+        "basis": ("%d-session change in each ratio. COPPER/GOLD uses the CPER and GLD ETFs as "
+                  "the tradable proxies for the metals" % LEADERSHIP_LOOKBACK),
+    }
+
+
+# ── §3's Zweig flag, as a PROXY ───────────────────────────────────────────
+
+#: Zweig's breadth thrust: the 10-day EMA of advances / (advances + declines) going from under
+#: 40% to over 61.5% within 10 sessions.
+ZWEIG_FROM_PCT = 40.0
+ZWEIG_TO_PCT = 61.5
+ZWEIG_WINDOW = 10
+
+ZWEIG_PROXY_NOTE = (
+    "PROXY, not Zweig's own measure (R-IV.1246(b)7). The real thrust is the 10-day EMA of "
+    "NYSE advances / (advances + declines) crossing from under 40% to over 61.5% in 10 "
+    "sessions. The hub stores no advance/decline line, so this substitutes the share of "
+    "sectors above their 50-day average, which is a slower and broader series: it will miss a "
+    "fast thrust and can register one the real measure would not. Labelled a proxy wherever it "
+    "is shown")
+
+
+def zweig_proxy(breadth_pct: Sequence[Optional[float]],
+                window: int = ZWEIG_WINDOW) -> Dict[str, Any]:
+    """(fired, basis) for the proxy thrust over `window` observations.
+
+    Returns `fired: False` with a reason when there is history and no thrust, and
+    `available: False` when there is not enough history -- which are different facts and must
+    not share a rendering.
+    """
+    vals = [v for v in breadth_pct if v is not None]
+    if len(vals) < window + 1:
+        return {"available": False, "fired": None,
+                "reason": "fewer than %d breadth observations (%d)" % (window + 1, len(vals)),
+                "note": ZWEIG_PROXY_NOTE}
+    recent = vals[-(window + 1):]
+    low = min(recent)
+    fired = low < ZWEIG_FROM_PCT and recent[-1] > ZWEIG_TO_PCT
+    return {
+        "available": True,
+        "fired": bool(fired),
+        "from_pct": ZWEIG_FROM_PCT,
+        "to_pct": ZWEIG_TO_PCT,
+        "low_in_window": round(low, 1),
+        "now_pct": round(recent[-1], 1),
+        "window": window,
+        "reason": (None if fired else
+                   "no thrust: the window's low was %.1f%% and it is %.1f%% now"
+                   % (low, recent[-1])),
+        "note": ZWEIG_PROXY_NOTE,
+    }

@@ -199,12 +199,13 @@ async def run_cycle(conn, *, now: Optional[_dt.datetime] = None,
             direction = _alert_direction(ev)
             relation, rel_why = pw.classify_relation(direction, position)
             action = pw.action_for(kind, relation)
+            # R-IV.1243(c)1: THE LELEDC EXHAUSTION PUSH IS REMOVED. QUERY found HYPNOS-LELEDC
+            # NOT SUPPORTED on all five arms, and R-IV.1241(c) pre-committed this consequence,
+            # so the gate it needed is gone rather than left switched off. It was never
+            # reachable in any case: B2's detector emits LEVEL_BREAK, FAILED_BREAKOUT,
+            # GAP_FADED, STOP_LEVEL and TARGET_LEVEL and never EXHAUSTION, so the branch was
+            # dead code waiting for a detector that is now not coming.
             implied_note = None
-            if kind == "EXHAUSTION":
-                ok_gate, implied_note = pw.exhaustion_push_gate(
-                    position, _implied_move(position), _open_profit(position))
-                if not ok_gate:
-                    ev = dict(ev, pushable=False)
             ok, why = pw.may_push_event(
                 ev, relation=relation, ticker=under, recent=recent, now=now,
                 pushed_today=pushed_today, session_date=today)
@@ -284,16 +285,6 @@ def _alert_direction(ev: Dict[str, Any]) -> Optional[str]:
         return "bullish"
     if side == "below":
         return "bearish"
-    return None
-
-
-def _implied_move(position: Dict[str, Any]) -> Optional[float]:
-    """Not available from the book alone, so it is None and the gate says "n/a".
-
-    R-IV.1209(f)4 rules that the unavailable case PUSHES with "vs implied: n/a", so a missing
-    yardstick does not silence an exhaustion against a profitable position. Stated here rather
-    than quietly returning None from nowhere.
-    """
     return None
 
 

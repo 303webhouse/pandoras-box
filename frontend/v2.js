@@ -1008,6 +1008,130 @@
    * in the synthesis's own vote order; B8 wires them one at a time, and each will report its
    * source and a sample row before it does.
    */
+  // B8 §§2-5 (R-IV.1246(b)). One route, one payload, four sections -- the drawer opens once
+  // and four routes would be four chances for a partial render.
+  //
+  // A SOURCE THAT FAILS SHOWS "unavailable" WITH ITS REASON, NEVER A MOCK VALUE. `_rsSections`
+  // starts empty, so a drawer opened before the fetch lands says "loading" rather than drawing
+  // zeros, which would read as a reading.
+  let _rsSections = {};
+  async function loadRegimeSections() {
+    try {
+      const r = await apiFetch('/api/regime-sections');
+      if (r.ok) _rsSections = await r.json();
+    } catch (_) { /* leaves the previous payload, and each section says if it is absent */ }
+  }
+
+  function naHtml(b, what) {
+    if (!b) return '<div class="rd-na">' + esc(what) + ' · loading</div>';
+    return '<div class="rd-na">unavailable — ' + esc(b.reason || 'no reason given') + '</div>';
+  }
+
+  function creditHtml(b) {
+    if (!b || !b.available) return naHtml(b, 'HY OAS');
+    const chg = b.change_20d_bp;
+    return '<div class="rd-big"><b>' + esc(b.bp) + 'bp</b>'
+      + '<span class="rd-word">' + esc(b.word) + '</span>'
+      + (chg != null ? '<span class="rd-chg ' + (chg > 0 ? 'neg' : 'pos') + '">'
+        + (chg > 0 ? '+' : '') + esc(chg) + 'bp / 20d</span>' : '')
+      + (b.pct_rank != null ? '<span class="rd-pct">' + esc(b.pct_rank)
+        + 'th pct</span>' : '') + '</div>'
+      + '<div class="rd-note rd-dim" title="' + esc(b.basis || '') + '">as of '
+      + esc(b.as_of || '—') + ' · ' + esc(b.series) + '</div>';
+  }
+
+  function ratesHtml(b) {
+    if (!b || !b.available) return naHtml(b, 'rates');
+    const rows = (b.rows || []).map((r) => {
+      if (!r.available) {
+        return '<div class="kv"><span class="k">' + esc(r.series)
+          + '</span><span class="v rd-na-inline">unavailable</span></div>';
+      }
+      const chg = r.change_20d_bp;
+      return '<div class="kv"><span class="k">'
+        + esc(r.key === 'real_10y' ? '10y real (DFII10)' : '10y breakeven (T10YIE)')
+        + '</span><span class="v">' + esc(r.pct) + '%'
+        + (chg != null ? ' <i class="rd-chg ' + (chg > 0 ? 'neg' : 'pos') + '">'
+          + (chg > 0 ? '+' : '') + esc(chg) + 'bp/20d</i>' : '') + '</span></div>';
+    }).join('');
+    const mv = b.move || {};
+    const move = mv.available
+      ? '<div class="kv"><span class="k">MOVE</span><span class="v">' + esc(mv.value)
+        + '</span></div>'
+      : '<div class="kv"><span class="k">MOVE</span>'
+        + '<span class="v rd-na-inline" title="' + esc(mv.reason || '')
+        + '">unavailable</span></div>';
+    return rows + move
+      + '<div class="rd-note rd-dim">' + esc(b.basis || '') + '</div>';
+  }
+
+  function leadershipHtml(b) {
+    if (!b || !b.available) return naHtml(b, 'leadership ratios');
+    const rows = (b.rows || []).map((r) => {
+      if (!r.available) {
+        return '<div class="kv"><span class="k">' + esc(r.name)
+          + '</span><span class="v rd-na-inline" title="' + esc(r.reason || '')
+          + '">unavailable</span></div>';
+      }
+      const dir = r.direction || '';
+      return '<div class="kv" title="rising = ' + esc(r.rising_means || '') + '">'
+        + '<span class="k">' + esc(r.name) + '</span><span class="v">'
+        + '<i class="ld-' + esc(dir) + '">' + esc(dir) + '</i> '
+        + (r.change_pct != null ? (r.change_pct > 0 ? '+' : '') + esc(r.change_pct) + '%' : '')
+        + '</span></div>';
+    }).join('');
+    return '<div class="rd-big"><b>' + esc(b.headline || '') + '</b></div>' + rows
+      + '<div class="rd-note rd-dim">' + esc(b.basis || '') + '</div>';
+  }
+
+  function zweigHtml(b) {
+    if (!b) return naHtml(b, 'Zweig proxy');
+    // PROXY, and the label is not optional: the hub stores no advance/decline line, so this is
+    // a slower, broader series than Zweig's own measure. Shown on the row, not in a tooltip.
+    const tag = '<span class="rd-proxy" title="' + esc(b.note || '') + '">PROXY</span>';
+    if (!b.available) {
+      return '<div class="kv"><span class="k">Zweig thrust ' + tag
+        + '</span><span class="v rd-na-inline">unavailable — ' + esc(b.reason || '')
+        + '</span></div>';
+    }
+    return '<div class="kv"><span class="k">Zweig thrust ' + tag + '</span>'
+      + '<span class="v' + (b.fired ? ' ld-rising' : '') + '">'
+      + (b.fired ? 'FIRED' : 'no') + '</span></div>'
+      + '<div class="rd-note rd-dim" title="' + esc(b.note || '') + '">'
+      + esc(b.fired ? ('low ' + b.low_in_window + '% to ' + b.now_pct + '% in '
+        + b.window + ' sessions') : (b.reason || '')) + '</div>';
+  }
+
+  // B8 section 1 (R-IV.1243(e)). CONDITIONS WITH COUNTERS, and NO distance-to-flip: the v1
+  // classifier takes a label when a SET of conditions holds, not when one score crosses a
+  // line, so there is no number whose shrinking means closer. A points estimate would imply a
+  // geometry the rules do not have, which is what the note in this file already said.
+  function flipTriggersHtml(ft) {
+    if (!ft || ft.error) {
+      return '<div class="rd-mock">flip conditions unavailable'
+        + (ft && ft.error ? ' (' + esc(ft.error) + ')' : '') + '</div>';
+    }
+    const row = (b, cls) => {
+      if (!b) return '';
+      const counter = b.counter
+        ? '<b class="ft-count">' + esc(b.counter.text) + '</b>' : '';
+      return '<div class="ft-row ' + cls + '" title="' + esc(b.closes_basis || '') + '">'
+        + '<span class="ft-dir">' + esc(b.direction || '') + '</span>'
+        + '<span class="ft-cond">' + esc(b.condition || b.headline || '') + '</span>'
+        + (b.target_words ? '<span class="ft-to">' + esc(b.target_words) + '</span>' : '')
+        + counter + '</div>';
+    };
+    return '<div class="ft-held">holding ' + esc(ft.shown)
+      + (ft.held_sessions != null ? ' for ' + esc(ft.held_sessions) + ' session'
+        + (Number(ft.held_sessions) === 1 ? '' : 's') : '')
+      + (ft.min_hold != null ? ' · minimum hold ' + esc(ft.min_hold) : '') + '</div>'
+      + row(ft.in_progress, 'ft-live')
+      + row(ft.down_order, 'ft-ctx')
+      + row(ft.up_order, 'ft-ctx')
+      + '<div class="rd-note rd-dim">' + esc(ft.order_note || '') + '</div>'
+      + '<div class="rd-note rd-dim">' + esc(ft.no_distance_estimate || '') + '</div>';
+  }
+
   // B8 section 7 (R-IV.1239(h)). The last 40 SETTLED sessions, from the stored snapshots the
   // drawer's payload already carries. One square per session, flips marked.
   //
@@ -1039,8 +1163,11 @@
       + esc(rb.basis || '') + '</div>';
   }
 
-  function openRegimeDetails(src) {
+  async function openRegimeDetails(src) {
     closePopup();
+    // Fetched on open, not on a poll: the drawer is the only reader, and these are daily
+    // series. An await here is why the sections say "loading" rather than drawing zeros.
+    await loadRegimeSections();
     const d = $('drawer');
     setSide(d, 'left');
     syncTopbarH();
@@ -1066,15 +1193,15 @@
       + '<div class="rd-ctx">Usually suits: debit spreads over naked longs · premium '
       + 'pricey · shorts only early or as a tail. Context, not a signal.</div>'
 
-      + sec('1', 'WHAT WOULD FLIP IT') + mock('both directions; hub data in B8')
-      + sec('2', 'CREDIT · HY SPREAD') + mock('FRED BAMLH0A0HYM2 in B8')
+      + sec('1', 'WHAT WOULD FLIP IT') + flipTriggersHtml(m.flip_triggers)
+      + sec('2', 'CREDIT · HY SPREAD') + creditHtml(_rsSections.credit)
       + sec('3', 'BREADTH · % ABOVE 50D')
       + kv('Live now', (((_lastRegime.regime || {}).breadth || {}).pct_above_50dma != null
         ? _lastRegime.regime.breadth.pct_above_50dma + '%' : '—'))
-      + mock('trend + Zweig thrust flag in B8, labelled a proxy')
+      + zweigHtml(_rsSections.zweig)
       + sec('4', 'LEADERSHIP · WHO IS CARRYING THE INDEX')
-      + mock('RSP/SPY, IWM/SPY, XLY/XLP, SMH/SPY, copper/gold in B8')
-      + sec('5', 'RATES & CROSS-ASSET') + mock('DFII10, T10YIE, MOVE in B8')
+      + leadershipHtml(_rsSections.leadership)
+      + sec('5', 'RATES & CROSS-ASSET') + ratesHtml(_rsSections.rates)
       + sec('6', 'AUCTION STATE') + mock('PYTHIA feed in B8; bracket counter greyed <10 sessions')
       + sec('7', 'REGIME RIBBON') + ribbonHtml(m.ribbon)
       + sec('8', 'LAMPS') + mock('overlay + kill-switch lamps in B8')
@@ -1083,7 +1210,9 @@
       // a section is wired, which is the caption-lies-about-its-field fault. It now names
       // what is wired and what is not, so wiring section 8 changes the count and not this
       // sentence.
-      + '<div class="rd-foot">WIRED: 7 (ribbon). STILL PLACEHOLDERS: 1-6, 8 — each is '
+      + '<div class="rd-foot">WIRED: 1 (flip triggers), 2 (credit), 3 (breadth + Zweig '
+      + 'proxy), 4 (leadership), 5 (rates), 7 (ribbon). STILL PLACEHOLDERS: 6, 8 — each '
+      + 'is '
       + 'wired in B8 one at a time, and its source, terms and a sample row are reported '
       + 'first (R-IV.1209(e)).</div>';
 
@@ -3256,29 +3385,22 @@
         <div><span class="add-pos-lock-label">Position</span>${esc(p.ticker + ' · ' + structureStr(p))}</div>
         <div><span class="add-pos-lock-label">Account</span>${esc(p.account_display || '—')}</div>
         <div><span class="add-pos-lock-label">Held</span>${held != null ? esc(String(held)) : 'unknown'}</div>
-        <div class="add-pos-lock-note">The account and the instrument are fixed. An add that
-          could change either is a different position, so there is no field for them.</div>
       </div>
       <div class="form-grid">
         <div class="fld"><label for="a_qty">Quantity to add</label>
-          <input id="a_qty" type="number" min="1" step="1" placeholder="how many more?">
-          <div class="fld-echo">${mult === 1 ? 'shares' : 'contracts · 100 per contract'}</div></div>
+          <input id="a_qty" type="number" min="1" step="1"></div>
         <div class="fld"><label for="a_price">Price per ${mult === 1 ? 'share' : 'contract'}</label>
-          <input id="a_price" type="number" step="any" placeholder="${p.current_price != null ? esc(String(p.current_price)) : '0.00'}"></div>
+          <input id="a_price" type="number" step="any"></div>
         <div class="fld"><label for="a_cost">Exact total <span class="add-pos-optional">(optional)</span></label>
-          <input id="a_cost" type="number" step="any" placeholder="leave blank to derive">
-          <div class="fld-echo">Blank derives it from price x quantity and records
-            derived_from_cost_basis. Fill it in to use the broker's own figure.</div></div>
-        ${dateFieldHtml('a_when', 'Date added', 'the day you added — today unless you say otherwise')}
-        <div class="fld full"><label for="a_note">Note</label><input id="a_note" placeholder="optional"></div>
+          <input id="a_cost" type="number" step="any"></div>
+        ${dateFieldHtml('a_when', 'Date added', '')}
+        <div class="fld full"><label for="a_note">Note</label><input id="a_note"></div>
       </div>
       <div class="add-pos-preview">
         <div class="add-pos-preview-title">What this would do</div>
         <div id="a_preview" class="add-pos-preview-wait">Enter a quantity and a price.</div>
       </div>
       <div class="add-pos-refusal" id="a_refusal"></div>
-      <div class="add-pos-step1-note">Preview only — saving is switched off in this step.
-        Try the numbers, and say the word when the preview looks right.</div>
       <div class="form-foot">
         <div class="form-msg" id="a_msg"></div>
         <div class="form-actions">
@@ -3287,8 +3409,13 @@
         </div>
       </div>`);
     $('a_cancel').addEventListener('click', closeModal);
-    // NO HANDLER ON a_submit. The `disabled` attribute can be removed in devtools; an unbound
-    // button cannot do anything regardless. STEP 2 is where a handler appears.
+    // STEP 2 (R-IV.1243(d)): the handler exists now. Nick checked the preview on 2026-10-18 at
+    // 23:54 MT and it works, which was the gate step 1 was waiting on.
+    //
+    // THE BUTTON STAYS `disabled` UNTIL THE PREVIEW IS VALID, and the preview is what enables
+    // it -- so the enabling condition is the same computation Nick checked, not a second
+    // opinion about whether the numbers are usable.
+    $('a_submit').addEventListener('click', () => submitAddToPosition(p));
     ['a_qty', 'a_price', 'a_cost'].forEach((id) => {
       const el = $(id);
       if (el) el.addEventListener('input', () => updateAddToPositionPreview(p));
@@ -3304,6 +3431,14 @@
     const price = Number($('a_price') && $('a_price').value);
     const exact = $('a_cost') && $('a_cost').value !== '' ? Number($('a_cost').value) : null;
     if (refusal) { refusal.textContent = ''; refusal.classList.remove('active'); }
+    // STEP 2 (R-IV.1243(d)): THE PREVIEW OWNS THE BUTTON. Every path that cannot produce a
+    // preview also disables the save, so the enabling condition is the same computation Nick
+    // checked rather than a second opinion about whether the numbers are usable. It starts
+    // disabled on every keystroke and is re-enabled only at the end, where the preview
+    // succeeded -- a guard that has to be remembered at each early return is a guard that
+    // gets missed at one of them.
+    const okBtn = $('a_submit');
+    if (okBtn) okBtn.disabled = true;
 
     if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) {
       out.className = 'add-pos-preview-wait';
@@ -3351,13 +3486,97 @@
       + (credit ? 'goes UP by ' + money(addCost) + ' (a credit structure is paid to you on open).'
                 : 'goes DOWN by ' + money(addCost) + '.'));
     if (exact != null) {
+      const perUnit = Math.abs(exact) / (mult * qty);
       lines.push('Total taken from the figure you entered: ' + money(Math.abs(exact)) + '.');
+      // Stated because the SAVED price is not the price typed above. The route has no field
+      // for a total, so the exact figure is recorded as the per-unit price that reproduces it
+      // -- the same money, a different number in the price column, and a reader comparing the
+      // lot against the ticket would otherwise find a discrepancy nobody explained.
+      lines.push('Recorded price per ' + (mult === 1 ? 'share' : 'contract') + ' will be '
+        + money(perUnit * mult) + ', which is that total divided by the quantity.');
     } else {
       lines.push('Total derived as ' + money(price) + ' x ' + (mult === 1 ? '' : mult + ' x ')
         + qty + ' = ' + money(addCost) + ' (derived_from_cost_basis).');
     }
     out.className = 'add-pos-preview-list';
     out.innerHTML = '<ul>' + lines.map((l) => '<li>' + l + '</li>').join('') + '</ul>';
+    if (okBtn) okBtn.disabled = false;
+  }
+
+  // STEP 2's write (R-IV.1243(d)). POST one lot to the position's own route, which derives
+  // quantity, entry price and cost basis from the lot set rather than taking an aggregate.
+  //
+  // THE DOUBLE-SUBMIT IS THE RISK HERE AND IT IS ONLY HALF-GUARDED, which is worth saying
+  // plainly rather than burying: `position_lots` has NO server-side duplicate guard for a
+  // manual add -- the route's guard fires only when a `broker_ref` is supplied, and a hand
+  // entry has none. That is the filed defect where cash_flows refuses a duplicate same-day
+  // movement and position_lots does not, leaving basis > cash with the two stores disagreeing
+  // as the only detector. So this disables the button for the WHOLE round trip and holds an
+  // in-flight flag as well: the flag stops a second click that arrives before the browser has
+  // repainted, which `disabled` alone does not. Neither is a substitute for a server guard,
+  // and the gap is reported.
+  let addLotInFlight = false;
+  async function submitAddToPosition(p) {
+    if (addLotInFlight) return;
+    const msg = $('a_msg'), btn = $('a_submit');
+    const qty = Number($('a_qty') && $('a_qty').value);
+    const price = Number($('a_price') && $('a_price').value);
+    const exact = $('a_cost') && $('a_cost').value !== '' ? Number($('a_cost').value) : null;
+    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price <= 0) return;
+    const when = (val('a_when') || '').trim();
+    const body = {
+      // The route renamed these in 2026-09 and deliberately does NOT accept the old names,
+      // so a stale body gets a 422 naming the field. These are the current ones.
+      fill_time: when ? when : new Date().toISOString().slice(0, 10),
+      qty: qty,
+      price: price,
+      source: 'MANUAL',
+    };
+    // THE EXACT TOTAL HAS NO FIELD ON THIS ROUTE, and finding that out mattered:
+    // `AddLotRequest` carries fill_time / qty / price / fees / source / broker_ref / reason /
+    // actor and NO cost_basis, so a `cost_basis` key would have been silently dropped by
+    // Pydantic and the basis derived from price x qty instead -- the user's own broker figure
+    // ignored without a word. Instead the exact total is carried as the PER-UNIT PRICE that
+    // reproduces it, which is the same money by construction, and the preview says that is
+    // what will be recorded.
+    if (exact != null && qty > 0) {
+      body.price = Math.abs(exact) / (addPosMultiplier(p) * qty);
+    }
+    const note = (val('a_note') || '').trim();
+    if (note) body.reason = note;
+    addLotInFlight = true;
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'saving…'; }
+    if (msg) { msg.className = 'form-msg'; msg.textContent = 'saving…'; }
+    try {
+      const r = await apiFetch('/api/v2/positions/' + encodeURIComponent(p.position_id)
+        + '/lots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json',
+                   'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) {
+        if (msg) { msg.className = 'form-msg ok'; msg.textContent = 'added'; }
+        setTimeout(() => { closeModal(); refreshDesk(); }, 500);
+      } else if (r.status === 401) {
+        if (msg) { msg.className = 'form-msg err'; msg.textContent = 'sign in to add'; }
+        showLogin();
+      } else {
+        const d = await r.json().catch(() => ({}));
+        // The refusal in full, not a status code: every refusal this route gives names the
+        // field or the rule it is refusing on, and shortening it to "failed" throws that away.
+        if (msg) {
+          msg.className = 'form-msg err';
+          msg.textContent = 'refused: ' + (d.detail || r.status);
+        }
+      }
+    } catch (_) {
+      if (msg) { msg.className = 'form-msg err'; msg.textContent = 'network error'; }
+    } finally {
+      addLotInFlight = false;
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
   }
 
   function openCloseForm(p) {

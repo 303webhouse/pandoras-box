@@ -69,13 +69,24 @@ stops the item and is reported — never substituted.
 
 **Deferred, with their conditions:**
 
-- **Leledc on 15m for 0–3 DTE** (R-IV.1215(c)) — reopens only when LAB's HYPNOS-LELEDC v1 has
-  reported *and* an eligible 0–3 DTE holding with a usable underlying series exists. Today the
-  only 0–3 DTE row is a VIX spread, which has no usable underlying series, so the rule has no
-  eligible instrument. Daily Leledc on Set B ships inside B2.
+- ~~**Leledc on 15m for 0–3 DTE** (R-IV.1215(c))~~ — **CLOSED, R-IV.1243(c)2.** The condition
+  that would have reopened it has resolved the other way: LAB's HYPNOS-LELEDC v1 reported and
+  QUERY confirmed **NOT SUPPORTED on all five arms**, triggering the consequence R-IV.1241(c)
+  had pre-committed. The 15m path is closed, not deferred — a deferral implies it is waiting
+  for something, and nothing is coming. The **exhaustion push and its 0.5× implied-move gate
+  are removed from Position Watch** (c)1, not switched off. A 4-hour crypto test (v2) is a
+  separate question and changes none of this.
+  - **(c)3 NEEDS A RULING, and the premise is mine to own.** It says the daily Leledc marker
+    *stays* on the panel labelled "no tested edge". **It was never built.** R-IV.1215(c) ended
+    "Daily Leledc on Set B ships inside B2" and I did not ship it — none of my B2 remainder
+    lists carried it, which is an omission on my side, not an ambiguity in the ruling. So
+    "stays" has nothing to apply to. I have **not** built it now: writing a new detector for a
+    strategy QUERY has just found unsupported, on the strength of the word "stays", would be
+    the opposite of careful. Say build it (labelled "no tested edge") or say leave it closed.
 - **Daily ATM IV percentile for FXI/EEM/EWJ/KWEB** (R-IV.1214(c)12) — ask SPINE when a free
   source is verified.
-- **Add step 2** — waits on Nick's preview check.
+- ~~**Add step 2** — waits on Nick's preview check.~~ **CLEARED, R-IV.1243(d):** Nick checked
+  the preview on 2026-10-18 at 23:54 MT and it works.
 
 ---
 

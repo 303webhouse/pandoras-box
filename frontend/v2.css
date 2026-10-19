@@ -1928,3 +1928,43 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .rb-blocked { opacity: .45; }
 .rd-note { font-size: 10px; color: var(--text-2); }
 .rd-dim { color: var(--text-3); margin-top: 2px; }
+
+/* B8 section 1: flip conditions with counters. No distance-to-flip (R-IV.1243(e)). */
+.ft-held { font-size: 10px; color: var(--text-2); margin: 4px 0 6px; }
+.ft-row {
+    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+    padding: 4px 0; border-top: 1px solid var(--border);
+}
+.ft-dir { font-size: 9px; letter-spacing: .06em; color: var(--text-3); min-width: 92px; }
+.ft-cond { font-size: 11px; color: var(--text); flex: 1 1 140px; }
+.ft-to { font-size: 10px; letter-spacing: .04em; color: var(--text-2); }
+/* The live candidate is the only row the stored counter belongs to, so it is the only one
+   that reads as current. The two order-neighbours are context. */
+.ft-live .ft-cond { color: var(--text); }
+.ft-live .ft-to { color: var(--teal); }
+.ft-ctx .ft-cond, .ft-ctx .ft-to { color: var(--text-2); }
+.ft-count {
+    font-family: var(--mono); font-size: 11px; color: var(--amber);
+    border: 1px solid var(--amber); border-radius: 3px; padding: 0 4px;
+}
+
+/* B8 §§2-5 (R-IV.1246(b)). A failed source reads as "unavailable" with its reason, never as
+   a value — so the unavailable styling is deliberately plain, not alarming: a missing series
+   is not a market event. */
+.rd-na { font-size: 11px; color: var(--text-3); padding: 4px 0; }
+.rd-na-inline { color: var(--text-3); }
+.rd-big { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+.rd-big b { font-family: var(--mono); font-size: 16px; color: var(--text); }
+.rd-word { font-size: 9px; letter-spacing: .08em; color: var(--text-2); }
+.rd-chg { font-family: var(--mono); font-size: 10px; }
+.rd-chg.neg { color: var(--down); }
+.rd-chg.pos { color: var(--up); }
+.rd-pct { font-size: 10px; color: var(--text-2); }
+.ld-rising { color: var(--up); font-style: normal; }
+.ld-falling { color: var(--down); font-style: normal; }
+.ld-flat { color: var(--text-2); font-style: normal; }
+/* A proxy says so on the row. Amber is this file's "we cannot confirm this". */
+.rd-proxy {
+    font-size: 8px; letter-spacing: .08em; margin-left: 5px; padding: 0 4px;
+    border: 1px solid var(--amber); color: var(--amber); border-radius: 2px;
+}

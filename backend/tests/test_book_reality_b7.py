@@ -196,3 +196,42 @@ def test_THE_COLUMNS_ARE_THE_RULED_SCENARIOS():
     g = br.grid([], spots={}, betas={}, r=R, today=TODAY)
     assert g["columns"] == ["-10%", "-5%", "-3%", "+3%", "+5%"]
     assert [r["key"] for r in g["rows"]] == ["RH", "ROTH", "401A", "TOTAL"]
+
+
+# ── 7. B7 reads what B7 prices (R-IV.1246(f)) ─────────────────────────────
+
+def test_B7_SELECTS_EVERY_COLUMN_IT_PRICES_FROM():
+    """QUERY found B7 modelling 17 of 29 rows with EVERY OPTION EXCLUDED, because it reused
+    Position Watch's `SET_B_SQL` -- a query written for a different job, carrying no expiry and
+    no strikes. `years_to_expiry` returned None for every option, `price_structure` refused it,
+    and the grid looked plausible: the stock rows were right and each exclusion carried a
+    reason, so nothing read as broken.
+
+    THE FAULT WAS THE REUSE, not the three columns. So this asserts the whole set a B7 row is
+    read for, which fails if a future field is priced from without being selected.
+    """
+    needed = ("ticker", "structure", "account", "quantity", "current_price",
+              "expiry", "long_strike", "short_strike")
+    select = api.B7_SQL.split("FROM")[0]
+    for col in needed:
+        assert col in select, "%s is priced from but not selected" % col
+    # And it must NOT be Position Watch's query any more.
+    from jobs.position_watch_job import SET_B_SQL
+    assert api.B7_SQL != SET_B_SQL
+    assert "expiry" not in SET_B_SQL.split("FROM")[0], (
+        "if Position Watch's query grows these columns, this test stops proving anything")
+
+
+def test_AN_OPTION_ROW_WITH_ITS_STRIKES_IS_MODELLED():
+    """The positive control for the fix: the same row that was excluded is now priced. Without
+    this, the test above would pass on a query nobody reads."""
+    row = _spread()
+    assert all(k in row for k in ("expiry", "long_strike", "short_strike"))
+    got = br.position_cells(row, spot=520.0, beta=1.05, r=R, today=TODAY)
+    assert got["cells"] is not None, got.get("reason")
+    # And stripping the three columns reproduces the bug, which is what QUERY saw.
+    stripped = {k: v for k, v in row.items()
+                if k not in ("expiry", "long_strike", "short_strike")}
+    broke = br.position_cells(stripped, spot=520.0, beta=1.05, r=R, today=TODAY)
+    assert broke["cells"] is None
+    assert "no expiry" in broke["reason"] or "volatility" in broke["reason"]
