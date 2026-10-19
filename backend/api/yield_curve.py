@@ -98,6 +98,27 @@ def _spread_block(name: str, series_id: str) -> Dict[str, Any]:
     }
 
 
+def _intraday_block() -> Dict[str, Any]:
+    """R-IV.1257(c)'s overlay, or an explained absence. NEVER raises into the payload.
+
+    SEPARATED FROM THE FRED READ ON PURPOSE. FRED stays official (c), so a Yahoo outage must
+    cost the box its intraday line and nothing else -- the levels, labels and fire rates beside
+    it are unaffected and must keep serving. Wrapping the whole payload in one try would have
+    made a second vendor able to blank the first one's numbers, which is the fault R-IV.1251(b)
+    was raised about.
+    """
+    try:
+        from models import yield_intraday as yi
+
+        return yi.overlay()
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[yield-curve] intraday overlay failed: %s", type(exc).__name__)
+        return {"tenors": {}, "verified_tenors": [],
+                "unavailable": {"all": "the intraday overlay failed (%s); FRED's daily series "
+                                       "is unaffected and is what the box is showing"
+                                       % type(exc).__name__}}
+
+
 def payload() -> Dict[str, Any]:
     tenors = [_tenor_block(t, s) for t, s in yc.SERIES.items()]
     spreads = {n: _spread_block(n, s) for n, s in yc.SPREAD_SERIES.items()}
@@ -121,8 +142,13 @@ def payload() -> Dict[str, Any]:
                    "z_window_sessions": yc.Z_WINDOW,
                    "retired": ["RARE (R-IV.1220(b))",
                                "the 10Y >= 10bp route to EXTREME (R-IV.1239(b))"]},
+        # R-IV.1257(c): the intraday overlay sits BESIDE the FRED table under its own key, never
+        # merged into `tenors`. Merged, a 15-minute tick and a settled close would share a field
+        # and the reader could not tell which one they had -- and a label computed off the
+        # merged value would be computed off an unsettled number.
+        "intraday": _intraday_block(),
         "field_origin": {"tenors": "derived", "spreads": "derived", "shape": "derived",
-                         "fires": "derived", "as_of": "stored"},
+                         "fires": "derived", "as_of": "stored", "intraday": "derived"},
     }
 
 

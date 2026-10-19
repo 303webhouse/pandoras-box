@@ -3131,6 +3131,33 @@
     // from /api/stable/rates (3M/5Y/10Y/30Y) while the labels came from the FRED route
     // (3M/2Y/10Y/30Y), so the two lists disagreed about which tenors the curve even has.
     const tenors = (d.tenors || []);
+    // R-IV.1257(c): THE INTRADAY OVERLAY, beside the FRED figure and never instead of it. The
+    // tick is styled apart and captioned "intra" so the two numbers on a row can never be read
+    // as one: the FRED level is a settled close, the tick is not settled at all.
+    //
+    // Styled INLINE rather than through v2.css, which is pinned independently by v2.html,
+    // stater.html and abacus.html at three already-diverged values -- a rule added there ships
+    // three times or reaches a stale cache on the pages that were missed.
+    const intra = (d.intraday && d.intraday.tenors) || {};
+    const intraCell = (tenor) => {
+      const b = intra[tenor];
+      if (!b) return '';
+      if (!b.verified) {
+        // The ABSENCE IS SHOWN, not swallowed: 2Y has no intraday symbol at all, and a row
+        // that silently lacked the tick would read as "unchanged today" (R-IV.1251(b), one
+        // row down). No substitution, so the reason is the content.
+        return '<span style="font-size:10px;color:#5d6b82;letter-spacing:.3px" title="'
+          + esc(b.reason || 'no intraday reading') + '">FRED only</span>';
+      }
+      if (b.change_bp == null) return '';
+      const sign = b.change_bp >= 0 ? '+' : '';
+      return '<span style="font-size:10px;color:#8b98ad;letter-spacing:.3px" title="'
+        + esc('intraday ' + (b.symbol || '') + ' (' + (b.vendor_name || 'unnamed')
+              + '), 15-minute bars, today’s session only, as of '
+              + (b.as_of || 'unknown') + ' — an unsettled tick, NOT a settled close; the '
+              + '% beside it is FRED’s settled figure') + '">intra ' + sign
+        + Number(b.change_bp).toFixed(1) + 'bp</span>';
+    };
     const tenorRows = tenors.map((t) => {
       const tint = t.label === 'EXTREME' ? ' yc-t-extreme'
         : (t.label === 'UNUSUAL' ? ' yc-t-unusual' : '');
@@ -3146,6 +3173,7 @@
         + '<span class="yc-tv">' + Number(t.level_pct).toFixed(2) + '%</span>'
         + (chg == null ? '' : '<span class="yc-tc ' + signCls(chg) + '">'
           + (chg >= 0 ? '+' : '') + Number(chg).toFixed(1) + 'bp</span>')
+        + intraCell(t.tenor)
         + '</div>';
     }).join('');
     // The chart: a dot per tenor now, and a DASHED line for a month ago (c). Drawn from the
@@ -3161,6 +3189,20 @@
         sets.push({ label: '1 month ago', borderColor: 'rgba(139,152,173,0.65)',
                     borderDash: [4, 3], backgroundColor: 'transparent', pointRadius: 0,
                     data: ago });
+      }
+      // R-IV.1257(c): the intraday curve as a THIRD series, dotted, and only when at least two
+      // tenors verified. One verified tenor is a point, not a curve, and a one-point line drawn
+      // across five labels would imply four readings that do not exist. The 2Y gap stays a gap:
+      // Chart.js skips a null rather than bridging it, which is the honest rendering of "no
+      // intraday symbol for this tenor".
+      const tick = drawn.map((t) => {
+        const b = intra[t.tenor];
+        return (b && b.verified && b.last_pct != null) ? b.last_pct : null;
+      });
+      if (tick.filter((v) => v != null).length >= 2) {
+        sets.push({ label: 'intraday (unsettled)', borderColor: 'rgba(94,234,212,0.75)',
+                    borderDash: [2, 2], backgroundColor: 'transparent', pointRadius: 2,
+                    spanGaps: false, data: tick });
       }
       makeLineChart('curveChart', sets, drawn.map((t) => t.tenor));
     }
