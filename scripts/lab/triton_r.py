@@ -5,7 +5,9 @@ amended by TRITON-R-v1-AMENDMENT-1-R-IV.1084.md (d8030b4f...): continuous EMA; s
 and TRITON-R-v1-AMENDMENT-2-R-IV.1090.md (21a2c0e9...): controls from t_r + 1 min; WIN 1 bootstrap 10,000;
 WIN 4 >= 5 claim events per side (named if not met); SUSPECT if > 10% of resamples skipped;
 and TRITON-R-v1-AMENDMENT-3-R-IV.1093.md (c491c196...): a SUSPECT interval carries no verdict weight;
-amendment 4 (6d26a90e..., PYTHIA data note); amendment 5 (8f5931a9..., secondaries, confirmation set only);
+amendment 4 (6d26a90e..., PYTHIA data note); amendment 5 (8f5931a9..., secondaries, confirmation set only:
+secs. 2-3 coded as horizon_z / evaluate(horizons=True) / placebos(horizons=True) / summarize_secondaries, which
+the backtest and the count job never call; sec. 4, the money gate, NOT CODED pending a ruling, R-IV.1238(b)3);
 amendment 6 (b8a5ff38...): the slot median counts the 10 most recent prior sessions in which the slot EXISTS.
 LOAD (R-IV.1116(b)2a): run 2's frozen path itself -- _read_parquet -> census_set -> prepare_prints (dedup first).
 Source of record: triton-design-of-record-2026-10-12.md (12ecf72c...).
@@ -71,6 +73,60 @@ HALF_DAYS = {date(2026, 11, 27), date(2026, 12, 24)}
 def session_close(d):
     """Regular-session close of `d` in seconds after midnight ET (13:00 on a half-day, else 16:00)."""
     return 13 * 3600 if d in HALF_DAYS else RTH1
+
+
+# ── amendment 5 (8f5931a9...): SECONDARY declarations, confirmation set only, no verdict weight ─────
+#: sec. 2 -- Z - placebo at +30m, +60m and the next-session close; IM recomputed for each tau; same placebo.
+A5_HORIZONS = (("30m", 1800), ("60m", 3600), ("next_close", None))
+A5_STALE_S = 300            # LAB reading: the horizon price is the last 1-min close at or before T, within 5 min
+#: sec. 3 -- the asset-group split; a group needs >= 30 sessions with claim events, else UNDERPOWERED.
+A5_GROUPS = {"index_etfs": ("SPY", "QQQ", "IWM", "SMH"), "megacap_singles": ("NVDA", "AAPL", "MSFT", "TSLA")}
+A5_GROUP_MIN_SESSIONS = 30
+A5_LABEL = "SECONDARY (amendment 5): propose-only, NO verdict weight; computed on the confirmation set only"
+A5_MONEY_GATE = ("amendment 5 sec. 4 NOT CODED: the modeled 0-3 DTE debit spread (strikes, width, entry slot, "
+                 "fill and cost model, slot mapping of +30m / +60m) is not defined by the stamp; a ruling is needed")
+
+
+def next_session(d):
+    """The next NYSE session after d on the confirmation calendar (weekdays minus its holidays)."""
+    x = pd.Timestamp(d) + pd.offsets.BDay(1)
+    while x.date() in NYSE_HOLIDAYS_CONFIRM:
+        x += pd.offsets.BDay(1)
+    return x.date()
+
+
+def horizon_z(ohlcv, tk, d, S0, t_conf, sigma, dsign):
+    """Amendment 5 sec. 2: {horizon: z or None} and {horizon: reason} for one claim event.
+    z = d (S_h - S0) / (S0 sigma sqrt(tau_h)), tau_h in years on 390 x 252 trading minutes."""
+    z, why = {}, {}
+    b1 = ohlcv.get((tk, d))
+    for name, off in A5_HORIZONS:
+        if off is not None:
+            T = t_conf + off
+            if T > session_close(d):
+                z[name], why[name] = None, "beyond_session_close"
+                continue
+            if b1 is None:
+                z[name], why[name] = None, "bars"
+                continue
+            done = b1[(b1.t_s + 60 <= T) & (b1.t_s + 60 >= T - A5_STALE_S)]
+            if done.empty:
+                z[name], why[name] = None, "horizon_bar"
+                continue
+            S, tau_min = float(done.close.iloc[-1]), off / 60.0
+        else:
+            nd = next_session(d)
+            b2 = ohlcv.get((tk, nd))
+            if b2 is None or b2.empty:
+                z[name], why[name] = None, "next_session_bars"
+                continue
+            S = float(b2.close.iloc[-1])
+            tau_min = (session_close(d) - t_conf) / 60.0 + (session_close(nd) - RTH0) / 60.0
+        im = S0 * sigma * np.sqrt(tau_min / (390.0 * 252.0))
+        z[name] = dsign * (S - S0) / im if im > 0 else None
+        if z[name] is None:
+            why[name] = "im"
+    return z, why
 BAR5 = 300
 D7_ATR_MULT, D7_ATR_N, D7_WINDOW_S, SLOT_LOOKBACK = 0.25, 14, 3600, 10
 EMA_N = 20
@@ -474,9 +530,11 @@ class Ctx:
         return miss
 
 
-def evaluate(ctx, tk, d, t, L, side, outcome=True):
+def evaluate(ctx, tk, d, t, L, side, outcome=True, horizons=False):
     """All ingredients for one (tk, d, t, L, side). Returns dict: missing, fails, and if claim, Z inputs.
-    outcome=False (the COUNT-ONLY job, R-IV.1080(b)): S_close, sigma and Z are never read or computed."""
+    outcome=False (the COUNT-ONLY job, R-IV.1080(b)): S_close, sigma and Z are never read or computed.
+    horizons=True (amendment 5 sec. 2, the confirmation-set READ only): a claim also carries z_h / z_h_why.
+    The default (False) is the backtest's path, unchanged."""
     res = {"missing": [], "fails": [], "z": None, "conf": None, "slot_skips": []}
     cal = calendar_ok(d, ctx.macro_excl)
     if cal != "OK":
@@ -527,6 +585,8 @@ def evaluate(ctx, tk, d, t, L, side, outcome=True):
         res["z"] = dsign * (s_close - S0) / im if im > 0 else None
         if res["z"] is None:
             res["missing"].append("horizon")
+        elif horizons:
+            res["z_h"], res["z_h_why"] = horizon_z(ctx.ohlcv, tk, d, S0, t_conf, sigma, dsign)
     return res
 
 
@@ -571,10 +631,14 @@ def dark_runs(df_sess, t_lo, t_hi, adv):
     return np.vstack(rows)[:, [0, 3]] if rows else np.empty((0, 2))
 
 
-def placebos(ctx, prints_by_ts, adv, tk, d_event, t_event, wstart, rng, bars_hl, eligible_sessions, outcome=True):
+def placebos(ctx, prints_by_ts, adv, tk, d_event, t_event, wstart, rng, bars_hl, eligible_sessions, outcome=True,
+             horizons=False):
     """Valid placebo Zs for one claim event (up to PLACEBO_MAX, fixed rng). outcome=False (the COUNT job):
     only whether valid placebos EXIST -- each is a claim-passing candidate under evaluate(outcome=False);
-    no Z is computed and S_close is never read."""
+    no Z is computed and S_close is never read.
+    horizons=True (amendment 5 sec. 2, "the same placebo is used"): the SAME candidates and the SAME draw,
+    each returned as {"z", "z_h"} instead of z. A candidate qualifies on its primary z alone, so the pick
+    cannot depend on the flag."""
     cands = []
     for d in eligible_sessions:
         if d == d_event or (tk, d) not in ctx.ohlcv:
@@ -597,9 +661,9 @@ def placebos(ctx, prints_by_ts, adv, tk, d_event, t_event, wstart, rng, bars_hl,
                 if key in seen:
                     continue
                 seen.add(key)
-                ev = evaluate(ctx, tk, d, float(r.t_s), Lp, d6p, outcome=outcome)
+                ev = evaluate(ctx, tk, d, float(r.t_s), Lp, d6p, outcome=outcome, horizons=horizons)
                 if outcome and ev["z"] is not None:
-                    cands.append(ev["z"])
+                    cands.append({"z": ev["z"], "z_h": ev.get("z_h", {})} if horizons else ev["z"])
                 elif not outcome and not ev["missing"] and not ev["fails"]:
                     cands.append(1.0)                                  # existence only
     if not cands:
@@ -759,6 +823,65 @@ def summarize(events, n_eval_ts):
     out["win3"] = bool(out["win3_mean_without_best_week"] is not None and out["win3_mean_without_best_week"] > 0)
     out["win4"] = not out["win4_not_met_sides"]
     out["min_n_met"] = len(events) >= MIN_EVENTS and out["sessions"] >= MIN_SESSIONS
+    return out
+
+
+def _a5_diffs(events, horizon=None):
+    """{session: [z_event - mean(z_placebo)]} for the primary (horizon=None) or one A5 horizon, and the
+    count of events that could not be evaluated there (no event z, or no placebo with that horizon's z)."""
+    g, n_un = {}, 0
+    for e in events:
+        if horizon is None:
+            ze, zp = e["z"], [p["z"] if isinstance(p, dict) else p for p in e["zp"]]
+        else:
+            ze = (e.get("z_h") or {}).get(horizon)
+            zp = [p["z_h"].get(horizon) for p in e["zp"] if isinstance(p, dict) and p.get("z_h")]
+        zp = [x for x in zp if x is not None]
+        if ze is None or not zp:
+            n_un += 1
+            continue
+        g.setdefault(e["session"], []).append(ze - float(np.mean(zp)))
+    return g, n_un
+
+
+def _a5_block(events, horizon=None):
+    g, n_un = _a5_diffs(events, horizon)
+    p, lo, hi, nb = boot_ci(g, mean_stat)
+    return {"events_evaluable": sum(len(v) for v in g.values()), "sessions_evaluable": len(g),
+            "events_unevaluable": n_un, "diff": p, "lo": lo, "hi": hi, "boot_used": nb, **suspect("diff", p, nb)}
+
+
+def summarize_secondaries(events):
+    """Amendment 5 secs. 2-4 on CONFIRMATION-SET claim events. events: dicts {session, ticker, side, z,
+    z_h, z_h_why, zp: [{"z", "z_h"}]} as evaluate(..., horizons=True) / placebos(..., horizons=True) build
+    them. Refuses any event dated before 09-25: these are never computed on the backtest."""
+    early = sorted({e["session"] for e in events if e["session"] < CONFIRM_FIRST})
+    if early:
+        raise SystemExit(f"AMENDMENT 5: secondaries are confirmation-set only; events dated {early[:3]} refuse")
+    out = {"label": A5_LABEL, "amendment_5": AMENDMENT_5, "claim_events": len(events),
+           "sessions_with_claim_events": len({e["session"] for e in events}), "horizons": {}, "groups": {},
+           "money_gate": A5_MONEY_GATE}
+    for name, _ in A5_HORIZONS:
+        b = _a5_block(events, name)
+        why = {}
+        for e in events:
+            r = (e.get("z_h_why") or {}).get(name)
+            if r:
+                why[r] = why.get(r, 0) + 1
+        b["event_unevaluable_reasons"] = why
+        out["horizons"][name] = b
+    for gname, tickers in A5_GROUPS.items():
+        ge = [e for e in events if e["ticker"] in tickers]
+        sess = len({e["session"] for e in ge})
+        blk = {"tickers": list(tickers), "claim_events": len(ge), "sessions_with_claim_events": sess,
+               "events_with_placebo": sum(1 for e in ge if e["zp"])}
+        if sess < A5_GROUP_MIN_SESSIONS:
+            blk["status"] = f"UNDERPOWERED (< {A5_GROUP_MIN_SESSIONS} sessions with claim events); no result"
+        else:
+            blk["status"] = "COMPUTED"
+            blk["primary"] = _a5_block(ge, None)
+            blk["horizons"] = {name: _a5_block(ge, name) for name, _ in A5_HORIZONS}
+        out["groups"][gname] = blk
     return out
 
 
@@ -1390,6 +1513,132 @@ def _count_tests():
     return checks
 
 
+def _a5_tests():
+    """Amendment 5 secs. 2-3 on synthetic bars; the backtest path is proven unchanged."""
+    import inspect
+    checks = {}
+    tk, d, nd = "SPY", date(2026, 10, 6), date(2026, 10, 7)
+
+    def b1_for(day, base):
+        k = np.arange(int((session_close(day) - RTH0) // 60))
+        return pd.DataFrame({"t_s": RTH0 + 60.0 * k, "open": base + 0.01 * k, "high": base + 0.01 * k + 0.02,
+                             "low": base + 0.01 * k - 0.02, "close": base + 0.01 * k, "volume": 1000.0})
+    oh = {(tk, d): b1_for(d, 100.0), (tk, nd): b1_for(nd, 102.0)}
+    S0, t_conf, sig = 100.5, float(RTH0 + 3600), 0.2
+    z, why = horizon_z(oh, tk, d, S0, t_conf, sig, 1.0)
+    exp30 = (100.0 + 0.01 * 89 - S0) / (S0 * sig * np.sqrt(30 / (390 * 252)))
+    checks["A5: +30m z = d(S_h - S0)/(S0 sigma sqrt(30 min)), S_h = the 1-min close AT t+30m"] = abs(z["30m"] - exp30) < 1e-9
+    exp60 = (100.0 + 0.01 * 119 - S0) / (S0 * sig * np.sqrt(60 / (390 * 252)))
+    checks["A5: +60m z, IM recomputed for its own tau"] = abs(z["60m"] - exp60) < 1e-9
+    tau_n = (RTH1 - t_conf) / 60 + 390
+    expn = (float(oh[(tk, nd)].close.iloc[-1]) - S0) / (S0 * sig * np.sqrt(tau_n / (390 * 252)))
+    checks["A5: next-session close z, tau = rest of today + the whole next session"] = abs(z["next_close"] - expn) < 1e-9
+    zs, _ = horizon_z(oh, tk, d, S0, t_conf, sig, -1.0)
+    checks["A5: SELLER side flips the sign"] = abs(zs["30m"] + z["30m"]) < 1e-12
+    zl, wl = horizon_z(oh, tk, d, S0, float(RTH1 - 600), sig, 1.0)
+    checks["A5: +30m past the close -> None, reason beyond_session_close (never truncated)"] = \
+        zl["30m"] is None and wl["30m"] == "beyond_session_close" and zl["next_close"] is not None
+    hd, hn = date(2026, 11, 27), date(2026, 11, 30)
+    oh2 = {(tk, hd): b1_for(hd, 100.0), (tk, hn): b1_for(hn, 100.0)}
+    zh, wh = horizon_z(oh2, tk, hd, 100.0, float(12 * 3600 + 45 * 60), sig, 1.0)
+    tau_h = 15 + 390
+    exph = (float(oh2[(tk, hn)].close.iloc[-1]) - 100.0) / (100.0 * sig * np.sqrt(tau_h / (390 * 252)))
+    checks["A5: half-day 11-27 -- +30m past its 13:00 close; next close tau = 15 + 390 min"] = \
+        wh["30m"] == "beyond_session_close" and abs(zh["next_close"] - exph) < 1e-9
+    checks["A5: next_session skips Thanksgiving and the weekend"] = \
+        next_session(date(2026, 11, 25)) == date(2026, 11, 27) and next_session(date(2026, 10, 9)) == date(2026, 10, 12)
+    zm, wm = horizon_z({(tk, d): oh[(tk, d)]}, tk, d, S0, t_conf, sig, 1.0)
+    checks["A5: next session without bars -> None, reason next_session_bars"] = \
+        zm["next_close"] is None and wm["next_close"] == "next_session_bars"
+    gap = oh[(tk, d)][(oh[(tk, d)].t_s < t_conf + 1200) | (oh[(tk, d)].t_s > t_conf + 1800)]
+    zg, wg = horizon_z({(tk, d): gap, (tk, nd): oh[(tk, nd)]}, tk, d, S0, t_conf, sig, 1.0)
+    checks["A5: no 1-min close within 5 min of the horizon -> None, reason horizon_bar (no stale price)"] = \
+        zg["30m"] is None and wg["30m"] == "horizon_bar"
+
+    # evaluate(): horizons=False is the backtest path, byte-for-byte; horizons=True only ADDS z_h
+    class FakeCtx:
+        def __init__(self):
+            self.ohlcv, self.tide, self.va, self.macro_excl = oh, {d: object()}, {(tk, d): (101.0, 99.0)}, set()
+            self.iv = {(tk, date(2026, 10, 5)): sig}
+            self.seq = {tk: bars5(oh[(tk, d)]).assign(session=d)}
+            self.dates = [date(2026, 10, 5), d, nd]
+
+        def session_missing(self, tk_, d_):
+            return []
+        def prior_b5(self, tk_, d_):
+            return []
+        def prior_session(self, d_):
+            return date(2026, 10, 5)
+    g = globals()
+    saved = {k: g[k] for k in ("calendar_ok", "d7", "ema_at", "tide_slope", "pythia_pass")}
+    i_conf = int(np.flatnonzero((FakeCtx().seq[tk].t_close == t_conf).to_numpy())[0])
+    try:
+        g["calendar_ok"] = lambda d_, m_: "OK"
+        g["d7"] = lambda *a, **k: ("CONFIRMED", i_conf)
+        g["ema_at"] = lambda c_, j_: 0.0
+        g["tide_slope"] = lambda t_, s_: 1.0
+        g["pythia_pass"] = lambda L_, va_, s_: "PASS"
+        r0 = evaluate(FakeCtx(), tk, d, t_conf - 600, 100.0, "BUYER")
+        r1 = evaluate(FakeCtx(), tk, d, t_conf - 600, 100.0, "BUYER", horizons=True)
+    finally:
+        g.update(saved)
+    same = {k: v for k, v in r1.items() if k not in ("z_h", "z_h_why")} == r0
+    checks["A5: evaluate(horizons=True) == the default on every existing key (z, missing, fails, conf)"] = \
+        same and r0["z"] is not None and "z_h" not in r0 and set(r1["z_h"]) == {"30m", "60m", "next_close"}
+
+    # placebos(): the SAME draw with and without horizons
+    saved_c = (C.lit, C.tau)
+    saved_e = g["evaluate"]
+    try:
+        C.lit = lambda hl, t_s, Lp, tau: (True, "BUYER")
+        C.tau = lambda Lp: 0.01
+        g["evaluate"] = lambda ctx, tk_, d_, t_, L_, s_, outcome=True, horizons=False: dict(
+            {"z": d_.day + t_ / 1e5 + L_ / 1e9, "missing": [], "fails": []},
+            **({"z_h": {"30m": 1.0, "60m": 2.0, "next_close": 3.0}} if horizons else {}))
+        fc = FakeCtx()
+        fc.ohlcv = {(tk, x): b1_for(x, 100.0) for x in (date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8))}
+        args = (fc, {}, {}, tk, date(2026, 10, 6), t_conf, RTH0, None, {}, sorted(x for _, x in fc.ohlcv))
+        p0 = placebos(*args[:7], np.random.default_rng(5), *args[8:])
+        p1 = placebos(*args[:7], np.random.default_rng(5), *args[8:], horizons=True)
+    finally:
+        C.lit, C.tau = saved_c
+        g["evaluate"] = saved_e
+    checks["A5: placebos(horizons=True) draws the SAME placebos ('the same placebo is used')"] = \
+        len(p0) == PLACEBO_MAX and [x["z"] for x in p1] == p0 and all("z_h" in x for x in p1)
+
+    # summarize_secondaries
+    def ev(s, t, z, zp, zh=None, zph=None):
+        return {"session": s, "ticker": t, "side": "BUYER", "z": z, "z_h": zh or {}, "z_h_why": {},
+                "zp": [{"z": q, "z_h": zph or {}} for q in zp]}
+    try:
+        summarize_secondaries([ev(date(2026, 9, 24), "SPY", 1.0, [0.0])])
+        checks["A5: a backtest-dated event refuses (confirmation set only)"] = False
+    except SystemExit as e_:
+        checks["A5: a backtest-dated event refuses (confirmation set only)"] = "confirmation-set only" in str(e_)
+    days = confirmation_dates(date(2026, 12, 31))
+    few = [ev(days[i], "NVDA", 1.0, [0.0], {"30m": 1.0}, {"30m": 0.5}) for i in range(5)]
+    s5 = summarize_secondaries(few)
+    checks["A5: a group under 30 sessions reports UNDERPOWERED with its counts, never a result"] = \
+        s5["groups"]["megacap_singles"]["status"].startswith("UNDERPOWERED") and \
+        "primary" not in s5["groups"]["megacap_singles"] and s5["groups"]["megacap_singles"]["claim_events"] == 5
+    many = [ev(days[i], "SPY", 1.0 + 0.01 * i, [0.0], {"30m": 1.0, "60m": None}, {"30m": 0.25, "60m": 0.1})
+            for i in range(31)]
+    s31 = summarize_secondaries(many + few)
+    gi = s31["groups"]["index_etfs"]
+    checks["A5: a group with >= 30 sessions is COMPUTED on the primary and each horizon"] = \
+        gi["status"] == "COMPUTED" and gi["primary"]["events_evaluable"] == 31 and \
+        abs(gi["horizons"]["30m"]["diff"] - 0.75) < 1e-12
+    checks["A5: a horizon with no event z counts every event as unevaluable"] = \
+        s31["horizons"]["60m"]["events_unevaluable"] == 36 and s31["horizons"]["60m"]["diff"] is None
+    checks["A5: the label, the amendment hash and the money-gate status are carried"] = \
+        s31["label"].startswith("SECONDARY (amendment 5)") and "8f5931a9" in s31["amendment_5"] and \
+        s31["money_gate"].startswith("amendment 5 sec. 4 NOT CODED")
+    src = inspect.getsource(backtest) + inspect.getsource(backtest_census) + inspect.getsource(count)
+    checks["A5: backtest / count never call the secondaries (no horizons=True, no summarize_secondaries)"] = \
+        "horizons=True" not in src and "summarize_secondaries" not in src and "horizon_z" not in src
+    return checks
+
+
 def selftest():
     import tempfile
     checks = {}
@@ -1655,6 +1904,7 @@ def selftest():
         checks["AGGREGATE: an output with an L column refuses"] = True
     checks.update(_e2e())
     checks.update(_count_tests())
+    checks.update(_a5_tests())
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
     return 0 if all(checks.values()) else 1
