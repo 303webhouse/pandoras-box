@@ -40,6 +40,10 @@ Usage (QUERY):
   python scripts/lab/triton_r.py count <as_of> <prints_glob> <complete_csv> <bars_glob> "<polygon_glob>;<polygon_glob2>" <va_csv>
          <macro_csv> <tide_csv> <iv_csv> <out_dir> <state_dir>   (COUNT-ONLY, confirmation set 09-25 .. as_of;
          state_dir keeps the frozen stop trigger across weekly runs; refuses until amendment 5 is stamped)
+  python scripts/lab/triton_r.py read <as_of> <prints_glob> <complete_csv> <bars_glob> "<polygon_glob>;<polygon_glob2>"
+         <va_csv> <macro_csv> <tide_csv> <iv_csv> <fx_csv> <counts_csv> <out_dir> <state_dir>
+         (the CONFIRMATION-SET READ, ONCE, in the 11-20 decision run, R-IV.1241(d): counts_csv = the count job's
+         output for the SAME as_of, which a count-only first pass must reproduce before any outcome)
   python scripts/lab/triton_r.py confirmation-complete <as_of> <walk_pages_csv> <complete_csv_out>
   python scripts/lab/triton_r.py confirmation-crosscheck <as_of> <prints_glob> <complete_csv> <crosscheck_csv_out>
   python scripts/lab/triton_r.py selftest
@@ -1279,6 +1283,241 @@ def count(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, mac
     return out
 
 
+# ── 9 · the CONFIRMATION-SET READ, run ONCE (R-IV.1080(b)/(d), R-IV.1241(d)) ─────────────────────────
+READ_MARKER = "read_once.json"                # written before the first outcome; a second read refuses
+HOLDOUT_LAST, FORWARD_FIRST = date(2026, 10, 15), date(2026, 10, 16)     # stamped sec. 2 (R-IV.1080(a))
+MONEY_GATE_READ = ("money gate (WIN 5): NOT EVALUATED at this read -- deferred by R-IV.1241(d): the money test "
+                   "follows only a passed census (salvage plan sec. 3). ESTABLISHED promotes nothing to money.")
+READ_LABEL = "CONFIRMATION SET (holdout 09-25..10-15 + forward 10-16..), pooled, read once (R-IV.1080(b))"
+COUNT_GUARD_COLUMNS = ("claim_events", "sessions_with_claim_events", "evaluable_ticker_sessions", "events_with_placebo")
+
+
+def verdict_confirmation(p):
+    """Stamped sec. 7 / R-IV.1080(d), on the PRIMARY summary: KILLED if any kill holds (kills carry
+    amendment 1's floors and amendment 3's SUSPECT rule inside summarize); ESTABLISHED if WIN 1-4 hold at
+    >= 30 events over >= 10 sessions; otherwise INSUFFICIENT. Returns (verdict, reasons)."""
+    if p["kills_fired"]:
+        return "KILLED", list(p["kills_fired"])
+    wins = {w: bool(p[w]) for w in ("win1", "win2", "win3", "win4")}
+    if p["min_n_met"] and all(wins.values()):
+        return "ESTABLISHED", []
+    why = []
+    if not p["min_n_met"]:
+        why.append(f"n: {p['claim_events']} claim events over {p['sessions']} sessions (needs >= {MIN_EVENTS} "
+                   f"over >= {MIN_SESSIONS})")
+    why += [f"{w} not met" for w, ok in wins.items() if not ok]
+    why += [f"{k} suppressed (SUSPECT, amendment 3)" for k in p.get("kills_suppressed_suspect", [])]
+    return "INSUFFICIENT", why
+
+
+def _read_scoped(path, col, what, allowed):
+    df = pd.read_csv(path)
+    bad = sorted({str(x) for x in _dates(df[col]) if x not in allowed})
+    if bad:
+        raise SystemExit(f"DATE CEILING: {what} carries dates outside its scope: {bad[:5]}. Refusing.")
+    return df
+
+
+def _confirmation_inputs(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, macro_csv, tide_csv,
+                         iv_csv, fx_csv, n_shuffles):
+    """Exactly the count job's load (count() lines, unchanged there), plus the FX tag file scoped to <= as_of."""
+    conf = confirmation_dates(as_of)
+    hist = [d for d in C.CALIBRATION_DATES if in_block(d)]
+    scope = set(conf) | set(hist)
+
+    def in_scope(d):
+        return d in scope
+    va = _read_scoped(va_csv, "session", "va_csv", set(conf))
+    va = {(r.ticker, pd.Timestamp(r.session).date()): (r.vah, r.val) for r in va.itertuples()}
+    mac = _read_scoped(macro_csv, "date", "macro_csv", set(confirmation_dates(CONFIRM_LAST)))
+    macro_excl = {pd.Timestamp(r.date).date() for r in mac.itertuples() if str(r.event) in MACRO_EXCLUDE}
+    td = _read_scoped(tide_csv, "session_date", "tide_csv", set(conf))
+    t = pd.to_datetime(td.tick_at, utc=True).dt.tz_convert("America/New_York")
+    td = td.assign(t_s=(t - t.dt.normalize()).dt.total_seconds(),
+                   net=pd.to_numeric(td.net_call_premium) - pd.to_numeric(td.net_put_premium),
+                   d=pd.to_datetime(td.session_date).dt.date)
+    tide = {d: g.sort_values("t_s")[["t_s", "net"]].reset_index(drop=True) for d, g in td.groupby("d")}
+    ivd = _read_scoped(iv_csv, "session_date", "iv_csv", scope)
+    iv = {(r.ticker, pd.Timestamp(r.session_date).date()): float(r.iv_near) if pd.notna(r.iv_near) else np.nan
+          for r in ivd.itertuples()}
+    fx = pd.read_csv(fx_csv)
+    fxd = _dates(fx.date)
+    if any(d > as_of for d in fxd):
+        raise SystemExit(f"DATE CEILING: fx_csv reaches {max(fxd)} (> as_of {as_of}). Refusing.")
+    fx = fx[[not _sealed(d) for d in fxd]].reset_index(drop=True)
+    praw, _ = load_polygon_multi(polygon_glob)
+    praw = scope_bars(praw, in_scope)
+    readme = scope_bars(C.load_bars(bars_glob), in_scope)
+    with census_window(hist, "triton-r-history"):
+        _, smap_h = C.choose_bars(readme, praw)
+    with census_window(conf, "triton-r-confirmation-count"):
+        raw = C._read_parquet(prints_glob)
+        build_set = C.build_complete_set(raw)
+        S, _, refusals = C.census_set(pd.read_csv(complete_csv), build_set)
+        if refusals:
+            raise SystemExit(C.refusal_message(refusals))
+        df, n_dup, _ = C.prepare_prints(raw, S)
+        if len(df) and not all(d in set(conf) for d in set(df.session)):
+            raise SystemExit("DATE CEILING: prints outside the confirmation window; refusing")
+        braw, smap_c = C.choose_bars(readme, praw)
+        bars_hl = C.bars_by_session(braw)
+        frames, E = run_census_captured(df, {}, bars_hl, va, set(), n_shuffles)
+    cap = capture_matches_census(frames, E)
+    if not all(v["match"] for v in cap.values()):
+        raise SystemExit("captured events do not match the census counts; refusing")
+    ohlcv = load_ohlcv(polygon_glob, bars_glob, pd.concat([smap_h, smap_c], ignore_index=True), in_scope)
+    ctx = Ctx(ohlcv, tide, iv, va, macro_excl, sorted(scope))
+    eval_ts = [(tk, d) for (tk, d) in sorted(S) if d in set(conf) and calendar_ok(d, macro_excl) == "OK"
+               and not ctx.session_missing(tk, d)]
+    return {"conf": conf, "ctx": ctx, "E": E, "cap": cap, "df": df, "n_dup": n_dup, "bars_hl": bars_hl,
+            "eval_ts": eval_ts, "macro_excl": macro_excl, "fx": fx,
+            "prints_by_ts": {k: g for k, g in df.groupby(["ticker", "session"])},
+            "eligible": sorted({d for d in conf if calendar_ok(d, macro_excl) == "OK"})}
+
+
+def _variant_events(E, wname):
+    ev = E[(E.window == wname) & (E.floor == FLOOR) & E.kept] if len(E) else E
+    n_kept = len(ev)
+    ev = ev[ev.d5 == True] if len(ev) else ev  # noqa: E712
+    n_d5 = len(ev)
+    ev = ev[ev.d6.isin(["BUYER", "SELLER"])] if len(ev) else ev
+    return ev, n_kept, n_d5
+
+
+def read(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, macro_csv, tide_csv, iv_csv, fx_csv,
+         counts_csv, out_dir, state_dir, n_shuffles=None, today=None):
+    """The single read of the CONFIRMATION SET (09-25 .. as_of), R-IV.1241(d): it runs ONCE, in the 11-20
+    decision run. Order:
+      1. as_of is a completed confirmation session; if the stop trigger fired, as_of must be ITS as_of
+         (the frozen read window); a read marker in state_dir refuses (read once).
+      2. the count job's exact load; a COUNT-ONLY first pass (outcome=False) must reproduce QUERY's
+         counts.csv for the same as_of on every guard column, both variants -- else refuse, no outcome.
+      3. the read marker is written; only then are outcomes computed (the backtest's own loop, plus
+         amendment 5's horizons with the same placebo draw).
+    Verdict on TG-ON per R-IV.1080(d); holdout-only and forward-only figures and amendment 5 are
+    secondaries with no verdict weight; the money gate is NOT EVALUATED (R-IV.1241(d))."""
+    from datetime import datetime, timezone
+    as_of = pd.Timestamp(as_of).date()
+    check_as_of(as_of, today)
+    marker = os.path.join(state_dir, READ_MARKER)
+    if os.path.exists(marker):
+        raise SystemExit(f"READ ONCE: a confirmation read already started ({json.load(open(marker))}). Refusing.")
+    trig_path = os.path.join(state_dir, TRIGGER_FILE)
+    trig = json.load(open(trig_path)) if os.path.exists(trig_path) else None
+    if trig is not None and trig["as_of"] != str(as_of):
+        raise SystemExit(f"FROZEN READ WINDOW: the stop trigger fixed as_of {trig['as_of']}; got {as_of}. Refusing.")
+    if os.path.exists(out_dir) and os.listdir(out_dir):
+        raise SystemExit("out_dir is not empty; refusing")
+    cnt = pd.read_csv(counts_csv)
+    if set(cnt.as_of.astype(str)) != {str(as_of)}:
+        raise SystemExit(f"IDENTITY GUARD: counts.csv is for {sorted(set(cnt.as_of.astype(str)))}, not {as_of}. Refusing.")
+    I = _confirmation_inputs(as_of, prints_glob, complete_csv, bars_glob, polygon_glob, va_csv, macro_csv, tide_csv,
+                             iv_csv, fx_csv, n_shuffles)
+    ctx, E, conf = I["ctx"], I["E"], I["conf"]
+    # pass 1: COUNT ONLY, the count job's own arithmetic; must equal QUERY's counts of record
+    mism = []
+    for vname, wname in VARIANTS.items():
+        ev, _, _ = _variant_events(E, wname)
+        wstart = C.WINDOWS[wname][0].hour * 3600 + C.WINDOWS[wname][0].minute * 60
+        rng = np.random.default_rng(SEED_R)
+        n, sess, with_p = 0, set(), 0
+        for r in ev.itertuples():
+            res = evaluate(ctx, r.ticker, r.session, r.t, r.L, r.d6, outcome=False)
+            if not res["missing"] and not res["fails"]:
+                n += 1
+                sess.add(r.session)
+                pl = placebos(ctx, I["prints_by_ts"], {}, r.ticker, r.session, r.t, wstart, rng, I["bars_hl"],
+                              I["eligible"], outcome=False)
+                with_p += int(len(pl) > 0)
+        mine = {"claim_events": n, "sessions_with_claim_events": len(sess),
+                "evaluable_ticker_sessions": len(I["eval_ts"]), "events_with_placebo": with_p}
+        rec = cnt[cnt.variant == vname]
+        if len(rec) != 1:
+            mism.append(f"{vname}: counts.csv has {len(rec)} rows")
+            continue
+        for k in COUNT_GUARD_COLUMNS:
+            if int(rec[k].iloc[0]) != mine[k]:
+                mism.append(f"{vname} {k}: read {mine[k]} vs counts of record {int(rec[k].iloc[0])}")
+    if mism:
+        raise SystemExit("IDENTITY GUARD: the read's count-only pass differs from counts.csv: " + "; ".join(mism) +
+                         ". Refusing; no outcome was computed.")
+    os.makedirs(state_dir, exist_ok=True)
+    started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    json.dump({"as_of": str(as_of), "started_at_utc": started, "counts_csv": os.path.abspath(counts_csv)},
+              open(marker, "w"), indent=1)
+    # pass 2: OUTCOMES -- the backtest's own loop on the confirmation set
+    result = {"claim": CLAIM, "label": READ_LABEL, "money_gate": MONEY_GATE_READ, "as_of": str(as_of),
+              "window": [str(conf[0]), str(conf[-1])], "window_sessions": len(conf),
+              "frozen_trigger": trig, "capture_check": I["cap"], "duplicate_tracking_ids_dropped": I["n_dup"],
+              "count_guard": "PASSED (count-only pass == counts.csv on " + ", ".join(COUNT_GUARD_COLUMNS) + ")",
+              "amendments": [AMENDMENT_1, AMENDMENT_2, AMENDMENT_3, AMENDMENT_4, AMENDMENT_5, AMENDMENT_6],
+              "pythia_label": C.PYTHIA_LABEL, "read_started_at_utc": started, "variants": {}}
+    funnel_rows = []
+    for vname, wname in VARIANTS.items():
+        ev, n_kept, n_d5 = _variant_events(E, wname)
+        n_side = len(ev)
+        miss, fails, claims, sec = {}, {}, [], []
+        rng = np.random.default_rng(SEED_R)
+        wstart = C.WINDOWS[wname][0].hour * 3600 + C.WINDOWS[wname][0].minute * 60
+        tags = {"m4": 0, "fx_DXY": {}, "fx_USDJPY": {}}
+        for r in ev.itertuples():
+            res = evaluate(ctx, r.ticker, r.session, r.t, r.L, r.d6, horizons=True)
+            for m in res["missing"]:
+                miss[m] = miss.get(m, 0) + 1
+            for f in res["fails"]:
+                fails[f] = fails.get(f, 0) + 1
+            if res["z"] is None or res["missing"] or res["fails"]:
+                continue
+            S0, t_conf = res["conf"]
+            b1 = ctx.ohlcv[(r.ticker, r.session)]
+            tL, hL = touched_held(b1, t_conf, r.L, S0)
+            D = abs(r.L - S0)
+            elig = b1.t_s[(b1.t_s >= wstart) & (b1.t_s < b1.t_s.max())].to_numpy()
+            ctrl = controls(b1, elig, D, rng)
+            mirror = touched_held(b1, t_conf, 2 * S0 - r.L, S0)
+            zpd = placebos(ctx, I["prints_by_ts"], {}, r.ticker, r.session, r.t, wstart, rng, I["bars_hl"],
+                           I["eligible"], horizons=True)
+            tags["m4"] += int(r.m4)
+            for sym, key in (("DXY", "fx_DXY"), ("USDJPY", "fx_USDJPY")):
+                stt = fx_state(I["fx"], sym, r.session)
+                tags[key][stt] = tags[key].get(stt, 0) + 1
+            claims.append({"session": r.session, "side": r.d6, "z": res["z"], "zp": [p["z"] for p in zpd],
+                           "touched_L": tL, "held_L": hL, "ctrl": ctrl, "mirror": mirror})
+            sec.append({"session": r.session, "ticker": r.ticker, "side": r.d6, "z": res["z"],
+                        "z_h": res.get("z_h", {}), "z_h_why": res.get("z_h_why", {}), "zp": zpd})
+        summ = summarize(claims, len(I["eval_ts"]))
+        summ.update({"census_frun_kept": n_kept, "d5_matched": n_d5, "side_assigned": n_side,
+                     "unevaluable_by_ingredient": miss, "fails_by_ingredient": fails, "tags": tags,
+                     "weight": "PRIMARY" if vname == PRIMARY else "SECONDARY (no verdict weight)"})
+        ev_ts = I["eval_ts"]
+        for part, keep in (("holdout_only", lambda d: d <= HOLDOUT_LAST), ("forward_only", lambda d: d >= FORWARD_FIRST)):
+            sub = [c for c in claims if keep(c["session"])]
+            ps = summarize(sub, sum(1 for _, d in ev_ts if keep(d)))
+            summ[part] = {"weight": "SECONDARY (stamped sec. 2): no verdict weight",
+                          **{k: ps[k] for k in ("claim_events", "sessions", "evaluable_ticker_sessions", "win2_diff",
+                                                "win2_lo", "win2_hi", "win1_diff", "win1_lo", "win1_hi",
+                                                "rate_per_week")}}
+        summ["amendment_5"] = summarize_secondaries(sec)
+        result["variants"][vname] = summ
+        for stage, k in (("census_frun_kept", n_kept), ("d5_matched", n_d5), ("side_assigned", n_side),
+                         ("claim_events", len(claims))):
+            funnel_rows.append({"variant": vname, "stage": stage, "count": k})
+    v, why = verdict_confirmation(result["variants"][PRIMARY])
+    result["verdict"], result["verdict_reasons"] = v, why
+    result["verdict_note"] = ("CONFIRMATION SET at the single read (R-IV.1080(d)): ESTABLISHED / KILLED / "
+                              "INSUFFICIENT on TG-ON. Every result carries the money-gate label.")
+    result["computed_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    F = pd.DataFrame(funnel_rows)
+    C.assert_aggregate({"funnel": F})
+    os.makedirs(out_dir, exist_ok=True)
+    F.to_csv(os.path.join(out_dir, "funnel.csv"), index=False)
+    json.dump(result, open(os.path.join(out_dir, "read.json"), "w"), indent=1, default=str)
+    json.dump({"as_of": str(as_of), "started_at_utc": started, "finished_at_utc": result["computed_at_utc"],
+               "verdict": v, "counts_csv": os.path.abspath(counts_csv)}, open(marker, "w"), indent=1)
+    print(json.dumps({"verdict": v, "reasons": why, "computed_at_utc": result["computed_at_utc"]}, indent=1))
+    return result
+
+
 # ── self-test (synthetic only) ───────────────────────────────────────────────────────────────────
 def _e2e():
     """`backtest` end to end on synthetic files in every input's real format."""
@@ -1639,6 +1878,156 @@ def _a5_tests():
     return checks
 
 
+def _read_tests():
+    """The confirmation-set READ (R-IV.1241(d)), synthetic only: guards, read-once, verdict rules."""
+    import tempfile
+    checks = {}
+    base = {"kills_fired": [], "min_n_met": True, "win1": True, "win2": True, "win3": True, "win4": True,
+            "claim_events": 31, "sessions": 10, "kills_suppressed_suspect": []}
+    checks["READ verdict: WIN 1-4 at >= 30 / >= 10 -> ESTABLISHED"] = verdict_confirmation(base)[0] == "ESTABLISHED"
+    checks["READ verdict: any kill -> KILLED (and it is named)"] = \
+        verdict_confirmation(dict(base, kills_fired=["kill_placebo_keeps_pace"])) == ("KILLED", ["kill_placebo_keeps_pace"])
+    v, why = verdict_confirmation(dict(base, min_n_met=False, claim_events=9, sessions=4))
+    checks["READ verdict: below 30 / 10 -> INSUFFICIENT, with the n stated"] = v == "INSUFFICIENT" and "9 claim events" in why[0]
+    v, why = verdict_confirmation(dict(base, win3=False))
+    checks["READ verdict: a WIN not met, no kill -> INSUFFICIENT, naming the WIN"] = v == "INSUFFICIENT" and why == ["win3 not met"]
+    v, why = verdict_confirmation(dict(base, win2=False, kills_suppressed_suspect=["kill_placebo_keeps_pace"]))
+    checks["READ verdict: a SUSPECT-suppressed kill is not a KILL (amendment 3) and is named"] = \
+        v == "INSUFFICIENT" and any("SUSPECT" in w for w in why)
+    rng = np.random.default_rng(5)
+    raw, braw, sessions = C._synthetic_vendor(rng)
+    today = date(2026, 10, 15)
+    with tempfile.TemporaryDirectory() as td:
+        for tk, g in raw.groupby("ticker"):
+            os.makedirs(os.path.join(td, "dp", tk), exist_ok=True)
+            g.to_parquet(os.path.join(td, "dp", tk, "202609.parquet"), index=False)
+        C._write_readme_bars(braw, os.path.join(td, "bars1m"))
+        for d in ("2026-09-02", "2026-09-03"):
+            C._write_polygon(os.path.join(td, "poly_hist"), "SPY", d, {})
+        C._write_polygon(os.path.join(td, "poly_conf"), "SPY", "2026-09-28", {})
+        conf = confirmation_dates(date(2026, 9, 28))
+        bp = {(t, pd.Timestamp(s).date()) for t, s in zip(raw.ticker, raw.session_date)}
+        pd.DataFrame([{"ticker": t, "session": e.isoformat(), "complete": (t, e) in bp}
+                      for t in C.CORE8 for e in conf]).to_csv(os.path.join(td, "complete.csv"), index=False)
+        pd.DataFrame([{"ticker": t, "session": "2026-09-28", "vah": 503.0, "val": 501.5}
+                      for t in C.CORE8]).to_csv(os.path.join(td, "va.csv"), index=False)
+        pd.DataFrame({"date": ["2026-09-28"], "event": ["initial_claims"], "source": ["t"]}).to_csv(
+            os.path.join(td, "macro.csv"), index=False)
+        rows = [{"session_date": "2026-09-28",
+                 "tick_at": (pd.Timestamp("2026-09-28 09:30", tz="America/New_York") + pd.Timedelta(minutes=5 * k))
+                 .tz_convert("UTC").isoformat(), "net_call_premium": 1e6 + k, "net_put_premium": 1e6} for k in range(81)]
+        pd.DataFrame(rows).to_csv(os.path.join(td, "tide.csv"), index=False)
+        pd.DataFrame([{"ticker": t, "session_date": d, "iv_near": 0.2} for t in C.CORE8
+                      for d in ("2026-09-24", "2026-09-25")]).to_csv(os.path.join(td, "iv.csv"), index=False)
+        fxd = pd.bdate_range("2026-05-01", "2026-09-28")
+        pd.DataFrame([{"date": d.date().isoformat(), "symbol": s, "close": 100 + 0.01 * i}
+                      for s in ("DXY", "USDJPY") for i, d in enumerate(fxd)]).to_csv(os.path.join(td, "fx.csv"), index=False)
+        common = [os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "complete.csv"),
+                  os.path.join(td, "bars1m", "*", "*.parquet"),
+                  os.path.join(td, "poly_hist", "*.parquet") + ";" + os.path.join(td, "poly_conf", "*.parquet"),
+                  os.path.join(td, "va.csv"), os.path.join(td, "macro.csv"), os.path.join(td, "tide.csv"),
+                  os.path.join(td, "iv.csv")]
+        state = os.path.join(td, "state")
+        count("2026-09-28", *common, os.path.join(td, "cnt"), state, n_shuffles=30, today=today)
+        cnt = os.path.join(td, "cnt", "counts.csv")
+        fx = os.path.join(td, "fx.csv")
+        # the guard refuses BEFORE any outcome: a counts file that differs by one
+        bad = pd.read_csv(cnt)
+        bad.loc[0, "evaluable_ticker_sessions"] += 1
+        badp = os.path.join(td, "counts_bad.csv")
+        bad.to_csv(badp, index=False)
+        try:
+            read("2026-09-28", *common, fx, badp, os.path.join(td, "r_bad"), state, n_shuffles=30, today=today)
+            checks["READ: counts differing by one refuse; no marker, no output"] = False
+        except SystemExit as e_:
+            checks["READ: counts differing by one refuse; no marker, no output"] = \
+                "IDENTITY GUARD" in str(e_) and not os.path.exists(os.path.join(state, READ_MARKER)) and \
+                not os.path.exists(os.path.join(td, "r_bad"))
+        try:
+            read("2026-09-25", *common, fx, cnt, os.path.join(td, "r_asof"), state, n_shuffles=30, today=today)
+            checks["READ: counts.csv for another as_of refuses"] = False
+        except SystemExit as e_:
+            checks["READ: counts.csv for another as_of refuses"] = "IDENTITY GUARD" in str(e_)
+        fx2 = pd.read_csv(fx)
+        fx2.loc[len(fx2)] = {"date": "2026-10-01", "symbol": "DXY", "close": 101.0}
+        fx2.to_csv(os.path.join(td, "fx_bad.csv"), index=False)
+        try:
+            read("2026-09-28", *common, os.path.join(td, "fx_bad.csv"), cnt, os.path.join(td, "r_fx"), state,
+                 n_shuffles=30, today=today)
+            checks["READ: an FX row after as_of refuses (date ceiling)"] = False
+        except SystemExit as e_:
+            checks["READ: an FX row after as_of refuses (date ceiling)"] = "DATE CEILING" in str(e_)
+        res = read("2026-09-28", *common, fx, cnt, os.path.join(td, "r"), state, n_shuffles=30, today=today)
+        mk = json.load(open(os.path.join(state, READ_MARKER)))
+        checks["READ e2e: completes; the count guard passed; marker written with start and finish"] = \
+            res["count_guard"].startswith("PASSED") and mk["as_of"] == "2026-09-28" and "finished_at_utc" in mk
+        checks["READ e2e: a plumbing-sized set reads INSUFFICIENT on TG-ON, the n stated"] = \
+            res["verdict"] == "INSUFFICIENT" and res["verdict_reasons"][0].startswith("n:")
+        p = res["variants"][PRIMARY]
+        checks["READ e2e: holdout-only, forward-only and amendment 5 blocks carried, no verdict weight"] = \
+            p["holdout_only"]["weight"].startswith("SECONDARY") and p["forward_only"]["weight"].startswith("SECONDARY") \
+            and p["amendment_5"]["label"].startswith("SECONDARY (amendment 5)")
+        checks["READ e2e: the money gate is NOT EVALUATED (R-IV.1241(d)) and the label is carried"] = \
+            res["money_gate"].startswith("money gate (WIN 5): NOT EVALUATED") and res["label"].startswith("CONFIRMATION SET")
+        F = pd.read_csv(os.path.join(td, "r", "funnel.csv"))
+        checks["READ e2e: outputs are aggregates only (funnel = variant, stage, count)"] = \
+            set(F.columns) == {"variant", "stage", "count"} and os.path.exists(os.path.join(td, "r", "read.json"))
+        try:
+            read("2026-09-28", *common, fx, cnt, os.path.join(td, "r2"), state, n_shuffles=30, today=today)
+            checks["READ: a second read refuses (READ ONCE)"] = False
+        except SystemExit as e_:
+            checks["READ: a second read refuses (READ ONCE)"] = "READ ONCE" in str(e_)
+        # the OUTCOME loop with claims in it: evaluate stubbed to pass every side-assigned event (synthetic z)
+        g = globals()
+        saved_e = g["evaluate"]
+
+        def fake_eval(ctx_, tk_, d_, t_, L_, s_, outcome=True, horizons=False):
+            b = ctx_.ohlcv.get((tk_, d_))
+            if b is None:
+                return {"missing": ["bars"], "fails": [], "z": None, "conf": None, "slot_skips": []}
+            j = int(np.searchsorted(b.t_s.to_numpy(), t_))
+            j = min(j, len(b) - 2)
+            out_ = {"missing": [], "fails": [], "z": None, "conf": (float(b.close.iloc[j]), float(b.t_s.iloc[j] + 60)),
+                    "slot_skips": []}
+            if outcome:
+                out_["z"] = 0.1 + (t_ % 7) / 10.0
+                if horizons:
+                    out_["z_h"], out_["z_h_why"] = {"30m": 0.2, "60m": None, "next_close": 0.3}, {"60m": "beyond_session_close"}
+            return out_
+        st3 = os.path.join(td, "state3")
+        try:
+            g["evaluate"] = fake_eval
+            count("2026-09-28", *common, os.path.join(td, "cnt3"), st3, n_shuffles=30, today=today)
+            c3 = pd.read_csv(os.path.join(td, "cnt3", "counts.csv"))
+            r3 = read("2026-09-28", *common, fx, os.path.join(td, "cnt3", "counts.csv"), os.path.join(td, "r_claims"),
+                      st3, n_shuffles=30, today=today)
+        finally:
+            g["evaluate"] = saved_e
+        pc = r3["variants"][PRIMARY]
+        n_c = int(c3[c3.variant == PRIMARY].claim_events.iloc[0])
+        checks["READ e2e WITH CLAIMS: the guard passes and the outcome loop runs on every claim"] = \
+            n_c > 0 and pc["claim_events"] == n_c and pc["amendment_5"]["claim_events"] == n_c
+        checks["READ e2e WITH CLAIMS: WIN 1 controls, placebos and A5 horizons are all computed"] = \
+            pc["win1_ctrl_touched"] >= 0 and pc["events_with_placebo"] + pc["events_without_placebo"] == n_c and \
+            pc["amendment_5"]["horizons"]["60m"]["event_unevaluable_reasons"].get("beyond_session_close") == n_c
+        checks["READ e2e WITH CLAIMS: holdout-only + forward-only events add up to the pooled set"] = \
+            pc["holdout_only"]["claim_events"] + pc["forward_only"]["claim_events"] == n_c
+        st2 = os.path.join(td, "state2")
+        os.makedirs(st2)
+        json.dump({"as_of": "2026-12-31"}, open(os.path.join(st2, TRIGGER_FILE), "w"))
+        try:
+            read("2026-09-28", *common, fx, cnt, os.path.join(td, "r3"), st2, n_shuffles=30, today=today)
+            checks["READ: with a frozen stop trigger, any other as_of refuses"] = False
+        except SystemExit as e_:
+            checks["READ: with a frozen stop trigger, any other as_of refuses"] = "FROZEN READ WINDOW" in str(e_)
+    import inspect
+    src = inspect.getsource(count)
+    checks["READ: the count job is untouched by the read (it never calls read / the A5 code)"] = \
+        "read(" not in src.replace("pd.read_csv(", "").replace("_read_parquet(", "").replace("read_scoped(", "") \
+        and "horizons=True" not in src
+    return checks
+
+
 def selftest():
     import tempfile
     checks = {}
@@ -1905,6 +2294,7 @@ def selftest():
     checks.update(_e2e())
     checks.update(_count_tests())
     checks.update(_a5_tests())
+    checks.update(_read_tests())
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
     return 0 if all(checks.values()) else 1
@@ -1920,6 +2310,8 @@ if __name__ == "__main__":
         if not AMENDMENT_5:
             raise SystemExit("amendment 5 is not stamped yet; the first count run waits for it (R-IV.1114(e))")
         count(*sys.argv[2:13])
+    elif mode == "read":                             # ONCE, in the 11-20 decision run (R-IV.1241(d))
+        read(*sys.argv[2:15])
     elif mode == "confirmation-complete":            # 6b completeness for the confirmation window, metadata only
         a = pd.Timestamp(sys.argv[2]).date()
         check_as_of(a)
