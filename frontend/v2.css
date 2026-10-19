@@ -1848,3 +1848,30 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   .pw-row { grid-template-columns: 50px 26px 1fr 92px 72px 96px; }
   .pw-det { margin-top: 1px; }
 }
+
+/* ── B2: the live Position Watch panel (R-IV.1237(b)) ─────────────────── */
+/* Tokens checked against :root before use. The first draft of this block invented
+   --teal-dim, --line, --fg-dim and --bg-raise, none of which exist here -- an undefined
+   custom property does not fail loudly, it just renders as nothing, so a colour token is
+   exactly the kind of mistake that ships looking fine on the author's screen. */
+.pw-live { color: var(--teal); border-color: var(--teal); background: var(--panel-2); }
+.pw-revised {
+    font-size: 9px; letter-spacing: .06em; padding: 1px 5px; margin-left: 6px;
+    border: 1px solid var(--amber); color: var(--amber); border-radius: 3px;
+}
+/* Amber is reserved for "we cannot confirm this", which is exactly what an unconfirmed gap
+   is -- so UNCONFIRMED gets the dashed neutral and REVISED gets the amber: one is waiting
+   for a bar, the other is a reading that turned out not to hold. */
+.pw-pending {
+    font-size: 9px; letter-spacing: .06em; padding: 1px 5px; margin-left: 6px;
+    border: 1px dashed var(--text-3); color: var(--text-3); border-radius: 3px;
+}
+.pw-foot { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }
+.pw-fl { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 6px; }
+.pw-fl b { font-size: 9px; letter-spacing: .08em; color: var(--text-2); margin-right: 4px; }
+.pw-w, .pw-nw {
+    font-size: 10px; padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border);
+}
+.pw-w { color: var(--text); background: var(--panel-2); }
+.pw-w i { font-style: normal; color: var(--text-2); margin-left: 4px; font-size: 9px; }
+.pw-nw { color: var(--text-2); border-style: dashed; }

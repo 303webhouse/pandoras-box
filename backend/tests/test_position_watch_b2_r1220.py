@@ -164,21 +164,26 @@ def _push(**kw):
     return pw.may_push(**base)
 
 
-def test_PUSHES_ARE_OFF_BY_DEFAULT():
-    """(a)5: the panel is live, the wire is dark. The DEFAULT is the shipped behaviour, so this
-    asserts what happens when the caller passes nothing -- a flag that is only correct when
-    remembered is not a ship-with-pushes-off."""
-    assert pw.PUSHES_ENABLED is False
-    ok, why = _push()
+def test_THE_WIRE_IS_ON_IN_THE_COMPLETION_DEPLOY():
+    """R-IV.1228(c): the flag flips in B2's completion deploy, which is this one.
+
+    This test asserted `is False` from R-IV.1220(a)5 until now. The expectation moved by
+    ruling, not by drift, and the OTHER half of the old test -- that the switch is the FIRST
+    gate and consumes nothing on the way past -- still matters and is kept below, driven
+    explicitly rather than by the default.
+    """
+    assert pw.PUSHES_ENABLED is True
+    assert _push()[0] is True
+    ok, why = _push(pushes_enabled=False)
     assert ok is False and "OFF" in why and "panel is live" in why
-    assert _push(pushes_enabled=True)[0] is True              # control
 
 
 def test_THE_OFF_SWITCH_IS_THE_FIRST_GATE():
     """It consumes nothing on the way past. With the wire dark, a would-be push must not spend
     a cap slot, leave a cooldown row or record "already pushed this session" -- all three would
-    still be there on the day the wire is switched on."""
-    ok, why = _push(pushed_today=20, event="LEVEL_BREAK",
+    still be there on the day the wire is switched on. Still live as a rule: the flag can be
+    passed False by a caller, and B3-B9 inherit this gate order."""
+    ok, why = _push(pushed_today=20, event="LEVEL_BREAK", pushes_enabled=False,
                     recent=[{"ticker": "QQQ", "event": "LEVEL_BREAK", "pushed_at": T}])
     assert ok is False
     assert "OFF" in why, "the OFF gate must be reached before the cap and the session limit"
@@ -238,8 +243,10 @@ def test_THE_CAP_NOTICE_FIRES_ONLY_ONCE_THE_CAP_HAS_ACTUALLY_EATEN_SOMETHING():
     # Once per session: a notice that repeats is the flood it reports.
     assert pw.cap_notice(pushed_today=25, suppressed_by_cap=True, notice_sent=True,
                          pushes_enabled=True)[0] is False
-    # And the OFF switch covers this wire too.
-    assert pw.cap_notice(pushed_today=20, suppressed_by_cap=True, notice_sent=False)[0] is False
+    # And the OFF switch covers this wire too -- passed explicitly now that R-IV.1228(c) has
+    # made ON the default, so this still tests the gate rather than the default.
+    assert pw.cap_notice(pushed_today=20, suppressed_by_cap=True, notice_sent=False,
+                         pushes_enabled=False)[0] is False
 
 
 def test_THE_CAP_NOTICE_TEXT_IS_THE_RULED_WORDING_AND_CLEARS_THE_MONEY_GUARD():

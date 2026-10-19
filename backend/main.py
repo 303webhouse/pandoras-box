@@ -199,6 +199,17 @@ async def lifespan(app: FastAPI):
                 "  ADD COLUMN IF NOT EXISTS x4_result TEXT,"
                 "  ADD COLUMN IF NOT EXISTS cut_due DATE,"
                 "  ADD COLUMN IF NOT EXISTS cut_status TEXT")
+            # R-IV.1233(b): position_watch_events, created AT STARTUP because
+            # api/position_watch SELECTs it. Fifth instance of the same guard: a READ must
+            # never wait on a writer having run. The DDL is the model's own constant, so
+            # there is exactly one author of this schema.
+            try:
+                from models.position_watch_events import DDL as _PW_DDL
+                from models.position_watch_events import DDL_INDEX as _PW_IDX
+                await conn.execute(_PW_DDL)
+                await conn.execute(_PW_IDX)
+            except Exception as _pw_ddl_err:
+                logger.warning("position_watch_events migration failed: %s", _pw_ddl_err)
             await conn.execute(
                 "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
                 "  id SERIAL PRIMARY KEY,"
@@ -1053,6 +1064,10 @@ async def lifespan(app: FastAPI):
     flow_deadfeed_watchdog_task = asyncio.create_task(flow_deadfeed_watchdog_loop())  # L1.0 Chunk 3
     pythia_staleness_watchdog_task = asyncio.create_task(pythia_staleness_watchdog_loop())  # 6/29 brief Part 1, full liquid-20 as of 2026-07-17
     adx_regime_task = asyncio.create_task(adx_regime_loop())
+    # B2's Position Watch: one batched yfinance call per 15-minute bar during RTH, plus one
+    # after the close. Quiet outside RTH, and quiet when the calendar cannot answer.
+    from jobs.position_watch_job import position_watch_loop
+    position_watch_task = asyncio.create_task(position_watch_loop())
     from jobs.strike_ib_converter import strike_ib_converter_loop
     strike_ib_task = asyncio.create_task(strike_ib_converter_loop())  # STRIKE-SPEC-01 shadow converter + per-ticker watermarks
     from jobs.qqq_sma_watch import qqq_sma_watch_loop
@@ -2203,6 +2218,8 @@ from api.board_state import router as board_router
 app.include_router(board_router, prefix="/api", tags=["board"])
 from api.abacus import router as abacus_router  # R-IV.429 — /api/abacus/summary (stub)
 app.include_router(abacus_router, prefix="/api", tags=["abacus"])
+from api.position_watch import router as position_watch_router  # B2, R-IV.1209(f)
+app.include_router(position_watch_router, prefix="/api", tags=["position-watch"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /

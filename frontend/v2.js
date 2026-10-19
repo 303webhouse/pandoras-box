@@ -5320,6 +5320,8 @@ const X = (function () {
   // NOT A SIGNAL, EVER (f)6: nothing here writes to `signals`, nothing is graded, and the rows
   // do not reach Kairos or the River's actionable lanes.
 
+  const LIVE = '/api/position-watch';
+  // Kept for reference only: A3's mock fixture. `load()` does NOT read it.
   const FIXTURE = '/assets/agora/position_watch_mock.json';
   let panel = null, backdrop = null, data = null, tab = 'held', opener = null, isOpen = false;
 
@@ -5335,7 +5337,16 @@ const X = (function () {
       + '<div class="pw-main">'
       + '<div class="pw-top"><b>' + esc(r.ticker) + '</b>'
       + '<span class="pw-ev">' + esc(r.event) + '</span>'
-      + '<span class="pw-tf">' + esc(r.tf) + '</span></div>'
+      + '<span class="pw-tf">' + esc(r.tf) + '</span>'
+      // R-IV.1215(b)5: the row KEEPS the words it was written with and carries a tag saying a
+      // later bar changed what they mean. A number that silently becomes a different number
+      // is the thing a log exists to prevent.
+      + (r.revised ? '<span class="pw-revised" title="a later bar superseded this reading: '
+        + 'the gap did not hold">REVISED</span>' : '')
+      + (r.gap_held === null && r.gap_open
+        ? '<span class="pw-pending" title="' + esc(r.gap_held_reason || '') + '">UNCONFIRMED'
+          + '</span>' : '')
+      + '</div>'
       + '<div class="pw-det">' + esc(r.detail) + '</div>'
       + '</div>'
       // AGAINST / WITH is the whole routing decision ((f)3-4), so it is the loudest thing on
@@ -5347,6 +5358,33 @@ const X = (function () {
       + esc(r.shown_regime || '—') + '</div>'
       + '<div class="pw-act' + (r.pushed ? ' pw-pushed' : '') + '">'
       + esc(r.action) + '</div>'
+      + '</div>';
+  }
+
+  // R-IV.1215(b)3 + R-IV.1228(d): the footer. Built from the payload's OWN resolution of
+  // Set B, which is the same resolution the detector ran on, so the panel cannot claim to
+  // watch a ticker the job skipped. Every exclusion shows its ruled reason: a ticker missing
+  // from a watch list with no reason reads as an oversight.
+  function footerHtml(f) {
+    if (!f) return '';
+    const watched = (f.watched || []);
+    const via = f.watched_via || {};
+    const nw = f.not_watched || {};
+    const chips = watched.map((t) => {
+      const through = (via[t] || []).filter((v) => v !== t);
+      const title = through.length ? t + ' — watched through ' + through.join(', ') : t;
+      return '<span class="pw-w" title="' + esc(title) + '">' + esc(t)
+        + (through.length ? '<i>via ' + esc(through.join(', ')) + '</i>' : '') + '</span>';
+    }).join('');
+    const outs = Object.keys(nw).map((t) =>
+      '<span class="pw-nw" title="' + esc(nw[t]) + '">' + esc(t) + '</span>').join('');
+    return '<div class="pw-foot">'
+      + '<div class="pw-fl"><b>WATCHED · ' + watched.length + '</b>' + chips + '</div>'
+      + (outs ? '<div class="pw-fl pw-fl-out"><b>NOT WATCHED · '
+        + Object.keys(nw).length + '</b>' + outs + '</div>' : '')
+      // The ruled phone line is NOT repeated here: it is rendered once in the chain above,
+      // from the one string the backend test binds to `PANEL_FOOTER_PHONE_LINE`. Two copies
+      // of a sentence drift, and this one is ruled verbatim.
       + '</div>';
   }
 
@@ -5376,8 +5414,14 @@ const X = (function () {
     panel.innerHTML =
       '<div class="pw-head">'
       + '<h3>Position Watch</h3>'
-      + '<span class="mock-chip" title="A3 is a mock list (R-IV.1209(c)). Every value is fake '
-      + 'and NO PUSH IS SENT.">MOCK</span>'
+      + (data._mock
+        ? '<span class="mock-chip" title="A3 is a mock list (R-IV.1209(c)). Every value is '
+          + 'fake and NO PUSH IS SENT.">MOCK</span>'
+        // The chip follows the PAYLOAD, not the markup. A live panel still wearing a MOCK
+        // chip trains Nick to ignore the chip, which is worse than having none.
+        : '<span class="mock-chip pw-live" title="B2 is live: these rows are stored events '
+          + 'from position_watch_events, and the phone wire is '
+          + ((data.footer && data.footer.pushes_enabled) ? 'ON' : 'OFF') + '.">LIVE</span>')
       + '<div class="pw-tabs">'
       + '<button type="button" class="pw-tab' + (held ? ' on' : '') + '" data-tab="held">'
       + 'HELD · ' + esc(data.held_count) + '</button>'
@@ -5402,8 +5446,10 @@ const X = (function () {
       // holds the same string with a test binding the two so they cannot drift apart.
       + '<div class="pw-cap pw-phone-rule">Phone: one alert per ticker per day, '
       + 'against-you only</div>'
-      + '<div class="pw-cap pw-warn">A3 sends nothing. The block above is a picture of a '
-      + 'notification, not a notification — the live path is B2.</div>'
+      + (data._mock
+        ? '<div class="pw-cap pw-warn">A3 sends nothing. The block above is a picture of a '
+          + 'notification, not a notification — the live path is B2.</div>'
+        : footerHtml(data.footer))
       + '</div>';
   }
 
@@ -5429,12 +5475,17 @@ const X = (function () {
 
   async function load() {
     if (data) return;
+    // B2 IS LIVE, so the live route is the source and THE MOCK IS NOT A FALLBACK. If the read
+    // fails, render() says so; drawing the fixture instead would show Nick fake alerts that
+    // look exactly like real ones, and drawing an empty list would assert "no alerts", which
+    // is a claim. The mock fixture stays on disk for the A3 layout, not as a safety net.
     try {
-      const r = await fetch(FIXTURE, { cache: 'no-store' });
+      const r = await apiFetch(LIVE);
       data = r.ok ? await r.json() : null;
     } catch (_) {
-      data = null;      // render() then says the fixture did not load, rather than drawing
-    }                   // an empty list, which would read as "no alerts" -- a claim.
+      data = null;
+    }
+    if (data && data.error) { data = null; }
   }
 
   async function openIt() {
