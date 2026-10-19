@@ -1594,14 +1594,16 @@
 
   const AGORA_FIXTURES = {
     crowd: '/assets/agora/crowd_mock.json',
-    fear: '/assets/agora/fear_mock.json',
     bookStress: '/assets/agora/book_stress_mock.json',
   };
   // B4: the Event Strip is LIVE and no longer reads a fixture. The other three tiles are
   // still mocks and still say so through their own `_mock` flag — which is why the chip is
   // driven by the payload rather than the markup: these four tiles go live one at a time, and
   // a chip hard-coded per tile would be wrong for four different weeks.
-  const AGORA_LIVE = { eventStrip: '/api/event-strip' };
+  const AGORA_LIVE = {
+    eventStrip: '/api/event-strip',   // B4
+    fear: '/api/fear-price',          // B5
+  };
   const _agora = { crowd: null, fear: null, bookStress: null, eventStrip: null };
 
   // The lean -> colour scale of R-IV.1209(d)2, as CSS custom-property expressions so the
@@ -1728,10 +1730,19 @@
     const cv = m.curve || {};
     const curve = (cv.tenors || []).map((t, i) => {
       const vals = cv.values || [];
-      const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-      const h = hi > lo ? 6 + ((vals[i] - lo) / (hi - lo)) * 14 : 12;
-      return '<span class="ag-ct"><i style="height:' + h.toFixed(1) + 'px"></i>'
-        + esc(t) + '</span>';
+      // NULL-SAFE, and it matters on live data: Math.min over [18.2, null] is 0, which would
+      // squash every other bar to full height against a floor that is not in the data. A
+      // tenor with no reading draws a stub and says so on hover.
+      const have = vals.filter((v) => v != null);
+      const v = vals[i];
+      if (v == null) {
+        return '<span class="ag-ct ag-ct-na" title="no reading for ' + esc(t)
+          + '"><i style="height:2px"></i>' + esc(t) + '</span>';
+      }
+      const lo = Math.min.apply(null, have), hi = Math.max.apply(null, have);
+      const h = hi > lo ? 6 + ((v - lo) / (hi - lo)) * 14 : 12;
+      return '<span class="ag-ct" title="' + esc(t) + ' ' + Number(v).toFixed(2)
+        + '"><i style="height:' + h.toFixed(1) + 'px"></i>' + esc(t) + '</span>';
     }).join('');
 
     const sk = m.skew || {};
@@ -1749,7 +1760,8 @@
       + '<b>' + esc(sk.pct_label || '\u2014') + '</b>'
       + '<span class="ag-sk"><span>' + esc(sk.left || '') + '</span>'
       + '<span>' + esc(sk.right || '') + '</span></span></div>'
-      + '<div class="ag-blk"><span class="ag-bl">' + esc(em.label || '') + '</span>'
+      + '<div class="ag-blk" title="' + esc(em.basis || em.reason || '') + '">'
+      + '<span class="ag-bl">' + esc(em.label || '') + '</span>'
       + '<b>' + (em.approx ? '\u2248 ' : '') + esc(em.value || '\u2014') + '</b>'
       + '<span class="ag-days">' + esc(em.days || '') + '</span></div>'
       + '<div class="ag-cap">' + esc(m.caption || '') + '</div>';
