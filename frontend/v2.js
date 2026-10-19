@@ -768,6 +768,15 @@
         <div class="mini-vals" id="curveVals"></div>
       </div>`;
     applyGlossary(band);
+    // R-IV.1251: THE REPAINT THAT FIXES THE BLANK BOX. This function has just replaced the
+    // band's innerHTML, which destroyed the yield-curve box's filled markup and put the empty
+    // template back. `refreshMarket` is on a SEPARATE 60-second timer, so without this line
+    // the box stays blank for up to a minute — and permanently, whenever the two timers settle
+    // into band-last order, which is what Nick's screenshot caught mid-session.
+    //
+    // Painting from the CACHE, not fetching: this runs on every band tick and a fetch here
+    // would turn one blank box into a request storm.
+    paintYieldCurve();
     // The agreement basis rides on the grid so a reader can see WHY every box is outlined the
     // way it is, rather than counting dots to work it out.
     const gridEl = band.querySelector('.rb-grid');
@@ -2696,9 +2705,32 @@
       + '<path d="' + d + '"/></svg>';
   }
 
+  // R-IV.1251: THE BOX WENT BLANK DURING RTH, and the cause was a race nobody owned.
+  //
+  // `loadRegimeBand` REBUILDS the band's innerHTML — this box's markup included — on its own
+  // 60-second timer, and `refreshMarket` FILLS the box on a SECOND, independent 60-second
+  // timer. Whenever the band repaints after the fill, the box is left holding its empty
+  // template until the next fill tick: a title, an em dash and nothing. That is exactly the
+  // screenshot. B3 made it worse rather than causing it, by adding an `ycHeads` element that
+  // starts empty and a second sequential await after the rebuild.
+  //
+  // THE FIX IS NOT A LONGER TIMER OR A RETRY. The payload is cached here and ONE painter draws
+  // from the cache — called after every fetch AND immediately after every band rebuild, so the
+  // box is repainted in the same tick its DOM is recreated, from data already in hand, with no
+  // network wait. A box that can only be correct between two timers is a box that is
+  // sometimes wrong.
+  let _ycData = null;
+
   async function loadYieldCurve() {
-    let d = null;
-    try { const r = await apiFetch('/api/yield-curve'); if (r.ok) d = await r.json(); } catch (_) {}
+    try {
+      const r = await apiFetch('/api/yield-curve');
+      if (r.ok) _ycData = await r.json();
+    } catch (_) { /* the cache keeps the last good payload rather than blanking the box */ }
+    paintYieldCurve();
+  }
+
+  function paintYieldCurve() {
+    const d = _ycData;
     const shape = $('ycShape'), flag = $('ycFlag'), heads = $('ycHeads');
     if (!heads) return;
     // (e) R-IV.1246: OUTSIDE RTH the box shows the LAST AVAILABLE values at reduced opacity
@@ -2717,12 +2749,18 @@
     const box = $('rbCurve');
     const closed = marketShut();
     if (box) box.classList.toggle('yc-closed', !!closed);
+    // R-IV.1251(b): NEVER BLANK. With no payload at all it says so and names the route; with
+    // a payload whose individual tenors failed, each ROW names its own series and reason
+    // below. A reader can act on "5Y (DGS5) returned no usable observation" and cannot act on
+    // a gap.
     if (!d || d.error || !d.spreads) {
-      // Says so. No cached number, no substituted figure -- the panel showing a stale spread
-      // as current is the fault this says out loud instead.
-      heads.innerHTML = '<span class="val-muted">FRED curve unavailable'
-        + (d && d.error ? ' (' + esc(d.error) + ')' : '') + '</span>';
-      if (shape) { shape.textContent = '—'; shape.title = 'the FRED read failed'; }
+      heads.innerHTML = '<span class="val-muted">yield curve unavailable — '
+        + esc(d && d.error ? d.error : 'no reading yet from /api/yield-curve')
+        + '</span>';
+      if (shape) {
+        shape.textContent = '—';
+        shape.title = 'the FRED read has not returned a curve';
+      }
       return;
     }
     if (closed && flag) {
@@ -2748,7 +2786,46 @@
       flag.style.display = ui ? '' : 'none';
       flag.className = 'yc-flag';
     }
-    heads.innerHTML = ['3m10s', '2s10s'].map((k) => {
+    // (c) THE TENOR ROWS: 3M, 2Y, 5Y, 10Y, 30Y, each with its level and today's change in bp,
+    // and UNUSUAL/EXTREME TINTING THE TENOR'S LABEL rather than sitting beside it. All five
+    // come from /api/yield-curve, which is why 2Y has a row at last: the box drew its table
+    // from /api/stable/rates (3M/5Y/10Y/30Y) while the labels came from the FRED route
+    // (3M/2Y/10Y/30Y), so the two lists disagreed about which tenors the curve even has.
+    const tenors = (d.tenors || []);
+    const tenorRows = tenors.map((t) => {
+      const tint = t.label === 'EXTREME' ? ' yc-t-extreme'
+        : (t.label === 'UNUSUAL' ? ' yc-t-unusual' : '');
+      if (t.level_pct == null) {
+        return '<div class="yc-tr"><span class="yc-tk' + tint + '">' + esc(t.tenor)
+          + '</span><span class="yc-tv rd-na-inline" title="'
+          + esc(t.unavailable_reason || '') + '">unavailable</span></div>';
+      }
+      const chg = t.change_bp;
+      return '<div class="yc-tr" title="' + esc(t.tooltip || '') + '">'
+        + '<span class="yc-tk' + tint + (t.pulse ? ' yc-pulse' : '') + '">'
+        + esc(t.tenor) + '</span>'
+        + '<span class="yc-tv">' + Number(t.level_pct).toFixed(2) + '%</span>'
+        + (chg == null ? '' : '<span class="yc-tc ' + signCls(chg) + '">'
+          + (chg >= 0 ? '+' : '') + Number(chg).toFixed(1) + 'bp</span>')
+        + '</div>';
+    }).join('');
+    // The chart: a dot per tenor now, and a DASHED line for a month ago (c). Drawn from the
+    // same five tenors as the rows, so the two cannot disagree about the curve's shape.
+    const drawn = tenors.filter((t) => t.level_pct != null);
+    if (drawn.length) {
+      const sets = [{ label: 'now', borderColor: '#14b8a6', backgroundColor: '#14b8a6',
+                      pointRadius: 3, data: drawn.map((t) => t.level_pct) }];
+      const ago = drawn.map((t) => (t.month_ago_pct == null ? null : t.month_ago_pct));
+      // Only when a month of history exists. A dashed line drawn on top of the solid one
+      // would say "unchanged in a month", which is a claim.
+      if (ago.some((v) => v != null)) {
+        sets.push({ label: '1 month ago', borderColor: 'rgba(139,152,173,0.65)',
+                    borderDash: [4, 3], backgroundColor: 'transparent', pointRadius: 0,
+                    data: ago });
+      }
+      makeLineChart('curveChart', sets, drawn.map((t) => t.tenor));
+    }
+    const spreadRows = ['3m10s', '2s10s'].map((k) => {
       const b = d.spreads[k]; if (!b) return '';
       const bp = b.bp == null ? '--' : (b.bp > 0 ? '+' : '') + b.bp.toFixed(0);
       const ch = b.change_bp == null ? '' : '<span class="yc-ch ' + signCls(b.change_bp) + '">'
@@ -2761,12 +2838,10 @@
         + ' sessions, FRED ' + esc(b.series || '') + '">' + ycSpark(b.spark) + '</span>'
         + '</div>';
     }).join('');
-    // The per-tenor z chips ride on the LIVE tenor table that /api/stable/rates already
-    // draws, so the two sources sit side by side and are labelled as two sources.
-    (d.tenors || []).forEach((t) => {
-      const el = document.querySelector('.mv [data-tenor="' + t.tenor + '"]');
-      if (el) el.innerHTML = ycChip(t);
-    });
+    // (c)'s order: the tenor rows, the chart (drawn into its own canvas above), then the two
+    // spreads BELOW them.
+    heads.innerHTML = '<div class="yc-tenors">' + tenorRows + '</div>'
+      + '<div class="yc-spreads">' + spreadRows + '</div>';
   }
 
   // ── b6 USD carry mini ───────────────────────────────────────────────────────

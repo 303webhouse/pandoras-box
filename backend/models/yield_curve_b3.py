@@ -48,12 +48,22 @@ Z_WINDOW = 252
 SESSIONS_PER_YEAR = 252
 
 #: The FRED series B3 reads. Keys are the display tenors.
+#: R-IV.1251(c): FIVE tenors, in curve order, and ALL FROM ONE SOURCE. The box used to draw
+#: its tenor table from /api/stable/rates (3M/5Y/10Y/30Y) while the labels came from here
+#: (3M/2Y/10Y/30Y) -- so 2Y had a z-score and no row, 5Y had a row and no z-score, and the two
+#: lists disagreed about which tenors the curve has. One dict now feeds the rows, the chart and
+#: the labels.
 SERIES = {
     "3M": "DGS3MO",
     "2Y": "DGS2",
+    "5Y": "DGS5",
     "10Y": "DGS10",
     "30Y": "DGS30",
 }
+
+#: Sessions back for the chart's dashed comparison line. R-IV.1251(c) asks for "1 month ago",
+#: which on a daily series is 21 sessions.
+MONTH_AGO_SESSIONS = 21
 SPREAD_SERIES = {
     "2s10s": "T10Y2Y",
     "3m10s": "T10Y3M",

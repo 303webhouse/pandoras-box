@@ -1999,3 +1999,15 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 
 /* §8's armed kill lamp keeps the vermilion alarm (R-IV.1209(d)). */
 .lamp-armed { color: var(--down); font-weight: 700; }
+
+/* R-IV.1251(c): the tenor rows. UNUSUAL / EXTREME tint the TENOR'S LABEL rather than adding a
+   chip beside it — the box is small and a fifth element per row would crowd the number out. */
+.yc-tenors { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 4px 0 2px; }
+.yc-tr { display: flex; align-items: baseline; gap: 4px; }
+.yc-tk { font-size: 9px; letter-spacing: .06em; color: var(--text-2); min-width: 22px; }
+.yc-t-unusual { color: var(--text); font-weight: 700; }
+.yc-t-extreme { color: var(--amber); font-weight: 700; }
+.yc-tv { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.yc-tc { font-family: var(--mono); font-size: 9px; }
+.yc-spreads { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px;
+              border-top: 1px solid var(--border); padding-top: 4px; }

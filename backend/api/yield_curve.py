@@ -38,10 +38,18 @@ def _tenor_block(tenor: str, series_id: str) -> Dict[str, Any]:
     stats = yc.fires_per_year(changes)
     stats["as_of"] = as_of.isoformat() if as_of else "unknown"
     label = yc.label_for(z)
+    # The chart's dashed line (R-IV.1251(c)). None rather than today's value when the history
+    # is short: a dashed line drawn on top of the solid one would say "unchanged in a month",
+    # which is a claim.
+    month_ago = None
+    have = [v for v in values if v is not None]
+    if len(have) > yc.MONTH_AGO_SESSIONS:
+        month_ago = have[-(yc.MONTH_AGO_SESSIONS + 1)]
     return {
         "tenor": tenor,
         "series": series_id,
         "level_pct": level,
+        "month_ago_pct": month_ago,
         "as_of": as_of.isoformat() if as_of else None,
         "change_bp": round(change_bp, 1) if change_bp is not None else None,
         "z": round(z, 2) if z is not None else None,
@@ -50,9 +58,11 @@ def _tenor_block(tenor: str, series_id: str) -> Dict[str, Any]:
         "pulse": label == yc.EXTREME,
         "fires": stats,
         "tooltip": yc.tooltip(tenor, stats),
+        # R-IV.1251(b): THE BOX IS NEVER BLANK, so a missing tenor says WHICH SERIES and why
+        # -- the reader can act on "DGS5 returned no observation" and cannot act on a gap.
         "unavailable_reason": None if level is not None else (
-            "FRED returned no usable observation for %s (FRED_API_KEY present: %s)"
-            % (series_id, fred.key_present())),
+            "%s (%s) returned no usable observation; FRED_API_KEY present: %s"
+            % (tenor, series_id, fred.key_present())),
     }
 
 
