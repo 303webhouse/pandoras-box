@@ -852,14 +852,30 @@ async def label_counts_by_version(conn) -> Dict[str, Any]:
     """
     try:
         rows = await conn.fetch(
-            """SELECT rules_version, shown_regime, COUNT(*) AS n
+            """SELECT rules_version, close_source, shown_regime,
+                      COUNT(*) AS n,
+                      COUNT(*) FILTER (WHERE superseded IS TRUE) AS superseded_n
                  FROM regime_snapshots
                 WHERE settled IS TRUE
-                GROUP BY rules_version, shown_regime
-                ORDER BY rules_version, shown_regime""")
+                GROUP BY rules_version, close_source, shown_regime
+                ORDER BY rules_version, close_source, shown_regime""")
     except Exception as exc:                                        # noqa: BLE001
         return {"error": "regime_snapshots unreadable (%s)" % type(exc).__name__}
-    out: Dict[str, Any] = {}
+    # GROUPED BY close_source TOO, which is a correction to this very function. Its first
+    # version grouped by rules_version alone and reported v1 = 623 against v2 = 302 — because
+    # v1 holds TWO GENERATIONS over the same dates: the 302 rows priced off Polygon, and the
+    # 321 superseded rows priced off stable_daily_bars from before the 2026-10-17 re-seed.
+    # Summing them puts a double-counted column beside a single-counted one and invites the
+    # reader to conclude v2 lost 321 sessions. Each generation is reported on its own line so
+    # the comparison is like with like.
+    out: Dict[str, Any] = {"generations": {}, "basis": (
+        "one line per (rules_version, close_source): v1 holds two generations over the same "
+        "dates — Polygon and the pre-2026-10-17 stable_daily_bars rows — so a count grouped "
+        "by version alone double-counts v1")}
     for r in rows:
-        out.setdefault(r["rules_version"] or "?", {})[r["shown_regime"] or "(none)"] = int(r["n"])
+        key = "%s/%s" % (r["rules_version"] or "?", r["close_source"] or "?")
+        gen = out["generations"].setdefault(key, {"labels": {}, "superseded": 0, "total": 0})
+        gen["labels"][r["shown_regime"] or "(none)"] = int(r["n"])
+        gen["superseded"] += int(r["superseded_n"] or 0)
+        gen["total"] += int(r["n"])
     return out
