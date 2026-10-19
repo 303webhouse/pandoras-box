@@ -37,6 +37,7 @@ Usage:
     python scripts/lab/regime_filter.py pull <out.parquet>
     python scripts/lab/regime_filter.py fires <pull.parquet> <themed.parquet> <out_dir>
     python scripts/lab/regime_filter.py grade <fires.csv> <pull.parquet> <themed.parquet> <labels.csv> <out_dir>
+    python scripts/lab/regime_filter.py p1-label-counts <signals_for_label_join.csv> <labels.csv>
     python scripts/lab/regime_filter.py selftest
 """
 import hashlib
@@ -404,6 +405,21 @@ def grade(fires_path, pull_path, themed_path, labels_path, out_dir):
     return out
 
 
+def p1_label_counts(signals_path, labels_path):
+    """Protocol 1 §6 (QUERY): labelled vs unlabelled counts per arm, kind and group. Counts only."""
+    labels = read_labels(labels_path)
+    s = pd.read_csv(signals_path)
+    s["date"] = pd.to_datetime(s["date"]).dt.date
+    j = s.label_status == "JOIN"
+    s.loc[j, "regime"] = s.loc[j, "date"].map(labels)
+    s["group"] = s["regime"].map(lambda r: REGIME_TO_GROUP.get(r) if isinstance(r, str) else None)
+    s["status"] = np.where(~j, s.label_status,
+                           np.where(s.group.notna(), "LABELLED", np.where(s.date.isin(set(labels)),
+                                                                          "NULL label", "no label row")))
+    out = s.groupby(["arm", "kind", "status", s.group.fillna("-")]).size().rename("n").reset_index()
+    return out.rename(columns={"group": "group"})
+
+
 # ── selftest (synthetic only) ─────────────────────────────────────────────────────────────
 def selftest():
     ok = fail = 0
@@ -541,6 +557,17 @@ def selftest():
         check("e2e grade: strategies without fires report NO FIRES", res["primary_h5"]["MIDAS"]["status"] == "NO FIRES")
         check("e2e grade: the card-horizon secondary is outside Holm (CIRCE h1)",
               res["secondary_card_horizon"]["CIRCE"]["horizon"] == 1)
+        sig = pd.DataFrame({"arm": ["main", "main", "crypto", "crypto"], "ticker": "X",
+                            "date": [days[0], days[16], days[1], date(2025, 1, 2)],
+                            "kind": "signal", "side": "BEAR",
+                            "label_status": ["JOIN", "JOIN", "NO LABEL (no US session)", "NO LABEL (pre-seed)"]})
+        sp = os.path.join(tmp2, "sig.csv")
+        sig.to_csv(sp, index=False)
+        lc = p1_label_counts(sp, lab_p)
+        st_ = dict(zip(lc.status, lc.n))
+        check("p1 label counts: LABELLED / NULL / NO LABEL kept apart",
+              st_.get("LABELLED") == 1 and st_.get("NULL label") == 1
+              and st_.get("NO LABEL (no US session)") == 1 and st_.get("NO LABEL (pre-seed)") == 1)
     else:
         check("e2e grade: synthetic label file has 302 rows", False)
     print(f"{ok}/{ok + fail}")
@@ -556,6 +583,9 @@ if __name__ == "__main__":
         sys.exit(0)
     if a[:1] == ["fires"] and len(a) == 4:
         print(json.dumps(fires(*a[1:4]), indent=1, default=str))
+        sys.exit(0)
+    if a[:1] == ["p1-label-counts"] and len(a) == 3:
+        print(p1_label_counts(a[1], a[2]).to_string(index=False))
         sys.exit(0)
     if a[:1] == ["grade"] and len(a) == 6:
         out = grade(*a[1:6])
