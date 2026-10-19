@@ -16,7 +16,7 @@
   "index.html": {
     "app.js": {
       "pin": 180,
-      "sha256": "08ed256552b3c58c1bb466e91f296e19ffbca0a15994906aa728cd3c39f51885"
+      "sha256": "ee1c8d923e27814f6158e6e9de6b1474f6f2e96da3f8a118b8fa9de0a0b83c4d"
     },
     "styles.css": {
       "pin": 156,
@@ -40,7 +40,7 @@
     },
     "stater.js": {
       "pin": 2,
-      "sha256": "75086aff28318c28a2a9a7f0deb2f2292a32db5ab24dbf45c4cd71a46278d4dc"
+      "sha256": "ff00b4a10e8d4b87fd880cc5c4a31e803a37f7a4d7dded39fd59b6c87944c2e3"
     },
     "v2.css": {
       "pin": 64,

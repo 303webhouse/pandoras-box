@@ -106,7 +106,36 @@ def replay(sessions: List[Dict[str, Any]],
     # The inputs ride along with the verdict so a stored row can be re-derived later. A label
     # without the numbers behind it is a claim a reader has to take on trust, and six months from
     # now nobody can rebuild the bar slice that produced it.
-    raw = [dict(classify(s, rules), inputs=s) for s in sessions]
+    # R-IV.1260(c)2: THE PRIOR LABEL IS INJECTED AS THIS WALK GOES, which the comment in
+    # `sessions_from_series` has always claimed happened and which no code did. The builder
+    # cannot do it -- it must not import the classifier, because the classifier reads its
+    # output -- so it left `prior_regime` None on every row, and `_row_recovery`'s first test
+    # ("the prior regime is one of rows 1-4") was therefore False on EVERY session. RECOVERY
+    # and BEAR_MARKET_RALLY could not match even with every other input present.
+    #
+    # THE PRIOR LABEL IS THE PREVIOUSLY *SHOWN* ONE, not the previous raw verdict: "coming out
+    # of rows 1-4" means the regime the card was displaying, which is what hysteresis decides.
+    # So the hysteresis is re-applied over the rows classified so far at each step -- 302
+    # cheap passes -- rather than once at the end, which is also exactly what a live nightly
+    # job does one session at a time.
+    raw = []
+    for s_in in sessions:
+        settled_so_far = [r for r in raw if r.get("settled")]
+        shown_so_far = apply_hysteresis(settled_so_far, rules) if settled_so_far else []
+        prior = shown_so_far[-1].get("shown_regime") if shown_so_far else None
+        if s_in.get("prior_regime") is None:
+            s_in["prior_regime"] = prior
+        if s_in.get("sessions_since_crash") is None:
+            # Counted back over the SHOWN series to the last crash label. None when there has
+            # never been one in the window: the Bear-rally row reads "within N sessions after a
+            # crash", and 0 would read as "a crash today".
+            since = None
+            for k in range(len(shown_so_far) - 1, -1, -1):
+                if shown_so_far[k].get("shown_regime") == "crash_liquidation":
+                    since = len(shown_so_far) - 1 - k
+                    break
+            s_in["sessions_since_crash"] = since
+        raw.append(dict(classify(s_in, rules), inputs=s_in))
     # An unsettled session produces no label and must not occupy a slot in the series: the
     # hysteresis counts CLOSES, and a refused session is not one.
     settled = [r for r in raw if r.get("settled")]

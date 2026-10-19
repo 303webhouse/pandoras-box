@@ -227,7 +227,20 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
         await _audit(conn, action="refused", detail=detail, rules_version=rules.get("version"))
         return dict(report, written=0, refused=detail)
 
-    sessions = sessions_from_series(series, settled_through=through)
+    # R-IV.1260(c): v2 fills the inputs the v1 rows already read. The VIX pair is fetched
+    # ONCE for the whole replay and passed in by date, because the CRASH row needs both legs
+    # on the same session and a per-session fetch would be 302 calls for one series.
+    vix_by_date, vix_report = {}, {"skipped": "v1"}
+    if str(rules.get("version")) == "v2":
+        from models.regime_vix import by_date as _vix_by_date
+
+        vix_by_date, vix_report = _vix_by_date()
+        await _audit(conn, action="vix_source",
+                     detail=json.dumps(vix_report)[:1900],
+                     rules_version=rules.get("version"))
+    sessions = sessions_from_series(series, settled_through=through,
+                                    vix_by_date=vix_by_date,
+                                    v2=str(rules.get("version")) == "v2")
     # A WRITE FAILURE IS AUDITED TOO. The first live seed raised inside the INSERT -- an ISO
     # string handed to a DATE column -- and because only the REFUSAL paths audited, it left no
     # row at all: the route could say "no snapshot" and nothing could say why. Finding that
@@ -771,4 +784,65 @@ async def breadth_history(conn, sessions: int = BREADTH_HISTORY_SESSIONS) -> Lis
                 except (TypeError, ValueError, ZeroDivisionError):
                     pct = None
         out.append(pct)
+    return out
+
+
+async def supersede_other_versions(conn, version: str) -> Dict[str, Any]:
+    """Mark every snapshot whose rules_version is NOT `version` as superseded. R-IV.1260(c).
+
+    WHY THIS IS NEEDED AT ALL, and it is the quiet half of a version bump. Every read in this
+    lane filters `superseded = FALSE` and does NOT filter rules_version -- the ribbon, the
+    breadth history, the flip list. So the instant v2 rows land beside v1's, those reads would
+    return BOTH generations over the same dates: a 40-session ribbon of 80 squares, a breadth
+    series interleaving two label sets. Marking the old version superseded is what makes
+    `superseded = FALSE` mean "the current generation" rather than "everything ever written".
+
+    Audited, with the count, because a silent bulk UPDATE over the label history is exactly the
+    kind of write that should leave a mark.
+    """
+    try:
+        n = await conn.fetchval(
+            """UPDATE regime_snapshots SET superseded = TRUE
+                WHERE rules_version <> $1 AND superseded = FALSE
+             RETURNING 1""", version)
+        rows = await conn.fetch(
+            """SELECT rules_version, COUNT(*) AS n
+                 FROM regime_snapshots GROUP BY rules_version ORDER BY rules_version""")
+    except Exception as exc:                                        # noqa: BLE001
+        return {"error": "%s" % type(exc).__name__}
+    # fetchval returns one row of a RETURNING; count properly instead.
+    try:
+        moved = await conn.fetchval(
+            "SELECT COUNT(*) FROM regime_snapshots WHERE rules_version <> $1 "
+            "AND superseded = TRUE", version)
+    except Exception:                                               # noqa: BLE001
+        moved = None
+    out = {"version": version, "superseded_rows": moved,
+           "by_version": {r["rules_version"]: int(r["n"]) for r in rows}}
+    await _audit(conn, action="supersede",
+                 detail=json.dumps(out)[:1900], rows_written=int(moved or 0),
+                 rules_version=version)
+    return out
+
+
+async def label_counts_by_version(conn) -> Dict[str, Any]:
+    """Shown-label counts per rules_version, for R-IV.1260(c)'s v1-beside-v2 report.
+
+    Counts the SHOWN label, not the raw verdict: the shown one is what the card displayed and
+    what a flip is counted on. Both versions are reported over their own rows, so a label that
+    appears in one and not the other is visible as an absence rather than as a zero that has to
+    be inferred.
+    """
+    try:
+        rows = await conn.fetch(
+            """SELECT rules_version, shown_regime, COUNT(*) AS n
+                 FROM regime_snapshots
+                WHERE settled IS TRUE
+                GROUP BY rules_version, shown_regime
+                ORDER BY rules_version, shown_regime""")
+    except Exception as exc:                                        # noqa: BLE001
+        return {"error": "regime_snapshots unreadable (%s)" % type(exc).__name__}
+    out: Dict[str, Any] = {}
+    for r in rows:
+        out.setdefault(r["rules_version"] or "?", {})[r["shown_regime"] or "(none)"] = int(r["n"])
     return out

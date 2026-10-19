@@ -78,8 +78,22 @@ async def lifespan(app: FastAPI):
                 # rows, marked superseded -- so an unfiltered COUNT(*) reads them as "the seed
                 # has run" and the new Polygon seed never happens. The marker has to be
                 # honoured by the guard that decides whether to seed, not only by the reads.
+                # R-IV.1260(c): THE GUARD IS NOW VERSION-AWARE. It counted any
+                # non-superseded row, so with v1's 302 rows present the v2 seed would have
+                # been skipped and the card would have kept reading v1 while claiming v2 --
+                # the same shape as the bug this ruling is fixing. A version bump has to be
+                # able to seed itself.
+                from models.regime_classifier import RULES_VERSION as _RV
+                from jobs.regime_job import supersede_other_versions as _sup
+
                 _have = await _conn.fetchval(
-                    "SELECT COUNT(*) FROM regime_snapshots WHERE superseded = FALSE")
+                    "SELECT COUNT(*) FROM regime_snapshots "
+                    " WHERE superseded = FALSE AND rules_version = $1", _RV)
+                if not _have:
+                    # Old generations are marked superseded BEFORE the new rows land, so no
+                    # read ever sees two generations at once.
+                    _s = await _sup(_conn, _RV)
+                    logger.info("📌 Regime %s: superseded other versions %s", _RV, _s)
                 if _have:
                     logger.info("✅ Regime v1: %s current snapshot(s) stored, seed skipped",
                                 _have)
@@ -199,6 +213,19 @@ async def lifespan(app: FastAPI):
                 "  ADD COLUMN IF NOT EXISTS x4_result TEXT,"
                 "  ADD COLUMN IF NOT EXISTS cut_due DATE,"
                 "  ADD COLUMN IF NOT EXISTS cut_status TEXT")
+            # R-IV.1260(d): position_lot_closures.trade_date. NULLABLE, because the broker
+            # action date is not known for every historical closure and a NULL that says "not
+            # recorded" is the honest state -- a default of created_at would bake the very
+            # confusion this column exists to remove.
+            #
+            # WHY IT IS NEEDED: Abacus windows realized P&L on `created_at`, the row's WRITE
+            # time. The R-IV.760(c) backfill wrote old closures recently, so "since 2026-09-01"
+            # reported +3,535.22 where the trades that actually closed in that window sum to
+            # about -30. A write timestamp is not a trade date, and for a backfilled ledger it
+            # is not even close.
+            await conn.execute(
+                "ALTER TABLE position_lot_closures "
+                "  ADD COLUMN IF NOT EXISTS trade_date DATE")
             # R-IV.1233(b): position_watch_events, created AT STARTUP because
             # api/position_watch SELECTs it. Fifth instance of the same guard: a READ must
             # never wait on a writer having run. The DDL is the model's own constant, so
