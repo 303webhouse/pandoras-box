@@ -3247,7 +3247,22 @@
     const scoped = accts.filter((a) => a.in_scope === true);
     const scopeKnown = accts.some((a) => typeof a.in_scope === 'boolean');
     const counted = scopeKnown ? scoped : accts;
-    const total = counted.reduce((s, a) => s + (Number(a.balance) || 0), 0);
+    // R-IV.1262(b)2. The 0.00 this ruling names is `balance_stored`, which the route RETIRED and
+    // does not serve as current (R-IV.560) -- so no zero reaches this tile, and my R-IV.1255 report
+    // was wrong to imply one did. What the route DOES serve for FID 401A is a DERIVED 11,346.92
+    // carrying `balance_partial: true` and a reason saying 2 positions could not be valued, "so
+    // this figure is PARTIAL and understates the account" -- and this tile has been rendering that
+    // as a plain dollar figure. An understated balance read as whole is the same failure the
+    // ruling is about, so it is what gets fixed here.
+    //
+    // A row with NO balance renders "not recorded", never 0: a null is unknown and a zero is a
+    // claim that the account is empty.
+    const hasBal = (a) => a && a.balance != null;
+    const total = counted.filter(hasBal).reduce((s, a) => s + Number(a.balance), 0);
+    const balMissing = counted.filter((a) => !hasBal(a));
+    const balPartial = counted.filter((a) => hasBal(a) && a.balance_partial === true);
+    // A sum over partial parts is a FLOOR, exactly as the greeks below are. Same word, same mark.
+    const balFloor = balPartial.length > 0 || balMissing.length > 0;
     const day = pnl && pnl.daily ? pnl.daily : {};
 
 
@@ -3313,7 +3328,7 @@
     const conc = computeConcentration(positions);
 
     el.innerHTML = `
-      <div class="book-line"><span class="k">Balance</span><span class="v">${counted.length ? fmt$(total) : '--'}${scopeKnown ? '' : ' ' + vintageChip({ unknownLabel: 'scope unknown', unknownTitle: 'this backend does not report account scope; the total is every row' })}</span></div>
+      <div class="book-line"><span class="k">Balance</span><span class="v">${counted.filter(hasBal).length ? (balFloor ? '≥' : '') + fmt$(total) : 'not recorded'}${scopeKnown ? '' : ' ' + vintageChip({ unknownLabel: 'scope unknown', unknownTitle: 'this backend does not report account scope; the total is every row' })}${balFloor ? ' ' + vintageChip({ unknownLabel: 'floor only', unknownTitle: [balPartial.length ? balPartial.length + ' account(s) serve a PARTIAL balance: ' + balPartial.map((a) => (a.account_display || a.account_name) + ' — ' + (a.balance_reason || 'partial, no reason given')).join('; ') : '', balMissing.length ? balMissing.length + ' account(s) have no balance recorded at all, and are not in this sum' : ''].filter(Boolean).join('. ') }) : ''}</span></div>
       <div class="book-line"><span class="k">Day P&amp;L</span>${dayCell}</div>
       <div class="book-greeks">
         ${greekCell('Δ', 'delta', 0)}
@@ -3325,6 +3340,13 @@
       ${conc ? `<div class="conc-lamp ${conc.hot ? 'hot' : 'ok'}" data-gloss="CONC"><span>Concentration${conc.theme ? ' · ' + esc(conc.theme) : ''}</span><span>${conc.pct != null ? conc.pct + '%' : ''}${conc.skipped ? ' ' + vintageChip({ unknownLabel: conc.pct != null ? 'partial: ' + conc.skipped + ' of ' + conc.total + ' left out' : 'no figures: ' + conc.skipped + ' of ' + conc.total + ' left out', unknownTitle: conc.skipped + ' of ' + conc.total + ' positions have no dollar figure and are left out of this percentage; it covers only the rest, and stays partial until every row has one' }) : ''}</span></div>` : ''}
       <div class="acct-chips">${accts.filter((a) => a.in_scope !== false).map((a) => {
           const tag = esc(a.account_display || (a.broker || '').toUpperCase().slice(0, 4) || '');
+          // Three states, deliberately distinguished: a figure, a PARTIAL figure, and none.
+          if (a.balance == null) {
+            return `<span class="acct-chip acct-chip-none" title="The hub has no balance recorded for this account. Shown as not recorded rather than as $0.00, which would claim the account is empty.">${tag ? tag + ' ' : ''}not recorded</span>`;
+          }
+          if (a.balance_partial === true) {
+            return `<span class="acct-chip acct-chip-partial" title="${esc(a.balance_reason || 'The hub says this figure is partial.')}${a.balance_source ? ' Source: ' + esc(a.balance_source) + '.' : ''}">${tag ? tag + ' ' : ''}≥${fmt$(a.balance)}</span>`;
+          }
           return `<span class="acct-chip">${tag ? tag + ' ' : ''}${fmt$(a.balance)}</span>`;
         }).join('')}</div>`;
     applyGlossary(el);
@@ -5344,6 +5366,15 @@ function viewRow(r) {
     mark: bkNum(r.current_price),
     markState: MARK_STATE[String(r.mark_status || '').toUpperCase()] || 'unknown',
     markWhy: r.mark_reason || null, markAt: r.mark_checked_at || null,
+    // R-IV.1262(b)3 / R-IV.943(c): the mark's OWN instant and the hub's OWN verdict, both served
+    // now. `mark_as_of` is an exact UTC instant (never a day) and is on 3 of 29 rows;
+    // `price_updated_at` is on 23 and is the only age most rows have. `mark_checked_at` is when the
+    // job LOOKED, which is not when the price was good -- a row checked a minute ago can hold a
+    // four-day-old price, so it is kept but never used as the age.
+    markAsOf: r.mark_as_of || null,
+    priceAt: r.price_updated_at || null,
+    markIntegrity: r.mark_integrity ? String(r.mark_integrity).toLowerCase() : null,
+    markIntegrityWhy: r.mark_integrity_reason || null,
     // The hub's lot-derived figure. `mark − cost` on the page was wrong for every spread and
     // right by accident for single legs.
     pnl: bkNum(r.unrealized_pnl), pnlWhy: d.basis_reason || r.basis_incomplete_reason || null,
@@ -5499,16 +5530,73 @@ const X = (function () {
     if (p.qty == null) return `<span class="pp-amber" title="${esc(p.qtyWhy)}">unknown</span>`;
     return String(p.qty);
   }
+  // ── R-IV.1262(b)3 · EVERY MARK-DERIVED FIGURE SHOWS ITS MARK'S AGE ───────────────────────────
+  //
+  // The treatment drafted and parked under R-IV.943(e); its two blocking fields are served now.
+  // Three rules from that draft, each with its reason, so neither survives as a mere habit:
+  //
+  //   1. THE AGE SHOWS IN EVERY STATE, not only when something is wrong. An age that appears only
+  //      on a bad row teaches its absence to mean "fine", and then a field that stops arriving
+  //      looks like good news.
+  //   2. THE PAGE PICKS NO THRESHOLD. "Stale" is the hub's word (`mark_integrity`, else
+  //      `mark_status`); this file renders the verdict and the raw age and judges neither. The
+  //      26-hour line is the hub's, set in one backend place (R-IV.943(c)); the B2 gate's
+  //      post-close rule is a different question about the same price (Convention #38).
+  //   3. "AGE UNKNOWN" IS NOT "NO PRICE". The first says the hub could not tell us when, the
+  //      second that there is nothing to show. One phrase for both hides which happened.
+  //
+  // AND THE P&L CARRIES IT TOO, which is the point the draft was written for: the Book row has no
+  // mark column, so when the price is a day old the P&L is a day old and nothing on that row says
+  // so. The P&L here IS the mark-derived figure.
+  const MARK_VERDICT = { ok: 'verified', stale: 'unknown', wide: 'unknown', unknown: 'unknown' };
+  function markAge(p) {
+    // `mark_as_of` first because it is the authored instant for the mark itself; `price_updated_at`
+    // is the fallback and is NAMED as such, so a reader can tell which clock they are being shown.
+    const iso = p.markAsOf || p.priceAt || null;
+    const src = p.markAsOf ? 'mark' : (p.priceAt ? 'price' : null);
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return null;
+    const ms = Date.now() - t;
+    if (ms < 0) return { txt: 'timed ahead of now', iso: iso, src: src, odd: true };
+    const m = Math.floor(ms / 60000);
+    const txt = m < 1 ? 'seconds old' : m < 60 ? m + ' min old'
+      : m < 1440 ? Math.floor(m / 60) + ' h old' : Math.floor(m / 1440) + ' d old';
+    return { txt: txt, iso: iso, src: src, odd: false };
+  }
+  function ageChip(p) {
+    const a = markAge(p);
+    const verdict = p.markIntegrity ? (MARK_VERDICT[p.markIntegrity] || 'unknown')
+      : (p.markState === 'fresh' ? 'verified' : 'unknown');
+    const word = p.markIntegrity || (p.markState === 'fresh' ? null : p.markState);
+    if (!a) {
+      return ' ' + chip('unknown', 'age unknown',
+        'The hub served no time for this price, so how old it is cannot be stated. That is not the '
+        + 'same as having no price: this row HAS one.'
+        + (p.markIntegrityWhy ? ' The hub says: ' + p.markIntegrityWhy : ''));
+    }
+    const why = [
+      a.src === 'mark' ? 'From `mark_as_of`, the mark\'s own instant.'
+                       : 'From `price_updated_at` — this row carries no `mark_as_of`, so the age is the price\'s, not the mark\'s.',
+      'Timed ' + when(a.iso) + '.',
+      word ? 'The hub calls this mark ' + String(word).toUpperCase() + '.' : 'The hub calls this mark current.',
+      p.markIntegrityWhy || p.markWhy || '',
+      a.odd ? 'The hub timed it AHEAD of now, which is a clock disagreement, not a fresh price.' : '',
+    ].filter(Boolean).join(' ');
+    return ' ' + chip(a.odd ? 'unknown' : verdict, a.txt, why);
+  }
   function markCell(p) {
     if (p.mark == null) return `<span class="pp-amber" title="${esc(p.markWhy || 'the hub served no mark for this position')}">no mark</span>`;
     const v = usd(p.mark);
-    if (p.markState === 'stale') return `${v} ${chip('unknown', 'stale mark', 'The hub marks this price STALE' + (p.markWhy ? ': ' + p.markWhy : '') + ', so it cannot be read as current.')}`;
-    if (p.markState !== 'fresh') return `${v} ${chip('unknown', 'unconfirmed', 'The hub does not call this mark current' + (p.markWhy ? ': ' + p.markWhy : '') + '.')}`;
-    return v;
+    if (p.markState === 'stale') return `${v} ${chip('unknown', 'stale mark', 'The hub marks this price STALE' + (p.markWhy ? ': ' + p.markWhy : '') + ', so it cannot be read as current.')}${ageChip(p)}`;
+    if (p.markState !== 'fresh') return `${v} ${chip('unknown', 'unconfirmed', 'The hub does not call this mark current' + (p.markWhy ? ': ' + p.markWhy : '') + '.')}${ageChip(p)}`;
+    return v + ageChip(p);
   }
   function pnlCell(p) {
     if (p.pnl == null) return `<span class="pp-amber" title="${esc(p.pnlWhy || 'the hub derived no P&L for this row')}">no P&amp;L</span>`;
-    return `<span class="${tone(p.pnl)}">${usd(p.pnl, true)}</span>`;
+    // The age rides with the figure it qualifies. A P&L drawn from a four-day-old price is a
+    // four-day-old P&L, and this row is the only place the reader sees it.
+    return `<span class="${tone(p.pnl)}">${usd(p.pnl, true)}</span>${ageChip(p)}`;
   }
 
   // The sleeve line. There is NO ceiling anywhere in the schema, so there is no gauge: a bar

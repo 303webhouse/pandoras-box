@@ -282,6 +282,12 @@ INTERNAL_FLOWS = frozenset({"DIVIDEND", "INTEREST", "FEE", "TRADE_DEBIT", "TRADE
 # and a "rough" label next to it does not stop it being read as one.
 SHARPE_MIN_N = 30
 
+# R-IV.1262(b)1: the stats that are WINDOWED off the closed census, and so carry a date basis.
+# `loss_vs_risk` is withheld and carries no figure at all, so it is not in here: a basis on a
+# withheld tile would suggest there is a measurement behind it.
+LIVE_PERIOD_STATS = frozenset({"net_profit", "win_rate", "expectancy", "profit_factor",
+                               "avg_win_loss", "expected_return"})
+
 
 def _census_where(first: Optional[date], last: date) -> tuple:
     """(clause, params) for the ONE census predicate. $1 is `last`, $2 is `first`.
@@ -651,6 +657,74 @@ async def _load_equity(pool) -> dict:
     return {"accounts": out}
 
 
+# R-IV.1262(b)1 — EVERY PERIOD FIGURE ON THIS PAGE SAYS WHAT DATE IT WAS WINDOWED ON.
+#
+# `position_lot_closures` HAS NO TRADE DATE. Its only timestamp is `created_at`, the instant the
+# reconciliation WROTE the row, and that is what branch 1 of the realized formula windows on. The
+# whole ledger was written across ten days in 2026-09-23..10-15 carrying exits back to 2025-12-11,
+# so a window containing those days contains almost the entire book's realized history: measured
+# 2026-10-19, Abacus read +3,535.22 "since 2026-09-01" where the period's own trades were roughly
+# flat, and FID ROTH's sign flipped (R-IV.1255(a)).
+#
+# THE BASIS IS MIXED, and saying only "written, not closed" would be its own half-truth: branch 2
+# (rows with no closures at all) windows on `exit_date`, which IS the trade's own day. Both halves
+# are stated, with the count of rows where the two disagree, so a reader can see how far the figure
+# can be out rather than being told to distrust it in the abstract.
+#
+# This is a LABEL, not a fix. The fix is BUILD's `trade_date` column (R-IV.1260(d)) and POSITIONS'
+# backfill (R-IV.1263); when it lands, both branches window on the same real-world day and rows
+# without one appear as "date unknown", outside every period total (R-IV.1262(c)).
+_DATE_BASIS_SQL = """
+    SELECT COUNT(*) AS n_rows,
+           COUNT(*) FILTER (WHERE exit_day IS NOT NULL AND write_day <> exit_day) AS differing,
+           COUNT(*) FILTER (WHERE exit_day IS NOT NULL AND write_day = exit_day) AS agreeing,
+           COUNT(*) FILTER (WHERE exit_day IS NULL) AS no_exit_day,
+           MIN(exit_day) AS earliest_exit, MIN(write_day) AS first_write, MAX(write_day) AS last_write
+      FROM (SELECT {w} AS write_day, {e} AS exit_day
+              FROM position_lot_closures c
+              JOIN unified_positions p ON p.position_id = c.position_id
+             WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF') q
+""".format(w=_day_sql("c.created_at"), e=_day_sql("p.exit_date"))
+
+
+async def _load_date_basis(pool) -> dict:
+    """What date the period figures were windowed on, measured rather than asserted."""
+    r = await pool.fetchrow(_DATE_BASIS_SQL)
+    n = int((r["n_rows"] if r else 0) or 0)
+    differing = int((r["differing"] if r else 0) or 0)
+    agreeing = int((r["agreeing"] if r else 0) or 0)
+    no_exit = int((r["no_exit_day"] if r else 0) or 0)
+
+    def _d(v):
+        v = _day_of(v) if v is not None else None
+        return v.isoformat() if v is not None else None
+
+    return {
+        "label": "by the day each closure row was WRITTEN, not the day the trade closed",
+        "trade_date_exists": False,
+        "column": "position_lot_closures.created_at",
+        "mixed": True,
+        "mixed_detail": ("A row with closures is placed by the day its closure was WRITTEN. A row "
+                         "with no closures is placed by its own `exit_date`, which is the trade's "
+                         "day. The two halves of this page's realized total are therefore on "
+                         "different bases."),
+        "closure_rows": n,
+        "rows_differing": differing,
+        "rows_agreeing": agreeing,
+        "rows_no_exit_date": no_exit,
+        "earliest_exit_in_ledger": _d(r["earliest_exit"] if r else None),
+        "written_from": _d(r["first_write"] if r else None),
+        "written_to": _d(r["last_write"] if r else None),
+        "meaning": ("`position_lot_closures` carries no trade date -- only `created_at`, the instant "
+                    "the reconciliation wrote the row. So a period figure here is 'what was written "
+                    "in this period', which is not 'what was traded in it'. On %d of %d closure rows "
+                    "the two days differ." % (differing, n)),
+        "fix": ("BUILD's `trade_date` column (R-IV.1260(d)) and POSITIONS' backfill (R-IV.1263). "
+                "Then every period figure windows on the trade's own day, and rows without one are "
+                "shown as 'date unknown' outside the totals (R-IV.1262(c))."),
+    }
+
+
 def _realized_money_sql(first: Optional[date], last: date) -> tuple:
     """(branch-1 SQL, branch-2 SQL, params) for the realized TOTAL — R-IV.761(b).
 
@@ -961,7 +1035,15 @@ async def abacus_summary(
     # window are the two ways this page could still mislead while being technically live.
     live = await _load_book_live(pool, live_first, live_last)
     span = live["span"]
+    # R-IV.1262(b)1: ONE measurement, attached to every period figure below. A basis stated once at
+    # the top of a payload is a basis the reader of a single tile never sees.
+    basis = await _load_date_basis(pool)
     for st in out["stats"]:
+        # Only the figures that are WINDOWED carry it: a rate computed over the closed census is a
+        # period figure, a fixture tile is not, and stamping the basis on a mock would say the mock
+        # had been measured.
+        if st["key"] in LIVE_PERIOD_STATS:
+            st["date_basis"] = basis
         if st["key"] == "net_profit":
             st["value"] = book["net_profit"]
             st["coverage"] = book["coverage"]
@@ -1037,6 +1119,7 @@ async def abacus_summary(
     from models.accounts import CANONICAL_ACCOUNTS as _CANON, display_name as _disp
     out["scope"] = {"label": " · ".join([_disp(a) or a for a in _CANON]),
                     "closed_positions": live["total"], "accounts": len(_CANON), **live_stamp}
+    out["date_basis"] = basis
 
     # The four breakdowns, live. `discipline` is left on the fixture and says so: on these closed
     # rows `time_stop` is recorded 1 time, `stop_type` 2 and `invalidation` 2, so every line of it
@@ -1066,6 +1149,8 @@ async def abacus_summary(
             if b["key"] == "hold":
                 b["note"] += (" %d row(s) could not be placed: %d closed before they opened, %d carry "
                               "no usable pair of dates." % (_lost, _ub["negative_hold"], _ub["no_dates"]))
+    for b in live_bd:
+        b["date_basis"] = basis
     out["breakdowns"] = live_bd + [b for b in out["breakdowns"] if b["key"] == "discipline"]
     for b in out["breakdowns"]:
         if b["key"] == "discipline":
@@ -1118,6 +1203,7 @@ async def abacus_summary(
     # rate's n. A trade whose basis is unknown has a P&L but no return, so the two counts differ
     # and a rate that borrowed the other's n would be quoting a sample it was not drawn from.
     out["stats"].append({
+        "date_basis": basis,
         "key": "expected_return", "label": "Expected return per trade", "format": "pct",
         "value": book["expected_return"], "n": book["expected_return_n"],
         "coverage": book["coverage"],
@@ -1131,6 +1217,7 @@ async def abacus_summary(
     # Per account, beside the combined figures. The combined row is POOLED over every counted
     # trade, so it is weighted by trade count rather than being an average of the three rates.
     out["accounts"] = book["accounts"]
+    out["accounts_date_basis"] = basis
     out["combined_is_pooled"] = book["combined_is_pooled"]
     # R-IV.761(b) requires the READ to return these, not merely to compute them. The loader
     # produced both and this route selects keys by name, so without these two lines they were
