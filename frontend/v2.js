@@ -4933,9 +4933,429 @@
       </div>`;
   }
 
+  // ── NOTABLES v2 · the MOCK step ─────────────────────────────────────────────
+  //
+  // R-IV.1259(i): behind `?notables=1`, MOCK-labelled cards, for Nick to see IN PLACE. The
+  // approved mocks (Main 3bfb1943…, States d78757ee…, both verified by hash) are standalone
+  // pages; this renders their card set inside River's own lanes, which is the only way to
+  // judge whether a card belongs where (d) puts it.
+  //
+  // PLACEMENT IS THE RULING'S, NOT THE MOCK'S (d): ticker cards go in WATCH under "NOTABLE",
+  // market-wide cards go in CONTEXT, and NOTHING goes in Actionable. A held position stays in
+  // Your book, which is why the footer says so on the face of the block rather than in a note.
+  //
+  // EVERY STRING COMES FROM `frontend/assets/notables/notables_mock.v1.json`, which the Python
+  // lint reads too (`services/notables.py`). One author for the text: a card worded here and
+  // checked there would be two texts wearing one name, and the unchecked one is the one that
+  // ships an instruction.
+  //
+  // EVERY FIGURE IS BRACKETED `[MOCK …]`. The approved Main mock printed plain numbers on its
+  // VALUE MOVED card; plain numbers on a page served from the live hub are the one thing a
+  // reader could take for a live read, and (i) asks for MOCK-labelled cards. Fidelity to the
+  // mock's typography, not to its unlabelled figures.
+  //
+  // NOTHING IS WRITTEN AND NOTHING IS SENT. (h) puts the two logs in the deploy that first
+  // writes to them, so neither table exists yet; the three buttons are inert and say so on
+  // hover.
+  const NOTABLES_MOCK = (() => {
+    try { return new URLSearchParams(location.search).get('notables') === '1'; }
+    catch (_) { return false; }
+  })();
+
+  // INJECTED, not added to v2.css. That stylesheet is pinned INDEPENDENTLY by v2.html,
+  // stater.html and abacus.html and the three values have already diverged, so a rule added
+  // there has to be shipped three times or it reaches a stale cache on the pages that were
+  // missed. A rule the renderer carries ships with the renderer's own pin.
+  const NB_CSS = `
+.nb-wrap{display:flex;flex-direction:column;gap:14px;padding:12px 0 4px}
+.nb-badge{font-size:10px;letter-spacing:1.4px;color:#f5a524;border:1px solid #f5a524;border-radius:999px;padding:3px 8px;white-space:nowrap}
+.nb-card{background:#0b1122;border:1px solid #1b2745;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.nb-card.nb-loud{border-color:#14b8a6;box-shadow:0 0 0 3px rgba(20,184,166,.12)}
+.nb-card.nb-aged{opacity:.5}
+.nb-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.nb-sym{font-size:26px;font-weight:700;letter-spacing:.5px}
+.nb-move{font-size:13px;font-weight:700;border-radius:6px;padding:2px 7px;background:#1b2745;color:#e2e8f0}
+.nb-move.up{background:#7CFF6B;color:#050810}
+.nb-move.down{background:#ff5c33;color:#050810}
+.nb-big{font-size:26px;font-weight:700}
+.nb-big.up{color:#7CFF6B}
+.nb-big.down{color:#ff5c33}
+.nb-kind{font-size:11px;letter-spacing:1.5px}
+.nb-kind.up{color:#7CFF6B}
+.nb-kind.down{color:#ff5c33}
+.nb-kind.muted{color:#70829d}
+.nb-when{font-size:11px;color:#8b98ad;margin-left:auto}
+.nb-sub{font-size:12px;color:#8b98ad}
+.nb-chips{display:flex;gap:6px;flex-wrap:wrap}
+.nb-chip{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10px;letter-spacing:1.2px;padding:3px 7px;border-radius:999px;border:1px solid #223258;color:#70829d}
+.nb-chip.on{border-color:#14b8a6;color:#5eead4;background:rgba(20,184,166,.12)}
+.nb-note{display:flex;align-items:center;gap:10px;border-radius:8px;padding:8px 10px;font-size:13px}
+.nb-note .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.nb-note.amber{background:rgba(245,165,36,.08);border:1px solid rgba(245,165,36,.45);color:#f5c46a}
+.nb-note.amber .dot{background:#f5a524}
+.nb-note.red{background:rgba(255,92,51,.08);border:1px solid rgba(255,92,51,.45)}
+.nb-note.red .dot{background:#ff5c33}
+.nb-note.teal{background:#0d152b}
+.nb-note.teal .dot{background:#14b8a6}
+.nb-note .why{font-size:11px;color:#8b98ad}
+.nb-cols{display:flex;gap:6px}
+.nb-col{flex:1 1 0;display:flex;flex-direction:column;gap:4px}
+.nb-col h4{margin:0;font-size:10px;letter-spacing:1px;color:#70829d;font-weight:400}
+.nb-bar{display:flex;gap:4px;align-items:center;font-size:11px}
+.nb-bar i{height:8px;border-radius:2px;display:block}
+.nb-bar i.up{background:#7CFF6B}
+.nb-bar i.down{background:#ff5c33}
+.nb-vp{position:relative;height:92px;background:#0d152b;border-radius:8px;overflow:hidden}
+.nb-vp .lab{position:absolute;font-size:10px}
+.nb-against{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.nb-against b{font-size:10px;letter-spacing:1px;color:#70829d;font-weight:400}
+.nb-against span{font-size:12px;color:#c8d3e3;border:1px dashed #223258;border-radius:6px;padding:3px 7px}
+.nb-stale{font-size:12px;color:#8b98ad}
+.nb-strip{border-top:1px solid #1b2745;padding-top:12px;display:flex;flex-direction:column;gap:10px}
+.nb-strip-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.nb-ivr{font-size:10px;letter-spacing:1px;border-radius:999px;padding:2px 8px;margin-left:auto;white-space:nowrap}
+.nb-ivr.rich{color:#ff5c33;border:1px solid rgba(255,92,51,.55)}
+.nb-ivr.neutral{color:#8b98ad;border:1px solid #223258}
+.nb-rungs{position:relative;height:118px}
+.nb-rungs .axis{position:absolute;left:4%;right:4%;top:15px;height:2px;background:#223258}
+.nb-rungs .em{position:absolute;left:4%;width:46%;top:9px;height:14px;background:rgba(20,184,166,.18);border-radius:3px}
+.nb-rungs .tail{position:absolute;right:4%;top:15px;height:2px;background:repeating-linear-gradient(90deg,#70829d 0 3px,transparent 3px 7px)}
+.nb-rungs .now{position:absolute;left:4%;top:4px;width:2px;height:24px;background:#e2e8f0}
+.nb-rungs .nowlab{position:absolute;left:4%;top:32px;font-size:10px;color:#8b98ad}
+.nb-rungs .taillab{position:absolute;left:87%;top:0;font-size:9px;letter-spacing:1px;color:#70829d}
+.nb-rungs .tick{position:absolute;top:8px;width:2px;height:16px;background:#5eead4}
+.nb-rungs .tick.far{background:#8b98ad}
+.nb-rung{position:absolute;top:30px;transform:translateX(-50%);text-align:center;display:flex;flex-direction:column;gap:2px;white-space:nowrap}
+.nb-rung .m{font-size:10px;color:#70829d}
+.nb-rung .q{font-size:12px}
+.nb-rung .o{font-size:11px;color:#c8d3e3}
+.nb-rung .b{font-size:10px;color:#8b98ad}
+.nb-rung.far .q,.nb-rung.far .o{color:#8b98ad}
+.nb-rung.far .b{color:#70829d}
+.nb-foot{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px}
+.nb-foot .lite{display:flex;gap:6px;align-items:center}
+.nb-foot .lite i{width:8px;height:8px;border-radius:50%;display:block}
+.nb-foot .lite i.green{background:#7CFF6B}
+.nb-foot .lite i.amber{background:#f5a524}
+.nb-foot .lite i.red{background:#ff5c33}
+.nb-foot .unknown{color:#f5c46a}
+.nb-compact{display:flex;align-items:center;gap:10px;background:#0d152b;border-radius:8px;padding:8px 10px;flex-wrap:wrap;font-size:12px}
+.nb-btns{display:flex;gap:8px}
+.nb-btn{font:inherit;font-size:12px;color:#8b98ad;background:transparent;border:1px solid #223258;border-radius:6px;padding:0 12px;height:32px;cursor:not-allowed}
+.nb-tally{display:flex;align-items:center;gap:10px;font-size:11px}
+.nb-tally .up{color:#7CFF6B}
+.nb-tally .down{color:#ff5c33}
+.nb-tally .meter{flex-grow:1;height:6px;border-radius:3px;display:flex;overflow:hidden;background:#1b2745}
+.nb-tally .meter i{display:block}
+.nb-tally .meter i.up{background:#7CFF6B}
+.nb-tally .meter i.down{background:#ff5c33}
+.nb-tally .cap{font-size:10px;color:#70829d}
+.nb-quiet{background:#0b1122;border:1px dashed #223258;border-radius:10px;padding:22px 14px;display:flex;flex-direction:column;gap:6px;align-items:center;text-align:center}
+.nb-quiet b{letter-spacing:2px;color:#70829d;font-size:13px;font-weight:400}
+.nb-capline{background:#0b1122;border:1px solid #1b2745;border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:10px;font-size:12px}
+.nb-caption{font-size:10px;letter-spacing:2px;color:#70829d;padding-top:6px}
+.nb-tilefoot{font-size:10px;letter-spacing:1px;color:#70829d;text-align:center;padding-top:4px}
+.nb-strips{display:flex;flex-wrap:wrap;gap:8px}
+.nb-ctxstrip{background:#0b1122;border:1px solid #1b2745;border-radius:8px;padding:8px 10px;display:flex;gap:8px;align-items:center;font-size:12px}
+.nb-ctxstrip b{font-size:10px;letter-spacing:1px;color:#70829d;font-weight:400}
+.nb-ctxstrip .up{color:#7CFF6B}
+.nb-ctxstrip .down{color:#ff5c33}
+`;
+
+  function nbStyle() {
+    if (document.getElementById('nb-css')) return;
+    const st = document.createElement('style');
+    st.id = 'nb-css';
+    st.textContent = NB_CSS;
+    document.head.appendChild(st);
+  }
+
+  // THE ONE HELPER THAT EMITS A TICKER. (b) requires 26px mono bold on every card type and
+  // every state; six separate strings would have to agree, and one of them eventually would
+  // not. One helper makes the requirement structural.
+  function nbSym(t) { return '<span class="mono nb-sym">' + esc(t || '') + '</span>'; }
+
+  let _nbMock = null;
+  function nbLoad() {
+    if (_nbMock) return Promise.resolve(_nbMock);
+    return fetch('/assets/notables/notables_mock.v1.json', { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { _nbMock = j; return j; })
+      .catch(() => null);
+  }
+
+  const nbDirClass = (d) => (d === 'up' ? 'up' : d === 'down' ? 'down' : d === 'muted' ? 'muted' : '');
+
+  function nbChips(chips) {
+    if (!chips || !chips.length) return '';
+    return '<div class="nb-chips">'
+      + chips.map((c) => '<span class="nb-chip' + (c.on ? ' on' : '') + '">' + esc(c.label) + '</span>').join('')
+      + '</div>';
+  }
+
+  function nbAgainst(list) {
+    if (!list || !list.length) return '';
+    return '<div class="nb-against"><b>AGAINST</b>'
+      + list.map((a) => '<span>' + esc(a) + '</span>').join('') + '</div>';
+  }
+
+  function nbStale(text) {
+    if (!text) return '';
+    return '<div class="nb-stale">' + esc(text)
+      + ' · <i>a fact about this card, not a stop</i></div>';
+  }
+
+  function nbButtons(labels) {
+    if (!labels || !labels.length) return '';
+    return '<div class="nb-btns">' + labels.map((l) =>
+      '<button class="nb-btn" type="button" disabled title="MOCK — this button does nothing yet'
+      + '; the log it would write does not exist until the deploy that writes to it">'
+      + esc(l) + '</button>').join('') + '</div>';
+  }
+
+  function nbNote(n) {
+    if (!n) return '';
+    return '<div class="nb-note ' + esc(n.tone || 'teal') + '"><span class="dot"></span>'
+      + '<span>' + esc(n.text || '') + '</span>'
+      + (n.detail ? '<span class="why">' + esc(n.detail) + '</span>' : '') + '</div>';
+  }
+
+  function nbLoudCard(c, badge) {
+    const d = nbDirClass(c.dir);
+    const col = (title, rows, dir) => '<div class="nb-col"><h4>' + esc(title) + '</h4>'
+      + (rows || []).map((r) => '<div class="nb-bar"><i class="' + dir + '" style="width:'
+        + Math.max(3, Math.min(100, Number(r.w) || 3)) + 'px"></i><span class="mono">'
+        + esc(r.label) + '</span></div>').join('') + '</div>';
+    const why = c.why && c.why.state === 'known'
+      ? nbNote({ tone: 'teal', text: c.why.text })
+      : nbNote({ tone: 'amber', text: c.why ? c.why.text : '' });
+    return '<div class="nb-card nb-loud">'
+      + '<div class="nb-head"><span class="mono nb-kind" style="color:#5eead4">LOUD MOVE</span>'
+      + (c.pinned ? '<span class="mono nb-sub">' + esc(c.pinned) + '</span>' : '')
+      + (badge ? '<span class="mono nb-badge">' + esc(badge) + '</span>' : '')
+      + '<span class="mono nb-when">' + esc(c.time || '') + '</span></div>'
+      + '<div class="nb-head">' + nbSym(c.ticker)
+      + '<span class="mono nb-big ' + d + '">' + esc(c.move || '') + '</span>'
+      + '<span class="mono nb-sub">' + esc(c.scale || '') + '</span></div>'
+      + (c.leading || c.lagging ? '<div class="nb-cols">'
+          + col('LEADING', c.leading, 'up') + col('LAGGING', c.lagging, 'down') + '</div>' : '')
+      + why + '</div>';
+  }
+
+  function nbRungs(strip) {
+    const rungs = strip.rungs || [];
+    return '<div class="nb-rungs">'
+      + '<div class="axis"></div><div class="em"></div><div class="tail"></div>'
+      + '<div class="now"></div><div class="mono nowlab">now</div>'
+      + '<div class="mono taillab">' + esc(strip.tail_label || 'TAIL ONLY') + '</div>'
+      + rungs.map((r) => '<div class="tick' + (r.tone === 'far' ? ' far' : '')
+          + '" style="left:' + Number(r.at) + '%"></div>').join('')
+      + rungs.map((r) => '<div class="nb-rung mono' + (r.tone === 'far' ? ' far' : '')
+          + '" style="left:' + Number(r.at) + '%">'
+          + '<span class="m">' + esc(r.mult) + '</span>'
+          + '<span class="q">' + esc(r.quote) + '</span>'
+          + '<span class="o">' + esc(r.odds) + '</span>'
+          + '<span class="b">' + esc(r.be) + '</span></div>').join('')
+      + '</div>';
+  }
+
+  function nbStrip(strip) {
+    if (!strip) return '';
+    const ivr = strip.iv_rank || {};
+    const liq = strip.liquidity || {};
+    const earn = strip.earnings || {};
+    return '<div class="nb-strip">'
+      + '<div class="nb-strip-head mono"><span>' + esc(strip.expiry || '') + '</span>'
+      + '<span style="color:#8b98ad">·</span><span>' + esc(strip.em || '') + '</span>'
+      + (ivr.label ? '<span class="nb-ivr ' + esc(ivr.tone || 'neutral') + '">'
+          + esc(ivr.label) + '</span>' : '') + '</div>'
+      + nbRungs(strip)
+      + '<div class="nb-foot">'
+      + (liq.text ? '<span class="lite"><i class="' + esc(liq.light || 'green') + '"></i>'
+          + esc(liq.text) + '</span>' : '')
+      + (strip.wait ? '<span>' + esc(strip.wait) + '</span>' : '')
+      + (earn.text ? '<span class="lite' + (earn.tone === 'unknown' ? ' unknown' : '') + '">'
+          + (earn.tone === 'unknown' ? '<i class="amber"></i>' : '') + esc(earn.text) + '</span>' : '')
+      + '</div>'
+      + (strip.structure ? '<div class="nb-stale">' + esc(strip.structure) + '</div>' : '')
+      + '</div>';
+  }
+
+  function nbCompact(cs) {
+    if (!cs) return '';
+    const liq = cs.liquidity || {};
+    const ivr = cs.iv_rank || {};
+    const earn = cs.earnings || {};
+    return '<div class="nb-compact">'
+      + '<span class="mono">' + esc(cs.expiry || '') + '</span>'
+      + (liq.text ? '<span class="lite" style="display:flex;gap:5px;align-items:center">'
+          + '<i class="' + esc(liq.light || 'green') + '" style="width:8px;height:8px;border-radius:50%;display:block"></i>'
+          + esc(liq.text) + '</span>' : '')
+      + (ivr.label ? '<span class="mono nb-ivr ' + esc(ivr.tone || 'neutral')
+          + '" style="margin-left:0">' + esc(ivr.label) + '</span>' : '')
+      + (earn.text ? '<span style="color:#8b98ad">' + esc(earn.text) + '</span>' : '')
+      + (cs.macro ? '<span style="color:#f5c46a">' + esc(cs.macro) + '</span>' : '')
+      + (cs.more ? '<button class="nb-btn" type="button" disabled style="height:28px;margin-left:auto"'
+          + ' title="MOCK — the strike table is not wired yet">' + esc(cs.more) + '</button>' : '')
+      + '</div>';
+  }
+
+  function nbValueCard(c, badge) {
+    const L = c.levels || {};
+    return '<div class="nb-card">'
+      + '<div class="nb-head">' + nbSym(c.ticker)
+      + '<span class="mono nb-move ' + nbDirClass(c.dir) + '">' + esc(c.move || '') + '</span>'
+      + '<span class="mono nb-kind ' + nbDirClass(c.dir) + '">' + esc(c.headline || '') + '</span>'
+      + (badge ? '<span class="mono nb-badge">' + esc(badge) + '</span>' : '')
+      + '<span class="mono nb-when">' + esc(c.time || '') + '</span></div>'
+      + nbChips((c.chips || []).concat(c.pythia ? [{ label: c.pythia, on: false }] : []))
+      + '<div class="nb-vp">'
+      + '<svg width="100%" height="92" viewBox="0 0 528 92" preserveAspectRatio="none" aria-hidden="true">'
+      + '<line x1="0" y1="72" x2="528" y2="72" stroke="#70829d" stroke-dasharray="3 4" stroke-width="1"></line>'
+      + '<rect x="0" y="34" width="528" height="16" fill="rgba(20,184,166,.10)"></rect>'
+      + '<line x1="0" y1="42" x2="528" y2="42" stroke="#14b8a6" stroke-width="1"></line>'
+      + '<polyline points="' + esc(c.spark || '') + '" fill="none" stroke="#7CFF6B" stroke-width="2"></polyline>'
+      + '</svg>'
+      + '<span class="mono lab" style="left:8px;top:74px;color:#8b98ad">' + esc(L.prior_edge || '') + '</span>'
+      + '<span class="mono lab" style="left:8px;top:30px;color:#5eead4">' + esc(L.value || '') + '</span>'
+      + '<span class="mono lab" style="right:8px;top:4px;font-size:11px;color:#e2e8f0">' + esc(L.last || '') + '</span>'
+      + '</div>'
+      + nbAgainst(c.against) + nbStale(c.stale) + nbStrip(c.strip) + nbButtons(c.buttons)
+      + '</div>';
+  }
+
+  function nbFailedCard(c, badge) {
+    return '<div class="nb-card">'
+      + '<div class="nb-head">' + nbSym(c.ticker)
+      + '<span class="mono nb-move ' + nbDirClass(c.dir) + '">' + esc(c.move || '') + '</span>'
+      + '<span class="mono nb-kind down">' + esc(c.headline || '') + '</span>'
+      + (badge ? '<span class="mono nb-badge">' + esc(badge) + '</span>' : '')
+      + '<span class="mono nb-when">' + esc(c.time || '') + '</span></div>'
+      + nbChips(c.chips)
+      + '<div style="display:flex;align-items:center;gap:12px">'
+      + '<svg width="140" height="44" viewBox="0 0 140 44" aria-hidden="true">'
+      + '<line x1="0" y1="14" x2="140" y2="14" stroke="#14b8a6" stroke-dasharray="3 3"></line>'
+      + '<polyline points="' + esc(c.spark || '') + '" fill="none" stroke="#ff5c33" stroke-width="2"></polyline>'
+      + '</svg><div style="font-size:13px;line-height:1.45">' + esc(c.body || '') + '</div></div>'
+      + nbAgainst(c.against) + nbStale(c.stale) + nbCompact(c.compact_strip)
+      + '</div>';
+  }
+
+  function nbTrendCard(c, badge) {
+    const t = c.transition || {};
+    return '<div class="nb-card">'
+      + '<div class="nb-head">' + nbSym(c.ticker)
+      + '<span class="mono nb-move">' + esc(c.move || '') + '</span>'
+      + '<span class="mono nb-kind down">' + esc(c.headline || '') + '</span>'
+      + (badge ? '<span class="mono nb-badge">' + esc(badge) + '</span>' : '')
+      + '<span class="mono nb-when">' + esc(c.time || '') + '</span></div>'
+      + nbChips(c.chips)
+      + '<div class="nb-head mono" style="font-size:12px">'
+      + '<span style="border:1px solid #223258;border-radius:6px;padding:4px 8px">' + esc(t.from || '') + '</span>'
+      + '<span style="color:#8b98ad">→</span>'
+      + '<span style="color:#ff5c33;border:1px solid rgba(255,92,51,.6);border-radius:6px;padding:4px 8px">'
+      + esc(t.to || '') + '</span>'
+      + (t.detail || []).map((d) => '<span style="color:#8b98ad">' + esc(d) + '</span>').join('')
+      + '</div>'
+      + nbAgainst(c.against) + nbStale(c.stale) + nbCompact(c.compact_strip)
+      + '</div>';
+  }
+
+  function nbStateCard(s, badge) {
+    const head = '<div class="nb-head">'
+      + (s.ticker ? nbSym(s.ticker) : '')
+      + (s.move ? '<span class="mono nb-big ' + nbDirClass(s.dir) + '">' + esc(s.move) + '</span>' : '')
+      + (s.headline ? '<span class="mono nb-kind ' + nbDirClass(s.dir) + '">' + esc(s.headline) + '</span>' : '')
+      + (badge ? '<span class="mono nb-badge">' + esc(badge) + '</span>' : '')
+      + (s.time ? '<span class="mono nb-when">' + esc(s.time) + '</span>' : '')
+      + '</div>';
+    if (s.kind === 'state_quiet') {
+      return '<div class="nb-quiet"><b class="mono">' + esc(s.headline || '') + '</b>'
+        + '<div class="nb-sub">' + esc(s.body || '') + '</div></div>';
+    }
+    if (s.kind === 'state_cap') {
+      return '<div class="nb-capline"><span class="mono">' + esc(s.headline || '') + '</span>'
+        + '<span class="nb-sub">' + esc(s.body || '') + '</span></div>';
+    }
+    if (s.kind === 'state_loud_known') {
+      return nbLoudCard(s, badge);
+    }
+    return '<div class="nb-card' + (s.kind === 'state_aging' ? ' nb-aged' : '') + '">'
+      + head + nbChips(s.chips) + nbNote(s.notice)
+      + (s.body ? '<div class="nb-sub">' + esc(s.body) + '</div>' : '')
+      + '</div>';
+  }
+
+  function nbTickerCard(c, badge) {
+    if (c.kind === 'value_moved') return nbValueCard(c, badge);
+    if (c.kind === 'failed_break') return nbFailedCard(c, badge);
+    if (c.kind === 'trend_change') return nbTrendCard(c, badge);
+    return '';
+  }
+
+  function nbTally(m) {
+    const t = m.tally || {}, cap = m.cap || {};
+    const up = Number(t.up) || 0, down = Number(t.down) || 0, tot = up + down || 1;
+    return '<div class="nb-tally mono"><span class="up">Up ' + up + '</span>'
+      + '<span class="meter"><i class="up" style="width:' + ((up / tot) * 100).toFixed(0) + '%"></i>'
+      + '<i class="down" style="width:' + ((down / tot) * 100).toFixed(0) + '%"></i></span>'
+      + '<span class="down">Down ' + down + '</span>'
+      + '<span class="cap">' + esc((cap.shown != null ? cap.shown : '?') + ' of '
+          + (cap.max != null ? cap.max : '?') + ' today · time order only, never ranked') + '</span>'
+      + '</div>';
+  }
+
+  // The WATCH half: ticker cards under "NOTABLE", plus the states as a collapsed reference
+  // sheet. The states are a DESIGN reference, not today's cards, so they sit behind a summary
+  // rather than in the stream where they would read as six more notables.
+  function nbWatchBlock(m) {
+    if (!m) return '';
+    const badge = m.badge || '';
+    const cards = (m.watch || []).map((c) => nbTickerCard(c, badge)).filter(Boolean).join('');
+    const states = (m.states || []).map((s) =>
+      '<div class="mono nb-caption">' + esc(s.caption || '') + '</div>' + nbStateCard(s, badge)
+    ).join('');
+    return '<div class="nb-wrap">'
+      + '<div class="nb-head"><span class="mono nb-kind" style="color:#14b8a6;letter-spacing:2px">NOTABLE</span>'
+      + '<span class="mono nb-badge">' + esc(badge) + '</span>'
+      + '<span class="mono nb-when">' + esc(m.stamp || '') + '</span></div>'
+      + nbTally(m)
+      + (cards || '<div class="nb-sub">no mock ticker card in the fixture</div>')
+      + '<details class="nb-card" style="gap:6px"><summary class="mono nb-sub" style="cursor:pointer">'
+      + 'CARD STATES · design reference, not today’s cards</summary>' + states + '</details>'
+      + '<div class="mono nb-tilefoot">' + esc(m.footer || '') + '</div>'
+      + '</div>';
+  }
+
+  // The CONTEXT half: the pinned LOUD MOVE and the market-wide strips. (c)1 pins it at the top
+  // of Context and keeps it out of the cap; (c)5 makes rotation a Context LINE, not a card.
+  function nbContextBlock(m) {
+    if (!m) return '';
+    const ctx = m.context || {};
+    const strips = (ctx.strips || []).map((s) => '<div class="nb-ctxstrip mono"><b>'
+      + esc(s.label) + '</b>'
+      + (s.items || []).map((it, i) => '<span class="'
+          + esc(((s.dirs || [])[i]) || '') + '">' + esc(it) + '</span>').join('')
+      + '</div>').join('');
+    return '<div class="nb-wrap">'
+      + (ctx.loud_move ? nbLoudCard(ctx.loud_move, m.badge) : '')
+      + (strips ? '<div class="nb-strips">' + strips + '</div>' : '')
+      + '</div>';
+  }
+  // ── end notables ────────────────────────────────────────────────────────────
+
   function renderLanes() {
     const el = $('riverLanes'); if (!el) return;
     const now = Date.now();
+    // R-IV.1259(i): the mock cards, in place, behind `?notables=1`. The fixture is fetched
+    // ONCE and the lanes are repainted when it lands, so the first paint is never blocked on
+    // it -- and a fetch that fails leaves the lanes exactly as they are today rather than
+    // replacing them with an error. `nbLoad` resolves null on failure for that reason.
+    if (NOTABLES_MOCK) {
+      nbStyle();
+      if (!_nbMock) { nbLoad().then((m) => { if (m) renderLanes(); }); }
+    }
+    const nbWatch = NOTABLES_MOCK && _nbMock ? nbWatchBlock(_nbMock) : '';
+    const nbCtx = NOTABLES_MOCK && _nbMock ? nbContextBlock(_nbMock) : '';
     const notices = noticeRowsHtml(now);
     const d = _laneData;
     if (!d) { el.innerHTML = notices + '<div class="rl-seam">The idea feed has not been read yet this session.</div>'; return; }
@@ -4994,9 +5414,12 @@
           { key: 'book', countUnknown: !d.answered, note: 'contradictions first',
             countTitle: d.answered ? 'Ideas touching an open position. One signal can touch two positions, and each is its own row.'
                                    : 'Unknown, not zero: the idea feed did not answer this cycle.' })
-      + laneShell('Watch', watch.length, watch.length
+      // NOTABLE goes ABOVE the graded rows, not inside them (R-IV.1259(d)): a notable is not a
+      // signal with a grade, and interleaving the two would make the lane's "grade shown" note
+      // a claim about cards that have none.
+      + laneShell('Watch', watch.length, nbWatch + (watch.length
           ? watch.map((s) => laneSigRow(s, { grade: true })).join('')
-          : empty('No roster setup below A fired this cycle.'), { key: 'watch', note: 'grade shown; gates later' })
+          : empty('No roster setup below A fired this cycle.')), { key: 'watch', note: 'grade shown; gates later' })
       + laneShell('Unproven', unproven.length, circeRow + (unproven.length
           // A display-mapped class keeps its name even when it never grades (shadow, river-only);
           // only a class the roster does not know surfaces under its raw DB identifier.
@@ -5004,9 +5427,12 @@
           : empty('No shadow or non-roster class fired this cycle.')),
           // Open on an error: a row shown inside a collapsed lane is a row still hidden.
           { key: 'unproven', collapsed: true, open: bad.length > 0, note: 'no measured expectancy' })
-      + laneShell('Context', ctx.length, ctx.length
+      // The LOUD MOVE is PINNED at the top of Context (R-IV.1259(c)1), which is why the mock
+      // block is prepended rather than appended: pinned means first, and a card placed after
+      // the stream would be pinned in name only.
+      + laneShell('Context', ctx.length, nbCtx + (ctx.length
           ? ctx.map((i) => `<div class="rl-row" data-rid="${esc(i.id)}"><div class="rl-main"><span class="rl-k">${esc(i.type)}</span>${i.text}</div><div class="rl-sub">${riverTime(i.ts) ? `<span class="rl-time">${esc(riverTime(i.ts))}</span>` : vintageChip({ unknownLabel: 'time unknown', unknownTitle: 'This item carries no time of its own, so none is shown.' })}</div></div>`).join('')
-          : empty('Nothing in context yet.'), { key: 'context', note: 'not trades' })
+          : empty('Nothing in context yet.')), { key: 'context', note: 'not trades' })
       + `<div class="rl-foot">${esc(foot)}</div>`;
     applyGlossary(el);
   }
