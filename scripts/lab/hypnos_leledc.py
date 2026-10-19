@@ -155,9 +155,7 @@ def beta_adj(adj, spy_adj):
     var = rm.where(both).rolling(BETA_WIN, min_periods=BETA_MIN).var()
     n = both.astype(int).rolling(BETA_WIN).sum()
     b = (cov / var).shift(1)                       # window ends the session BEFORE the signal
-    flagged = ~(n.shift(1) >= BETA_MIN) | b.isna()
-    b = b.where(~flagged, 1.0)
-    return 0.67 * b + 0.33, flagged
+    return S.guard_beta(b, n.shift(1), BETA_MIN)   # R-IV.1245(c): the value guard (raw <= 0 or > 4 -> 1)
 
 
 # ── the value area (§5.4, approximate) ────────────────────────────────────────────────────
@@ -719,6 +717,22 @@ def selftest():
     except AssertionError:
         reuse = True
     check("e2e: a second run into the same directory is refused", reuse)
+    # 13b. R-IV.1245(c): the beta VALUE guard
+    braw = pd.Series([-13.3, 0.0, 0.5, 1.2, 4.0, 4.01, 70.7, np.nan])
+    nv = pd.Series([60, 60, 60, 60, 60, 60, 60, 60])
+    ba, fl = S.guard_beta(braw, nv)
+    check("beta guard: raw <= 0 or > 4 or missing -> beta 1, flagged",
+          list(fl) == [True, True, False, False, False, True, True, True]
+          and all(abs(ba[i] - 1.0) < 1e-12 for i in (0, 1, 5, 6, 7)))
+    check("beta guard: 0 < raw <= 4 -> 0.67 raw + 0.33, not flagged",
+          abs(ba[3] - (0.67 * 1.2 + 0.33)) < 1e-12 and abs(ba[4] - (0.67 * 4 + 0.33)) < 1e-12)
+    ba2, fl2 = S.guard_beta(pd.Series([1.2]), pd.Series([49]))
+    check("beta guard: < 50 valid sessions still flags (skill §3.3)", bool(fl2[0]) and abs(ba2[0] - 1.0) < 1e-12)
+    rs1 = pd.Series(np.r_[0.0, np.tile([0.01, -0.01], 40)])
+    a1 = (1 + rs1).cumprod()
+    tk = (1 + (-20.0) * rs1).cumprod().clip(lower=1e-6)
+    bb, ff = beta_adj(pd.Series(tk.values), pd.Series(a1.values))
+    check("beta_adj: a ticker with beta -20 vs SPY is flagged and uses beta 1", bool(ff.iloc[-1]) and abs(bb.iloc[-1] - 1.0) < 1e-12)
     # 14. v2: 4h aggregation, the drop rule, the bar-6 exit, end to end (synthetic 1h only)
     ts = pd.date_range("2024-01-01 00:00", periods=4 * 6 * 400, freq="h", tz="UTC")
     rng2 = np.random.default_rng(21)
