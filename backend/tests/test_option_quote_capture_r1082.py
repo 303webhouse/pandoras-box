@@ -329,8 +329,15 @@ def test_status_reports_missed_slots_not_just_the_last_one():
 def test_the_carve_is_budget_neutral():
     from integrations.uw_governor import (
         QUOTAS, DAILY_BUDGET, QUOTA_SAFETY_BUFFER)
+    # R-IV.1265(d) MOVED THE TOTAL: `notables_strip` (50) was funded by cutting the
+    # safety buffer 2,000 -> 1,950, so the table now sums to 26,050. The literal 26,000
+    # was hard-coded in FIVE separate test files, each written by a different carve to
+    # say "this sum must not move" -- so the first ruled move broke all five at once.
+    # The INVARIANT was never the literal; it is that the table fills the budget minus
+    # the buffer exactly. Asserted that way now, so the next ruled change to either
+    # number does not require editing five files that were never about the number.
     total = sum(q for q, _t in QUOTAS.values())
-    assert total == DAILY_BUDGET - QUOTA_SAFETY_BUFFER == 26000
+    assert total == DAILY_BUDGET - QUOTA_SAFETY_BUFFER
 
 
 def test_the_new_tag_was_funded_from_flow_per_expiry():

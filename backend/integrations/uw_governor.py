@@ -226,7 +226,13 @@ def describe_block(sentinel) -> str:
 # (`GET /api/uw/health/by_caller`); the mechanism is the durable part, the
 # numbers are knobs. Tags match the `caller=` strings passed at each call site
 # (see the ohlc_* split in get_ohlc).
-QUOTA_SAFETY_BUFFER = 2000  # headroom under the HUB budget, not the account limit
+# R-IV.1265(d): CUT FROM 2,000 TO 1,950 to fund `notables_strip` at 50/day. This table already
+# summed to exactly DAILY_BUDGET - buffer, so a new tag can only come from a reallocation or
+# from the buffer, and the ruling chose the buffer. The arithmetic is asserted by
+# `test_hub_quota_table_fits_inside_the_hub_budget`, not left to this comment -- the previous
+# version of this line carried an arithmetic comment that survived two edits to the numbers it
+# described, which is why the assertion exists.
+QUOTA_SAFETY_BUFFER = 1950  # headroom under the HUB budget, not the account limit
 
 # ── RETUNED 2026-09-14 AGAINST MEASURED DEMAND (R-IV.379(c)) ────────────
 # The previous table called itself "STARTING VALUES to tune against the first
@@ -299,6 +305,17 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     "flow_recent": (400, TIER_FOREGROUND),        # Flow Radar + wh_accumulation
     "market_tide": (300, TIER_FOREGROUND),
     "chart_indicators": (560, TIER_FOREGROUND),
+    # R-IV.1265(d): the NOTABLES option strip, 50/day, carved from the safety buffer
+    # (2,000 -> 1,950) rather than from another tag -- the ruling's choice, and the only one
+    # available without reopening a measured sizing.
+    #
+    # STANDARD, NOT FOREGROUND, deliberately. FOREGROUND is "live trading -- protected, never
+    # starved", and the tier exists to keep marks and quotes alive when the budget tightens.
+    # The NOTABLES strip is DISPLAY ONLY (#42): nothing gates, caps or journals on it, so it
+    # must not be able to compete with the reads that mark the book. It is also capped a second
+    # time in `models/notables_strip.py`, because enforcement here is a MODE and a cap that
+    # holds only while a global switch is in one position is not a cap.
+    "notables_strip": (50, TIER_STANDARD),
     # ── STANDARD (scanners / factors) ──
     # ── crypto bars: the rename R-IV.380(b) said was owed — DONE, R-IV.624(b) ──
     # `outcome_resolver` named a JOB, not an endpoint, violating the endpoint-grain

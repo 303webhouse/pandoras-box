@@ -5056,8 +5056,12 @@
 .nb-strip{border-top:1px solid #1b2745;padding-top:12px;display:flex;flex-direction:column;gap:10px}
 .nb-strip-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
 .nb-ivr{font-size:10px;letter-spacing:1px;border-radius:999px;padding:2px 8px;margin-left:auto;white-space:nowrap}
-.nb-ivr.rich{color:#ff5c33;border:1px solid rgba(255,92,51,.55)}
-.nb-ivr.neutral{color:#8b98ad;border:1px solid #223258}
+/* R-IV.1265(c): the bands are IV LOW / IV MID / IV HIGH. rich and neutral were
+   (f)'s words and are gone with it; models/notables_strip.py owns the edges.
+   And no backtick may appear in here: this block is a TEMPLATE LITERAL, so one ends it. */
+.nb-ivr.low{color:#7CFF6B;border:1px solid rgba(124,255,107,.5)}
+.nb-ivr.mid{color:#8b98ad;border:1px solid #223258}
+.nb-ivr.high{color:#ff5c33;border:1px solid rgba(255,92,51,.55)}
 .nb-rungs{position:relative;height:118px}
 .nb-rungs .axis{position:absolute;left:4%;right:4%;top:15px;height:2px;background:#223258}
 .nb-rungs .em{position:absolute;left:4%;width:46%;top:9px;height:14px;background:rgba(20,184,166,.18);border-radius:3px}
@@ -5208,7 +5212,7 @@
     return '<div class="nb-strip">'
       + '<div class="nb-strip-head mono"><span>' + esc(strip.expiry || '') + '</span>'
       + '<span style="color:#8b98ad">·</span><span>' + esc(strip.em || '') + '</span>'
-      + (ivr.label ? '<span class="nb-ivr ' + esc(ivr.tone || 'neutral') + '">'
+      + (ivr.label ? '<span class="nb-ivr ' + esc(ivr.tone || '') + '">'
           + esc(ivr.label) + '</span>' : '') + '</div>'
       + nbRungs(strip)
       + '<div class="nb-foot">'
@@ -5232,7 +5236,7 @@
       + (liq.text ? '<span class="lite" style="display:flex;gap:5px;align-items:center">'
           + '<i class="' + esc(liq.light || 'green') + '" style="width:8px;height:8px;border-radius:50%;display:block"></i>'
           + esc(liq.text) + '</span>' : '')
-      + (ivr.label ? '<span class="mono nb-ivr ' + esc(ivr.tone || 'neutral')
+      + (ivr.label ? '<span class="mono nb-ivr ' + esc(ivr.tone || '')
           + '" style="margin-left:0">' + esc(ivr.label) + '</span>' : '')
       + (earn.text ? '<span style="color:#8b98ad">' + esc(earn.text) + '</span>' : '')
       + (cs.macro ? '<span style="color:#f5c46a">' + esc(cs.macro) + '</span>' : '')
