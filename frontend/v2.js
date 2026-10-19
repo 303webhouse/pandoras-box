@@ -1049,6 +1049,51 @@
     return '<div class="rd-na">unavailable — ' + esc(b.reason || 'no reason given') + '</div>';
   }
 
+  // §6 (R-IV.1246(b)5). The PYTHIA snapshot, as stored. The BRACKET COUNTER is withheld
+  // rather than greyed: board 8 asked for it greyed under 10 sessions, but the hub keeps only
+  // the latest snapshot per ticker, so there is no count to grey and a "1 of 10" would be a
+  // number about nothing.
+  function auctionHtml(b) {
+    if (!b || !b.available) return naHtml(b, 'auction state');
+    const lvl = (k, v) => v == null ? '' : '<div class="kv"><span class="k">' + esc(k)
+      + '</span><span class="v">' + Number(v).toFixed(2) + '</span></div>';
+    return '<div class="rd-big"><b>' + esc(b.where || '—') + '</b></div>'
+      + '<div class="rd-note" title="' + esc(b.where_basis || '') + '">'
+      + esc(b.where_basis || '') + '</div>'
+      + lvl('VAH', b.vah) + lvl('POC', b.poc) + lvl('VAL', b.val)
+      + lvl('IB high', b.ib_high) + lvl('IB low', b.ib_low)
+      + (b.va_migration ? '<div class="kv"><span class="k">VA migration</span>'
+        + '<span class="v">' + esc(b.va_migration) + '</span></div>' : '')
+      + (b.volume_quality ? '<div class="kv"><span class="k">Volume quality</span>'
+        + '<span class="v">' + esc(b.volume_quality) + '</span></div>' : '')
+      + '<div class="kv"><span class="k">Bracket counter</span>'
+      + '<span class="v rd-na-inline" title="'
+      + esc((b.bracket_counter || {}).reason || '') + '">unavailable</span></div>'
+      + '<div class="rd-note rd-dim">' + esc(b.basis || '') + '</div>';
+  }
+
+  // §8 (R-IV.1246(b)6). A lamp is shown ONLY where a feed exists. An unlit overlay lamp would
+  // read as "checked, nothing firing" — a claim — where "no feed" is the truth, and the rules
+  // file's own words are quoted for it. The kill lamp comes from the card's existing read, not
+  // a second one: two readers of the kill switch could disagree about whether it is armed.
+  function lampsHtml(b) {
+    if (!b) return naHtml(b, 'lamps');
+    const v = _lastKillView;
+    const killRow = v
+      ? '<div class="kv"><span class="k">Kill switch</span><span class="v'
+        + (v.state === 'armed' ? ' lamp-armed pulse-vermilion' : '')
+        + (v.state === 'unknown' ? ' rd-na-inline' : '') + '">'
+        + esc(v.state === 'armed' ? ('ARMED · ' + (v.label || ''))
+          : (v.state === 'unknown' ? 'unreadable' : 'not armed')) + '</span></div>'
+      : '<div class="kv"><span class="k">Kill switch</span>'
+        + '<span class="v rd-na-inline">not read yet</span></div>';
+    return killRow
+      + '<div class="kv"><span class="k">Overlay lamps</span>'
+      + '<span class="v rd-na-inline" title="' + esc((b.overlays || {}).reason || '')
+      + '">unavailable — ' + esc((b.overlays || {}).reason || '') + '</span></div>'
+      + '<div class="rd-note rd-dim">' + esc(b.basis || '') + '</div>';
+  }
+
   function creditHtml(b) {
     if (!b || !b.available) return naHtml(b, 'HY OAS');
     const chg = b.change_20d_bp;
@@ -1236,19 +1281,19 @@
       + sec('4', 'LEADERSHIP · WHO IS CARRYING THE INDEX')
       + leadershipHtml(_rsSections.leadership)
       + sec('5', 'RATES & CROSS-ASSET') + ratesHtml(_rsSections.rates)
-      + sec('6', 'AUCTION STATE') + mock('PYTHIA feed in B8; bracket counter greyed <10 sessions')
+      + sec('6', 'AUCTION STATE') + auctionHtml(_rsSections.auction)
       + sec('7', 'REGIME RIBBON') + ribbonHtml(m.ribbon)
-      + sec('8', 'LAMPS') + mock('overlay + kill-switch lamps in B8')
+      + sec('8', 'LAMPS') + lampsHtml(_rsSections.lamps)
       // THE FOOTER COUNTS, rather than asserting. It said "the sections above are
       // placeholders" while section 7 was live -- a caption that stops being true the moment
       // a section is wired, which is the caption-lies-about-its-field fault. It now names
       // what is wired and what is not, so wiring section 8 changes the count and not this
       // sentence.
-      + '<div class="rd-foot">WIRED: 1 (flip triggers), 2 (credit), 3 (breadth + Zweig '
-      + 'proxy), 4 (leadership), 5 (rates), 7 (ribbon). STILL PLACEHOLDERS: 6, 8 — each '
-      + 'is '
-      + 'wired in B8 one at a time, and its source, terms and a sample row are reported '
-      + 'first (R-IV.1209(e)).</div>';
+      // R-IV.1246(b): the "Phase A placeholders" footer is GONE, because none are left. All
+      // eight sections are wired; where a source has no feed the SECTION says so in its own
+      // row, which is where a reader is looking. A standing footer about placeholders would
+      // now be the stale caption this one replaced.
+      + '';
 
     $('drawerBackdrop').classList.add('open');
     d.classList.add('open');
