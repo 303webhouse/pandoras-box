@@ -1918,3 +1918,13 @@ body.is-mobile-grid .tile-grip { display: none !important; }
     font-size: 8px; letter-spacing: .08em; margin-left: 5px; padding: 0 4px;
     border: 1px solid var(--amber); color: var(--amber); border-radius: 2px;
 }
+
+/* B8 section 7: the regime ribbon. One square per settled session, oldest at the left. */
+.rb-strip { display: flex; gap: 2px; flex-wrap: wrap; margin: 6px 0 4px; }
+.rb-sq { width: 9px; height: 16px; border-radius: 2px; display: inline-block; }
+/* A session with no stored label is a GAP, not a neutral square (see ribbonHtml). */
+.rb-gap { background: transparent; border: 1px dashed var(--text-3); }
+.rb-flip { outline: 1px solid var(--text); outline-offset: 1px; }
+.rb-blocked { opacity: .45; }
+.rd-note { font-size: 10px; color: var(--text-2); }
+.rd-dim { color: var(--text-3); margin-top: 2px; }

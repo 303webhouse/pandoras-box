@@ -1008,6 +1008,37 @@
    * in the synthesis's own vote order; B8 wires them one at a time, and each will report its
    * source and a sample row before it does.
    */
+  // B8 section 7 (R-IV.1239(h)). The last 40 SETTLED sessions, from the stored snapshots the
+  // drawer's payload already carries. One square per session, flips marked.
+  //
+  // A SESSION WITH NO LABEL DRAWS A GAP, not a neutral square: the strip's job is to show how
+  // long the current label has held, and a blank filled in with "neutral" would read as a
+  // calm stretch that was really a hole in the record.
+  function ribbonHtml(rb) {
+    if (!rb || !rb.sessions || !rb.sessions.length) {
+      return '<div class="rd-mock">no stored sessions'
+        + (rb && rb.error ? ' (' + esc(rb.error) + ')' : '') + '</div>';
+    }
+    const sq = rb.sessions.map((s) => {
+      if (!s.label) {
+        return '<span class="rb-sq rb-gap" title="' + esc(s.as_of || '')
+          + ' · no label stored"></span>';
+      }
+      const lean = leanOf(s.label);
+      return '<span class="rb-sq' + (s.flipped ? ' rb-flip' : '')
+        + (s.blocked ? ' rb-blocked' : '') + '" style="background:' + leanColor(lean)
+        + '" title="' + esc(s.as_of || '') + ' · ' + esc(s.label)
+        + (s.flipped ? ' · FLIPPED here' : '') + (s.blocked ? ' · blocked' : '') + '"></span>';
+    }).join('');
+    const flips = rb.sessions.filter((s) => s.flipped).length;
+    return '<div class="rb-strip">' + sq + '</div>'
+      + '<div class="rd-note">' + esc(rb.count) + ' of ' + esc(rb.asked_for)
+      + ' sessions · ' + flips + ' flip' + (flips === 1 ? '' : 's')
+      + (rb.short_history ? ' · SHORT HISTORY' : '') + '</div>'
+      + '<div class="rd-note rd-dim" title="' + esc(rb.basis || '') + '">'
+      + esc(rb.basis || '') + '</div>';
+  }
+
   function openRegimeDetails(src) {
     closePopup();
     const d = $('drawer');
@@ -1045,11 +1076,16 @@
       + mock('RSP/SPY, IWM/SPY, XLY/XLP, SMH/SPY, copper/gold in B8')
       + sec('5', 'RATES & CROSS-ASSET') + mock('DFII10, T10YIE, MOVE in B8')
       + sec('6', 'AUCTION STATE') + mock('PYTHIA feed in B8; bracket counter greyed <10 sessions')
-      + sec('7', 'REGIME RIBBON') + mock('last 40 sessions, from the stored snapshots, in B8')
+      + sec('7', 'REGIME RIBBON') + ribbonHtml(m.ribbon)
       + sec('8', 'LAMPS') + mock('overlay + kill-switch lamps in B8')
-      + '<div class="rd-foot">Phase A: the sections above are placeholders. Each is wired in '
-      + 'B8 one at a time, and its source, terms and a sample row are reported first '
-      + '(R-IV.1209(e)).</div>';
+      // THE FOOTER COUNTS, rather than asserting. It said "the sections above are
+      // placeholders" while section 7 was live -- a caption that stops being true the moment
+      // a section is wired, which is the caption-lies-about-its-field fault. It now names
+      // what is wired and what is not, so wiring section 8 changes the count and not this
+      // sentence.
+      + '<div class="rd-foot">WIRED: 7 (ribbon). STILL PLACEHOLDERS: 1-6, 8 — each is '
+      + 'wired in B8 one at a time, and its source, terms and a sample row are reported '
+      + 'first (R-IV.1209(e)).</div>';
 
     $('drawerBackdrop').classList.add('open');
     d.classList.add('open');
