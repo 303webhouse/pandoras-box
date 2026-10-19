@@ -200,6 +200,9 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # drawer already has this payload, and a second route for one
             # field is a second thing to keep in step.
             ribbon_block = await regime_ribbon(conn, rules_version)
+            from jobs.regime_job import label_counts_by_version as _lcbv
+
+            counts_by_version = await _lcbv(conn)
             # R-IV.1198(c)/(e): the standing notes, readable rather than only recorded.
             notes = await audit_notes(conn)
             # R-IV.1203(b)2: where the re-seed changed a label, as a list of dates.
@@ -262,6 +265,11 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "seed_run": seeded_run,
         "flip_history": flips,
         "ribbon": ribbon_block,
+        # R-IV.1260(c) asks for v2's label counts BESIDE v1's. Served rather than
+        # queried by hand: R-IV.552(b) says a route exists so nobody needs SQL, and a
+        # figure a ruling asks to be reported should be readable from the thing that
+        # produced it.
+        "label_counts_by_version": counts_by_version,
         # B8 section 1 (R-IV.1243(e)). Built from the rules file and this same
         # snapshot, so the conditions and the counters cannot disagree with the
         # classifier that produced the label.
