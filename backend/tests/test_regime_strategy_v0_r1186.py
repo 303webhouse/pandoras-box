@@ -468,7 +468,14 @@ def test_v0_TOUCHES_NO_KILL_SWITCH_NO_CAPS_NO_JOURNAL():
     # payload since R-IV.1203, and a variable called Mock holding live data is the
     # caption-lies-about-its-field fault.
     i = js.index("let _rsLive = null")
-    j = js.index("function initGrid()", i)
+    # SCOPE, AND THIS IS THE THIRD TIME A GUARD HERE HAS GROWN WITH THE FILE. The end anchor
+    # was `function initGrid()`, which sits ~570 lines later and had swallowed the WHOLE A1
+    # Agora block -- so when B4 gave the Event Strip a live route, this guard failed on
+    # `apiFetch` and `/api/event-strip`, neither of which is anywhere near the regime card.
+    # The window now ends at the first line of the A1 block's own code, which is where the
+    # regime card's code actually ends. A guard whose scope is a distance rather than a
+    # boundary reports the wrong file's code as an offence.
+    j = js.index("const AGORA_FIXTURES", i)
     module = js[i:j]
     # The read ban moved under R-IV.1195(b); the WRITE ban and the kill-switch ban did not.
     for banned in ("method: 'POST'", 'method: "POST"', "XMLHttpRequest", "apiFetch",

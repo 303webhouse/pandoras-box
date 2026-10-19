@@ -1596,8 +1596,12 @@
     crowd: '/assets/agora/crowd_mock.json',
     fear: '/assets/agora/fear_mock.json',
     bookStress: '/assets/agora/book_stress_mock.json',
-    eventStrip: '/assets/agora/event_strip_mock.json',
   };
+  // B4: the Event Strip is LIVE and no longer reads a fixture. The other three tiles are
+  // still mocks and still say so through their own `_mock` flag — which is why the chip is
+  // driven by the payload rather than the markup: these four tiles go live one at a time, and
+  // a chip hard-coded per tile would be wrong for four different weeks.
+  const AGORA_LIVE = { eventStrip: '/api/event-strip' };
   const _agora = { crowd: null, fear: null, bookStress: null, eventStrip: null };
 
   // The lean -> colour scale of R-IV.1209(d)2, as CSS custom-property expressions so the
@@ -1634,6 +1638,18 @@
       } catch (_) {
         // Left null. Each renderer says the fixture did not load rather than drawing an
         // empty shell, which would read as "no crowding" / "no events" \u2014 a claim.
+        _agora[k] = null;
+      }
+    }));
+    // And the live ones, through apiFetch. A failed live read is ALSO left null and the
+    // renderer says so: it must never fall back to the fixture, because a mock served where
+    // live data belongs looks exactly like the real thing.
+    await Promise.all(Object.keys(AGORA_LIVE).map(async (k) => {
+      try {
+        const r = await apiFetch(AGORA_LIVE[k]);
+        const d = r.ok ? await r.json() : null;
+        _agora[k] = (d && !d.error) ? d : null;
+      } catch (_) {
         _agora[k] = null;
       }
     }));
