@@ -231,8 +231,15 @@ def auction_block(mp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     price = _f(d.get("price"))
     vah, val, poc = _f(d.get("vah")), _f(d.get("val")), _f(d.get("poc"))
     where, basis = _where_in_value(price, vah, val, poc)
+    # THE AUCTION STATE *IS* THE SECTION, so a row that cannot produce one is not "available".
+    # Measured live: the stored PYTHIA snapshot for SPY exists but carries no price, VAH or
+    # VAL, so the first version of this returned `available: True` with a blank headline — a
+    # section reporting itself present while having nothing to say, which is the
+    # caption-lies-about-its-field fault at the level of a whole block. Whatever IS recorded
+    # is still returned below, so a partial snapshot is not hidden either.
     return {
-        "available": True,
+        "available": where is not None,
+        "reason": None if where is not None else basis,
         "where": where,
         "where_basis": basis,
         "price": price, "vah": vah, "val": val, "poc": poc,
