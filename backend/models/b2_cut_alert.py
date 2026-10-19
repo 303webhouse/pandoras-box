@@ -269,22 +269,30 @@ def _structure_parts(row: Dict[str, Any]) -> Tuple[str, ...]:
     return tuple(p.strip() for p in raw.split("+") if p.strip())
 
 
-#: R-IV.1226(d)2 — DISPLAY TEXT ONLY, no logic change. Every refusal below that turns on the
-#: two orientation sources appends this clause, because WITHOUT IT A BOOK-WIDE CAUSE READS AS A
-#: FACT ABOUT ONE POSITION. The old wording ("it is not recorded", "held until
-#: position_orientation exists") invited exactly the wrong next action: go and look at that row,
-#: or wait for a column that is not coming. QUERY found source 1 NULL on every open row, and no
-#: migration anywhere creates source 2, so no row in the book can be resolved by either today.
+#: DISPLAY TEXT ONLY, no logic change — R-IV.1226(d)2, reworded under R-IV.1233(c)1. Every
+#: refusal below that turns on the two orientation sources appends this clause.
 #:
-#: One constant rather than the same sentence written at four call sites — four copies drift,
-#: and the drift would be invisible because each one is only ever read one row at a time.
-#: It names its source and its as-of in the same sentence as the claim (Convention #37, as
-#: clarified by R-IV.1224(g)).
+#: THE WORDING HAS NOW BEEN WRONG IN BOTH DIRECTIONS, which is the whole lesson of this string.
+#: First it said "it is not recorded" / "held until position_orientation exists" — a book-wide
+#: cause written as a fact about one position, inviting the reader to inspect that row or to
+#: wait for a column that was not coming. R-IV.1226(d)2 replaced that with "NULL on EVERY open
+#: row", which was true when QUERY measured it and GOES FALSE THE MOMENT POSITIONS WRITES THE
+#: FIRST VALUE — and TA-205 (R-IV.1232) has now ruled that POSITIONS does exactly that. A
+#: refusal that asserts a census is a refusal that starts lying without anyone touching it.
+#:
+#: So the CLAIM is now per-row and always checkable, and the census appears only as context
+#: carrying its own instant AND its expiry (Convention #37 as clarified by R-IV.1224(g): source,
+#: universe and as-of in the same sentence as the figure). Neither half can go stale: the first
+#: is a fact about the row in hand, the second is dated and says what supersedes it.
+#:
+#: One constant rather than the same sentence at four call sites — four copies drift, and the
+#: drift would be invisible because each one is only ever read one row at a time.
 BOOK_WIDE = (
-    "orientation_at_entry is NULL on EVERY open row (QUERY's census, 2026-10-18) and "
-    "position_orientation is created by no migration, so neither source can resolve ANY row "
-    "today: this is a BOOK-WIDE gap awaiting a TA-161 spec, not a fact about this position, "
-    "and orientation is UNDETERMINED so the row is held"
+    "this row records no orientation_at_entry, and position_orientation is created by no "
+    "migration, so neither source can resolve it and orientation is UNDETERMINED: the row is "
+    "held. For context, not as a claim about today: orientation_at_entry was NULL on every "
+    "open row at QUERY's census of 2026-10-18, and TA-205 (R-IV.1232) has since put POSITIONS "
+    "in charge of writing it, so that census expires on its first write"
 )
 
 
