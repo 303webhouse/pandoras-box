@@ -207,3 +207,60 @@ def test_THE_DETECTOR_RUN_REPORTS_EVERY_EVENT_A_SESSION_PRODUCES():
     assert [e["event"] for e in faded] == ["GAP_FADED"]
     # A fired side is not re-reported, and the fade path is unaffected by it.
     assert job.detect([100.2, 101.5], 101.0, 99.0, fired=["above"], position=pos) == []
+
+
+# ── 6. the deferred imports must resolve ──────────────────────────────────
+
+def test_EVERY_DEFERRED_IMPORT_IN_B2S_LIVE_PATH_RESOLVES():
+    """A DEFERRED IMPORT THAT DOES NOT EXIST FAILS AT REQUEST TIME, NOT AT BOOT.
+
+    This test exists because of a real outage: `api/position_watch` imported
+    `database.connection`, which is not a module -- the real one is
+    `database.postgres_client`. The app booted healthy, every other route worked, and
+    /api/position-watch returned a bare 500 with no log line of its own, because the failing
+    line was the single line outside the handler's own except block. py_compile cannot catch
+    it, the module imports fine, and no unit test touched the handler.
+
+    So: import every name these two modules defer, by hand, here.
+    """
+    import importlib
+
+    deferred = [
+        ("database.postgres_client", "get_postgres_client"),
+        ("jobs.position_watch_job", "load_book"),
+        ("jobs.regime_job", "latest_with_diff"),
+        ("integrations.ntfy_push", "send"),
+        ("models.position_watch", "bar_is_closed"),
+        ("models.position_watch_events", "DDL"),
+    ]
+    for mod, name in deferred:
+        m = importlib.import_module(mod)
+        assert hasattr(m, name), "%s.%s does not exist" % (mod, name)
+
+    # And the source must not have grown a NEW deferred import that this list does not cover.
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    known = {m for m, _ in deferred} | {"yfinance", "zoneinfo", "httpx"}
+    for rel in ("api/position_watch.py", "jobs/position_watch_job.py",
+                "integrations/yf_15m.py"):
+        tree = ast.parse(root.joinpath(rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.ImportFrom) and inner.module:
+                    # `from integrations import ntfy_push` names the PACKAGE as the module and
+                    # the submodule as an alias, so both spellings are accepted -- the first
+                    # version of this check read only `.module` and flagged a resolvable
+                    # import, which is a guard that cries wolf and gets relaxed next time.
+                    forms = {inner.module} | {"%s.%s" % (inner.module, a.name)
+                                              for a in inner.names}
+                    assert forms & known, (
+                        "%s defers `from %s import %s`, which this test does not resolve"
+                        % (rel, inner.module, ", ".join(a.name for a in inner.names)))
+                elif isinstance(inner, ast.Import):
+                    for a in inner.names:
+                        assert a.name.split(".")[0] in known, (
+                            "%s defers `import %s`, untested" % (rel, a.name))
