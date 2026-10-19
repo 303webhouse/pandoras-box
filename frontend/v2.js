@@ -4999,8 +4999,12 @@
   // NOTHING IS WRITTEN AND NOTHING IS SENT. (h) puts the two logs in the deploy that first
   // writes to them, so neither table exists yet; the three buttons are inert and say so on
   // hover.
+  // R-IV.1259(i) step 2: `?notables=1` is LIVE and `?notables=mock` renders the approved card
+  // set. `NOTABLES_MOCK` therefore means "render the fixture", which is now the mock value
+  // only -- the name is kept because the fixture renderers below are all named for it, and a
+  // rename across twelve functions buys nothing a comment does not.
   const NOTABLES_MOCK = (() => {
-    try { return new URLSearchParams(location.search).get('notables') === '1'; }
+    try { return new URLSearchParams(location.search).get('notables') === 'mock'; }
     catch (_) { return false; }
   })();
 
@@ -5388,6 +5392,186 @@
       + '</div>';
   }
   // ── end notables ────────────────────────────────────────────────────────────
+  // ── NOTABLES: the LIVE read ─────────────────────────────────────────────────
+  //
+  // R-IV.1259(i): "Then wire it live behind the same flag." So `?notables=1` is now LIVE and
+  // `?notables=mock` still renders the approved card set — the mock stays reachable because it
+  // is what Nick approved and what the layout is judged against, and deleting it would leave
+  // nothing to compare a live card to.
+  //
+  // ONE RENDERER, TWO SOURCES. The live payload's cards are mapped into the SAME shapes the
+  // fixture uses, rather than given renderers of their own: two renderers for one card would
+  // drift, and the one that drifted would be the live one — the only one anybody acts on.
+  const NOTABLES_SOURCE = (() => {
+    try {
+      const v = new URLSearchParams(location.search).get('notables');
+      return v === '1' ? 'live' : (v === 'mock' ? 'mock' : null);
+    } catch (_) { return null; }
+  })();
+
+  let _nbLiveData = null;
+  function nbLoadLive() {
+    if (_nbLiveData) return Promise.resolve(_nbLiveData);
+    return fetch('/api/stable/notables', { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { _nbLiveData = j; return j; })
+      .catch(() => null);
+  }
+
+  const nbPct = (v) => (v == null ? '' : (v > 0 ? '+' : '') + Number(v).toFixed(1) + '%');
+  const nbArrow = (d) => (d === 'up' ? ' ▲' : d === 'down' ? ' ▼' : '');
+
+  // The chips a live card lights. The fixture spells all four and marks which are on; a live
+  // card carries only the ones that fired, so the full set is reconstructed here and the rest
+  // are shown OFF rather than omitted — a missing chip and an unlit chip say different things.
+  const NB_CHIP_SET = ['STRUCTURE', 'FLOW', 'TREND', 'SECTOR'];
+  function nbLiveChips(card) {
+    const on = new Set((card.reasons || []).map((r) => String(r).toUpperCase()));
+    return NB_CHIP_SET.map((label) => ({ label, on: on.has(label) }));
+  }
+
+  // EVERY LIVE FIGURE IS REAL, so none of them is bracketed. The MOCK badge is replaced by a
+  // LIVE chip carrying the read's as-of, because a card with no provenance at all is the thing
+  // the mock badge existed to prevent.
+  function nbLiveStripNote(payload) {
+    const s = (payload && payload.strip) || {};
+    if (s.available) return null;
+    return { tone: 'amber', text: s.reason || 'Options data unavailable — chart only' };
+  }
+
+  function nbFromLive(card, payload) {
+    const kind = card.card_kind;
+    const common = {
+      ticker: card.ticker,
+      dir: card.direction || 'flat',
+      time: '',
+      chips: nbLiveChips(card),
+      against: card.counter_evidence || [],
+      stale: card.stale_if || '',
+    };
+    if (kind === 'LOUD_MOVE') {
+      return Object.assign({}, common, {
+        kind: 'loud_move',
+        move: nbPct(card.move_pct),
+        pinned: 'PINNED · NOT COUNTED IN CAP',
+        scale: (card.reasons || []).join(' · '),
+        why: card.why,
+      });
+    }
+    if (kind === 'VALUE_MOVED') {
+      return Object.assign({}, common, {
+        kind: 'value_moved',
+        move: nbPct(card.move_pct),
+        headline: 'VALUE MOVED' + nbArrow(card.direction),
+        levels: {
+          prior_edge: card.level == null ? '' : 'prior value edge ' + Number(card.level).toFixed(2),
+          value: card.basis || '',
+          last: card.close == null ? '' : Number(card.close).toFixed(2),
+        },
+        spark: '',
+        strip: null,
+        notice: nbLiveStripNote(payload),
+        buttons: ['Dismiss', 'Pin', 'Send to journal'],
+      });
+    }
+    if (kind === 'FAILED_BREAK') {
+      return Object.assign({}, common, {
+        kind: 'failed_break',
+        move: '',
+        headline: (card.event === 'GAP_FADED' ? 'GAP FADED' : 'FAILED BREAK') + nbArrow(card.direction),
+        spark: '',
+        body: card.basis || '',
+        notice: nbLiveStripNote(payload),
+      });
+    }
+    if (kind === 'TREND_CHANGE') {
+      return Object.assign({}, common, {
+        kind: 'trend_change',
+        move: 'last close',
+        headline: 'TREND CHANGE' + nbArrow(card.direction),
+        transition: {
+          from: card.stack_prior || '—',
+          to: card.stack_class || '—',
+          detail: (card.basis || '').split(' · '),
+        },
+        notice: nbLiveStripNote(payload),
+      });
+    }
+    return null;
+  }
+
+  // The live WATCH block. The states gallery is MOCK-ONLY: it is a design reference, and
+  // showing it beside live cards would put six invented cards in a lane of real ones.
+  function nbLiveWatchBlock(payload) {
+    if (!payload) return '';
+    const cards = (((payload.cards || {}).watch) || [])
+      .map((c) => nbFromLive(c, payload)).filter(Boolean)
+      .map((c) => nbTickerCard(c, '')).join('');
+    const counts = payload.counts || {};
+    const shown = counts.shown != null ? counts.shown : '?';
+    const cap = counts.cap != null ? counts.cap : '?';
+    const cand = counts.candidates != null ? counts.candidates : null;
+    const up = (((payload.cards || {}).watch) || [])
+      .filter((c) => c.direction === 'up').length;
+    const down = (((payload.cards || {}).watch) || [])
+      .filter((c) => c.direction === 'down').length;
+    const tot = (up + down) || 1;
+    const head = '<div class="nb-head">'
+      + '<span class="mono nb-kind" style="color:#14b8a6;letter-spacing:2px">NOTABLE</span>'
+      + '<span class="mono nb-badge" style="color:#5eead4;border-color:#14b8a6">LIVE</span>'
+      + '<span class="mono nb-when">' + esc(payload.as_of || '') + '</span></div>';
+    const tally = '<div class="nb-tally mono"><span class="up">Up ' + up + '</span>'
+      + '<span class="meter"><i class="up" style="width:' + ((up / tot) * 100).toFixed(0) + '%"></i>'
+      + '<i class="down" style="width:' + ((down / tot) * 100).toFixed(0) + '%"></i></span>'
+      + '<span class="down">Down ' + down + '</span>'
+      + '<span class="cap">' + esc(shown + ' of ' + cap + ' today'
+          + (cand == null ? '' : ' · ' + cand + ' candidate(s) considered')
+          + ' · time order only, never ranked') + '</span></div>';
+    // THE QUIET STATE AND THE CANNOT-LOOK STATE ARE DIFFERENT, and the payload tells them
+    // apart: `hours_ok` false is outside the window, `inputs_missing` is a read that failed,
+    // and neither is "nothing notable happened".
+    let body = cards;
+    if (!cards) {
+      if (payload.hours_ok === false) {
+        body = '<div class="nb-capline"><span class="mono">OUTSIDE HOURS</span>'
+          + '<span class="nb-sub">' + esc(payload.reason || '09:45–15:30 ET') + '</span></div>';
+      } else if (Object.keys(payload.inputs_missing || {}).length) {
+        body = '<div class="nb-note amber"><span class="dot"></span><span>'
+          + 'Could not look — not the same as a quiet day</span></div>';
+      } else {
+        body = '<div class="nb-quiet"><b class="mono">NOTHING NOTABLE YET</b>'
+          + '<div class="nb-sub">' + esc(shown + ' of ' + cap
+              + ' today · quiet is information too') + '</div></div>';
+      }
+    }
+    const missing = Object.entries(payload.inputs_missing || {});
+    const missingBlock = !missing.length ? '' :
+      '<details class="nb-card" style="gap:6px"><summary class="mono nb-sub" style="cursor:pointer">'
+      + esc(missing.length + ' input(s) not evaluated') + '</summary>'
+      + missing.map(([k, v]) => '<div class="nb-sub"><b class="mono">' + esc(k) + '</b> — '
+          + esc(v) + '</div>').join('') + '</details>';
+    return '<div class="nb-wrap">' + head + tally + body + missingBlock
+      + '<div class="mono nb-tilefoot">'
+      + esc(payload.display_only || 'display only') + '</div></div>';
+  }
+
+  function nbLiveContextBlock(payload) {
+    if (!payload) return '';
+    const ctx = ((payload.cards || {}).context) || [];
+    const loud = ctx.filter((c) => c.card_kind === 'LOUD_MOVE')
+      .map((c) => nbLoudCard(nbFromLive(c, payload), '')).join('');
+    const lines = ctx.filter((c) => c.card_kind === 'ROTATION_SHIFT').map((c) =>
+      '<div class="nb-ctxstrip mono"><b>ROTATION SHIFT</b>'
+      + (c.items || []).map((i) => '<span>' + esc(i) + '</span>').join('')
+      + (c.suppressed_themes && c.suppressed_themes.length
+          ? '<span style="color:#f5c46a">' + esc(c.suppressed_themes.length
+              + ' held back for a data-quality warning') + '</span>' : '')
+      + '</div>').join('');
+    if (!loud && !lines) return '';
+    return '<div class="nb-wrap">' + loud
+      + (lines ? '<div class="nb-strips">' + lines + '</div>' : '') + '</div>';
+  }
+  // ── end notables live ───────────────────────────────────────────────────────
+
 
   function renderLanes() {
     const el = $('riverLanes'); if (!el) return;
@@ -5396,12 +5580,19 @@
     // ONCE and the lanes are repainted when it lands, so the first paint is never blocked on
     // it -- and a fetch that fails leaves the lanes exactly as they are today rather than
     // replacing them with an error. `nbLoad` resolves null on failure for that reason.
-    if (NOTABLES_MOCK) {
+    if (NOTABLES_SOURCE) {
       nbStyle();
-      if (!_nbMock) { nbLoad().then((m) => { if (m) renderLanes(); }); }
+      if (NOTABLES_SOURCE === 'mock' && !_nbMock) {
+        nbLoad().then((m) => { if (m) renderLanes(); });
+      }
+      if (NOTABLES_SOURCE === 'live' && !_nbLiveData) {
+        nbLoadLive().then((d) => { if (d) renderLanes(); });
+      }
     }
-    const nbWatch = NOTABLES_MOCK && _nbMock ? nbWatchBlock(_nbMock) : '';
-    const nbCtx = NOTABLES_MOCK && _nbMock ? nbContextBlock(_nbMock) : '';
+    const nbWatch = NOTABLES_SOURCE === 'live' ? nbLiveWatchBlock(_nbLiveData)
+      : (NOTABLES_MOCK && _nbMock ? nbWatchBlock(_nbMock) : '');
+    const nbCtx = NOTABLES_SOURCE === 'live' ? nbLiveContextBlock(_nbLiveData)
+      : (NOTABLES_MOCK && _nbMock ? nbContextBlock(_nbMock) : '');
     const notices = noticeRowsHtml(now);
     const d = _laneData;
     if (!d) { el.innerHTML = notices + '<div class="rl-seam">The idea feed has not been read yet this session.</div>'; return; }

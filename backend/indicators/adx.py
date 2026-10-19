@@ -80,3 +80,86 @@ def latest_adx(
     """Most recent ADX value, rounded to 2dp. None if insufficient bars."""
     series = wilder_adx_series(highs, lows, closes, period)
     return round(series[-1], 2) if series else None
+
+
+def latest_di(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 14,
+) -> Optional[tuple]:
+    """(plus_di, minus_di) at the most recent bar, rounded to 2dp. None if too few bars.
+
+    WHY THIS EXISTS. R-IV.1259(c)4 fires on "ADX crosses 25 WITH A DIRECTION", and ADX itself is
+    directionless by construction -- it is built from |DI+ - DI-|, so a trend up and a trend
+    down of equal strength give the same number. The direction is in the two DI legs, which
+    `wilder_adx_series` already computes and then throws away inside its loop.
+
+    EXPOSED RATHER THAN RE-IMPLEMENTED. A second Wilder loop in a caller would drift from this
+    one -- the seeding is the easy part to get subtly different, and the two readings would
+    disagree about direction on exactly the bars where the trend is turning, which is the bar
+    the trigger cares about. `wilder_adx_series` is deliberately left byte-identical: a test
+    pins its output for a fixed series, so this addition cannot have changed it.
+
+    Returns None rather than (0, 0) when the series is too short: zero DI on both legs is a real
+    reading (a perfectly balanced tape) and must not double as "not computable".
+    """
+    n = len(closes)
+    if n < period * 2 + 1 or len(highs) != n or len(lows) != n:
+        return None
+
+    plus_dm = [0.0] * n
+    minus_dm = [0.0] * n
+    tr = [0.0] * n
+    for i in range(1, n):
+        up = highs[i] - highs[i - 1]
+        down = lows[i - 1] - lows[i]
+        plus_dm[i] = up if (up > down and up > 0) else 0.0
+        minus_dm[i] = down if (down > up and down > 0) else 0.0
+        tr[i] = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+
+    smoothed_tr = sum(tr[1 : period + 1])
+    smoothed_p = sum(plus_dm[1 : period + 1])
+    smoothed_m = sum(minus_dm[1 : period + 1])
+    for i in range(period + 1, n):
+        smoothed_tr = smoothed_tr - smoothed_tr / period + tr[i]
+        smoothed_p = smoothed_p - smoothed_p / period + plus_dm[i]
+        smoothed_m = smoothed_m - smoothed_m / period + minus_dm[i]
+
+    if smoothed_tr == 0:
+        return (0.0, 0.0)
+    return (round(100.0 * smoothed_p / smoothed_tr, 2),
+            round(100.0 * smoothed_m / smoothed_tr, 2))
+
+
+def latest_atr(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 14,
+) -> Optional[float]:
+    """Wilder ATR(14) at the most recent bar. None if too few bars.
+
+    Here rather than in a caller for the same reason as `latest_di`: the true range is already
+    computed by this module's own loop, and R-IV.1259(c)1's "more than 1.5x its ATR" needs it.
+    A second true-range implementation would differ on the gap cases -- which are exactly the
+    days a 1.5x-ATR trigger is meant to catch.
+    """
+    n = len(closes)
+    if n < period + 1 or len(highs) != n or len(lows) != n:
+        return None
+    tr = [0.0] * n
+    for i in range(1, n):
+        tr[i] = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+    atr = sum(tr[1 : period + 1]) / period
+    for i in range(period + 1, n):
+        atr = (atr * (period - 1) + tr[i]) / period
+    return round(atr, 4)
