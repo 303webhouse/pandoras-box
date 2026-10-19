@@ -37,6 +37,8 @@ PHOENIX OVERLAP (§7, R-IV.1201(b)5): counts only; PHOENIX washout-v1's rule is 
 
 Usage:
     python scripts/lab/hypnos_leledc.py run <equity.parquet> <btc.r2.parquet> <eth.r2.parquet> <out_dir>
+    python scripts/lab/hypnos_leledc.py run-4h <BTC-USD.coinbase.1h.parquet> <ETH-USD.coinbase.1h.parquet> <out_dir>
+        (v2, R-IV.1242 stamped R-IV.1245: 4h crypto, h6 primary / h30 secondary, raw, HAC h-1 lags)
     python scripts/lab/hypnos_leledc.py selftest
 """
 import hashlib
@@ -472,6 +474,89 @@ def run(eq_path, btc_path, eth_path, out_dir, check_hashes=True):
     return res
 
 
+# ── v2: 4-hour crypto (R-IV.1242, stamped R-IV.1245) ──────────────────────────────────────────────
+V2_COPY = "10-HYPNOS-LELEDC-v2-4H-STAMPED-R-IV.1245.md"
+V2_COPY_SHA256 = "94fb5383c6ce15795846aaf51be280a9c1d78afecc64499aafcde43b39731948"
+V2_BTC_SHA256 = "34fa514626c3d11d6d179d9c4a66a5b57596b795064915ce8667e8fae56754e8"
+V2_ETH_SHA256 = "c14f765c11996b7863feac38aa5f5094ec7d4bff264f11b72e9215cb399f0e11"
+V2_H_PRIMARY, V2_H_SECONDARY = 6, 30           # 4h bars: 24 hours, 5 days (entry bar = bar 1)
+V2_EPOCH = pd.Timestamp("2015-01-01", tz="UTC")
+
+
+def load_1h(path):
+    d = pd.read_parquet(path)
+    d["ts"] = pd.to_datetime(d["ts"], utc=True)
+    return d.sort_values("ts").drop_duplicates("ts").reset_index(drop=True)
+
+
+def to_4h(h1):
+    """4h bars on UTC 00/04/08/12/16/20: open first, high max, low min, close last, volume sum.
+    [R-IV.1245](b)1: a window missing any of its four hourly candles is DROPPED and counted."""
+    g = h1.assign(b=h1.ts.dt.floor("4h")).groupby("b")
+    a = pd.DataFrame({"open": g.open.first(), "high": g.high.max(), "low": g.low.min(),
+                      "close": g.close.last(), "volume": g.volume.sum(), "n": g.size()})
+    return a[a.n == 4].drop(columns="n"), int((a.n < 4).sum()), int(len(a))
+
+
+def events_4h(asset, b4):
+    """Every v2 signal / placebo (v1's detector on 4h bars) with raw returns at bars 6 and 30.
+    Entry = the next complete 4h bar's open; exit = the close of bar h (entry bar = bar 1)."""
+    if len(b4) < BURN_IN:
+        return []
+    det = detect(b4.open.values, b4.high.values, b4.low.values, b4.close.values)
+    o, c, idx = b4.open.values, b4.close.values, b4.index
+    rows = []
+    for key, kind, side, sign in KINDS:
+        for k in np.flatnonzero(det[key]):
+            row = {"arm": "crypto4h", "ticker": asset, "ts": idx[k], "date": idx[k].date(), "kind": kind,
+                   "side": side, "sign": sign, "bar": int((idx[k] - V2_EPOCH) / pd.Timedelta(hours=4))}
+            for h in (V2_H_PRIMARY, V2_H_SECONDARY):
+                e, x = k + 1, k + h
+                row[f"r{h}"] = c[x] / o[e] - 1 if x < len(b4) else np.nan
+            rows.append(row)
+    return rows
+
+
+def run_4h(btc_1h, eth_1h, out_dir, check_hashes=True):
+    started = datetime.now(timezone.utc)
+    hashes = {"btc_1h": sha256(btc_1h), "eth_1h": sha256(eth_1h)}
+    if check_hashes:
+        assert hashes == {"btc_1h": V2_BTC_SHA256, "eth_1h": V2_ETH_SHA256}, hashes
+    os.makedirs(out_dir, exist_ok=True)
+    assert not os.listdir(out_dir), "out_dir must be empty (one run per directory)"
+    rows, bars = [], {}
+    for name, path in (("BTC-USD", btc_1h), ("ETH-USD", eth_1h)):
+        b4, dropped, total = to_4h(load_1h(path))
+        bars[name] = {"complete_4h_bars": int(len(b4)), "windows_dropped_incomplete": dropped, "windows_total": total,
+                      "first_bar": str(b4.index.min()), "last_bar": str(b4.index.max()),
+                      "first_counted_bar": str(b4.index[BURN_IN - 1]) if len(b4) >= BURN_IN else None}
+        rows += events_4h(name, b4)
+    ev = pd.DataFrame(rows)
+    ev.to_csv(os.path.join(out_dir, "events_4h.csv.gz"), index=False, compression="gzip")
+    lab = ev[["arm", "ticker", "date", "kind", "side"]].copy()
+    wkend = pd.to_datetime(lab.date).dt.dayofweek >= 5
+    lab["label_status"] = np.where(lab.date < SEED_FIRST, "NO LABEL (pre-seed)",
+                                   np.where(wkend, "NO LABEL (no US session)", "JOIN"))
+    lab.to_csv(os.path.join(out_dir, "signals_for_label_join_4h.csv"), index=False)
+    prim = arm_result(ev, V2_H_PRIMARY, "raw", hac_lags=V2_H_PRIMARY - 1, bar_col="bar")
+    prim["floor"] = ">= 20 distinct signal days (UTC) AND >= 20 distinct placebo days [R-IV.1245](b)2"
+    res = {"copy_of_record": V2_COPY, "copy_sha256": V2_COPY_SHA256, "inputs": hashes, "bars": bars,
+           "lifetime_tries_counter": 2,
+           "primary_h6_24h": prim,
+           "secondary_h30_5d": arm_result(ev, V2_H_SECONDARY, "raw", hac_lags=V2_H_SECONDARY - 1, bar_col="bar"),
+           "per_asset_primary": {a: arm_result(ev[ev.ticker == a], V2_H_PRIMARY, "raw", hac_lags=V2_H_PRIMARY - 1,
+                                               bar_col="bar") for a in ("BTC-USD", "ETH-USD")},
+           "ungradeable_h6": int(ev.r6.isna().sum()), "ungradeable_h30": int(ev.r30.isna().sum()),
+           "labels": lab.groupby(["label_status"]).size().to_dict(),
+           "price_source": ("Coinbase Exchange public 1h candles (internal research only, never redistributed "
+                            "[R-IV.1245](b)3), aggregated by LAB to UTC 4h; raw returns"),
+           "run": {"started_utc": started.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                   "finished_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}}
+    with open(os.path.join(out_dir, "results_4h.json"), "w", encoding="utf-8") as fh:
+        json.dump(res, fh, indent=1, default=str)
+    return res
+
+
 _SPY200 = {}
 
 
@@ -634,6 +719,46 @@ def selftest():
     except AssertionError:
         reuse = True
     check("e2e: a second run into the same directory is refused", reuse)
+    # 14. v2: 4h aggregation, the drop rule, the bar-6 exit, end to end (synthetic 1h only)
+    ts = pd.date_range("2024-01-01 00:00", periods=4 * 6 * 400, freq="h", tz="UTC")
+    rng2 = np.random.default_rng(21)
+    cc = 100 * np.exp(np.cumsum(0.004 * rng2.standard_normal(len(ts))))
+    oo = np.r_[cc[0], cc[:-1]]
+    h1 = pd.DataFrame({"ts": ts, "open": oo, "high": np.maximum(oo, cc) * 1.001, "low": np.minimum(oo, cc) * 0.999,
+                       "close": cc, "volume": 1.0})
+    b4, dr, tot = to_4h(h1)
+    check("v2: 4h bars sit on UTC 00/04/08/12/16/20", set(b4.index.hour) == {0, 4, 8, 12, 16, 20})
+    w = h1.iloc[4:8]
+    check("v2: 4h OHLC = first open, max high, min low, last close",
+          np.isclose(b4.open.iloc[1], w.open.iloc[0]) and np.isclose(b4.high.iloc[1], w.high.max())
+          and np.isclose(b4.low.iloc[1], w.low.min()) and np.isclose(b4.close.iloc[1], w.close.iloc[-1]))
+    h1d = h1.drop(index=[9, 30, 31])
+    b4d, drd, totd = to_4h(h1d)
+    check("v2: a window missing any hourly candle is DROPPED and counted, never gap-marked",
+          drd == 2 and len(b4d) == len(b4) - 2 and totd == tot)
+    ev4 = events_4h("X", b4)
+    if ev4:
+        r0 = ev4[0]
+        k = list(b4.index).index(r0["ts"])
+        exp = b4.close.iloc[k + 6] / b4.open.iloc[k + 1] - 1 if k + 6 < len(b4) else np.nan
+        check("v2: r6 = close of bar 6 / open of the next bar - 1", (np.isnan(exp) and np.isnan(r0["r6"]))
+              or abs(r0["r6"] - exp) < 1e-12)
+        check("v2: the HAC bar index steps by one per 4 hours",
+              r0["bar"] == int((r0["ts"] - V2_EPOCH) / pd.Timedelta(hours=4)))
+    else:
+        check("v2: synthetic series produced events", False)
+    p1 = os.path.join(tmp, "b1h.parquet")
+    p2 = os.path.join(tmp, "e1h.parquet")
+    h1.to_parquet(p1, index=False)
+    h1d.to_parquet(p2, index=False)
+    r4 = run_4h(p1, p2, os.path.join(tmp, "out4"), check_hashes=False)
+    check("v2 e2e: results written; primary h6 HAC 5 lags; secondary h30; tries counter 2",
+          r4["primary_h6_24h"]["h"] == 6 and "5 lags" in r4["primary_h6_24h"].get("method", "")
+          and r4["secondary_h30_5d"]["h"] == 30 and r4["lifetime_tries_counter"] == 2
+          and r4["bars"]["ETH-USD"]["windows_dropped_incomplete"] == 2)
+    lab4 = pd.read_csv(os.path.join(tmp, "out4", "signals_for_label_join_4h.csv"))
+    check("v2 e2e: the label file carries no outcome column",
+          set(lab4.columns) == {"arm", "ticker", "date", "kind", "side", "label_status"})
     print(f"{ok}/{ok + fail}")
     return fail == 0
 
@@ -672,6 +797,10 @@ def synthetic_files(tmp):
 if __name__ == "__main__":
     if sys.argv[1:2] == ["selftest"]:
         sys.exit(0 if selftest() else 1)
+    if sys.argv[1:2] == ["run-4h"] and len(sys.argv) == 5:
+        out = run_4h(*sys.argv[2:5])
+        print(json.dumps({"written": sys.argv[4], "finished": out["run"]["finished_utc"]}))
+        sys.exit(0)
     if sys.argv[1:2] == ["run"] and len(sys.argv) == 6:
         out = run(*sys.argv[2:6])
         print(json.dumps({"written": sys.argv[5], "finished": out["run"]["finished_utc"]}))
