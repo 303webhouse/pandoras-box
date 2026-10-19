@@ -44,8 +44,18 @@ CYCLE_SECONDS = 15 * 60
 #: After the close the final bar needs the grace period from R-IV.1215(b)4 before it counts.
 POST_CLOSE_WAIT_S = (pw.CLOSE_GRACE_MIN + 1) * 60
 
+#: EVERY NAME HERE IS A REAL COLUMN, and one of them was not on the first deploy: the
+#: handler asked for `target`, which does not exist -- the table has `target_1` and
+#: `target_2` (database/postgres_client.py's CREATE TABLE). `target` is an ALIAS the
+#: /v2/positions route serves, and reading a served field name as a column name is how an
+#: UndefinedColumnError reaches production. `test_SET_B_SQL_ASKS_ONLY_FOR_REAL_COLUMNS`
+#: now checks this list against the canonical DDL.
+#:
+#: `target_1 AS target` is a CHOICE and so is stated: the FIRST target is the one a
+#: stop-or-target alert fires on, because it triggers earlier and the alert is "look at
+#: this", never an order. `target_2` is deliberately not read.
 SET_B_SQL = """
-SELECT ticker, structure, classification, bucket, stop_loss, target, quantity,
+SELECT ticker, structure, classification, bucket, stop_loss, target_1 AS target, quantity,
        entry_price, current_price, unrealized_pnl, account
   FROM unified_positions
  WHERE UPPER(COALESCE(status, '')) = 'OPEN'
