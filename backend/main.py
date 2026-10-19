@@ -237,6 +237,22 @@ async def lifespan(app: FastAPI):
                 await conn.execute(_PW_IDX)
             except Exception as _pw_ddl_err:
                 logger.warning("position_watch_events migration failed: %s", _pw_ddl_err)
+            # R-IV.1259(h), wired under R-IV.1265(g)2: notables_log + notables_outcomes,
+            # created in THE DEPLOY THAT WRITES THEM and not before -- an empty table that
+            # predates its writer is the state a later reader mistakes for a quiet day. The DDL
+            # is the model's own constant, so there is exactly one author of this schema.
+            #
+            # ITS OWN try, AT WARNING. The block this sits in ends in `except Exception` logged
+            # at DEBUG, so a failure anywhere in it is invisible and every statement after the
+            # failure silently never runs. That is how a migration comes to be "shipped" and
+            # absent at once.
+            try:
+                from models.notables_log import migrate as _nb_migrate
+                _nb_out = await _nb_migrate(conn)
+                logger.info("✅ notables tables ready: %s", _nb_out.get("tables"))
+            except Exception as _nb_err:
+                logger.warning("notables_log migration failed: %s: %s",
+                               type(_nb_err).__name__, _nb_err)
             await conn.execute(
                 "CREATE TABLE IF NOT EXISTS pythia_webhook_rejections ("
                 "  id SERIAL PRIMARY KEY,"

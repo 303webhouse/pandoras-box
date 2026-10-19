@@ -244,8 +244,16 @@ def test_the_notables_styles_are_injected_and_not_added_to_the_shared_stylesheet
 # ── 6 · nothing is sent, nothing is written ──────────────────────────────────
 
 def test_the_renderer_has_no_write_path():
-    """(i): the mock step writes nothing. Read from the PARSED source, so the comment that
-    explains why there is no POST cannot satisfy the check (#30's companion trap, 16 instances)."""
+    """(i): the mock step writes nothing.
+
+    THIS SCAN READS RAW TEXT, COMMENTS INCLUDED, and says so rather than claiming otherwise:
+    `read_source` is a BOM-tolerant read, and the comment-and-docstring stripping that protects
+    the Python scans runs on an `ast` tree, which cannot parse JavaScript. So the usual trap
+    applies in full force -- a comment naming a forbidden string would fail this test on the
+    prose explaining why the string is absent. The renderer's comments therefore say "the two
+    logs" where they mean the table names, deliberately, and this docstring records why instead
+    of asserting a protection that is not here.
+    """
     code = read_source(str(V2JS))
     nb = code[code.index("NOTABLES_MOCK"):]
     nb = nb[:nb.index("// ── end notables")] if "// ── end notables" in nb else nb
@@ -253,22 +261,39 @@ def test_the_renderer_has_no_write_path():
         assert forbidden not in nb, forbidden
 
 
-def test_neither_notables_table_is_created_yet():
-    """(h): both tables are created in the deploy that writes to them. The mock writes nothing,
-    so a CREATE TABLE here would be a table nothing fills -- and the next reader would take its
-    emptiness for a quiet day."""
+def test_both_notables_tables_are_created_by_the_module_that_writes_them():
+    """(h): both tables are created in the deploy that writes to them.
+
+    THIS TEST USED TO ASSERT THE OPPOSITE, and it was right to. During the mock step nothing
+    wrote, so a CREATE TABLE would have been a table nothing fills — and the next reader would
+    take its emptiness for a quiet day. R-IV.1265(g)2 authorised the writer, so the guard fired
+    on exactly the change it was watching for, and the assertion inverts rather than being
+    deleted: the DDL must now exist, and it must live in the SAME module as the writer so the
+    two cannot ship apart.
+    """
+    # PER STRING LITERAL, not per file. A file-level scan matched `main.py` too, because it
+    # contains a CREATE TABLE for an unrelated table AND the words `notables_log` in the import
+    # that calls the migration -- two true facts about the file and nothing about any one
+    # statement. The unit being asserted on is the DDL statement, so that is the unit scanned.
+    import ast as _ast
     hits = []
-    for base in (_BACKEND,):
-        for path in base.rglob("*.py"):
-            if "__pycache__" in str(path) or path.name == "test_notables_mock_r1259.py":
-                continue
-            try:
-                txt = io.open(path, encoding="utf-8-sig").read()
-            except Exception:                                       # noqa: BLE001
-                continue
-            if "CREATE TABLE" in txt.upper() and "notables_log" in txt:
-                hits.append(str(path.relative_to(_REPO)))
-    assert not hits, hits
+    for path in _BACKEND.rglob("*.py"):
+        if "__pycache__" in str(path) or path.name.startswith("test_"):
+            continue
+        try:
+            tree = _ast.parse(io.open(path, encoding="utf-8-sig").read())
+        except Exception:                                           # noqa: BLE001
+            continue
+        for node in _ast.walk(tree):
+            if (isinstance(node, _ast.Constant) and isinstance(node.value, str)
+                    and "CREATE TABLE" in node.value.upper()
+                    and "notables_log" in node.value):
+                hits.append(path.name)
+                break
+    assert hits == ["notables_log.py"], hits
+    from models import notables_log as nl
+    assert "notables_log" in nl.DDL and "notables_outcomes" in nl.OUTCOMES_DDL
+    assert callable(nl.insert) and callable(nl.migrate)
 
 
 def test_the_fixture_is_labelled_a_mock_in_its_own_text():
