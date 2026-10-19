@@ -152,32 +152,93 @@ def test_confirm_is_disabled_in_the_markup():
     assert "disabled" in src[i:i + 80]
 
 
-def test_no_handler_is_bound_to_confirm():
-    """The stronger half. A disabled attribute can be removed in devtools; an unbound button
-    cannot do anything regardless. STEP 2 is where a handler appears."""
+def test_STEP_2_BINDS_A_HANDLER_AND_THE_PREVIEW_OWNS_THE_BUTTON():
+    """R-IV.1243(d): step 2 arrived, so this guard changed with it.
+
+    It asserted that NO handler was bound — correct while saving was switched off, and now
+    exactly backwards. What replaces it is the property that still matters: the button is
+    enabled by THE PREVIEW and by nothing else, so the condition for saving is the same
+    computation Nick checked on 2026-10-18, not a second opinion about the numbers.
+    """
     src = _v2()
     i = src.index("function openAddToPositionForm")
     body = src[i:src.index("\n  function updateAddToPositionPreview", i)]
-    assert "$('a_submit').addEventListener" not in body
-    assert "a_submit" in body, "the button itself must still be in the form"
+    assert "$('a_submit').addEventListener" in body, "step 2 binds the handler"
+    assert 'id="a_submit" disabled' in body, "it still starts disabled"
+    prev = src[src.index("function updateAddToPositionPreview"):]
+    prev = prev[:prev.index("async function submitAddToPosition")]
+    assert "okBtn.disabled = true" in prev
+    assert prev.count("okBtn.disabled = false") == 1, "exactly one place may enable it"
+    assert prev.index("okBtn.disabled = true") < prev.index("okBtn.disabled = false")
 
 
-def test_the_add_module_never_writes():
-    """No fetch, no POST, no route. The preview is arithmetic over the row already loaded."""
+def test_THE_WRITE_IS_SINGLE_FLIGHT_BECAUSE_THE_SERVER_GUARD_DOES_NOT_COVER_IT():
+    """This banned every write. Step 2 is the write, so the ban is replaced by the property
+    that makes the write safe.
+
+    `position_lots` has NO server-side duplicate guard for a MANUAL add — the route's guard
+    fires only on a `broker_ref`, and a hand entry has none. That is the filed defect where
+    cash_flows refuses a duplicate same-day movement and position_lots does not, leaving
+    basis > cash with the two stores disagreeing as the only detector.
+
+    So the client holds both halves: `disabled` for the round trip AND an in-flight flag, which
+    is what stops a second click arriving before the browser repaints. Neither replaces a
+    server guard, and the gap is reported rather than papered over.
+    """
     src = _v2()
-    i = src.index("// ── Add to position (R-IV.1173 STEP 1")
-    j = src.index("  function openCloseForm(p) {", i)
-    module = src[i:j]
-    for banned in ("apiFetch(", "fetch(", "XMLHttpRequest", "method: 'POST'", "/v2/positions"):
-        assert banned not in module, banned
+    i = src.index("async function submitAddToPosition")
+    body = src[i:src.index("\n  function openCloseForm", i)]
+    assert "if (addLotInFlight) return;" in body
+    assert "addLotInFlight = true;" in body
+    assert "addLotInFlight = false;" in body
+    assert "finally" in body, "the flag must clear on failure too, or one error locks the form"
+    assert "X-Requested-With" in body, "a session-authed mutation needs the CSRF header"
+    assert "/lots" in body, "the lot route, not the position-create route"
 
 
-def test_the_form_says_saving_is_off():
-    """A dead button with no explanation reads as a bug. The form says why."""
+def test_THE_EXACT_TOTAL_IS_SENT_AS_A_PRICE_BECAUSE_THE_ROUTE_HAS_NO_FIELD_FOR_IT():
+    """FOUND BY READING THE ROUTE, and it would have failed silently.
+
+    `AddLotRequest` carries fill_time / qty / price / fees / source / broker_ref / reason /
+    actor and NO cost_basis, with Pydantic's default `extra: ignore`. A `cost_basis` key would
+    have been DROPPED and the basis derived from price x qty — the user's own broker figure
+    discarded without a word.
+
+    It is carried instead as the per-unit price that reproduces the total: the same money by
+    construction. The preview states what will be recorded, because the saved price is then
+    not the price typed in, and a reader comparing the lot against the ticket would otherwise
+    find a discrepancy nobody explained.
+    """
+    from api.unified_positions import AddLotRequest
+
+    assert "cost_basis" not in AddLotRequest.model_fields
     src = _v2()
-    assert "add-pos-step1-note" in src
-    i = src.index("add-pos-step1-note")
-    assert "Preview only" in src[i:i + 300]
+    i = src.index("async function submitAddToPosition")
+    body = src[i:src.index("\n  function openCloseForm", i)]
+    assert "body.cost_basis" not in body
+    assert "Math.abs(exact) / (addPosMultiplier(p) * qty)" in body
+    prev = src[src.index("function updateAddToPositionPreview"):]
+    assert "Recorded price per" in prev[:prev.index("async function submitAddToPosition")]
+
+
+def test_THE_EXPLANATORY_TEXT_IS_GONE_AND_THE_LABELS_REMAIN():
+    """R-IV.1243(d): remove all the explanatory text, keep each field with its label.
+
+    The step-1 note said "Preview only — saving is switched off in this step", which is now
+    false, so it is DELETED rather than reworded: a sentence that has to be rewritten every
+    time the behaviour changes is a sentence the next change will forget.
+    """
+    src = _v2()
+    assert "add-pos-step1-note" not in src
+    assert "Preview only" not in src
+    assert "add-pos-lock-note" not in src
+    i = src.index("function openAddToPositionForm")
+    body = src[i:src.index("\n  function updateAddToPositionPreview", i)]
+    assert "fld-echo" not in body, "the field hints are explanatory text"
+    for label in ("Quantity to add", "Price per", "Exact total", "Date added", "Note"):
+        assert label in body, label
+    # The PREVIEW stays: Nick checked it, and it is the thing that enables the save.
+    assert "a_preview" in body and "What this would do" in body
 
 
 # ── locked to the row ───────────────────────────────────────────────────────

@@ -31,6 +31,25 @@ logger = logging.getLogger("api_book_reality")
 
 router = APIRouter(prefix="/book-reality", tags=["book-reality"])
 
+#: B7'S OWN QUERY, R-IV.1246(f). It reused `SET_B_SQL`, which Position Watch wrote for a
+#: different job and which carries NO expiry and NO strikes -- so `years_to_expiry` returned
+#: None for every option, `price_structure` refused it, and B7 modelled 17 of 29 rows with
+#: EVERY OPTION EXCLUDED. QUERY found it; the grid looked plausible because the stock rows were
+#: right and the exclusions each carried a reason, so nothing read as broken.
+#:
+#: THE LESSON IS THE REUSE, not the three columns. A query written for one consumer's needs is
+#: not a book reader, and borrowing it silently inherits its omissions. B7 selects what B7
+#: prices, and a test now asserts that every column `price_structure` and `solve_iv` read is in
+#: this list.
+B7_SQL = """
+SELECT ticker, structure, classification, bucket, account, quantity,
+       entry_price, current_price, unrealized_pnl,
+       expiry, long_strike, short_strike
+  FROM unified_positions
+ WHERE UPPER(COALESCE(status, '')) = 'OPEN'
+   AND UPPER(COALESCE(status, '')) <> 'DUPLICATE_OF'
+"""
+
 #: R-IV.1239(e)4. Flipped only after SPINE rules on QUERY's three-row check (e)6. A constant,
 #: not an env var: the wire coming up because a deploy variable was set is not the same event
 #: as SPINE having ruled.
@@ -133,11 +152,11 @@ async def get_book_reality(verify: int = Query(0),
         }
     try:
         from database.postgres_client import get_postgres_client
-        from jobs.position_watch_job import load_book
 
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
-            book = await load_book(conn)
+            # B7's OWN query (R-IV.1246(f)), not Position Watch's.
+            book = [dict(r) for r in await conn.fetch(B7_SQL)]
         tickers = sorted({str(p.get("ticker", "")).upper() for p in book if p.get("ticker")})
         r, r_basis = await _rate()
         md = await asyncio.to_thread(_betas_and_spots, tickers)

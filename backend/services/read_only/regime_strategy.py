@@ -262,6 +262,30 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "seed_run": seeded_run,
         "flip_history": flips,
         "ribbon": ribbon_block,
+        # B8 section 1 (R-IV.1243(e)). Built from the rules file and this same
+        # snapshot, so the conditions and the counters cannot disagree with the
+        # classifier that produced the label.
+        "flip_triggers": _flip_triggers_block(snap, shown),
         "audit_notes": notes,
         "label_diff": ldiff,
     }
+
+
+def _flip_triggers_block(snap: dict, shown) -> dict:
+    """B8 section 1's block, or its reason for being absent.
+
+    Never raises into the payload: a drawer section that cannot be built says so, and the
+    other seven sections still render.
+    """
+    try:
+        from models.regime_classifier import load_rules
+        from models.regime_flip_triggers_b8 import flip_triggers
+
+        return flip_triggers({"regime_label": shown,
+                              "raw_regime_key": snap.get("regime"),
+                              "pending_closes": snap.get("pending_closes"),
+                              "held_sessions": snap.get("held_sessions")},
+                             load_rules())
+    except Exception as exc:                                        # noqa: BLE001
+        return {"error": "%s" % type(exc).__name__,
+                "basis": "the flip conditions could not be built from the rules file"}

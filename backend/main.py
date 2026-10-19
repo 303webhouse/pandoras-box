@@ -2230,6 +2230,8 @@ from api.crowd import router as crowd_router  # B6
 app.include_router(crowd_router, prefix="/api", tags=["crowd"])
 from api.book_reality import router as book_reality_router  # B7 — flag OFF, R-IV.1239(e)4
 app.include_router(book_reality_router, prefix="/api", tags=["book-reality"])
+from api.regime_sections import router as regime_sections_router  # B8 §§2-5, R-IV.1246(b)
+app.include_router(regime_sections_router, prefix="/api", tags=["regime-sections"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /

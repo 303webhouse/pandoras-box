@@ -255,7 +255,11 @@ def test_THE_VERB_MATCHES_THE_EVENT():
     assert pw.action_for("LEVEL_BREAK", "AGAINST") == pw.ACTION_REVIEW_STOP
     assert pw.action_for("STOP_LEVEL", "AGAINST") == pw.ACTION_REVIEW_STOP
     assert pw.action_for("FAILED_BREAKOUT", "AGAINST") == pw.ACTION_TIGHTEN
-    assert pw.action_for("EXHAUSTION", "AGAINST") == pw.ACTION_TIGHTEN
+    assert pw.action_for("TARGET_LEVEL", "AGAINST") == pw.ACTION_TIGHTEN
+    # EXHAUSTION is gone (R-IV.1243(c)1) and now pairs with NO action, which is the correct
+    # answer for an event nothing can emit: `action_for` gives an unruled event LOGGED rather
+    # than a plausible verb.
+    assert pw.action_for("EXHAUSTION", "AGAINST") == pw.ACTION_LOGGED
 
 
 def test_ANYTHING_NOT_AGAINST_IS_LOGGED_NOT_ADVISED():
@@ -383,27 +387,24 @@ def test_A_NON_AGAINST_ALERT_DOES_NOT_CONSUME_A_CAP_SLOT():
 
 # ── 8. the exhaustion profit gate (f)4 ────────────────────────────────────
 
-def test_EXHAUSTION_NEEDS_HALF_AN_IMPLIED_MOVE_OF_PROFIT():
-    assert pw.exhaustion_push_gate({}, 10.0, 6.0)[0] is True
-    assert pw.exhaustion_push_gate({}, 10.0, 4.0)[0] is False
-    assert "0.5x gate" in pw.exhaustion_push_gate({}, 10.0, 4.0)[1]
+def test_THE_EXHAUSTION_PUSH_AND_ITS_GATE_ARE_GONE():
+    """R-IV.1243(c)1, the HYPNOS consequence pre-committed in R-IV.1241(c).
 
+    THREE TESTS USED TO LIVE HERE: the 0.5x-implied-move gate, the unavailable-IV case that
+    pushed with "vs implied: n/a", and the unknown-profit case that did not. They were correct
+    about a push that no longer exists -- QUERY found HYPNOS-LELEDC NOT SUPPORTED on all five
+    arms, so the exhaustion push is removed and its gate with it.
 
-def test_AN_UNAVAILABLE_IV_PUSHES_AND_SAYS_SO():
-    """(f)4 names this case and chooses to push. An exhaustion against a profitable position is
-    worth saying even without the yardstick, and the label says the yardstick is missing rather
-    than implying a measurement."""
-    ok, note = pw.exhaustion_push_gate({}, None, 4.0)
-    assert ok is True
-    assert note == "vs implied: n/a"
-
-
-def test_an_unknown_PROFIT_with_a_known_implied_move_does_NOT_push():
-    """The gate is about profit. With a yardstick present and the measurement missing, the
-    honest answer is to hold, not to assume the position is far enough ahead."""
-    ok, why = pw.exhaustion_push_gate({}, 10.0, None)
-    assert ok is False
-    assert "not known" in why
+    REMOVED, NOT DISABLED, and this test is why: a gate left behind for a detector that is not
+    coming is a thing the next author has to work out the status of, and a flag they might
+    reasonably switch on. There is nothing to switch.
+    """
+    assert not hasattr(pw, "exhaustion_push_gate")
+    assert "EXHAUSTION" not in pw._TIGHTEN_EVENTS
+    assert "EXHAUSTION" not in pw._REVIEW_EVENTS
+    # And the job no longer has the helper that fed it.
+    from jobs import position_watch_job as job
+    assert not hasattr(job, "_implied_move")
 
 
 # ── 9. nothing here is a signal (f)6 ──────────────────────────────────────

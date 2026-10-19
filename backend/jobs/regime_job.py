@@ -713,3 +713,49 @@ async def ribbon(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
                   "dates since the 2026-10-17 re-seed" % RIBBON_SESSIONS),
         "short_history": len(out) < RIBBON_SESSIONS,
     }
+
+
+#: B8 §3's Zweig PROXY needs a breadth series, and this is the only module allowed to read
+#: `regime_snapshots` (the R-IV.1195 reader allowlist). Keeping the read here rather than
+#: widening that allowlist is the point of the guard: it asked whether a new reader was
+#: allowed, and the better answer was not to add one.
+BREADTH_HISTORY_SESSIONS = 60
+
+
+async def breadth_history(conn, sessions: int = BREADTH_HISTORY_SESSIONS) -> List[Any]:
+    """The stored `pct_above_50dma` series, oldest-first, current generation only.
+
+    `superseded = FALSE` for the same reason the ribbon needs it: the table holds TWO
+    GENERATIONS over the same dates since the 2026-10-17 re-seed, and a breadth series read
+    without it would interleave two price bases into one thrust test.
+    """
+    import json as _json
+
+    try:
+        rows = await conn.fetch(
+            """SELECT inputs_json
+                 FROM regime_snapshots
+                WHERE superseded = FALSE
+                ORDER BY as_of DESC
+                LIMIT $1""", sessions)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[regime] breadth history unreadable: %s", type(exc).__name__)
+        return []
+    out: List[Any] = []
+    for r in reversed(rows):
+        blob = r["inputs_json"]
+        if isinstance(blob, str):
+            try:
+                blob = _json.loads(blob)
+            except ValueError:
+                blob = None
+        pct = None
+        if isinstance(blob, dict):
+            br = blob.get("breadth")
+            if isinstance(br, dict):
+                pct = br.get("pct_above_50dma")
+        try:
+            out.append(None if pct is None else float(pct))
+        except (TypeError, ValueError):
+            out.append(None)
+    return out
