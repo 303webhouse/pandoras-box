@@ -99,6 +99,18 @@
 .ab-curve-foot, .ab-curve-off { font-size: var(--fs-2); margin-top: 4px; }
 .ab-curve-off { color: var(--amber); display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
 .ab-sub { color: var(--text-2); font-size: var(--fs-1); }
+
+/* R-IV.1262(b)1: the date basis, said in full where there is room for the sentence. Amber and
+   a dashed rule, because amber on this page already means "we cannot confirm this" and that is
+   exactly the claim: these are not period figures until a trade date exists. Readable weight,
+   never dimmed (H-13) and never --text-3 (R8) -- a warning in small grey type is a warning
+   nobody reads. */
+.ab-basis {
+  margin: var(--sp-2) 0 0; padding: var(--sp-2); font-size: var(--fs-1); line-height: 1.45;
+  color: var(--amber); border-left: 2px dashed var(--amber); border-radius: var(--r-2);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+.ab-basis b { color: var(--amber); }
 /* The measured span sits with the figures it qualifies, not in a footnote below them. */
 .ab-curve-measured { margin-top: 3px; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
 /* Readable amber, not dimmed: "not enough history" is the figure's replacement, not a whisper. */

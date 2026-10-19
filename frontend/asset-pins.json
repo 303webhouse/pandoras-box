@@ -1,22 +1,22 @@
 {
   "abacus.html": {
     "abacus.css": {
-      "pin": 6,
-      "sha256": "0366d2663ac755f3c34e8f211c29d3b9ad79212e6266b8021b16eb68ec4e57b3"
+      "pin": 7,
+      "sha256": "d02ded19b652c3a2365a1acd41df74608850e92d7028c0972d4192d9f581031f"
     },
     "abacus.js": {
-      "pin": 7,
-      "sha256": "03abf5414b7edf42f9dc8ccbd9f4d17f62a2fcc082ca0c5756f65e2803e05721"
+      "pin": 8,
+      "sha256": "a7fd0033aa2d330abd6e9beecbf4ef66c848f445e0e63a374303ab3666ae30ae"
     },
     "v2.css": {
-      "pin": 62,
-      "sha256": "316d08a78ad418dd3385d94b0f1fc9b89bab37e5599d9ff4914dd4e905ca32ce"
+      "pin": 63,
+      "sha256": "b7aec70e27057d02766dbf31fe3f01c9eaa7823f31a30daf8a5a849e2dff0752"
     }
   },
   "index.html": {
     "app.js": {
       "pin": 180,
-      "sha256": "ee1c8d923e27814f6158e6e9de6b1474f6f2e96da3f8a118b8fa9de0a0b83c4d"
+      "sha256": "08ed256552b3c58c1bb466e91f296e19ffbca0a15994906aa728cd3c39f51885"
     },
     "styles.css": {
       "pin": 156,
@@ -43,8 +43,8 @@
       "sha256": "75086aff28318c28a2a9a7f0deb2f2292a32db5ab24dbf45c4cd71a46278d4dc"
     },
     "v2.css": {
-      "pin": 63,
-      "sha256": "316d08a78ad418dd3385d94b0f1fc9b89bab37e5599d9ff4914dd4e905ca32ce"
+      "pin": 64,
+      "sha256": "b7aec70e27057d02766dbf31fe3f01c9eaa7823f31a30daf8a5a849e2dff0752"
     }
   },
   "v2.html": {
@@ -53,12 +53,12 @@
       "sha256": "1f97b39c3af961830aea8f92195c1ea25eba3e6fb59cae37765d16e8cd6447fe"
     },
     "v2.css": {
-      "pin": 67,
-      "sha256": "316d08a78ad418dd3385d94b0f1fc9b89bab37e5599d9ff4914dd4e905ca32ce"
+      "pin": 68,
+      "sha256": "b7aec70e27057d02766dbf31fe3f01c9eaa7823f31a30daf8a5a849e2dff0752"
     },
     "v2.js": {
-      "pin": 86,
-      "sha256": "b1db0a820fe075f4c3cc76e4312ccbaec5b723209ff281ca8b31f169a7972e53"
+      "pin": 87,
+      "sha256": "f30bb6e00e543abf019b0f02659de31f5aff9640f74129a7f8cfb8321868a083"
     }
   }
 }
