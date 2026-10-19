@@ -15,6 +15,7 @@ Authoritative running record of gate decisions and Phase-0 reconciliation ruling
 | 2026-07-24 | **SG-0** (Phase 0 gate) | **STOP → resolved via Option A.** No enforced discipline endpoint exists (C-A1). Adopt honest-seam descope. | Nick | Phase 0 P0.3 |
 | 2026-07-24 | **SG-1** (layout gate) | **CLEAR** — scaffold (S5.1 chips + S5.2 grid) matches the approved render | Nick (ratified); CC ran the HELIOS layout comparison † | scaffold `1b47e82` |
 | 2026-07-24 | **SG-2** (pre-deploy gate) | **CONDITIONAL GO** — surface-honesty graded excellent; conditions C1–C4 required before merge | Fable (coordination lane) | full build `2ddc119` |
+| 2026-10-19 | **SG-3** (post-deploy screenshot comparison) | **CLOSED** — not run; superseded by the principal's use of the live page since 2026-07-24. It gates nothing. | SPINE, R-IV.1254 | this ledger |
 
 † **SG-1 provenance (per Fable SG-2 ruling C1):** the coordination lane issued no SG-1 clearance and HELIOS's standing veto was not exercised. The layout comparison was **CC-produced** (scaffold-vs-render artifact) and **ratified by Nick's "SG-1 CLEAR" directive**.
 
@@ -35,7 +36,7 @@ The brief's §5.6 requires discipline chips to render *enforced* backend state, 
 
 ## P0.4 reconciliation rulings
 
-Adopted per CC Phase-0 recommendations and ratified by Nick's 2026-07-24 directive to build drawer → dial → feed → macro band. Each remains subject to the SG-3 screenshot comparison (HELIOS standing veto).
+Adopted per CC Phase-0 recommendations and ratified by Nick's 2026-07-24 directive to build drawer → dial → feed → macro band. These were written subject to the SG-3 screenshot comparison. R-IV.1254 closed that gate; it gates nothing.
 
 - **P0.4-1 · Macro band content.** Charter/brief §5.5 say DXY / real-yields / calendar; the concept plan and the approved render say funding / OI / basis / liquidations. **Ruling: build to the render** (funding/OI/basis/liqs, BTC-master) — the render is top-precedence and is the SG-3 target. The charter's DXY/real-yields/calendar macro context is **logged as deferred coverage**, not silently dropped.
 - **P0.4-2 · Cycle dial.** The approved render labels the dial "S-5 · DIAL PENDING BUILD," but `/api/crypto/cycle-extremes` returns a live `composite_score` marker today (only Signal #10 ETF-flow-exhaustion is S-5-deferred). **Ruling: render the live single-axis marker** from `composite_score` (matches the render's marker-at-CAPITULATION visual); keep an honest "S-10 input deferred (S-5)" note.
@@ -49,5 +50,5 @@ Adopted per CC Phase-0 recommendations and ratified by Nick's 2026-07-24 directi
 
 - **Deploy is HELD (C2):** rebase+merge waits for the coordination lane's **"AEGIS landed"** signal; AEGIS credential-rotation deploys first, S-6 rides immediately after.
 - When C2 clears, **rebase `s6-stater-build` against `origin/main` from a worktree** (C3) — not the tangled local `main`.
-- **SG-3** (post-deploy HELIOS screenshot comparison, 2026-08-03) remains binding; true-390 phone eyeball is an SG-3 input (C4).
+- **SG-3 is closed** (R-IV.1254, 2026-10-19): not run; superseded by the principal's use of the live page since 2026-07-24. It gates nothing, and the true-390 phone eyeball (C4) closes with it.
 - Timeline law: deploy by **2026-07-31** or S-6 holds past the 2026-08-04 → 08-15 freeze.
