@@ -1996,3 +1996,6 @@ body.is-mobile-grid .tile-grip { display: none !important; }
    is exactly what a reader wants, and hiding it would answer a different question. */
 .yc-closed .yc-heads, .yc-closed .mini-vals, .yc-closed .chart-host { opacity: .55; }
 .yc-flag-closed { border-color: var(--text-3); color: var(--text-3); }
+
+/* §8's armed kill lamp keeps the vermilion alarm (R-IV.1209(d)). */
+.lamp-armed { color: var(--down); font-weight: 700; }

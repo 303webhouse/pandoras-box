@@ -118,6 +118,18 @@ async def get_regime_sections() -> Dict[str, Any]:
                         "reason": "the stored breadth series could not be read: %s"
                                   % type(exc).__name__,
                         "note": rs.ZWEIG_PROXY_NOTE}
+    # §6 auction state, from the PYTHIA market-profile snapshot the hub already stores.
+    try:
+        from services.read_only.market_profile import get_market_profile
+
+        out["auction"] = rs.auction_block(await get_market_profile("SPY"))
+    except Exception as exc:                                        # noqa: BLE001
+        out["auction"] = {"available": False,
+                          "reason": "the market-profile read failed: %s" % type(exc).__name__}
+    # §8 lamps. The kill state is NOT read here: the card already holds it, and a second
+    # reader of the kill switch is a second thing that can disagree about whether it is armed.
+    out["lamps"] = rs.lamps_block(kill_state=None)
     out["field_origin"] = {"credit": "derived", "rates": "derived",
-                           "leadership": "derived", "zweig": "derived"}
+                           "leadership": "derived", "zweig": "derived",
+                           "auction": "stored", "lamps": "derived"}
     return out

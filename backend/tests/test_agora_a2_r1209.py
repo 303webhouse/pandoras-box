@@ -411,7 +411,7 @@ def test_THE_DRAWER_IS_FORCED_TO_THE_LEFT():
 
 #: The drawer sections B8 has wired. Section 7, the ribbon, came first because it needed
 #: no new source (R-IV.1239(h)).
-WIRED_DRAWER_SECTIONS = {"1", "2", "3", "4", "5", "7"}
+WIRED_DRAWER_SECTIONS = {"1", "2", "3", "4", "5", "6", "7", "8"}
 
 
 def test_EVERY_UNWIRED_DRAWER_SECTION_STILL_SAYS_IT_IS_MOCK():
@@ -423,11 +423,18 @@ def test_EVERY_UNWIRED_DRAWER_SECTION_STILL_SAYS_IT_IS_MOCK():
     # wired set. This asserted `>= 8` while all eight were placeholders; as a set, the
     # assertion TIGHTENS as sections land instead of having to be deleted eight times. A wired
     # section still calling itself a mock is the same fault inverted, so that is checked too.
-    assert body.count("mock(") == 8 - len(WIRED_DRAWER_SECTIONS), body.count("mock(")
+    # ALL EIGHT ARE WIRED (R-IV.1246(b)), so there is no mock left to count and no
+    # placeholders footer to keep honest. What this guard now holds is the inverse property:
+    # NOTHING in the drawer may claim to be a mock, and every section must be rendered by a
+    # named renderer rather than a placeholder.
+    assert body.count("mock(") == 0, body.count("mock(")
+    assert "STILL PLACEHOLDERS" not in body
+    assert "Phase A: the sections above are placeholders" not in body
+    for renderer in ("flipTriggersHtml", "creditHtml", "zweigHtml", "leadershipHtml",
+                     "ratesHtml", "auctionHtml", "ribbonHtml", "lampsHtml"):
+        assert renderer in body, renderer
+    # `rd-mock` SURVIVES as the class an unavailable section uses, which is not the same claim.
     assert "rd-mock" in js
-    # The footer COUNTS rather than asserting, so it cannot go stale as sections are wired.
-    assert "WIRED:" in body
-    assert "STILL PLACEHOLDERS: " in body
     for n in sorted(WIRED_DRAWER_SECTIONS):
         start = body.index("'%s', " % n)
         nxt = body.find("+ sec(", start)

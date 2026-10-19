@@ -210,3 +210,98 @@ def zweig_proxy(breadth_pct: Sequence[Optional[float]],
                    % (low, recent[-1])),
         "note": ZWEIG_PROXY_NOTE,
     }
+
+
+# ── §6 auction state (PYTHIA) ─────────────────────────────────────────────
+
+#: Where price sits against the prior session's value area. The words are the market-profile
+#: vocabulary the PYTHIA feed already uses, not new ones.
+def auction_block(mp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """SPY's auction state from the PYTHIA market-profile snapshot.
+
+    THE BRACKET COUNTER IS WITHHELD, not estimated. Board 8 asked for it greyed under 10
+    sessions; the hub stores the LATEST snapshot per ticker and no per-session bracket history,
+    so there is no count to grey -- a "1 of 10" built from one row would be a number about
+    nothing. Reported as unavailable with that reason.
+    """
+    if not mp:
+        return {"available": False,
+                "reason": "no PYTHIA market-profile snapshot is stored for SPY"}
+    d = mp.get("data") if isinstance(mp.get("data"), dict) else mp
+    price = _f(d.get("price"))
+    vah, val, poc = _f(d.get("vah")), _f(d.get("val")), _f(d.get("poc"))
+    where, basis = _where_in_value(price, vah, val, poc)
+    return {
+        "available": True,
+        "where": where,
+        "where_basis": basis,
+        "price": price, "vah": vah, "val": val, "poc": poc,
+        "ib_high": _f(d.get("ib_high")), "ib_low": _f(d.get("ib_low")),
+        "va_migration": d.get("va_migration"),
+        "poor_high": d.get("poor_high"), "poor_low": d.get("poor_low"),
+        "volume_quality": d.get("volume_quality"),
+        "interpretation": d.get("interpretation"),
+        "as_of": d.get("timestamp"),
+        "staleness_seconds": mp.get("staleness_seconds"),
+        "bracket_counter": {
+            "available": False,
+            "reason": ("the hub stores the latest market-profile snapshot per ticker and no "
+                       "per-session bracket history, so there is no count to show -- a "
+                       "figure built from one row would be a number about nothing"),
+        },
+        "basis": "PYTHIA market-profile snapshot for SPY, as stored",
+    }
+
+
+def _where_in_value(price, vah, val, poc) -> Tuple[Optional[str], str]:
+    """ABOVE / INSIDE / BELOW the value area, with the levels that decided it.
+
+    None when any of the three levels is missing: "inside value" computed against a missing
+    edge is the kind of confident wrong answer this card exists not to give.
+    """
+    if price is None or vah is None or val is None:
+        return None, "price, VAH or VAL is not recorded on the snapshot"
+    if price > vah:
+        return "ABOVE VALUE", "price %.2f over VAH %.2f" % (price, vah)
+    if price < val:
+        return "BELOW VALUE", "price %.2f under VAL %.2f" % (price, val)
+    side = ""
+    if poc is not None:
+        side = ", %s the POC %.2f" % ("above" if price >= poc else "below", poc)
+    return "INSIDE VALUE", "price %.2f between VAL %.2f and VAH %.2f%s" % (price, val, vah, side)
+
+
+def _f(v: Any) -> Optional[float]:
+    try:
+        f = float(v)
+        return None if f != f else f
+    except (TypeError, ValueError):
+        return None
+
+
+# ── §8 lamps ──────────────────────────────────────────────────────────────
+
+#: The rules file's OWN words for why overlays are not computed in v1. Quoted rather than
+#: paraphrased: the reason a lamp is dark is part of the card's record.
+OVERLAYS_REASON = "overlays are a judgement input, not computed in v1"
+
+
+def lamps_block(kill_state: Optional[str] = None) -> Dict[str, Any]:
+    """§8's lamps: the overlay lamps and the kill-switch lamp.
+
+    THE OVERLAY LAMPS HAVE NO FEED, and that is the rules file's own position, not a gap I
+    found: `NO_FEED_IN_V1` says overlays are a judgement input. So they are shown UNAVAILABLE
+    with that sentence, never as dark lamps -- a dark lamp reads as "checked, nothing firing",
+    which is a claim, where "no feed" is the truth.
+
+    The kill-switch lamp is the one that can light, and it comes from the regime payload the
+    card already reads rather than from a second source.
+    """
+    return {
+        "overlays": {"available": False, "reason": OVERLAYS_REASON},
+        "kill": {"available": kill_state is not None, "state": kill_state,
+                 "reason": None if kill_state is not None
+                 else "the kill-switch state was not readable on this payload"},
+        "basis": ("a lamp is shown only where a feed exists. An unlit lamp would read as "
+                  "'checked, nothing firing'; 'no feed' is the honest display")
+    }
