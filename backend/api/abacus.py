@@ -44,6 +44,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from database.postgres_client import get_postgres_client
 from models.accounts import display_name          # R-IV.650(a): the name is served, never inferred
+from models.session_day import day_of as _session_day_of    # R-IV.726's rule, one author
+from models.session_day import day_sql as _session_day_sql
 # Convention #27's OWN rounding helper, imported rather than re-written: a second author of
 # "HALF-UP to the cent" is a second place for it to drift.
 from services.position_economics import money as _money, money_in as _money_in
@@ -334,26 +336,22 @@ def _day_of(value) -> Optional[date]:
     would read as a day. That is 6 PM Mountain, after the close, and no such row exists in the book.
     If intraday crypto fills ever land in this census, this test needs a better discriminator than
     the clock -- a column saying which kind the value is.
+
+    THE ARITHMETIC MOVED OUT (R-IV.1265(b)). The position WRITER needs this same rule, to derive a
+    closure's `trade_date` from its disposal lot's own session rather than from the clock the row
+    was written at -- so the rule now lives in `models/session_day.py` and this function delegates.
+    The prose above stays here because it is where it was measured. Two copies of a rule this
+    subtle disagree eventually, and the copy that disagrees is the one nobody re-read.
     """
-    if value is None:
-        return None
-    if not isinstance(value, datetime):
-        return value
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    utc = value.astimezone(timezone.utc)
-    if (utc.hour, utc.minute, utc.second, utc.microsecond) == (0, 0, 0, 0):
-        return utc.date()
-    return value.astimezone(MT).date()
+    return _session_day_of(value)
 
 
 # The same rule in SQL, for the census window. A date predicate on a `timestamptz` with no
 # conversion at all reads a 9 PM Mountain close as the NEXT day, which at a range boundary silently
-# moves a trade into the wrong window.
+# moves a trade into the wrong window. Delegated for the reason above; the string it returns is
+# byte-identical to the one this file used to build, and a test asserts that.
 def _day_sql(col: str) -> str:
-    return ("(CASE WHEN ({c} AT TIME ZONE 'UTC')::time = TIME '00:00:00' "
-            "THEN ({c} AT TIME ZONE 'UTC')::date "
-            "ELSE ({c} AT TIME ZONE 'America/Denver')::date END)").format(c=col)
+    return _session_day_sql(col)
 
 
 HOLD_BUCKETS = (("Same day", 0, 0), ("2–7 days", 1, 7), ("8–21 days", 8, 21),
