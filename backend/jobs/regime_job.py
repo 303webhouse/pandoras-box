@@ -238,9 +238,26 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
         await _audit(conn, action="vix_source",
                      detail=json.dumps(vix_report)[:1900],
                      rules_version=rules.get("version"))
-    sessions = sessions_from_series(series, settled_through=through,
-                                    vix_by_date=vix_by_date,
-                                    v2=str(rules.get("version")) == "v2")
+    # AUDITED, because the first v2 deploy failed HERE and said nothing. `vix_source` was the
+    # last action on the record, and the route could report only "no row for rules v2" — the
+    # reason lived in a deploy log. An exception in the session build propagates to the startup
+    # task's own except, which logs a warning and writes NO audit row, so the one table that
+    # exists to answer "why is there no snapshot" was silent about the only step that failed.
+    try:
+        sessions = sessions_from_series(series, settled_through=through,
+                                        vix_by_date=vix_by_date,
+                                        v2=str(rules.get("version")) == "v2")
+    except Exception as exc:                                        # noqa: BLE001
+        detail = "session build failed: %s: %s" % (type(exc).__name__, exc)
+        await _audit(conn, action="refused", detail=detail,
+                     rules_version=rules.get("version"))
+        logger.error("[regime_job] %s", detail)
+        return dict(report, written=0, refused=detail)
+    await _audit(conn, action="sessions_built",
+                 detail="%d session(s) built for rules %s (v2 inputs: %s, vix dates: %d)"
+                        % (len(sessions), rules.get("version"),
+                           str(rules.get("version")) == "v2", len(vix_by_date)),
+                 rows_written=len(sessions), rules_version=rules.get("version"))
     # A WRITE FAILURE IS AUDITED TOO. The first live seed raised inside the INSERT -- an ISO
     # string handed to a DATE column -- and because only the REFUSAL paths audited, it left no
     # row at all: the route could say "no snapshot" and nothing could say why. Finding that
