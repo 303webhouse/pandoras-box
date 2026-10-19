@@ -1,7 +1,7 @@
-/* Stater Swap v2 — C2 Cockpit Grid · scaffold (SG-1 increment).
-   Scope: S5.1 global chips row + S5.2 symbol grid, live-wired to backend /api/crypto/*
-   and /api/analytics/risk-budget. Macro/tape/cycle/feed/drawer are placeholders pending
-   the SG-1 layout gate. Client consumes backend /api/* only — never the Hub MCP (AEGIS).
+/* Stater Swap v2 — C2 Cockpit Grid.
+   S5.1 chips, S5.2 grid, macro, tape, cycle, feed and the drawer are live-wired
+   to backend /api/crypto/* and /api/analytics/risk-budget.
+   Client consumes backend /api/* only — never the Hub MCP (AEGIS).
    Honest-seam doctrine: fake-healthy is a P0 bug — unknown/absent renders N/A-with-reason.
    Discipline per SG-0 Option A: concurrent = advisory, daily/cooldown = honest N/A seams. */
 (() => {
