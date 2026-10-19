@@ -348,7 +348,9 @@ def _ma50_rising(bars: Sequence[Bar]) -> Optional[bool]:
 def sessions_from_series(series: Dict[str, List[Bar]], *,
                          settled_through: Optional[str] = None,
                          overlays: Optional[Dict[str, Any]] = None,
-                         lenses: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                         lenses: Optional[Dict[str, Any]] = None,
+                         vix_by_date: Optional[Dict[str, Dict[str, Any]]] = None,
+                         v2: bool = False) -> List[Dict[str, Any]]:
     """Every classifiable session in `series`, oldest-first, each as a complete inputs dict.
 
     `settled_through` is the last session known to be settled; later sessions are marked unsettled
@@ -365,6 +367,17 @@ def sessions_from_series(series: Dict[str, List[Bar]], *,
                            prior_regime=prior)
         if row is None:
             continue
+        if v2:
+            # R-IV.1260(c): v2's bar-derived inputs, which the v1 rows already read by name.
+            # The two STATEFUL ones -- prior_regime and sessions_since_crash -- are NOT set
+            # here: this module must not import the classifier, so it cannot know a label. The
+            # replay injects them as it walks, which is what the comment below always claimed.
+            from models.regime_classifier import load_rules
+            from models.regime_inputs_v2 import fill as _fill_v2
+
+            _fill_v2(row, series, i, rules=load_rules(),
+                     vix=(vix_by_date or {}).get(_day(spy[i].date)),
+                     window_dates=[b.date for b in spy[:i + 1]])
         out.append(row)
         # The prior regime §2's Recovery row reads is the PREVIOUS session's label, which the
         # replay fills in as it goes. Left None here and set by the replay, because this module

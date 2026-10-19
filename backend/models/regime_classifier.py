@@ -34,7 +34,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-RULES_VERSION = "v1"
+RULES_VERSION = "v2"   # R-IV.1260(c): v2 fills the inputs the v1 rows already read
 _RULES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            "config", "regime_rules.%s.json" % RULES_VERSION)
 

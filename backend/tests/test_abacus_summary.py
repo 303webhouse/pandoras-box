@@ -1106,7 +1106,13 @@ class TestTheDateBasisIsServed:
         with p:
             d = _get(client, test_api_key).json()
         b = d["date_basis"]
-        assert b["column"] == "position_lot_closures.created_at"
+        # R-IV.1260(d): the column EXISTS now and the window reads
+        # COALESCE(trade_date, created_at), so the basis names both. This asserted the
+        # pre-column reality -- correct when it was written (R-IV.1262(b), which named
+        # BUILD's column as the fix) and false the moment that column landed. Updated
+        # by BUILD under (d) rather than left to fail, with the reason recorded here.
+        assert b["column"] == ("COALESCE(position_lot_closures.trade_date, "
+                               "position_lot_closures.created_at)")
         assert b["trade_date_exists"] is False
         assert b["mixed"] is True
         assert "exit_date" in b["mixed_detail"]
@@ -1117,7 +1123,9 @@ class TestTheDateBasisIsServed:
         pool, p = _patch_book([_row(100.0, 1000.0)])
         with p:
             d = _get(client, test_api_key).json()
-        assert d["accounts_date_basis"]["column"] == "position_lot_closures.created_at"
+        assert d["accounts_date_basis"]["column"] == (
+            "COALESCE(position_lot_closures.trade_date, "
+            "position_lot_closures.created_at)")
         live = [b for b in d["breakdowns"] if b["source"] == "live"]
         assert live, "no live breakdown to check"
         for b in live:

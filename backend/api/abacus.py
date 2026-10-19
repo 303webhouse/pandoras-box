@@ -679,8 +679,10 @@ _DATE_BASIS_SQL = """
            COUNT(*) FILTER (WHERE exit_day IS NOT NULL AND write_day <> exit_day) AS differing,
            COUNT(*) FILTER (WHERE exit_day IS NOT NULL AND write_day = exit_day) AS agreeing,
            COUNT(*) FILTER (WHERE exit_day IS NULL) AS no_exit_day,
+           COUNT(*) FILTER (WHERE trade_day IS NOT NULL) AS trade_dated,
+           COUNT(*) FILTER (WHERE trade_day IS NULL) AS write_dated,
            MIN(exit_day) AS earliest_exit, MIN(write_day) AS first_write, MAX(write_day) AS last_write
-      FROM (SELECT {w} AS write_day, {e} AS exit_day
+      FROM (SELECT {w} AS write_day, {e} AS exit_day, c.trade_date AS trade_day
               FROM position_lot_closures c
               JOIN unified_positions p ON p.position_id = c.position_id
              WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF') q
@@ -699,10 +701,28 @@ async def _load_date_basis(pool) -> dict:
         v = _day_of(v) if v is not None else None
         return v.isoformat() if v is not None else None
 
+    # R-IV.1260(d): MEASURED, NOT ASSERTED — which is what this function's own docstring
+    # promises. `trade_date_exists` and the label were hard-coded False / created_at when the
+    # column did not exist. It exists now, and the realized window reads
+    # COALESCE(trade_date, created_at), so the hard-coded version would have become false the
+    # moment that deployed: the caption-lies-about-its-field fault, in the one place on this
+    # page whose entire job is to say what the dates mean.
+    # A row that cannot answer gives UNKNOWN, not zero. Fixtures — and any caller selecting its
+    # own columns — will not carry these two, and reporting 0 trade-dated rows would be a claim
+    # that nothing is trade-dated, which is exactly the assertion this block exists to stop
+    # being hard-coded.
+    _keys = r.keys() if (r is not None and hasattr(r, "keys")) else ()
+    trade_dated = int(r["trade_dated"] or 0) if "trade_dated" in _keys else None
+    write_dated = int(r["write_dated"] or 0) if "write_dated" in _keys else None
     return {
-        "label": "by the day each closure row was WRITTEN, not the day the trade closed",
-        "trade_date_exists": False,
-        "column": "position_lot_closures.created_at",
+        "label": ("by each closure's TRADE DATE where it is recorded, otherwise by the day the "
+                  "closure row was written"
+                  if trade_dated else
+                  "by the day each closure row was WRITTEN, not the day the trade closed"),
+        "trade_date_exists": trade_dated is not None,
+        "trade_dated_rows": trade_dated,
+        "write_dated_rows": write_dated,
+        "column": "COALESCE(position_lot_closures.trade_date, position_lot_closures.created_at)",
         "mixed": True,
         "mixed_detail": ("A row with closures is placed by the day its closure was WRITTEN. A row "
                          "with no closures is placed by its own `exit_date`, which is the trade's "
@@ -757,7 +777,18 @@ def _realized_money_sql(first: Optional[date], last: date) -> tuple:
     R-IV.760(c), and `fallback.count` is expected to reach zero. It stays so that a row the
     closures ledger does not cover can never silently vanish from the total.
     """
-    day_closure = _day_sql("c.created_at")
+    # R-IV.1260(d): DATED BY THE TRADE, falling back to the write time only where the trade
+    # date is not recorded -- and the fallback is COUNTED below rather than assumed empty.
+    #
+    # `created_at` alone was wrong by more than the figure itself: the R-IV.760(c) backfill
+    # wrote old closures recently, so a "since 2026-09-01" window swept in trades that closed
+    # months earlier and reported +3,535.22 where those trades sum to about -30. A write
+    # timestamp is not a trade date.
+    #
+    # NOT `p.exit_date` EITHER, which (d) rules out and PDBC shows why: a partial exit leaves
+    # the row OPEN with exit_date NULL, so a window bounded on it cannot place the closure at
+    # all.
+    day_closure = _day_sql("COALESCE(c.trade_date, c.created_at)")
     day_exit = _day_sql("p.exit_date")
     params: list = [last]
     bound_c = f"{day_closure} <= $1"
@@ -769,7 +800,8 @@ def _realized_money_sql(first: Optional[date], last: date) -> tuple:
 
     # Branch 1 -- the closures ledger, dated by the closure itself.
     closures_sql = f"""
-        SELECT p.account AS account, SUM(c.realized) AS v, COUNT(*) AS n
+        SELECT p.account AS account, SUM(c.realized) AS v, COUNT(*) AS n,
+               COUNT(*) FILTER (WHERE c.trade_date IS NULL) AS n_fallback_date
           FROM position_lot_closures c
           JOIN unified_positions p ON p.position_id = c.position_id
          WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF'
@@ -821,10 +853,25 @@ async def _load_realized_money(pool, first: Optional[date], last: date) -> dict:
 
     totals: Dict[Optional[str], Decimal] = {}
     closures_n: Dict[Optional[str], int] = {}
+    # R-IV.1260(d): how many closures in this window are still dated by their WRITE time
+    # because no trade_date is recorded. Counted, not assumed: until POSITIONS has backfilled,
+    # some of this window is still dated the way that produced the wrong figure, and a reader
+    # is entitled to know how much.
+    # UNKNOWN, NOT ZERO, when a row cannot answer. A fixture row (and any caller that selects
+    # its own columns) may not carry `n_fallback_date`, and reporting 0 there would claim every
+    # closure is trade-dated — the opposite of what this field exists to disclose. One missing
+    # row makes the whole count None, because a partial count of "how much is mis-dated" would
+    # understate it.
+    dated_by_write: Optional[int] = 0
     for r in closure_rows:
         key = r["account"] or None
         totals[key] = totals.get(key, Decimal("0")) + Decimal(str(r["v"] or 0))
         closures_n[key] = closures_n.get(key, 0) + int(r["n"] or 0)
+        has_fb = "n_fallback_date" in (r.keys() if hasattr(r, "keys") else ())
+        if not has_fb:
+            dated_by_write = None
+        elif dated_by_write is not None:
+            dated_by_write += int(r["n_fallback_date"] or 0)
 
     fallback: list = []
     fallback_total = Decimal("0")
@@ -855,6 +902,17 @@ async def _load_realized_money(pool, first: Optional[date], last: date) -> dict:
         # cancelling losses -- still returns 0.00, because rows DID contribute.
         "combined": _money(sum(totals.values(), Decimal("0"))) if totals else None,
         "closure_rows_counted": closures_n,
+        # R-IV.1260(d). The window is dated by the TRADE where that is recorded; this says how
+        # much of it is not yet, so a figure drawn while the backfill is incomplete carries its
+        # own caveat instead of needing one from a report.
+        "dating": {
+            "basis": "COALESCE(trade_date, created_at)",
+            "closures_dated_by_write_time": dated_by_write,
+            "note": ("trade_date is the broker action date, written by POSITIONS; until it is "
+                     "backfilled these rows are still dated by when the closure row was "
+                     "WRITTEN, which is what reported +3,535.22 for a window whose trades sum "
+                     "to about -30"),
+        },
         "fallback": {
             "count": len(fallback),
             "total": _money(fallback_total),
