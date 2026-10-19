@@ -749,13 +749,26 @@ async def breadth_history(conn, sessions: int = BREADTH_HISTORY_SESSIONS) -> Lis
                 blob = _json.loads(blob)
             except ValueError:
                 blob = None
+        # THE KEY I FIRST READ DOES NOT EXIST. `breadth.pct_above_50dma` is what the drawer's
+        # own line asks for, but `_breadth_block` stores `sectors_above_50dma` (a COUNT) and
+        # `sectors_total` -- so the series came back with ZERO observations and §3 said
+        # unavailable. It was right to: it reported nothing rather than inventing a series,
+        # which is the only reason this was a five-minute fix and not a wrong thrust flag.
+        #
+        # The percentage is DERIVED from the two stored numbers. And a session whose count is
+        # absent stays a HOLE: `sectors_above_50dma` is omitted entirely when fewer than all
+        # eleven sector series were usable, because `sectors_above_50dma` refuses a partial
+        # count -- so a missing key means "not measurable that day", never zero sectors.
         pct = None
         if isinstance(blob, dict):
             br = blob.get("breadth")
             if isinstance(br, dict):
-                pct = br.get("pct_above_50dma")
-        try:
-            out.append(None if pct is None else float(pct))
-        except (TypeError, ValueError):
-            out.append(None)
+                count = br.get("sectors_above_50dma")
+                total = br.get("sectors_total")
+                try:
+                    if count is not None and total:
+                        pct = 100.0 * float(count) / float(total)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pct = None
+        out.append(pct)
     return out
