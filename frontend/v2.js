@@ -739,7 +739,9 @@
       </div>
       <div class="rb-curve" id="rbCurve">
         <div class="rb-ch"><span class="rb-cl">YIELD CURVE</span>
-          <span class="mock-chip" title="A2 is mocks (R-IV.1209(c)). The tenor table below is the LIVE /api/stable/rates read; the shape word, z-score chips and spreads arrive in B3.">PART MOCK</span></div>
+          <span class="yc-shape" id="ycShape" title="shape word: waiting for the FRED read">—</span>
+          <span class="yc-flag" id="ycFlag"></span></div>
+        <div class="yc-heads" id="ycHeads"></div>
         <div class="chart-host sm"><canvas id="curveChart"></canvas></div>
         <div class="mini-vals" id="curveVals"></div>
       </div>`;
@@ -2374,8 +2376,89 @@
     makeLineChart('curveChart', datasets, labels);
     vals.innerHTML = order.map((s) => {
       const y = yieldsBySym[s]; const v = cp[s]; const bp = y ? y.day_change : null;
-      return `<span class="mv"><span class="k">${s}</span><span class="v">${v != null ? Number(v).toFixed(2) + '%' : '--'}</span>${bp != null ? `<span class="bp ${signCls(bp)}">${bp >= 0 ? '+' : ''}${Number(bp).toFixed(1)}bp</span>` : ''}</span>`;
+      return `<span class="mv"><span class="k">${s}</span><span class="v">${v != null ? Number(v).toFixed(2) + '%' : '--'}</span>${bp != null ? `<span class="bp ${signCls(bp)}">${bp >= 0 ? '+' : ''}${Number(bp).toFixed(1)}bp</span>` : ''}<span data-tenor="${s}"></span></span>`;
     }).join('');
+  }
+
+  // ── B3: the FRED curve block (R-IV.1220(b)) ───────────────────────────────
+  //
+  // EVERY LABEL CARRIES ITS MEASURED FIRES PER YEAR, which is the ruling's own requirement
+  // and the reason the tooltip is assembled by the BACKEND rather than here: the figure is a
+  // measurement over that series' history, not a constant, and a second copy of the sentence
+  // in JS would drift from the number it describes.
+  //
+  // EXTREME pulses, UNUSUAL does not. "RARE" is retired (R-IV.1220(b)).
+  function ycChip(b) {
+    if (!b || !b.label) return '';
+    const cls = b.label === 'EXTREME' ? 'yc-extreme' : 'yc-unusual';
+    return '<span class="yc-lab ' + cls + (b.pulse ? ' yc-pulse' : '') + '" title="'
+      + esc(b.tooltip || '') + '">' + esc(b.label) + '</span>';
+  }
+
+  function ycSpark(spark) {
+    if (!spark || spark.length < 2) return '';
+    const w = 72, h = 18;
+    const min = Math.min.apply(null, spark), max = Math.max.apply(null, spark);
+    const rng = (max - min) || 1, step = w / (spark.length - 1);
+    const d = spark.map((v, i) =>
+      (i ? 'L' : 'M') + (i * step).toFixed(1) + ',' + (h - ((v - min) / rng) * h).toFixed(1)
+    ).join(' ');
+    // The zero line is drawn only when zero is INSIDE the range: a baseline outside the data
+    // would sit on the edge of the box and read as the series touching zero.
+    const zero = (min < 0 && max > 0)
+      ? '<line x1="0" y1="' + (h - ((0 - min) / rng) * h).toFixed(1) + '" x2="' + w
+        + '" y2="' + (h - ((0 - min) / rng) * h).toFixed(1) + '" class="yc-zero"/>'
+      : '';
+    return '<svg class="yc-spark" viewBox="0 0 ' + w + ' ' + h + '" width="' + w
+      + '" height="' + h + '" aria-hidden="true">' + zero
+      + '<path d="' + d + '"/></svg>';
+  }
+
+  async function loadYieldCurve() {
+    let d = null;
+    try { const r = await apiFetch('/api/yield-curve'); if (r.ok) d = await r.json(); } catch (_) {}
+    const shape = $('ycShape'), flag = $('ycFlag'), heads = $('ycHeads');
+    if (!heads) return;
+    if (!d || d.error || !d.spreads) {
+      // Says so. No cached number, no substituted figure -- the panel showing a stale spread
+      // as current is the fault this says out loud instead.
+      heads.innerHTML = '<span class="val-muted">FRED curve unavailable'
+        + (d && d.error ? ' (' + esc(d.error) + ')' : '') + '</span>';
+      if (shape) { shape.textContent = '—'; shape.title = 'the FRED read failed'; }
+      return;
+    }
+    if (shape) {
+      shape.textContent = (d.shape && d.shape.word) || '—';
+      shape.title = (d.shape && d.shape.basis ? d.shape.basis + ' · ' : '')
+        + 'as of ' + (d.as_of || 'unknown') + ' (FRED)';
+      shape.className = 'yc-shape' + (d.shape && d.shape.word === 'INVERTED' ? ' yc-inv' : '');
+    }
+    const ui = (d.spreads['2s10s'] && d.spreads['2s10s'].un_inverted)
+      || (d.spreads['3m10s'] && d.spreads['3m10s'].un_inverted);
+    if (flag) {
+      flag.textContent = ui ? ui.flag : '';
+      flag.title = ui ? ui.basis : '';
+      flag.style.display = ui ? '' : 'none';
+    }
+    heads.innerHTML = ['3m10s', '2s10s'].map((k) => {
+      const b = d.spreads[k]; if (!b) return '';
+      const bp = b.bp == null ? '--' : (b.bp > 0 ? '+' : '') + b.bp.toFixed(0);
+      const ch = b.change_bp == null ? '' : '<span class="yc-ch ' + signCls(b.change_bp) + '">'
+        + (b.change_bp >= 0 ? '+' : '') + b.change_bp.toFixed(1) + 'bp</span>';
+      return '<div class="yc-head' + (b.inverted ? ' yc-inv' : '') + '">'
+        + '<span class="yc-k">' + esc(k) + '</span>'
+        + '<span class="yc-bp" title="' + esc(b.tooltip || '') + '">' + bp + 'bp</span>'
+        + ch + ycChip(b)
+        + '<span class="yc-sp" title="' + (b.spark_sessions || 0)
+        + ' sessions, FRED ' + esc(b.series || '') + '">' + ycSpark(b.spark) + '</span>'
+        + '</div>';
+    }).join('');
+    // The per-tenor z chips ride on the LIVE tenor table that /api/stable/rates already
+    // draws, so the two sources sit side by side and are labelled as two sources.
+    (d.tenors || []).forEach((t) => {
+      const el = document.querySelector('.mv [data-tenor="' + t.tenor + '"]');
+      if (el) el.innerHTML = ycChip(t);
+    });
   }
 
   // ── b6 USD carry mini ───────────────────────────────────────────────────────
@@ -4146,7 +4229,12 @@
   }
 
   // ── Polling groups (idle interval budget: 4 << 10) ──────────────────────────
-  function refreshMarket() { loadThemes(); loadDivergence(); loadIndexStrip(); loadRates(); loadFx(); }
+  // loadYieldCurve runs AFTER loadRates: it writes the per-tenor chips into the slots
+  // that table draws, and a chip written before its slot exists is a chip nobody sees.
+  function refreshMarket() {
+    loadThemes(); loadDivergence(); loadIndexStrip(); loadFx();
+    loadRates().then(loadYieldCurve);
+  }
   async function refreshDesk() {
     let positions = null;
     try { const r = await apiFetch('/api/v2/positions?status=OPEN'); if (r.ok) positions = await r.json(); } catch (_) {}
