@@ -1317,7 +1317,17 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 
 /* ── the regime call and the BEAR -> BULL slider ─────────────────────────── */
 .rs-call { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
-.rs-label { font-size: 22px; font-weight: 700; line-height: 1.1; color: var(--text); }
+/* R-IV.1246(d). THE CARD'S LABEL WAS THE ODD ONE OUT: 22px system-sans bold, where the band's
+   labels are Orbit. It now takes the same face.
+   (d)2 then reduces every label in the Regime section by 15% and holds them at ONE SHARED
+   SIZE, so --regime-label is the only number: 19px x 0.85 = 16.15px, rounded to 16px, and the
+   drawer's 24px comes down to the same token rather than to its own 20.4px. Three sizes
+   claiming to be one size is how they drifted apart in the first place. */
+:root { --regime-label: 16px; }
+.rs-label {
+  font-family: var(--orbit); font-size: var(--regime-label); letter-spacing: 1.4px;
+  font-weight: 400; line-height: 1.1; color: var(--text);
+}
 .chip.rs-tag { border-style: dashed; color: var(--text-3); font-size: 11px; padding: 1px 7px; }
 
 /* The one track, vermilion -> lime, with the ten fixed ticks over it. Built on .vc-gauge so
@@ -1640,7 +1650,8 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 }
 .rb-lab-row { display: flex; align-items: baseline; gap: 7px; }
 .rb-lab {
-  font-family: var(--orbit); font-size: 19px; letter-spacing: 1.4px; line-height: 1;
+  font-family: var(--orbit); font-size: var(--regime-label); letter-spacing: 1.4px;
+  line-height: 1;
 }
 .rb-num { font: 600 12px var(--mono); color: var(--text-2); margin-left: auto; }
 .rb-g { height: 12px; margin-top: 2px; }
@@ -1706,7 +1717,10 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 
 /* -- the left DETAILS drawer (board 8) -- */
 .rd-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
-.rd-lab { font-family: var(--orbit); font-size: 24px; letter-spacing: 1.5px; line-height: 1.1; }
+.rd-lab {
+  font-family: var(--orbit); font-size: var(--regime-label); letter-spacing: 1.5px;
+  line-height: 1.1;
+}
 .rd-sub { font: 9px var(--mono); color: var(--text-3); letter-spacing: .4px; }
 .rd-diff { font: 9px var(--mono); color: var(--teal); }
 .rd-ctx {
@@ -1730,7 +1744,9 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 
 @media (min-width: 769px) {
   .rb-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
-  .rb-lab { font-size: 22px; }
+  /* Was 22px, the pre-R-IV.1246(d) desktop size. It follows the token now: a phone
+     override with its own number would break the one-shared-size rule at 768px. */
+  .rb-lab { font-size: var(--regime-label); }
   .regime-band { flex-direction: row; align-items: stretch; gap: 12px; }
   .rb-grid { flex: 1 1 auto; }
   .rb-curve {
@@ -1968,3 +1984,15 @@ body.is-mobile-grid .tile-grip { display: none !important; }
     font-size: 8px; letter-spacing: .08em; margin-left: 5px; padding: 0 4px;
     border: 1px solid var(--amber); color: var(--amber); border-radius: 2px;
 }
+
+/* R-IV.1246(c)3: the kill badge in the Regime card. ARMED keeps the vermilion alarm pulse
+   (R-IV.1209(d)); UNREADABLE is amber, this file's "we cannot confirm this" — because an
+   unreadable switch is not a fired one. Not-armed renders nothing at all. */
+.ks-unknown { border-color: var(--amber); color: var(--amber); background: transparent; }
+#rsKill { cursor: pointer; }
+
+/* (e) R-IV.1246: the yield-curve box outside RTH — last available values, dimmed, with a
+   CLOSED chip, matching USD CARRY. Dimmed and not blanked: outside the session the last close
+   is exactly what a reader wants, and hiding it would answer a different question. */
+.yc-closed .yc-heads, .yc-closed .mini-vals, .yc-closed .chart-host { opacity: .55; }
+.yc-flag-closed { border-color: var(--text-3); color: var(--text-3); }

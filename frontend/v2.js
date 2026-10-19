@@ -216,7 +216,14 @@
     const worst = (anyFlat || vals.includes('dead')) ? 'dead' : vals.includes('down') ? 'down' : vals.includes('suspect') ? 'suspect' : vals.includes('unconfirmed') ? 'unconfirmed' : vals.includes('ok') ? 'ok' : vals.length ? 'closed' : '';
     const dot = $('dataHealthDot');
     paintDot(dot, worst);
-    dot.setAttribute('title', GLOSSARY.HEALTH + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : worst === 'suspect' ? 'SUSPECT — a displayed change does not match its own spot and prior close' : worst === 'down' ? 'a source reported an error' : worst === 'unconfirmed' ? 'cannot confirm — a feed is unreadable or stale' : worst === 'closed' ? 'market session not open' : (worst || 'no data')));
+    // R-IV.1246(c)2: it monitors the WORST state across every ranked feed, so the
+    // tooltip NAMES them. A dot whose tooltip gives only a verdict cannot be acted on:
+    // "DEAD feed(s)" leaves the reader hunting for which one.
+    const ranked = Object.keys(_health).filter((k) => _health[k] !== null);
+    const flat = Object.keys(_flat).filter((k) => _flat[k]);
+    const whichFlat = flat.length ? ' — flatlined: ' + flat.join(', ') : '';
+    const watching = ranked.length ? '\n\nwatching: ' + ranked.sort().join(', ') : '';
+    dot.setAttribute('title', GLOSSARY.HEALTH + whichFlat + ' — ' + (worst === 'dead' ? 'DEAD feed(s) — pipe flatlined' : worst === 'suspect' ? 'SUSPECT — a displayed change does not match its own spot and prior close' : worst === 'down' ? 'a source reported an error' : worst === 'unconfirmed' ? 'cannot confirm — a feed is unreadable or stale' : worst === 'closed' ? 'market session not open' : (worst || 'no data')) + watching);
   }
   // Record a feed's flatline state; adds exactly one River action item per incident
   // (River dedups by id) and removes it on recovery.
@@ -327,20 +334,35 @@
     return v;
   }
 
-  // ── Kill-switch beacon (top bar) ─────────────────────────────────────────────
-  // One state word, at most one number, one dot (HELIOS glance budget). Lives in the top bar
-  // so it stays visible with pop-outs open. Provenance goes in the hover title and the drawer.
+  // ── Kill switch: IN THE REGIME CARD, NOT THE HEADER (R-IV.1246(c)3) ─────────
+  //
+  // It was a permanent top-bar pill reading "KILL · CLEAR" — loud while saying everything was
+  // fine, which is the alarm nobody reads. It now renders ONLY when armed, in the Regime
+  // Strategy card's own badge and in its drawer, keeping the vermilion alarm pulse
+  // R-IV.1209(d) ruled. When it is not armed, nothing renders: an absent badge is the honest
+  // display of "not armed", and it leaves the card's header to the label.
+  //
+  // THE UNKNOWN STATE STILL SHOWS. "We cannot read the kill switch" is not "the kill switch is
+  // clear", and collapsing the two would be fail-open with a tidier header.
   const _unesc = (s) => { const t = document.createElement('textarea'); t.innerHTML = String(s || ''); return t.value; };
+  let _lastKillView = null;
   function renderKillBeacon(kill) {
-    const b = $('killBeacon'); if (!b) return;
     const v = killCellView(kill, _killReadAt);
-    b.dataset.state = v.state;
-    b.querySelector('.kb-word').textContent = 'KILL · ' + v.label;
-    b.querySelector('.kb-num').textContent = v.num || '';
-    b.classList.toggle('pulse-vermilion', v.state === 'armed');
-    if (v.staleRead) b.setAttribute('data-stale', ''); else b.removeAttribute('data-stale');
-    b.title = 'Kill switch: ' + v.label + ' — ' + _unesc(v.prov) + (v.source ? ' (' + v.source + ')' : '') + '\n\n' + GLOSSARY.KILL;
-    b.setAttribute('aria-label', 'Kill switch ' + v.label + '. Open details.');
+    _lastKillView = v;
+    const badge = $('rsKill');
+    if (!badge) return;
+    const show = v.state === 'armed' || v.state === 'unknown';
+    badge.hidden = !show;
+    if (!show) {
+      badge.className = 'dead-badge';
+      badge.removeAttribute('title');
+      return;
+    }
+    badge.textContent = v.state === 'armed'
+      ? ('KILL · ' + v.label + (v.num ? ' ' + v.num : '')) : 'KILL · ?';
+    badge.className = 'dead-badge' + (v.state === 'armed' ? ' pulse-vermilion' : ' ks-unknown');
+    badge.title = 'Kill switch: ' + v.label + ' — ' + _unesc(v.prov)
+      + (v.source ? ' (' + v.source + ')' : '') + '\n\n' + GLOSSARY.KILL;
   }
 
   async function loadRegimeBand() {
@@ -1106,6 +1128,19 @@
   // classifier takes a label when a SET of conditions holds, not when one score crosses a
   // line, so there is no number whose shrinking means closer. A points estimate would imply a
   // geometry the rules do not have, which is what the note in this file already said.
+  // §3's live number. `pct_above_50dma` IS NOT A STORED KEY -- `_breadth_block` writes
+  // `sectors_above_50dma` (a count) and `sectors_total`, so the old expression read a missing
+  // field and this line has been showing a dash. The percentage is derived, and the count is
+  // shown beside it so the reader can see the sample it came from: 5 of 11 and 45% are the
+  // same fact, but only the first says how coarse it is.
+  function breadthNow() {
+    const br = ((_lastRegime.regime || {}).breadth) || {};
+    if (br.pct_above_50dma != null) return br.pct_above_50dma + '%';
+    const c = br.sectors_above_50dma, t = br.sectors_total;
+    if (c != null && t) return c + ' of ' + t + ' sectors (' + Math.round(100 * c / t) + '%)';
+    return '—';
+  }
+
   function flipTriggersHtml(ft) {
     if (!ft || ft.error) {
       return '<div class="rd-mock">flip conditions unavailable'
@@ -1196,8 +1231,7 @@
       + sec('1', 'WHAT WOULD FLIP IT') + flipTriggersHtml(m.flip_triggers)
       + sec('2', 'CREDIT · HY SPREAD') + creditHtml(_rsSections.credit)
       + sec('3', 'BREADTH · % ABOVE 50D')
-      + kv('Live now', (((_lastRegime.regime || {}).breadth || {}).pct_above_50dma != null
-        ? _lastRegime.regime.breadth.pct_above_50dma + '%' : '—'))
+      + kv('Live now', breadthNow())
       + zweigHtml(_rsSections.zweig)
       + sec('4', 'LEADERSHIP · WHO IS CARRYING THE INDEX')
       + leadershipHtml(_rsSections.leadership)
@@ -2622,6 +2656,22 @@
     try { const r = await apiFetch('/api/yield-curve'); if (r.ok) d = await r.json(); } catch (_) {}
     const shape = $('ycShape'), flag = $('ycFlag'), heads = $('ycHeads');
     if (!heads) return;
+    // (e) R-IV.1246: OUTSIDE RTH the box shows the LAST AVAILABLE values at reduced opacity
+    // with a CLOSED chip, matching USD CARRY. The session comes from the server's own answer
+    // (`marketShut()`, which reads the server's own `market_session`) and NOT from the
+    // browser's clock: a laptop in the wrong timezone would dim the box mid-session, and a
+    // holiday would not dim it at all. R-IV.416(c) already made that a rule for this page.
+    //
+    // MY FIRST VERSION READ `_mktSession`, WHICH DOES NOT EXIST -- the second invented-name
+    // fault of this session after `database.connection`. An undefined identifier here throws
+    // and the whole tile stops rendering, so it is worth saying out loud: the accessor is
+    // `serverSession()` / `marketShut()`, and unknown is NOT closed.
+    //
+    // THE VALUES STAY. Blanking them would lose the last close, which is exactly what a reader
+    // wants outside the session; dimming says "not updating" without hiding it.
+    const box = $('rbCurve');
+    const closed = marketShut();
+    if (box) box.classList.toggle('yc-closed', !!closed);
     if (!d || d.error || !d.spreads) {
       // Says so. No cached number, no substituted figure -- the panel showing a stale spread
       // as current is the fault this says out loud instead.
@@ -2629,6 +2679,15 @@
         + (d && d.error ? ' (' + esc(d.error) + ')' : '') + '</span>';
       if (shape) { shape.textContent = '—'; shape.title = 'the FRED read failed'; }
       return;
+    }
+    if (closed && flag) {
+      // The CLOSED chip replaces the UN-INVERTED flag's slot rather than crowding it: both
+      // are single chips in the header, and the session fact outranks the flag outside hours.
+      flag.textContent = 'CLOSED · as of ' + (d.as_of || '—');
+      flag.title = 'outside the regular session (server calendar); these are the last '
+        + 'available FRED values, as of ' + (d.as_of || 'an unknown date');
+      flag.style.display = '';
+      flag.className = 'yc-flag yc-flag-closed';
     }
     if (shape) {
       shape.textContent = (d.shape && d.shape.word) || '—';
@@ -2638,10 +2697,11 @@
     }
     const ui = (d.spreads['2s10s'] && d.spreads['2s10s'].un_inverted)
       || (d.spreads['3m10s'] && d.spreads['3m10s'].un_inverted);
-    if (flag) {
+    if (flag && !closed) {
       flag.textContent = ui ? ui.flag : '';
       flag.title = ui ? ui.basis : '';
       flag.style.display = ui ? '' : 'none';
+      flag.className = 'yc-flag';
     }
     heads.innerHTML = ['3m10s', '2s10s'].map((k) => {
       const b = d.spreads[k]; if (!b) return '';
@@ -4662,8 +4722,15 @@
     });
     const dpb = $('divPopBtn');
     if (dpb) dpb.addEventListener('click', () => openDrawer('divergence', {}, dpb));
-    const kb = $('killBeacon');
-    if (kb) kb.addEventListener('click', () => openDrawer('kill', { kill: _lastRegime.kill }, kb));
+    // The card's badge is the way into the kill drawer now that the header pill is gone
+    // (R-IV.1246(c)3). It is only clickable when it is shown, which is only when armed or
+    // unreadable — the two states worth opening.
+    const kb = $('rsKill');
+    if (kb) {
+      kb.setAttribute('role', 'button');
+      kb.setAttribute('tabindex', '0');
+      kb.addEventListener('click', () => openDrawer('kill', { kill: _lastRegime.kill }, kb));
+    }
     // The Breadth tile is the only way into the breadth drawer now that the band's duplicate
     // New H/L and % > 50DMA cells are gone.
     const bp = $('breadthPanel');

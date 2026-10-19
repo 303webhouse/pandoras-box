@@ -28,16 +28,26 @@
             <img src="/assets/pandora-logo.png" alt="Pandora" class="v2-logo-icon">
             <span class="v2-brand">PANDORA</span>
         </div>
-        <button type="button" class="v2-quote" id="v2Quote" hidden><span class="q-text"></span> <span class="q-author"></span></button>
-        <span class="health-dot" id="dataHealthDot" data-gloss="HEALTH" title=""></span>
+        <!-- R-IV.1246(c)1: the quote is CENTRED, which needs a spacer on each side of it
+             rather than one after it. -->
         <div class="spacer"></div>
-        <!-- Kill-switch beacon: pinned here so it stays visible with pop-outs open -->
-        <button type="button" class="kill-beacon" id="killBeacon" data-state="loading" aria-label="Kill switch — loading"><span class="kb-dot" aria-hidden="true"></span><span class="kb-word">KILL · …</span><span class="kb-num num"></span></button>
+        <button type="button" class="v2-quote" id="v2Quote" hidden><span class="q-text"></span> <span class="q-author"></span></button>
+        <div class="spacer"></div>
+        <!-- R-IV.1246(c)3: THE KILL-SWITCH PILL IS GONE FROM THE HEADER. When the switch is
+             armed it shows inside the Regime Strategy card (#rsKill) and its drawer, with the
+             red alarm pulse R-IV.1209(d) rules; when it is not armed, nothing renders. A
+             permanent header pill reading "KILL · CLEAR" is an alarm nobody reads, and it was
+             the only thing on the bar that was loud while saying everything was fine. -->
         <button type="button" class="v2-fs" id="fsBtn" aria-label="Full screen" aria-pressed="false" title="Full screen" hidden>
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
         <span class="v2-sub" id="layoutStatus"></span>
         <a class="v2-legacy-link" href="/app/abacus">Abacus →</a>
+        <!-- R-IV.1246(c)2: IT MONITORS SOMETHING, so it moved rather than went. It is the
+             worst health across every feed on the board, flatline detection included, and the
+             tooltip names the feeds it is ranking rather than only the verdict. Far right,
+             after the links, so the centred quote is not pushed off centre by it. -->
+        <span class="health-dot" id="dataHealthDot" data-gloss="HEALTH" title=""></span>
         <a class="v2-legacy-link" href="/app/legacy">Legacy /app →</a>
     </header>
 
@@ -363,6 +373,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=80"></script>
+    <script src="/v2.js?v=81"></script>
 </body>
 </html>
