@@ -1,0 +1,200 @@
+{
+  "version": "v1",
+  "ruling": "R-IV.1259",
+  "approved_mocks": {
+    "main": "3bfb1943eab1f8d0e9471484d694446747ed2c8f7657fa037b42630f707061ab",
+    "states": "d78757ee6b5eabf832acee644c55d1996cdbf55ad23d22d6c4a8437b7388643f"
+  },
+  "note": "MOCK step of R-IV.1259(i): every figure here is illustrative and labelled. AMZN is deliberately absent - the approved mock used it as illustration and (b) states it is not in the v1 universe. Lives under frontend/assets/ so the browser and the Python lint read the SAME bytes.",
+  "badge": "MOCK · SAMPLE DATA",
+  "stamp": "SAMPLE · NOT A LIVE READ",
+  "cap": { "shown": 3, "max": 5 },
+  "tally": { "up": 1, "down": 2 },
+  "footer": "Positions you hold appear in YOUR BOOK (Position Watch), not here.",
+
+  "context": {
+    "loud_move": {
+      "kind": "loud_move",
+      "ticker": "SMH",
+      "move": "+3.2%",
+      "dir": "up",
+      "time": "11:12 ET",
+      "pinned": "PINNED · NOT COUNTED IN CAP",
+      "scale": "2.1× a normal day · 30-min velocity alarm",
+      "leading": [
+        { "label": "SMH +3.2", "w": 96 },
+        { "label": "QQQ +1.9", "w": 57 }
+      ],
+      "lagging": [
+        { "label": "XLF −0.5", "w": 15 },
+        { "label": "RSP −0.1", "w": 6 }
+      ],
+      "why": { "state": "unknown", "text": "Hub doesn't know why. Probably news. Go look." }
+    },
+    "strips": [
+      { "label": "MACRO IN WINDOW", "items": ["FOMC [MOCK 10/27–28]", "GDP + PCE [MOCK 10/29]"] },
+      { "label": "ROTATION SHIFT", "items": ["XLC ↗ in", "XLE ↘ out"], "dirs": ["up", "down"] }
+    ]
+  },
+
+  "watch": [
+    {
+      "kind": "value_moved",
+      "ticker": "SPY",
+      "move": "+1.4%",
+      "dir": "up",
+      "headline": "VALUE MOVED ▲",
+      "time": "10:41 ET",
+      "chips": [
+        { "label": "STRUCTURE", "on": true },
+        { "label": "FLOW", "on": true },
+        { "label": "TREND", "on": false },
+        { "label": "SECTOR", "on": false }
+      ],
+      "pythia": "PYTHIA · this ticker [MOCK 10:41] ✓",
+      "levels": {
+        "prior_edge": "prior VAH [MOCK 672.40]",
+        "value": "value [MOCK 674.10–677.65] · POC [MOCK 676.20]",
+        "last": "[MOCK 679.88]"
+      },
+      "spark": "0,78 40,76 80,80 120,70 160,66 200,58 230,44 260,40 300,34 340,30 380,26 420,22 460,20 500,17 528,16",
+      "against": [
+        "Daily trend: range (ADX [MOCK 13.5])",
+        "Thin volume",
+        "Narrow market ([MOCK 0.09])"
+      ],
+      "stale": "Stale if back below [MOCK 672.40]",
+      "strip": {
+        "expiry": "[MOCK 10/23] · 4 DTE",
+        "em": "Market expects ±$[MOCK 9.40] (±[MOCK 1.4]%)",
+        "iv_rank": { "label": "IV RANK [MOCK 61] · RICH", "tone": "rich" },
+        "rungs": [
+          { "mult": "0.5×", "quote": "[MOCK 684C 2.17]", "odds": "odds ≈ [MOCK 35]%", "be": "BE [MOCK 0.66] EM", "at": 27, "tone": "near" },
+          { "mult": "1×", "quote": "[MOCK 689C 0.90]", "odds": "odds ≈ [MOCK 18]%", "be": "BE [MOCK 1.05] EM", "at": 50, "tone": "near" },
+          { "mult": "1.5×", "quote": "[MOCK 694C 0.33]", "odds": "odds ≈ [MOCK 8]%", "be": "BE [MOCK 1.52] EM", "at": 73, "tone": "far" }
+        ],
+        "tail_label": "TAIL ONLY",
+        "liquidity": { "light": "green", "text": "Spread [MOCK 3.4]%" },
+        "wait": "Costs ~[MOCK 35]%/day to wait",
+        "earnings": { "tone": "unknown", "text": "Earnings: UNKNOWN — check" },
+        "structure": "Structure in the way: none before the 1× rung · no macro event before [MOCK 10/23]"
+      },
+      "buttons": ["Dismiss", "Pin", "Send to journal"]
+    },
+    {
+      "kind": "failed_break",
+      "ticker": "IWM",
+      "move": "+0.7%",
+      "dir": "flat",
+      "headline": "FAILED BREAK ▼",
+      "time": "12:05 ET",
+      "chips": [
+        { "label": "STRUCTURE", "on": true },
+        { "label": "FLOW", "on": true },
+        { "label": "TREND", "on": false },
+        { "label": "SECTOR", "on": false }
+      ],
+      "spark": "0,34 20,30 40,26 60,18 72,8 84,12 96,20 116,24 140,26",
+      "body": "Poked above prior-day high [MOCK 273.10], bar closed back inside.",
+      "against": ["Index still green", "Thin volume"],
+      "stale": "Stale if a bar closes back above [MOCK 273.10]",
+      "compact_strip": {
+        "expiry": "[MOCK 10/23] · ±$[MOCK 6.30]",
+        "liquidity": { "light": "green", "text": "[MOCK 2.1]%" },
+        "iv_rank": { "label": "IV [MOCK 38] · NEUTRAL", "tone": "neutral" },
+        "earnings": { "tone": "na", "text": "Earnings: n/a (ETF)" },
+        "more": "Show strikes ▸"
+      }
+    },
+    {
+      "kind": "trend_change",
+      "ticker": "XLK",
+      "move": "Fri close",
+      "dir": "flat",
+      "headline": "TREND CHANGE ▼",
+      "time": "posted 09:30 ET",
+      "chips": [
+        { "label": "STRUCTURE", "on": false },
+        { "label": "FLOW", "on": false },
+        { "label": "TREND", "on": true },
+        { "label": "SECTOR", "on": true }
+      ],
+      "transition": { "from": "RANGE", "to": "TREND · DOWN", "detail": ["ADX [MOCK 18 → 26]", "stack → bearish"] },
+      "against": ["Semis [MOCK +3.2]% today", "Above the 200-day"],
+      "stale": "Stale if a daily close back above [MOCK 50-day]",
+      "compact_strip": {
+        "expiry": "[MOCK 10/30] · ±$[MOCK]",
+        "liquidity": { "light": "amber", "text": "[MOCK 6.8]%" },
+        "macro": "FOMC + PCE inside expiry",
+        "more": "Show strikes ▸"
+      }
+    }
+  ],
+
+  "states": [
+    {
+      "kind": "state_aging",
+      "caption": "1 · AGING — FADES AFTER 60 MIN WITHOUT A NEW REASON",
+      "ticker": "SPY",
+      "headline": "VALUE MOVED ▲",
+      "dir": "up",
+      "time": "10:35 ET · 72 min old",
+      "chips": [
+        { "label": "STRUCTURE", "on": true },
+        { "label": "FLOW", "on": false },
+        { "label": "TREND", "on": false },
+        { "label": "SECTOR", "on": false }
+      ],
+      "body": "Faded: nothing new since it fired. Still listed so the day's record stays complete."
+    },
+    {
+      "kind": "state_thin",
+      "caption": "2 · OPTIONS TOO THIN — RED LIGHT COLLAPSES THE STRIP",
+      "ticker": "[CORE NAME]",
+      "headline": "FAILED BREAK ▼",
+      "dir": "down",
+      "time": "13:10 ET",
+      "notice": {
+        "tone": "red",
+        "text": "Options too thin — chart only",
+        "detail": "spread [MOCK 14]% at the 1× rung (limit 10%)"
+      }
+    },
+    {
+      "kind": "state_unverified",
+      "caption": "3 · STRUCTURE UNVERIFIED — THIS TICKER'S PYTHIA FEED IS QUIET",
+      "ticker": "QQQ",
+      "headline": "VALUE MOVED — WITHHELD",
+      "dir": "muted",
+      "time": "",
+      "notice": {
+        "tone": "amber",
+        "text": "Structure unverified",
+        "detail": "QQQ alert not yet checked against the tape"
+      },
+      "body": "The whole feed reading \"flowing\" never stands in for one ticker's own last update."
+    },
+    {
+      "kind": "state_loud_known",
+      "caption": "4 · LOUD MOVE WITH A KNOWN REASON",
+      "ticker": "SPY",
+      "move": "−1.0%",
+      "dir": "down",
+      "time": "14:00 ET",
+      "scale": "SPY −1% breaker",
+      "why": { "state": "known", "text": "On file: FOMC statement [MOCK 14:00 ET]" }
+    },
+    {
+      "kind": "state_quiet",
+      "caption": "5 · QUIET DAY",
+      "headline": "NOTHING NOTABLE YET",
+      "body": "0 of 5 today · quiet is information too"
+    },
+    {
+      "kind": "state_cap",
+      "caption": "6 · CAP REACHED",
+      "headline": "5 of 5 today",
+      "body": "New candidates are logged, not shown. LOUD MOVE still fires."
+    }
+  ]
+}
