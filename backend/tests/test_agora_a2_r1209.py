@@ -409,14 +409,30 @@ def test_THE_DRAWER_IS_FORCED_TO_THE_LEFT():
     assert ".drawer.from-left" in css, "the left mode must exist"
 
 
-def test_EVERY_PHASE_A_DRAWER_SECTION_SAYS_IT_IS_MOCK():
+#: The drawer sections B8 has wired. Section 7, the ribbon, came first because it needed
+#: no new source (R-IV.1239(h)).
+WIRED_DRAWER_SECTIONS = {"7"}
+
+
+def test_EVERY_UNWIRED_DRAWER_SECTION_STILL_SAYS_IT_IS_MOCK():
     """A placeholder that looks like a finished section is the A1 chip problem one level up."""
     js = _js()
     i = js.index("function openRegimeDetails")
     body = js[i:js.index("\n  }", i)]
-    assert body.count("mock(") >= 8, "board 8 has eight sections"
+    # B8 wires the eight sections ONE AT A TIME (R-IV.1239(h)), so the count is 8 minus the
+    # wired set. This asserted `>= 8` while all eight were placeholders; as a set, the
+    # assertion TIGHTENS as sections land instead of having to be deleted eight times. A wired
+    # section still calling itself a mock is the same fault inverted, so that is checked too.
+    assert body.count("mock(") == 8 - len(WIRED_DRAWER_SECTIONS), body.count("mock(")
     assert "rd-mock" in js
-    assert "Phase A: the sections above are placeholders" in body
+    # The footer COUNTS rather than asserting, so it cannot go stale as sections are wired.
+    assert "WIRED: 7 (ribbon)" in body
+    assert "STILL PLACEHOLDERS: 1-6, 8" in body
+    for n in sorted(WIRED_DRAWER_SECTIONS):
+        start = body.index("'%s', " % n)
+        nxt = body.find("+ sec(", start)
+        assert "mock(" not in body[start:nxt if nxt > 0 else len(body)], (
+            "section %s is wired and must not claim to be a mock" % n)
 
 
 def test_THE_DRAWER_HEADER_IS_LIVE_NOT_MOCK():

@@ -671,3 +671,45 @@ async def health(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
     return {"state": state, "reason": reason, "as_of": as_of_d.isoformat(),
             "last_settled_session": newest_settled.isoformat(), "lag_sessions": lag,
             "shown_regime": row["shown_regime"], "rules_version": version}
+
+
+#: B8 section 7: how many settled sessions the ribbon shows.
+RIBBON_SESSIONS = 40
+
+
+async def ribbon(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
+    """The last RIBBON_SESSIONS settled sessions' shown labels, oldest-first. B8 section 7.
+
+    `superseded = FALSE`, WHICH IS LOAD-BEARING AND NOT BOILERPLATE. Since the 2026-10-17
+    re-seed `regime_snapshots` holds TWO GENERATIONS over the same dates -- the current rows
+    priced off Polygon and 321 superseded rows priced off stable_daily_bars -- and nothing but
+    this flag tells them apart. A ribbon read without it would draw each session twice, from two
+    different price bases, and look like a 40-session strip of 80 squares.
+
+    No label is invented for a session that has none: a gap in the strip is a gap.
+    """
+    version = rules_version or load_rules().get("version")
+    try:
+        rows = await conn.fetch(
+            """SELECT as_of, shown_regime, change, blocked
+                 FROM regime_snapshots
+                WHERE rules_version = $1 AND superseded = FALSE
+                ORDER BY as_of DESC
+                LIMIT $2""", version, RIBBON_SESSIONS)
+    except Exception as exc:                                        # noqa: BLE001
+        return {"sessions": [], "error": "regime_snapshots unreadable (%s)"
+                                         % type(exc).__name__}
+    out = [{"as_of": r["as_of"].isoformat() if r["as_of"] else None,
+            "label": r["shown_regime"],
+            "flipped": bool(r["change"]),
+            "blocked": bool(r["blocked"])}
+           for r in reversed(rows)]
+    return {
+        "sessions": out,
+        "count": len(out),
+        "asked_for": RIBBON_SESSIONS,
+        "basis": ("the last %d settled sessions from regime_snapshots, current generation "
+                  "only (superseded = FALSE): the table holds two generations over the same "
+                  "dates since the 2026-10-17 re-seed" % RIBBON_SESSIONS),
+        "short_history": len(out) < RIBBON_SESSIONS,
+    }

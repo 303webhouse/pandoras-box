@@ -180,6 +180,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
     """
     try:
         from jobs.regime_job import (audit_notes, flip_history, health as regime_health,
+                                     ribbon as regime_ribbon,
                                      label_diff, latest_with_diff, seed_run)
     except Exception as exc:
         return _unavailable("regime module unavailable (%s)" % type(exc).__name__)
@@ -195,6 +196,10 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # R-IV.1198(c): the flip list, so a reader can see whether the churn is real
             # regime change or chatter between two neighbouring labels.
             flips = await flip_history(conn, rules_version)
+            # B8 section 7. Read here rather than in its own route: the
+            # drawer already has this payload, and a second route for one
+            # field is a second thing to keep in step.
+            ribbon_block = await regime_ribbon(conn, rules_version)
             # R-IV.1198(c)/(e): the standing notes, readable rather than only recorded.
             notes = await audit_notes(conn)
             # R-IV.1203(b)2: where the re-seed changed a label, as a list of dates.
@@ -256,6 +261,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "diff": got.get("diff"),
         "seed_run": seeded_run,
         "flip_history": flips,
+        "ribbon": ribbon_block,
         "audit_notes": notes,
         "label_diff": ldiff,
     }
