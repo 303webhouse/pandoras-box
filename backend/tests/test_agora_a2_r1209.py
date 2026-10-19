@@ -366,14 +366,24 @@ def test_THE_CURVE_IDS_ARE_UNCHANGED_SO_loadRates_IS_UNTOUCHED():
     assert "makeLineChart('curveChart'" in js
 
 
-def test_the_curve_in_the_bar_is_labelled_PART_MOCK():
-    """Its tenor table is the LIVE /api/stable/rates read; the shape word, z-scores and spreads
-    arrive in B3. Calling the whole thing MOCK would be as wrong as calling it live."""
+def test_the_curve_in_the_bar_is_FULLY_LIVE_SINCE_B3():
+    """B3 arrived (R-IV.1220(b)), so the PART MOCK chip is GONE rather than left to lie.
+
+    This test asserted `"PART MOCK" in body` while the shape word, the z-scores and the
+    spreads were still missing -- which was right then and is wrong now. A panel still wearing
+    a mock chip after its data went live trains the reader to ignore the chip, which costs more
+    than the chip was ever worth.
+
+    What replaces it is the thing the chip was standing in for: the tile must carry the three
+    B3 elements and must NOT claim to be a mock.
+    """
     js = _js()
     i = js.index("rb-curve")
     body = js[i:i + 700]
-    assert "PART MOCK" in body
-    assert "LIVE" in body or "live" in body
+    assert "PART MOCK" not in body
+    assert "ycShape" in body, "the shape word's element"
+    assert "ycHeads" in body, "the 3m10s / 2s10s headline numbers"
+    assert "ycFlag" in body, "the UN-INVERTED flag"
 
 
 # ── the left DETAILS drawer ─────────────────────────────────────────────────

@@ -1875,3 +1875,35 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 .pw-w { color: var(--text); background: var(--panel-2); }
 .pw-w i { font-style: normal; color: var(--text-2); margin-left: 4px; font-size: 9px; }
 .pw-nw { color: var(--text-2); border-style: dashed; }
+
+/* ── B3: the FRED curve block (R-IV.1220(b)) ──────────────────────────── */
+.yc-shape {
+    font-size: 9px; letter-spacing: .08em; padding: 1px 6px; margin-left: 6px;
+    border: 1px solid var(--border); border-radius: 3px; color: var(--text-2);
+}
+.yc-shape.yc-inv { color: var(--amber); border-color: var(--amber); }
+.yc-flag {
+    font-size: 9px; letter-spacing: .06em; padding: 1px 6px; margin-left: 5px;
+    border: 1px solid var(--teal); border-radius: 3px; color: var(--teal);
+}
+.yc-heads { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 2px; }
+.yc-head { display: flex; align-items: center; gap: 5px; }
+.yc-head.yc-inv .yc-bp { color: var(--amber); }
+.yc-k { font-size: 9px; letter-spacing: .06em; color: var(--text-2); }
+.yc-bp { font-family: var(--mono); font-size: 15px; color: var(--text); }
+.yc-ch { font-family: var(--mono); font-size: 10px; }
+.yc-lab {
+    font-size: 9px; letter-spacing: .06em; padding: 1px 4px; border-radius: 3px;
+    border: 1px solid currentColor;
+}
+.yc-unusual { color: var(--text-2); }
+.yc-extreme { color: var(--amber); }
+/* EXTREME pulses; UNUSUAL does not (R-IV.1220(b)). Honoured for anyone who has asked their
+   system not to animate -- the colour still carries the label, so nothing is lost. */
+@media (prefers-reduced-motion: no-preference) {
+    .yc-pulse { animation: yc-pulse 2s ease-in-out infinite; }
+}
+@keyframes yc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.yc-spark { display: block; }
+.yc-spark path { fill: none; stroke: var(--teal); stroke-width: 1.2; }
+.yc-spark .yc-zero { stroke: var(--text-3); stroke-width: .5; stroke-dasharray: 2 2; }

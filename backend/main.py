@@ -2220,6 +2220,8 @@ from api.abacus import router as abacus_router  # R-IV.429 — /api/abacus/summa
 app.include_router(abacus_router, prefix="/api", tags=["abacus"])
 from api.position_watch import router as position_watch_router  # B2, R-IV.1209(f)
 app.include_router(position_watch_router, prefix="/api", tags=["position-watch"])
+from api.yield_curve import router as yield_curve_router  # B3, R-IV.1220(b)
+app.include_router(yield_curve_router, prefix="/api", tags=["yield-curve"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
