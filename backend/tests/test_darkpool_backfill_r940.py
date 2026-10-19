@@ -238,8 +238,15 @@ def test_the_caller_tag_is_its_own():
 def test_the_hubs_own_quota_table_is_untouched():
     """The 2,500 comes from the FOREIGN RESERVE. The hub's table still sums to exactly 26,000,
     which is the number the whole governor was measured around."""
-    from integrations.uw_governor import DAILY_BUDGET, QUOTAS
-    assert sum(q for q, _ in QUOTAS.values()) == 26000
+    from integrations.uw_governor import DAILY_BUDGET, QUOTAS, QUOTA_SAFETY_BUFFER
+    # R-IV.1265(d) MOVED THE TOTAL: `notables_strip` (50) was funded by cutting the
+    # safety buffer 2,000 -> 1,950, so the table now sums to 26,050. The literal 26,000
+    # was hard-coded in FIVE separate test files, each written by a different carve to
+    # say "this sum must not move" -- so the first ruled move broke all five at once.
+    # The INVARIANT was never the literal; it is that the table fills the budget minus
+    # the buffer exactly. Asserted that way now, so the next ruled change to either
+    # number does not require editing five files that were never about the number.
+    assert sum(q for q, _ in QUOTAS.values()) == DAILY_BUDGET - QUOTA_SAFETY_BUFFER
     assert "darkpool_backfill_triton" not in QUOTAS
     assert DAILY_BUDGET == 28000
 

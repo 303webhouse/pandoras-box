@@ -115,9 +115,17 @@ def test_the_table_fits_the_ceiling_EXACTLY_at_the_interim_figure():
     """The reason 250 and not 300: it is the whole remaining room, to the call. This asserts the
     arithmetic the interim rests on, so a later quota change cannot silently reintroduce the
     overrun that held the merge."""
-    from integrations.uw_governor import QUOTAS
+    from integrations.uw_api_cache import DAILY_BUDGET
+    from integrations.uw_governor import QUOTAS, QUOTA_SAFETY_BUFFER
 
-    assert sum(q for q, _ in QUOTAS.values()) == 26000
+    # R-IV.1265(d) MOVED THE TOTAL: `notables_strip` (50) was funded by cutting the
+    # safety buffer 2,000 -> 1,950, so the table now sums to 26,050. The literal 26,000
+    # was hard-coded in FIVE separate test files, each written by a different carve to
+    # say "this sum must not move" -- so the first ruled move broke all five at once.
+    # The INVARIANT was never the literal; it is that the table fills the budget minus
+    # the buffer exactly. Asserted that way now, so the next ruled change to either
+    # number does not require editing five files that were never about the number.
+    assert sum(q for q, _ in QUOTAS.values()) == DAILY_BUDGET - QUOTA_SAFETY_BUFFER
 
 
 def test_darkpool_collector_keeps_its_quota_at_1630_when_it_runs():

@@ -67,7 +67,7 @@
       "strip": {
         "expiry": "[MOCK 10/23] · 4 DTE",
         "em": "Market expects ±$[MOCK 9.40] (±[MOCK 1.4]%)",
-        "iv_rank": { "label": "IV RANK [MOCK 61] · RICH", "tone": "rich" },
+        "iv_rank": { "label": "IV HIGH · [MOCK 61]", "tone": "high" },
         "rungs": [
           { "mult": "0.5×", "quote": "[MOCK 684C 2.17]", "odds": "odds ≈ [MOCK 35]%", "be": "BE [MOCK 0.66] EM", "at": 27, "tone": "near" },
           { "mult": "1×", "quote": "[MOCK 689C 0.90]", "odds": "odds ≈ [MOCK 18]%", "be": "BE [MOCK 1.05] EM", "at": 50, "tone": "near" },
@@ -101,7 +101,7 @@
       "compact_strip": {
         "expiry": "[MOCK 10/23] · ±$[MOCK 6.30]",
         "liquidity": { "light": "green", "text": "[MOCK 2.1]%" },
-        "iv_rank": { "label": "IV [MOCK 38] · NEUTRAL", "tone": "neutral" },
+        "iv_rank": { "label": "IV MID · [MOCK 38]", "tone": "mid" },
         "earnings": { "tone": "na", "text": "Earnings: n/a (ETF)" },
         "more": "Show strikes ▸"
       }

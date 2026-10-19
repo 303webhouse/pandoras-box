@@ -151,8 +151,16 @@ def test_the_reserve_still_has_room_after_this_claim():
     committed = sum(q for q, _ in FOREIGN_RESERVE_QUOTAS.values())
     assert committed <= UW_FOREIGN_RESERVE, (committed, UW_FOREIGN_RESERVE)
     # and the daily budget is untouched by a reserve claim
-    from integrations.uw_governor import QUOTAS
-    assert sum(q for q, _ in QUOTAS.values()) == 26000
+    from integrations.uw_governor import QUOTAS, QUOTA_SAFETY_BUFFER
+    from integrations.uw_api_cache import DAILY_BUDGET as _DB
+    # R-IV.1265(d) MOVED THE TOTAL: `notables_strip` (50) was funded by cutting the
+    # safety buffer 2,000 -> 1,950, so the table now sums to 26,050. The literal 26,000
+    # was hard-coded in FIVE separate test files, each written by a different carve to
+    # say "this sum must not move" -- so the first ruled move broke all five at once.
+    # The INVARIANT was never the literal; it is that the table fills the budget minus
+    # the buffer exactly. Asserted that way now, so the next ruled change to either
+    # number does not require editing five files that were never about the number.
+    assert sum(q for q, _ in QUOTAS.values()) == _DB - QUOTA_SAFETY_BUFFER
 
 
 def test_the_fetch_takes_a_caller_and_still_defaults_to_the_nightly_tag():

@@ -69,12 +69,19 @@ SALES_PHRASES = (
     "breakout coming",
 )
 
-#: THE CONFLICT, in code. (f) mandates "cheap" as the sub-30 IV-rank label; (g) bans the word.
+#: THE CONFLICT, and its resolution, both kept. (f) mandated "cheap" as the sub-30 IV-rank label
+#: while (g) banned the word, so one ruling required and forbade the same word on the same card.
+#: R-IV.1265(c) settled it BY WORDING: the tag reads "IV LOW" / "IV MID" / "IV HIGH" and "cheap"
+#: stays banned everywhere. The conflict text stays on the record rather than being deleted --
+#: the next reader of a card that says "IV LOW" should be able to find out why it does not say
+#: what (f) says.
 IV_RANK_CONFLICT = (
-    "R-IV.1259(f) labels a sub-30 IV rank \"cheap\" and (g) bans the word \"cheap\". The mock "
-    "renders no sub-30 rank so nothing has to be decided for it, but the live strip will, and "
-    "it needs a replacement label (a bare number, or \"low\") before the wiring deploy."
+    "R-IV.1259(f) labelled a sub-30 IV rank \"cheap\" and (g) banned the word \"cheap\". "
+    "RESOLVED by R-IV.1265(c): the tag reads \"IV LOW\" (below 30), \"IV MID\" (30-60) and "
+    "\"IV HIGH\" (above 60), and \"cheap\" stays banned everywhere. The bands live in "
+    "models/notables_strip.py, which owns the edges."
 )
+IV_RANK_CONFLICT_RESOLVED_BY = "R-IV.1265(c)"
 
 #: The v1 universe on screen, R-IV.1259(e). AMZN is NOT in it: the approved mock used it as
 #: illustration and (b) says so explicitly, so a fixture that kept it would be the one place a
