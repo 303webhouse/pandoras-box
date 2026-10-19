@@ -29,7 +29,8 @@ def test_RARE_IS_RETIRED_AND_THERE_IS_NO_THIRD_LABEL():
 def test_THE_THRESHOLDS_ARE_ONE_NUMBER_EACH():
     """Two numbers for one threshold is a fault this lane has shipped. The label function must
     read the same constants the payload publishes."""
-    assert (yc.UNUSUAL_Z, yc.EXTREME_Z, yc.EXTREME_10Y_BP) == (2.0, 3.0, 10.0)
+    assert (yc.UNUSUAL_Z, yc.EXTREME_Z) == (2.0, 3.0)
+    assert not hasattr(yc, "EXTREME_10Y_BP"), "R-IV.1239(b) removed the 10bp route"
     assert yc.label_for(1.99) is None
     assert yc.label_for(2.0) == yc.UNUSUAL
     assert yc.label_for(-2.5) == yc.UNUSUAL
@@ -37,15 +38,27 @@ def test_THE_THRESHOLDS_ARE_ONE_NUMBER_EACH():
     assert yc.label_for(-7.0) == yc.EXTREME
 
 
-def test_THE_10BP_ROUTE_TO_EXTREME_IS_THE_10Y_ONLY():
-    """As ruled. A 10bp day is EXTREME on the 10Y whatever its z -- and that route must not
-    leak to the 3M, whose daily moves are smaller, or to a spread, which is a different
-    quantity."""
-    assert yc.label_for(0.2, tenor="10Y", change_bp=12.0) == yc.EXTREME
-    assert yc.label_for(0.2, tenor="10Y", change_bp=-10.0) == yc.EXTREME
-    assert yc.label_for(0.2, tenor="10Y", change_bp=9.9) is None
-    assert yc.label_for(0.2, tenor="3M", change_bp=12.0) is None
-    assert yc.label_for(0.2, tenor=None, change_bp=50.0) is None
+def test_THE_10BP_ROUTE_IS_GONE_AND_ONE_RULE_COVERS_EVERY_ROW():
+    """R-IV.1239(b) removed it, and the ruling says the error was its own.
+
+    THE MEASUREMENT IS WHAT FOUND IT, which is the clearest argument this session makes for
+    requiring a rule to state its own fire rate. With the 10bp route live the counts came back
+    10Y EXTREME 23.2/yr against 1.9 for the spreads, and 10Y UNUSUAL collapsed to 2.2 because
+    the 10bp test ran first and took the days that would have read UNUSUAL. One row's EXTREME
+    meant something different from every other row's. The rule read perfectly sensibly as
+    prose; only the count showed what it did.
+
+    So: no tenor argument, no change_bp argument, and calling it with them now RAISES rather
+    than silently ignoring them -- a dead keyword left in a signature is an invitation to pass
+    it again and wonder why nothing happens.
+    """
+    assert yc.label_for(2.9) == yc.UNUSUAL
+    assert yc.label_for(3.0) == yc.EXTREME
+    import pytest as _pytest
+    with _pytest.raises(TypeError):
+        yc.label_for(0.2, tenor="10Y", change_bp=12.0)
+    with _pytest.raises(TypeError):
+        yc.fires_per_year([1.0, 2.0], tenor="10Y")
 
 
 def test_AN_UNMEASURABLE_Z_IS_NONE_NOT_ZERO():

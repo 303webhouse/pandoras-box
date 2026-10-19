@@ -1911,3 +1911,10 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 /* B5: a VIX tenor with no reading draws a stub, not a full bar (see renderFearPrice). */
 .ag-ct-na { color: var(--text-3); }
 .ag-ct-na i { background: var(--text-3); }
+
+/* B6: the Crowd tile is PART live, so the mock mark is per row (R-IV.1239(d)3). */
+.ag-row-mock { opacity: .72; }
+.ag-rmock {
+    font-size: 8px; letter-spacing: .08em; margin-left: 5px; padding: 0 4px;
+    border: 1px solid var(--amber); color: var(--amber); border-radius: 2px;
+}

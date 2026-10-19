@@ -30,9 +30,16 @@ EXTREME = "EXTREME"
 #: is a fault this lane has shipped before.
 UNUSUAL_Z = 2.0
 EXTREME_Z = 3.0
-#: R-IV.1220(b)'s second route to EXTREME: a 10Y daily move of 10bp or more, whatever its z.
-#: A 10bp day in the 10Y is a market event even in a year whose vol makes it a 1.8-sigma one.
-EXTREME_10Y_BP = 10.0
+
+# R-IV.1239(b) REMOVED the 10Y >= 10bp second route to EXTREME. EXTREME is |z| >= 3 on every
+# row, full stop.
+#
+# WHY IT WENT, and it is the clearest case this session makes for measuring a rule's own fire
+# rate: with the 10bp route live, the measurement came back 10Y EXTREME 23.2/yr against 1.9 for
+# the spreads, with 10Y UNUSUAL collapsed to 2.2 because the 10bp test ran FIRST and took the
+# days that would have read UNUSUAL. One row's EXTREME meant something materially different
+# from every other row's, and its pulse would have been on about twice a month. The rule read
+# perfectly sensibly as prose; only the count showed what it did.
 
 #: The trailing window, in sessions, that a z-score is measured against. ~1 year of sessions.
 Z_WINDOW = 252
@@ -98,16 +105,12 @@ def zscore(changes: Sequence[float], window: int = Z_WINDOW) -> Optional[float]:
     return (latest - mean) / sd
 
 
-def label_for(z: Optional[float], *, tenor: Optional[str] = None,
-              change_bp: Optional[float] = None) -> Optional[str]:
-    """UNUSUAL, EXTREME or None. R-IV.1220(b).
+def label_for(z: Optional[float]) -> Optional[str]:
+    """UNUSUAL, EXTREME or None. R-IV.1220(b) as amended by R-IV.1239(b).
 
-    The 10bp route applies to the 10Y ONLY, as ruled -- not to every tenor. Applying it to the
-    3M, whose daily moves are smaller, would mark almost nothing; applying it to a spread would
-    be a different quantity entirely.
+    ONE RULE FOR EVERY ROW. The tenor-specific 10bp route is gone, and with it the parameters
+    that carried it -- a dead keyword left in the signature is an invitation to pass it again.
     """
-    if tenor == "10Y" and change_bp is not None and abs(change_bp) >= EXTREME_10Y_BP:
-        return EXTREME
     if z is None:
         return None
     if abs(z) >= EXTREME_Z:
@@ -117,8 +120,7 @@ def label_for(z: Optional[float], *, tenor: Optional[str] = None,
     return None
 
 
-def fires_per_year(changes: Sequence[float], *, tenor: Optional[str] = None,
-                   window: int = Z_WINDOW) -> Dict[str, Any]:
+def fires_per_year(changes: Sequence[float], *, window: int = Z_WINDOW) -> Dict[str, Any]:
     """MEASURED fires per year for each label, by replaying the rule over the history.
 
     Every day with enough history behind it is re-tested with EXACTLY the published rule --
@@ -138,7 +140,7 @@ def fires_per_year(changes: Sequence[float], *, tenor: Optional[str] = None,
         if z is None:
             continue
         tested += 1
-        lab = label_for(z, tenor=tenor, change_bp=slice_[-1])
+        lab = label_for(z)
         if lab in counts:
             counts[lab] += 1
     if not tested:

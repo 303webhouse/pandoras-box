@@ -1593,7 +1593,6 @@
   // ===========================================================================
 
   const AGORA_FIXTURES = {
-    crowd: '/assets/agora/crowd_mock.json',
     bookStress: '/assets/agora/book_stress_mock.json',
   };
   // B4: the Event Strip is LIVE and no longer reads a fixture. The other three tiles are
@@ -1603,6 +1602,7 @@
   const AGORA_LIVE = {
     eventStrip: '/api/event-strip',   // B4
     fear: '/api/fear-price',          // B5
+    crowd: '/api/crowd',              // B6 — two rows live, the FINRA row still a mock
   };
   const _agora = { crowd: null, fear: null, bookStress: null, eventStrip: null };
 
@@ -1681,13 +1681,23 @@
       // amber "n / N" with the percentile starred -- amber is "cannot confirm", which is
       // exactly what a percentile over 9 weeks is.
       const cls = r.thin ? 'ag-thin' : (r.extreme ? 'ag-extreme' : '');
+      // B6: THE MOCK MARK IS PER ROW, because this tile is now part live. Two rows are read
+      // from CFTC and UW flow; the FINRA row is still a fixture (R-IV.1239(d)3), and a tile
+      // that marked itself wholly live or wholly mock would be wrong either way. The row also
+      // carries no gauge dot when it has no percentile: a dot at 0 would read as a reading.
+      const hasPct = r.pct != null;
       const pos = Math.max(0, Math.min(100, Number(r.pct) || 0));
-      return '<div class="ag-row">'
-        + '<div class="ag-rk"><b>' + esc(r.key) + '</b><i>' + esc(r.sub || '') + '</i></div>'
-        + '<div class="ag-rv">' + esc(r.value) + '</div>'
-        + '<div class="vc-gauge ag-g"><b class="' + cls + '" style="left:'
-        + pos.toFixed(1) + '%"></b></div>'
-        + '<div class="ag-rp ' + cls + '">' + esc(r.pct_label || '') + '</div>'
+      return '<div class="ag-row' + (r.mock ? ' ag-row-mock' : '') + '" title="'
+        + esc(r.source || '') + (r.staleness_note ? ' · ' + esc(r.staleness_note) : '') + '">'
+        + '<div class="ag-rk"><b>' + esc(r.key) + '</b>'
+        + (r.mock ? '<span class="ag-rmock" title="not wired: see the footnote">MOCK</span>'
+          : '')
+        + '<i>' + esc(r.sub || '') + '</i></div>'
+        + '<div class="ag-rv">' + esc(r.value == null ? '—' : r.value) + '</div>'
+        + '<div class="vc-gauge ag-g">'
+        + (hasPct ? '<b class="' + cls + '" style="left:' + pos.toFixed(1) + '%"></b>' : '')
+        + '</div>'
+        + '<div class="ag-rp ' + cls + '">' + esc(r.pct_label || '—') + '</div>'
         + '</div>';
     }).join('');
 
