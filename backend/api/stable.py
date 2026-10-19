@@ -91,6 +91,30 @@ async def get_regime_strategy():
     return await _get()
 
 
+@router.get("/notables")
+async def get_notables(log: bool = True):
+    """The live NOTABLES read (R-IV.1259, wired under R-IV.1265(g)2). DISPLAY ONLY (#42).
+
+    `log=false` takes the read WITHOUT appending to `notables_log`, for a diagnostic look that
+    must not inflate the day's candidate count. The surface's own fetch logs.
+
+    The import and the whole body are inside the try: a deferred import that cannot resolve
+    raises at REQUEST time, and outside the handler's error path that is a bare 500 with no log
+    line of its own -- the `database.connection` fault, which the route registry now sweeps for.
+    """
+    try:
+        from services.read_only.notables import payload as _notables
+
+        return await _notables(log=bool(log))
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("[notables] read failed: %s", type(exc).__name__)
+        return {"live": True, "error": "%s" % type(exc).__name__,
+                "cards": {"context": [], "watch": []},
+                "note": ("the NOTABLES read failed; no card and no cached card is served, "
+                         "because a card from an earlier minute shown as current is the one "
+                         "thing this surface must not do")}
+
+
 @router.post("/bars-audit")
 async def post_bars_audit(
     sessions: int = Query(5, ge=1, le=30),

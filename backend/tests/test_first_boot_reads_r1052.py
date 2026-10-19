@@ -39,7 +39,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BACKEND = os.path.dirname(HERE)
 
 #: The files that run at boot. A table or column these create exists for every reader.
-STARTUP_FILES = ("main.py", os.path.join("database", "postgres_client.py"))
+#:
+#: THE DDL-CARRYING MODULES COUNT AS STARTUP FILES, because they run at startup. main.py
+#: imports a `DDL` constant (or a `migrate()`) out of each of these and executes it inside the
+#: boot block, so the table IS created on a fresh database -- but the scanner reads TEXT, and
+#: `await conn.execute(_PW_DDL)` carries no table name. Before this list existed, a read path
+#: that queried one of those tables was reported as first-boot debt it does not have, which is
+#: a guard accusing the one pattern the house uses for "the model owns its own schema".
+#:
+#: Named explicitly rather than discovered, for the same reason the first two are: a list of
+#: files that run at boot is auditable, and a scanner that followed imports would eventually
+#: follow one that does not run.
+STARTUP_FILES = (
+    "main.py",
+    os.path.join("database", "postgres_client.py"),
+    os.path.join("integrations", "uw_spend_ledger.py"),
+    os.path.join("models", "position_watch_events.py"),
+    os.path.join("models", "notables_log.py"),
+)
 
 #: Read paths: the surfaces a consumer reaches. `api` is included because R-IV.1052(b) names
 #: read ENDPOINTS as well as MCP tools.
