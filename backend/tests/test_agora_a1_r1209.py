@@ -155,16 +155,28 @@ def test_the_chip_TITLE_says_the_values_are_fake():
 
 # ── display only (#42) ──────────────────────────────────────────────────────
 
-def test_THE_TILES_READ_NO_HUB_ROUTE_IN_PHASE_A():
-    """A1 is mocks. A tile reaching a live route in Phase A would be Phase B arriving early and
-    unannounced."""
+#: The A1 tiles that have gone live, and the ONE route each is allowed to read. B4 moved the
+#: Event Strip; B5/B6/B7 will move Fear Price, Crowd and Book Reality. Listed rather than
+#: open-ended, so a tile that starts reading a route it was not given still fails.
+LIVE_TILES = {"/api/event-strip"}
+
+
+def test_EACH_TILE_READS_ONLY_ITS_OWN_ROUTE_OR_ITS_FIXTURE():
+    """R-IV.1209(c)'s "no hub route in Phase A" has EXPIRED BY SCHEDULE for one tile, not been
+    relaxed: B4 (R-IV.1237(c)) made the Event Strip live.
+
+    So the ban becomes a whitelist. The tiles still on fixtures must still read fixtures, the
+    tiles that have gone live may read exactly the route they were given, and nothing may read
+    anything else. The old assertion would have had to be deleted outright at B5, B6 and B7 as
+    well; this one survives each move and keeps failing for the right reason.
+    """
     js = _js()
     i = js.index("const AGORA_FIXTURES")
     j = js.index("function initGrid")
     body = js[i:j]
-    assert "/assets/agora/" in body
-    assert "/api/" not in body, "no hub route until Phase B"
-    assert "apiFetch" not in body
+    assert "/assets/agora/" in body, "the tiles still on fixtures must still read them"
+    routes = set(re.findall(r"'(/api/[^']+)'", body))
+    assert routes == LIVE_TILES, routes
 
 
 def test_NOTHING_GATES_ON_THESE_TILES():
@@ -187,7 +199,16 @@ def test_the_fixtures_are_under_assets_so_they_are_SERVED():
         rel = os.path.relpath(p, FRONTEND).replace(os.sep, "/")
         assert rel.startswith("assets/"), rel
     js = _js()
+    # A tile that has gone live no longer references its fixture, and that is correct: B4's
+    # loader must NOT fall back to the mock, because a fixture served where live data belongs
+    # looks exactly like the real thing. The file stays on disk as the layout reference, which
+    # is what the existence check above is for.
+    live_fixtures = {"event_strip_mock.json"}
     for fname in FIXTURES.values():
+        if fname in live_fixtures:
+            assert "/assets/agora/" + fname not in js, (
+                "%s is live now, so the panel must not read its fixture" % fname)
+            continue
         assert "/assets/agora/" + fname in js, fname
 
 

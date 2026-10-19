@@ -17,7 +17,9 @@ import datetime as _dt
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from utils.pivot_auth import require_api_key
 
 from models import position_watch as pw
 from models import position_watch_events as pwe
@@ -123,7 +125,7 @@ async def payload(conn, *, now: Optional[_dt.datetime] = None) -> Dict[str, Any]
 
 
 @router.get("")
-async def get_position_watch() -> Dict[str, Any]:
+async def get_position_watch(_: str = Depends(require_api_key)) -> Dict[str, Any]:
     """The panel. On failure it says so; it never serves the mock.
 
     THE IMPORT IS INSIDE THE TRY, and that is the fix for a real outage this route had on its

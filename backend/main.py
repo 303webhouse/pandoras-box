@@ -2222,6 +2222,8 @@ from api.position_watch import router as position_watch_router  # B2, R-IV.1209(
 app.include_router(position_watch_router, prefix="/api", tags=["position-watch"])
 from api.yield_curve import router as yield_curve_router  # B3, R-IV.1220(b)
 app.include_router(yield_curve_router, prefix="/api", tags=["yield-curve"])
+from api.event_strip import router as event_strip_router  # B4
+app.include_router(event_strip_router, prefix="/api", tags=["event-strip"])
 
 # ─── MCP server (v1) ────────────────────────────────────────────────────
 # Mounted as an isolated ASGI sub-app at /mcp/v1. CORS / bearer auth /
