@@ -174,13 +174,24 @@ def test_EVERY_ROW_CARRIES_ITS_REGIME_AND_THE_PANEL_SAYS_ALERT_NOT_SIGNAL():
 # ── 2. SENDING: nothing is sent, and the panel says so ────────────────────
 
 def test_THE_PANEL_CANNOT_SEND_ANYTHING():
-    """A3 is a mock list. The browser has no path to a push, and these are the paths it would
-    have to take."""
+    """The browser has no path to a push, and these are the paths it would have to take.
+
+    `/api/` WAS ON THIS LIST AND IS NOT ANY MORE, which is a widening of the guard and so is
+    explained rather than just done. While A3 was a mock, "touches no backend route" was a
+    cheap proxy for "sends nothing". B2 makes the panel LIVE, and it has to read
+    `/api/position-watch` to show stored events at all. A read is not a send.
+
+    So the ban is now on SENDING, which was always the point, plus an explicit check that the
+    only route the panel names is the read-only one -- the proxy is replaced by the thing it
+    was standing in for, not dropped.
+    """
     js = _code_only(_panel_js())
     for banned in ("ntfy", "method: 'POST'", 'method: "POST"', "XMLHttpRequest",
                    "navigator.sendBeacon", "Notification(", "requestPermission",
-                   "serviceWorker", "/api/"):
+                   "serviceWorker"):
         assert banned not in js, banned
+    routes = set(re.findall(r"'(/api/[^']+)'", js))
+    assert routes == {"/api/position-watch"}, routes
 
 
 def test_THE_NTFY_TOPIC_APPEARS_NOWHERE():

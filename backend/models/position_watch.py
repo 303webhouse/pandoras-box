@@ -475,7 +475,7 @@ PUSH_DAILY_CAP = 20
 #: A constant and not an env read on purpose: flipping it is a code change that goes through a
 #: review. An env var would let the wire come up because a deploy variable was set, which is
 #: not the same event as B2 being complete.
-PUSHES_ENABLED = False
+PUSHES_ENABLED = True       # flipped in B2's completion deploy, R-IV.1228(c)
 
 #: R-IV.1228(d), VERBATIM: the panel footer's phone line. One line, and it states the two
 #: limits that decide whether Nick's phone stays quiet -- the per-ticker-per-day cap and the
