@@ -1,8 +1,8 @@
 # CC-STATER lane — status
 
-**Written:** 2026-10-08 08:51 MDT (2026-10-08 14:51 UTC)
-**Worked against:** `origin/main` = `25d579e`
-**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r753-dates`.
+**Written:** 2026-10-19 13:55 MDT (2026-10-19 19:55 UTC)
+**Worked against:** `origin/main` = `c2f243f4`
+**Where:** the Cursor agent on the principal's PC, in `C:\th-cursor`. Branch `claude/stater-r1254-comments`.
 **Hub at read time:** not re-timed this turn.
 
 ## Why this lane exists
@@ -18,81 +18,59 @@ no orders.
 
 **On the principal's PC (R-IV.628(b)):**
 - Never check out, commit to or push `main`; BUILD merges.
-- The database login is read-only.
+- The database login is read-only (`stater_ro`, SELECT only).
 - No Railway CLI, no deploys, no environment-variable changes.
 
+## R-IV.1254 — rulings
+SPINE accepted the R-IV.1197 report (window 2026-10-08 05:41Z to 2026-10-15 05:41Z, 169 cycles
+per symbol), the state of all seven /stater sections, and `claude/stater-r1197-report` at `c22abb17`.
+R-IV.1253 duplicated R-IV.1197. If it arrives, the reply is `see R-IV.1197 report` and nothing else.
+
+**Thresholds, ruled. Nothing in code changed, and no revisit is scheduled.**
+- The $5M liquidation gate stays for BTC, ETH and SOL.
+- `oi_extreme` holds at 5.0.
+- FARTCOIN liquidations stay unscored. One week is too thin to base a gate on its p99.
+
+Crypto scanners remain display-only (salvage plan 10-12). They stay off the trade-idea surface
+and are graded against always-long BTC. LAB's long-history replay is unchanged (by 2026-11-30).
+
+**Comments.** The header comments in `frontend/stater.js` and `frontend/stater.html` no longer
+say the macro, tape, cycle, feed and drawer are placeholders pending the SG-1 layout gate.
+Those seven sections are live. The cache pins were left as they were: a comment does not change
+what the browser renders.
+
+**SG-3.** Closed in `docs/strategy-reviews/stater-swap-redesign/s6-rulings-ledger.md`: not run;
+superseded by the principal's use of the live page since 2026-07-24. It gates nothing.
+
+## 7-day collection (accepted; full tables on `claude/stater-r1197-report`)
+The liquidation cell is the sum of the last two 1-hour buckets, not one clock hour. BTC/ETH/SOL
+cycles at or above $5M: 22 / 23 / 8 of 169. `oi_extreme` fired 0 times on BTC, ETH and SOL
+(max positive change 1.74 / 4.79 / 3.55 against a gate of 5.0).
+
 ## Remap break (R-IV.753(a) / R-IV.745)
-First cycle on the USDT-linear map: **2026-10-08 05:41:24.698 UTC
-(2026-10-07 23:41:24 MDT)** — BTC. ETH 05:41:25.209Z, SOL 05:41:26.969Z.
-That timestamp is also **BTC's first genuinely Coinalyze-sourced liquidations
-date** (closes the open line from R-IV.742(b)).
+First cycle on the USDT-linear map: **2026-10-08 05:41:24.698 UTC (2026-10-07 23:41:24 MDT)** —
+BTC. ETH 05:41:25.209Z, SOL 05:41:26.969Z. That is also BTC's first genuinely Coinalyze-sourced
+liquidations date. No computation compares a value across this switch (R-IV.725(c)4).
 
-All nine cells (funding, open_interest, liquidations × BTC/ETH/SOL) were
-coinalyze / LIVE / not stale. Liquidations moved NA/okx → LIVE/coinalyze,
-which confirms R-IV.742(e).
-
-On that cycle BTC liquidations 19,335,585.87 and ETH 5,810,020.41 were FIRING
-against the $5M gate. OI jumped 6× (BTC), 16× (ETH), 17× (SOL) because the
-population changed. ETH and SOL open_interest DEGRADED → LIVE cannot be
-credited to r742 or r745: both shipped in one deploy (R-IV.753(b)).
-
-No computation compares a value across this switch (R-IV.725(c)4).
-Thresholds are unchanged until SPINE rules after the week.
-
-## 7-day collection (R-IV.745(c) widened by R-IV.753(c)) — no threshold change
-Window starts at 05:41:24.698Z. Report on **2026-10-15 or after**. Per symbol:
-
-- Hourly liquidation totals: count, median, p90, max, hours that crossed $5M.
-- `oi_change_4h`: median, p10, p90, max |value|.
-- How often `oi_extreme` fires.
-
-Any OI or oi_extreme threshold calibrated before 05:41:24Z was calibrated on
-a different population.
-
-## Composite-break dates (R-IV.727(e) / R-IV.742(b))
-First cycle after `ed5491c` plus the scheduler boot fix: **2026-10-08 00:41:05.72 UTC
-(2026-10-07 18:41:05 MDT)**.
-
-| Symbol | Liquidations | Open interest |
-|---|---|---|
-| BTC | first LIVE Coinalyze-sourced: **2026-10-08 05:41:24.698Z** (remap) | first LIVE Coinalyze-sourced: 2026-10-08 00:41:05.72Z |
-| ETH | first LIVE Coinalyze-sourced: 2026-10-08 05:41:25.209Z (remap) | LIVE at remap cycle; DEGRADED→LIVE confound (r742+r745 one deploy) |
-| SOL | first LIVE Coinalyze-sourced: 2026-10-08 05:41:26.969Z (remap) | LIVE at remap cycle; DEGRADED→LIVE confound (r742+r745 one deploy) |
-| HYPE | first LIVE, Coinalyze-sourced, 00:41:05.72Z cycle | — |
-| ZEC | first LIVE, Coinalyze-sourced, 00:41:05.72Z cycle | — |
-| FARTCOIN | first LIVE, Coinalyze-sourced, 00:41:05.72Z cycle | — |
-
-## R-IV.745 — merged
-`25d579e` / `304412c`. BTC/ETH/SOL → `BTCUSDT_PERP.A` / `ETHUSDT_PERP.A` /
-`SOLUSDT_PERP.A`.
-
-## R-IV.742 — merged
-`e9e746e` / `43342ae`. stale is age only. Singleflight 36→24. 60s snapshot cache.
-
-## R-IV.741 — merged
-`1bd7810` on `main`.
-
-## R-IV.727 — merged
-`ed5491c`. Units USD; Coinalyze OI/liq score again; OKX stays unscored.
-
-## R-IV.700 — merged
-`eff4077`. Spot stays.
-
-## Robinhood
-US perps announced for "the coming months", not live, no keyless feed. Charter
-forbids holding the principal's trading key.
+## Merged
+- R-IV.753 dates: `1ad8eea2` is on `main`.
+- R-IV.745 `25d579e` / `304412c`; R-IV.742 `e9e746e` / `43342ae`; R-IV.741 `1bd7810`;
+  R-IV.727 `ed5491c`; R-IV.700 `eff4077`.
 
 ## Branch
 | Branch | State | Ready for BUILD? |
 |---|---|---|
-| `claude/stater-r753-dates` | Lane-file dates only. | Docs; merge when convenient. |
-| `claude/stater-r745-remap` | Merged (`25d579e`). | Done. |
-| `claude/stater-r742-stale` | Merged (`e9e746e`). | Done. |
-| `claude/stater-r741-lsr` | Merged (`1bd7810`). | Done. |
-| `claude/stater-r707-liq` | Merged (`ed5491c`). | Done. |
+| `claude/stater-r1254-comments` | Comment headers, the SG-3 ledger line, and these lane files. | Yes. Merge this one. |
+| `claude/stater-r1197-report` | Accepted report at `c22abb17`. Not on `main`. | Do not merge after this branch. Its lane file is the older copy and would overwrite this one. |
+
+Merging `claude/stater-r1254-comments` touches `frontend/`, so Railway will redeploy. The page
+behavior does not change.
+
+## Robinhood
+US perps announced for "the coming months", not live, no keyless feed. Charter forbids holding
+the principal's trading key.
 
 ## What the next CC-STATER session should do first
-On **2026-10-15 or after**, report the 7-day collection (liquidations +
-`oi_change_4h` + oi_extreme fire rate) per symbol. Do not change any
-threshold until SPINE rules. Do not skip HYPE Binance spot. Do not rebuild
-the Binance VPN. Do not edit `bias_scheduler.py`.
+Nothing is open. Do not change a threshold. Do not schedule a revisit. Do not skip HYPE Binance
+spot. Do not rebuild the Binance VPN. Do not edit `bias_scheduler.py`. If R-IV.1253 arrives,
+answer `see R-IV.1197 report` only.
