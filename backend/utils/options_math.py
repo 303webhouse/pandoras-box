@@ -260,3 +260,105 @@ def bs_greeks_from_iv(
         }
     except (ValueError, ZeroDivisionError, OverflowError):
         return _null
+
+
+# ── B7: pricing and the implied-vol solve (R-IV.1239(e)1) ─────────────────
+#
+# THEY LIVE HERE, in the module that already owns `_norm_cdf` and `bs_greeks_from_iv`, because
+# a second Black-Scholes implementation elsewhere in this repo would be a second set of
+# conventions to keep in step -- and the two in `scripts/` already differ from each other in
+# signature. One author of the maths.
+
+def bs_price(spot: float, strike: float, time_to_expiry_years: float,
+             risk_free_rate: float, iv: Optional[float],
+             option_type: str) -> Optional[float]:
+    """Black-Scholes price per share. None on any degenerate input, never 0.0.
+
+    Same conventions as `bs_greeks_from_iv`: European exercise, NO DIVIDENDS, iv as a decimal.
+    The dividend omission matters most for deep ITM puts on high-yield underlyings and is the
+    documented limitation of this module rather than a new one introduced here.
+
+    AT EXPIRY (T <= 0) IT RETURNS INTRINSIC, not None: a position at expiry has a value, and
+    returning None there would make the last day of every spread unreadable.
+
+    Checked against Hull's published worked example (S=42, K=40, r=10%, sigma=20%, T=0.5:
+    call 4.76, put 0.81) in test_options_math_b7.py.
+    """
+    try:
+        S, K, T = float(spot), float(strike), float(time_to_expiry_years)
+    except (TypeError, ValueError):
+        return None
+    if S <= 0 or K <= 0:
+        return None
+    opt = "call" if str(option_type).lower().startswith("c") else "put"
+    if T <= 0:
+        return max(0.0, S - K) if opt == "call" else max(0.0, K - S)
+    if iv is None or iv <= 0:
+        return None
+    try:
+        r = float(risk_free_rate)
+        sigma = float(iv)
+        sqrt_T = math.sqrt(T)
+        d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+        d2 = d1 - sigma * sqrt_T
+        disc = math.exp(-r * T)
+        if opt == "call":
+            return S * _norm_cdf(d1) - K * disc * _norm_cdf(d2)
+        return K * disc * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+    except (ValueError, ZeroDivisionError, OverflowError):
+        return None
+
+
+#: The solver's bracket. 1% to 500% annualised covers every listed equity option this book
+#: holds; a root outside it is reported as unsolvable rather than clamped to the edge, because
+#: a clamped vol would then be used to reprice and would look like a measurement.
+IV_LO, IV_HI = 0.01, 5.0
+IV_TOL = 1e-6
+IV_MAX_ITER = 100
+
+
+def implied_vol(target_price: float, price_at,
+                lo: float = IV_LO, hi: float = IV_HI) -> Tuple[Optional[float], str]:
+    """(iv, basis) for the vol that makes `price_at(iv)` equal `target_price`.
+
+    GENERIC IN THE PRICER, which is the point: the same solve serves a single option and a
+    two-leg spread, where `price_at` prices both legs at one vol. A spread has no per-leg mark
+    in this book -- only its net price -- so a single shared vol is the only thing a net mark
+    can identify, and that is stated rather than implied.
+
+    Bisection, not Newton: the function is monotonic in vol for every structure here, bisection
+    cannot diverge, and 100 iterations on a 0.01-5.0 bracket is far below the cost of the
+    network call that fetched the mark.
+
+    Returns (None, reason) when the target lies outside the bracket's range -- NOT the nearer
+    endpoint. A vol clamped to 500% would reprice the position and look like a measurement.
+    """
+    try:
+        target = float(target_price)
+    except (TypeError, ValueError):
+        return None, "the target price is not a number"
+    if target <= 0:
+        return None, "a non-positive mark cannot identify a volatility"
+    p_lo, p_hi = price_at(lo), price_at(hi)
+    if p_lo is None or p_hi is None:
+        return None, "the pricer could not value this structure at the bracket's ends"
+    if not (min(p_lo, p_hi) - IV_TOL <= target <= max(p_lo, p_hi) + IV_TOL):
+        return None, ("the mark %.4f is outside the %.0f%%-%.0f%% vol range (%.4f to %.4f), "
+                      "so no volatility in that range explains it"
+                      % (target, lo * 100, hi * 100, p_lo, p_hi))
+    a, b = lo, hi
+    rising = p_hi > p_lo
+    for _ in range(IV_MAX_ITER):
+        mid = (a + b) / 2.0
+        p = price_at(mid)
+        if p is None:
+            return None, "the pricer returned nothing mid-solve"
+        if abs(p - target) < IV_TOL:
+            return mid, "solved from the position's own mark %.4f" % target
+        if (p < target) == rising:
+            a = mid
+        else:
+            b = mid
+    mid = (a + b) / 2.0
+    return mid, ("bisected to %.0f iterations on the position's own mark %.4f"
+                 % (IV_MAX_ITER, target))
