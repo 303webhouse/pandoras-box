@@ -451,6 +451,13 @@ body {
 .book-greeks .g { display: flex; gap: 3px; } .book-greeks .g .k { color: var(--text-3); }
 .acct-chips { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .acct-chip { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-2); }
+
+/* R-IV.1262(b)2: an account whose balance is PARTIAL, and one that has none at all, must not
+   look like one that is simply known. Amber, which on this surface means "we cannot confirm
+   this"; dashed for the absent one, because there is no figure behind it. Full-strength colour
+   on both -- a caveat rendered in dimmed grey is a caveat that does not arrive (H-13, R8). */
+.acct-chip-partial { color: var(--amber); border-color: var(--amber); }
+.acct-chip-none { color: var(--amber); border-color: var(--amber); border-style: dashed; }
 .book-note { font-size: 10px; color: var(--text-2); line-height: 1.3; margin-top: 2px; }
 .book-reason { font-family: var(--mono); font-size: 10px; }
 /* The ruled four-state vintage chip (R-IV.427(c)); this page uses the unknown state today. */

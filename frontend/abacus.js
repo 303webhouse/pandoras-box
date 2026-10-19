@@ -101,6 +101,39 @@
     ? ' · ' + shortDate(s.from) + ' → ' + shortDate(s.to)
     : '');
 
+  // ── R-IV.1262(b)1 · THE DATE BASIS, ON THE FACE OF EVERY PERIOD FIGURE ──────────────────────
+  // A period figure here is not "what was traded in this period". `position_lot_closures` has no
+  // trade date, so the realized figures are windowed on the day each closure row was WRITTEN --
+  // and the ledger was written across ten days carrying exits back to 2025-12-11. Measured
+  // 2026-10-19 that made "since 2026-09-01" read +3,535.22 where the period's own trades were
+  // roughly flat, and it flipped one account's sign (R-IV.1255(a)).
+  //
+  // The COUNT goes in the label, not only the tooltip: a reader who has to hover to learn that a
+  // figure is on the wrong date basis has been told nothing. Amber, because amber on this page
+  // already means "we cannot confirm this" -- which is exactly the claim.
+  const basisCount = (b) => (b && b.closure_rows
+    ? b.rows_differing + ' of ' + b.closure_rows + ' rows differ'
+    : 'count unknown');
+  function basisTitle(b) {
+    if (!b) return '';
+    return [b.meaning, b.mixed ? b.mixed_detail : '', b.fix].filter(Boolean).join(' ');
+  }
+  // Shown wherever a windowed figure is. Returns '' once a real trade date exists, so the day
+  // BUILD's column lands this label disappears by itself rather than having to be hunted down.
+  function basisChip(b) {
+    if (!b || b.trade_date_exists) return '';
+    return ' ' + chip('unknown', 'by write date · ' + basisCount(b), basisTitle(b));
+  }
+  function basisLine(b) {
+    if (!b || b.trade_date_exists) return '';
+    return `<p class="ab-basis" role="note"><b>These period figures are dated by when the row was
+      written, not when the trade closed.</b> ${esc(basisCount(b))}${b.written_from
+        ? ', and the ledger was written between ' + esc(shortDate(b.written_from)) + ' and '
+          + esc(shortDate(b.written_to)) : ''}${b.earliest_exit_in_ledger
+        ? ', carrying trades that closed as far back as ' + esc(shortDate(b.earliest_exit_in_ledger)) : ''}.
+      ${esc(b.mixed ? b.mixed_detail : '')} ${esc(b.fix || '')}</p>`;
+  }
+
   // ── Range control ────────────────────────────────────────────────────────────
   const state = { range: '90d', from: null, to: null };
   function summaryUrl() {
@@ -131,7 +164,8 @@
   function renderHead(d) {
     const s = d.scope || {};
     const n = s.closed_positions != null ? s.closed_positions + ' closed positions in range' : 'closed positions: —';
-    $('abAsof').innerHTML = `<span>${esc(s.label || '—')} · ${esc(n)}</span> ${blockChip(s)}`;
+    $('abAsof').innerHTML = `<span>${esc(s.label || '—')} · ${esc(n)}</span> ${blockChip(s)}`
+      + basisChip(d.date_basis);
   }
   function allBlocks(d) {
     return [d.scope, d.equity, d.leaks, d.strategies].concat(d.stats || [], d.breakdowns || []).filter(Boolean);
@@ -162,9 +196,9 @@
       const q = s.qualifier ? ' ' + chip(s.qualifier.state, s.qualifier.label) : '';
       const nTxt = (s.n != null ? ' · n=' + s.n : '') + (s.date ? ' · trough ' + shortDate(s.date) : '')
         + spanTxt(s.span);
-      return `<div class="ab-stat" data-key="${esc(s.key)}">
+      return `<div class="ab-stat" data-key="${esc(s.key)}"${s.date_basis && !s.date_basis.trade_date_exists ? ' data-basis="write-date"' : ''}>
         <span class="ab-v ${tone(s.value, s.format)}">${esc(fmt(s.value, s.format))}${q}</span>
-        <span class="ab-l">${esc(s.label)}${esc(nTxt)} ${blockChip(s)}${coverageChip(s.coverage)}</span>
+        <span class="ab-l">${esc(s.label)}${esc(nTxt)} ${blockChip(s)}${coverageChip(s.coverage)}${basisChip(s.date_basis)}</span>
         ${s.meaning ? `<details><summary>what it means</summary>${esc(s.meaning)}</details>` : ''}
       </div>`;
     }).join('');
@@ -210,9 +244,11 @@
     $('abAccounts').innerHTML = `<table>
         <thead><tr><th>Account</th><th class="ab-num">Net profit</th><th class="ab-num">Win rate</th><th class="ab-num">Expected return</th></tr></thead>
         <tbody>${body}${rowHtml(combined, 'ab-total')}</tbody></table>`;
-    $('abAccountsNote').textContent = d.combined_is_pooled
-      ? 'All accounts is pooled over every counted trade, so it is weighted by trade count — not an average of the rates above it.'
-      : '';
+    // `innerHTML`, not `textContent`: the basis paragraph is markup. The pooled sentence is a
+    // fixed string from this file, and every value inside basisLine() is escaped there.
+    $('abAccountsNote').innerHTML = (d.combined_is_pooled
+      ? '<p>All accounts is pooled over every counted trade, so it is weighted by trade count — not an average of the rates above it.</p>'
+      : '') + basisLine(d.accounts_date_basis || d.date_basis);
   }
   const pick = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s ? s.value : null; };
   const pickN = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s && s.n != null ? s.n : 0; };
@@ -378,7 +414,7 @@
       aria-controls="abPanel-${esc(b.key)}" aria-selected="${b.key === activeTab}" tabindex="${b.key === activeTab ? 0 : -1}"
       data-t="${esc(b.key)}">${esc(b.label)}</button>`).join('');
     panels.innerHTML = list.map((b) => `<div role="tabpanel" id="abPanel-${esc(b.key)}" aria-labelledby="abTab-${esc(b.key)}"
-      ${b.key === activeTab ? '' : 'hidden'}><div class="ab-panel-chip">${blockChip(b)}${b.note ? ` <span class="ab-sub">${esc(b.note)}</span>` : ''}</div><div class="ab-panel-body"></div></div>`).join('');
+      ${b.key === activeTab ? '' : 'hidden'}><div class="ab-panel-chip">${blockChip(b)}${b.note ? ` <span class="ab-sub">${esc(b.note)}</span>` : ''}${basisChip(b.date_basis)}</div><div class="ab-panel-body"></div></div>`).join('');
     list.forEach((b) => wireSort(panels.querySelector(`#abPanel-${CSS.escape(b.key)} .ab-panel-body`), b));
     const select = (key, focus) => {
       activeTab = key;

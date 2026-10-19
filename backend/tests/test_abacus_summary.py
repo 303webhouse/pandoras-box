@@ -39,7 +39,7 @@ class _FakePool:
     """
 
     def __init__(self, rows=None, snapshots=None, cash=None,
-                 closures=None, fallback=None, dropped=None):
+                 closures=None, fallback=None, dropped=None, basis=None):
         self.rows = list(rows or [])
         self.snapshots = list(snapshots or [])
         self.cash = list(cash or [])
@@ -49,6 +49,10 @@ class _FakePool:
         self.closures = None if closures is None else list(closures)
         self.fallback = list(fallback or [])
         self.dropped = list(dropped or [])
+        # R-IV.1262(b)1: the date-basis census. `None` means "derive it from the fixture"; a test
+        # that needs a particular basis (a write date that disagrees with the trade's own day, or
+        # a trade date that exists) passes one.
+        self.basis = basis
         self.calls = []
 
     async def fetch(self, sql, *params):
@@ -81,6 +85,30 @@ class _FakePool:
             # unless a test supplies them, which is the book's norm too -- eight and one row.
             return list(self.fallback if "p.exit_date IS NOT NULL" in sql else self.dropped)
         return self.rows
+
+    async def fetchrow(self, sql, *params):
+        """One row. asyncpg has it, so the route uses it, so the stub must have it too.
+
+        It did not, and the loader added under R-IV.1262(b)1 calls it -- which failed every test in
+        this file with a 500 rather than with a missing-method error, because FastAPI turns an
+        AttributeError inside a route into an Internal Server Error. A stub that is missing a
+        method the real pool has does not fail where the gap is.
+        """
+        self.calls.append((sql, params))
+        if "write_day" in sql:                      # the date-basis census
+            if self.basis is not None:
+                return dict(self.basis)
+            # DERIVED, so a fixture's rows and its basis cannot disagree. THE STUB HAS NO WRITE
+            # DATE AT ALL -- there is no `created_at` in `_row` -- so `differing` is 0 here by
+            # construction, and a test that wants a non-zero one must pass `basis=` explicitly.
+            counted = [r for r in self.rows if r.get("realized_pnl") is not None]
+            with_exit = [r for r in counted if r.get("exit_date") is not None]
+            return {"n_rows": len(counted), "differing": 0, "agreeing": len(with_exit),
+                    "no_exit_day": len(counted) - len(with_exit),
+                    "earliest_exit": min((r["exit_date"] for r in with_exit), default=None),
+                    "first_write": None, "last_write": None}
+        rows = await self.fetch(sql, *params)
+        return rows[0] if rows else None
 
 
 import datetime as _dt
@@ -130,8 +158,9 @@ def book_pool():
         yield pool
 
 
-def _patch_book(rows, snapshots=None, cash=None, closures=None, fallback=None, dropped=None):
-    pool = _FakePool(rows, snapshots, cash, closures, fallback, dropped)
+def _patch_book(rows, snapshots=None, cash=None, closures=None, fallback=None, dropped=None,
+                basis=None):
+    pool = _FakePool(rows, snapshots, cash, closures, fallback, dropped, basis)
     return pool, patch("api.abacus.get_postgres_client", new=AsyncMock(return_value=pool))
 
 
@@ -1033,3 +1062,87 @@ class TestTheRouteSurfacesWhatTheLoaderComputed:
         net = _stat(d, "net_profit")
         assert "closures dated in the window" in net["basis"]
         assert net["coverage"]["predicate"] != net["basis"]
+
+class TestTheDateBasisIsServed:
+    """R-IV.1262(b)1 -- every period figure must SAY what date it was windowed on.
+
+    The defect this guards is not a crash, it is a figure that reads as a period figure and is
+    not one. `position_lot_closures` has no trade date, so branch 1 of the realized formula
+    windows on `created_at`, the instant the reconciliation WROTE the row. Measured 2026-10-19,
+    the whole ledger was written over ten days carrying exits back to 2025-12-11, so Abacus read
+    +3,535.22 "since 2026-09-01" where the period's own trades were roughly flat and one account's
+    sign was inverted (R-IV.1255(a)).
+
+    The tests below pin the three things that make the label trustworthy: that it reaches EVERY
+    windowed figure (a route that selects keys by name has dropped a loader's output here before),
+    that it does NOT reach the withheld tile (no measurement, so no basis), and that it says the
+    basis is MIXED -- branch 2 windows on `exit_date`, which IS the trade's own day, and a label
+    claiming otherwise would be a second untruth replacing the first.
+    """
+
+    PERIOD = ("net_profit", "win_rate", "expectancy", "profit_factor", "avg_win_loss",
+              "expected_return")
+
+    def test_every_windowed_stat_carries_the_basis(self, client, test_api_key):
+        pool, p = _patch_book([_row(100.0, 1000.0), _row(-50.0, 500.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        for key in self.PERIOD:
+            st = _stat(d, key)
+            assert st is not None, key
+            assert st.get("date_basis"), "no date_basis on " + key
+
+    def test_the_withheld_stat_carries_no_basis(self, client, test_api_key):
+        """A basis on a withheld tile would imply a measurement behind it. There is none."""
+        pool, p = _patch_book([_row(100.0, 1000.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        st = _stat(d, "loss_vs_risk")
+        assert st["value"] is None
+        assert "date_basis" not in st
+
+    def test_the_basis_names_the_column_and_says_it_is_mixed(self, client, test_api_key):
+        pool, p = _patch_book([_row(100.0, 1000.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        b = d["date_basis"]
+        assert b["column"] == "position_lot_closures.created_at"
+        assert b["trade_date_exists"] is False
+        assert b["mixed"] is True
+        assert "exit_date" in b["mixed_detail"]
+        # The fix is named ON the payload, so the page can say what it is waiting for.
+        assert "trade_date" in b["fix"]
+
+    def test_the_basis_reaches_the_accounts_block_and_the_live_breakdowns(self, client, test_api_key):
+        pool, p = _patch_book([_row(100.0, 1000.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        assert d["accounts_date_basis"]["column"] == "position_lot_closures.created_at"
+        live = [b for b in d["breakdowns"] if b["source"] == "live"]
+        assert live, "no live breakdown to check"
+        for b in live:
+            assert b.get("date_basis"), "no date_basis on breakdown " + b["key"]
+        # The fixture breakdown must NOT claim one: it was never windowed over anything.
+        for b in d["breakdowns"]:
+            if b["source"] != "live":
+                assert "date_basis" not in b, b["key"]
+
+    def test_the_count_of_disagreeing_rows_is_served(self, client, test_api_key):
+        """The COUNT is what makes the warning actionable, so it is part of the contract.
+
+        Passed explicitly here: the stub has no write date of its own, so a derived count is 0 by
+        construction and could never catch a route that dropped the field.
+        """
+        pool, p = _patch_book([_row(100.0, 1000.0)], basis={
+            "n_rows": 839, "differing": 803, "agreeing": 35, "no_exit_day": 1,
+            "earliest_exit": _dt.date(2025, 12, 11), "first_write": _dt.date(2026, 9, 23),
+            "last_write": _dt.date(2026, 10, 15)})
+        with p:
+            d = _get(client, test_api_key).json()
+        b = d["date_basis"]
+        assert b["closure_rows"] == 839
+        assert b["rows_differing"] == 803
+        assert b["rows_no_exit_date"] == 1
+        assert b["earliest_exit_in_ledger"] == "2025-12-11"
+        assert b["written_from"] == "2026-09-23" and b["written_to"] == "2026-10-15"
+        assert "803 of 839" in b["meaning"]
