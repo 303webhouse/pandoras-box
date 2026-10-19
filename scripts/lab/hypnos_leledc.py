@@ -270,8 +270,20 @@ def trailing_exit_rows(ticker, f, spy, badj, sig_rows):
 
 
 # ── statistics ────────────────────────────────────────────────────────────────────────────
-def arm_result(ev, h, value_col, cluster="date", hac_lags=None, bar_col=None):
-    """signal - placebo on signed continuation; the decision table of §4."""
+def arm_result(ev, h, value_col, cluster="date", hac_lags=None, bar_col=None, weight=True):
+    """signal - placebo on signed continuation; the decision table of §4.
+    weight=False (every secondary / control row): the decision field reads "no weight · t = x" and can
+    never print SUPPORTED (R-IV.1248(b), a display change only)."""
+    res = _arm_result(ev, h, value_col, cluster, hac_lags, bar_col)
+    if not weight:
+        res["decision"] = NO_WEIGHT_FMT.format(t="n/a" if res.get("t") is None else res["t"])
+    return res
+
+
+NO_WEIGHT_FMT = "no weight · t = {t}"
+
+
+def _arm_result(ev, h, value_col, cluster, hac_lags, bar_col):
     e = ev[ev[f"r{h}"].notna()].copy()
     if value_col == "adj":
         e = e[e[f"rspy{h}"].notna()]
@@ -395,19 +407,19 @@ def run(eq_path, btc_path, eth_path, out_dir, check_hashes=True):
     for arm in ("main", "etf"):
         e = ev_eq[ev_eq.arm == arm]
         res["primary"][arm] = {"adj": arm_result(e, H_PRIMARY, "adj"), "raw": arm_result(e, H_PRIMARY, "raw")}
-        res["secondary"][f"{arm}_h20"] = {"adj": arm_result(e, H_SECONDARY, "adj"),
-                                          "raw": arm_result(e, H_SECONDARY, "raw")}
+        res["secondary"][f"{arm}_h20"] = {"adj": arm_result(e, H_SECONDARY, "adj", weight=False),
+                                          "raw": arm_result(e, H_SECONDARY, "raw", weight=False)}
         sp = {}
         for kind in ("signal", "placebo"):
             k = e[(e.kind == kind) & e.rspy5.notna()]
             sp[kind] = round(100 * float((k.sign * k.rspy5).mean()), 4) if len(k) else None
         res["controls"][f"{arm}_spy_signed_mean_pct_h5"] = sp
         above = e.date.map(lambda d: bool(spy_above200(spy, cal).get(d, False)))
-        res["controls"][f"{arm}_spy_above_200"] = arm_result(e[above], H_PRIMARY, "adj")
-        res["controls"][f"{arm}_spy_below_200"] = arm_result(e[~above], H_PRIMARY, "adj")
+        res["controls"][f"{arm}_spy_above_200"] = arm_result(e[above], H_PRIMARY, "adj", weight=False)
+        res["controls"][f"{arm}_spy_below_200"] = arm_result(e[~above], H_PRIMARY, "adj", weight=False)
     res["primary"]["crypto"] = {"raw": arm_result(ev_cr, H_PRIMARY, "raw", hac_lags=H_PRIMARY - 1, bar_col="bar")}
     res["secondary"]["crypto_h20"] = {"raw": arm_result(ev_cr, H_SECONDARY, "raw", hac_lags=H_SECONDARY - 1,
-                                                        bar_col="bar")}
+                                                        bar_col="bar", weight=False)}
     for a in ("BTC-USD", "ETH-USD"):
         sub = ev_cr[ev_cr.ticker == a]
         res["controls"][f"crypto_{a}_counts"] = {"signals": int((sub.kind == "signal").sum()),
@@ -433,7 +445,7 @@ def run(eq_path, btc_path, eth_path, out_dir, check_hashes=True):
         "reading": "positive = exiting on the arrow left money on the table"}
     em = ev_eq[ev_eq.arm == "main"]
     res["secondary"]["va_location_approximate_daily_bar_va"] = {
-        loc: arm_result(em[em.va_loc == loc], H_PRIMARY, "adj") for loc in ("outside", "inside")}
+        loc: arm_result(em[em.va_loc == loc], H_PRIMARY, "adj", weight=False) for loc in ("outside", "inside")}
     res["secondary"]["va_location_approximate_daily_bar_va"]["no_va"] = int(em.va_loc.isna().sum())
     res["secondary"]["daedalus_spy_intraday"] = {
         "status": "NOT RUN", "spy_5min_sessions_held_by_lab": 0,
@@ -541,9 +553,10 @@ def run_4h(btc_1h, eth_1h, out_dir, check_hashes=True):
     res = {"copy_of_record": V2_COPY, "copy_sha256": V2_COPY_SHA256, "inputs": hashes, "bars": bars,
            "lifetime_tries_counter": 2,
            "primary_h6_24h": prim,
-           "secondary_h30_5d": arm_result(ev, V2_H_SECONDARY, "raw", hac_lags=V2_H_SECONDARY - 1, bar_col="bar"),
+           "secondary_h30_5d": arm_result(ev, V2_H_SECONDARY, "raw", hac_lags=V2_H_SECONDARY - 1, bar_col="bar",
+                                         weight=False),
            "per_asset_primary": {a: arm_result(ev[ev.ticker == a], V2_H_PRIMARY, "raw", hac_lags=V2_H_PRIMARY - 1,
-                                               bar_col="bar") for a in ("BTC-USD", "ETH-USD")},
+                                               bar_col="bar", weight=False) for a in ("BTC-USD", "ETH-USD")},
            "ungradeable_h6": int(ev.r6.isna().sum()), "ungradeable_h30": int(ev.r30.isna().sum()),
            "labels": lab.groupby(["label_status"]).size().to_dict(),
            "price_source": ("Coinbase Exchange public 1h candles (internal research only, never redistributed "
@@ -707,6 +720,11 @@ def selftest():
     check("e2e: crypto weekend rows are NO LABEL", (cr[wk & (pd.to_datetime(cr.date).dt.date >= SEED_FIRST)]
                                                     .label_status == "NO LABEL (no US session)").all())
     check("e2e: some signals and placebos were found", len(lab[lab.kind == "signal"]) > 0 and len(lab[lab.kind == "placebo"]) > 0)
+    sec_dec = [b["decision"] for k, v in res["secondary"].items() if isinstance(v, dict)
+               for b in v.values() if isinstance(b, dict) and "decision" in b]
+    sec_dec += [v["decision"] for k, v in res["controls"].items() if isinstance(v, dict) and "decision" in v]
+    check("R-IV.1248(b): v1 secondaries and controls never print SUPPORTED",
+          len(sec_dec) > 0 and all(x.startswith("no weight · t = ") for x in sec_dec))
     check("e2e: every primary arm has a decision",
           all("decision" in res["primary"][a][b] for a in res["primary"] for b in res["primary"][a]))
     check("e2e: PHOENIX overlap block present, cutoff counted",
@@ -771,6 +789,13 @@ def selftest():
           and r4["secondary_h30_5d"]["h"] == 30 and r4["lifetime_tries_counter"] == 2
           and r4["bars"]["ETH-USD"]["windows_dropped_incomplete"] == 2)
     lab4 = pd.read_csv(os.path.join(tmp, "out4", "signals_for_label_join_4h.csv"))
+    nw = [r4["secondary_h30_5d"]["decision"]] + [v["decision"] for v in r4["per_asset_primary"].values()]
+    check("R-IV.1248(b): every no-weight row reads 'no weight · t = x', never SUPPORTED",
+          all(x.startswith("no weight · t = ") for x in nw) and not any("SUPPORTED" in x for x in nw))
+    rr = pd.DataFrame(rows)
+    check("R-IV.1248(b): the same clear-exhaustion arm reads SUPPORTED with weight, 'no weight' without",
+          arm_result(rr, 5, "raw")["decision"] == "SUPPORTED"
+          and arm_result(rr, 5, "raw", weight=False)["decision"].startswith("no weight · t = -"))
     check("v2 e2e: the label file carries no outcome column",
           set(lab4.columns) == {"arm", "ticker", "date", "kind", "side", "label_status"})
     print(f"{ok}/{ok + fail}")
