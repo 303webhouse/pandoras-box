@@ -564,3 +564,72 @@ session's bars **from the open**, asserted), the RTH scheduler, the detector run
 REVISED marking (R-IV.1215(b)5) and the panel's watched/not-watched footer carrying the ruled
 phone line (R-IV.1228(d), verbatim, bound to `models.position_watch.PANEL_FOOTER_PHONE_LINE`
 by test).
+
+---
+
+## `position_watch_events` — the fields QUERY's 10-session check needs (R-IV.1233(b))
+
+**The table is still created in B2's completion deploy, by the code that writes to it.** This is
+the spec it is built from. **It is an EVENT log, not a push log:** every detected event gets a
+row whether or not it was pushed, because otherwise the denominator of "what share was pushed"
+would be unknowable and QUERY would have to reconstruct it.
+
+| field | type | notes |
+|---|---|---|
+| `detected_at` | `TIMESTAMPTZ NOT NULL` | when the decision was made, on every row |
+| `bar_close_at` | `TIMESTAMPTZ NOT NULL` | the closed 15m bar the event is anchored to — for a confirmed gap this is **bar 2's** close (R-IV.1226(b)1) |
+| `pushed_at` | `TIMESTAMPTZ` | **the push timestamp, NULL when nothing was pushed** |
+| `ticker` | `TEXT NOT NULL` | the Set B underlying, not the held ticker |
+| `event_type` | `TEXT NOT NULL` | `LEVEL_BREAK` / `FAILED_BREAKOUT` / `GAP_FADED` / `STOP_LEVEL` / `TARGET_LEVEL` / `EXHAUSTION` |
+| `relation` | `TEXT` | see the two notes below |
+| `pushed` | `BOOLEAN NOT NULL` | |
+| `suppression_reason` | `TEXT` | `may_push`'s own reason string, which it already returns on every refusal; NULL only when `pushed` is true |
+| `gap_open` | `BOOLEAN NOT NULL` | |
+| `gap_held` | `BOOLEAN` | see the note below |
+| `gap_held_reason` | `TEXT` | paired with the above, per Conventions #37/#38 |
+
+**Every field is storable. Three need their domain stated, and two of them answer "can it be
+stored" with *not at the instant of the first row*:**
+
+1. **The push timestamp is not the event timestamp.** A suppressed event has no push instant, so
+   one column cannot carry both without NULL meaning two different things. Hence `detected_at`
+   (always) and `pushed_at` (only when pushed). QUERY's median-pushes-per-day counts
+   `pushed_at`; its "what share was pushed" uses both.
+2. **`relation` has THREE values, not two.** The ruling says AGAINST / WITH; the code also
+   returns **UNKNOWN** — `classify_relation` answers None when the structure is one it does not
+   know, and that is deliberate (R-IV.1209(f)3: UNKNOWN is its own answer and is never pushed).
+   Stored as the literal string `UNKNOWN`, never as NULL, so a NULL in this column can only ever
+   mean "not written" and the three-way domain is visible to anyone who groups by it.
+3. **`gap_held` cannot be known when the first-bar row is written.** At bar 1 the gap has not
+   resolved; whether it holds is bar 2's fact. The bar-1 row is therefore written with
+   `gap_held = NULL` and `gap_held_reason = 'not yet known: the second bar had not closed'`, and
+   the **bar-2 row carries the resolution** (`true` on the confirmation, `false` on `GAP_FADED`).
+   The first row is **never updated** — an event log that rewrites its own history cannot be
+   audited. For a non-gap event, `gap_open` is false and `gap_held` is NULL with
+   `gap_held_reason = 'not a gap-open session'` — a STRUCTURAL null, not a pending one
+   (Convention #41).
+
+**Nothing here is reconstructed by QUERY.** Any field that turns out not to be written is
+reported UNAVAILABLE by QUERY rather than inferred — which is why the two NULLs above each carry
+a paired reason: a bare NULL would be indistinguishable from a writer that failed.
+
+---
+
+## TA-205 (R-IV.1232) — what BUILD does, and when (R-IV.1233(c), (d))
+
+**No build is needed for Wednesday.** POSITIONS writes `orientation_at_entry` and the cut alert
+evaluates. BUILD does **not** populate or derive orientation (R-IV.1228(a)/1233).
+
+| # | item | when |
+|---|---|---|
+| **S7.1** | Reword `BOOK_WIDE` so the claim is per-row and the census carries its instant and its expiry. Display text only. | **DONE** — shipped before Wed 10-21 as a standalone change; it touches `b2_cut_alert.py` only and does not disturb B2 |
+| **S7.2** | A recorded orientation that **disagrees with a whitelist shape** → `NOT_EVALUABLE`, **showing both values**. Today the recorded field silently overrides the shape, so a mis-recorded +1 on a credit structure is evaluated as a debit with nothing said. | after B2 completes |
+| **S7.3** | Retire the `position_orientation` text branch (`models/b2_cut_alert.py:340-346`). It accepts **`"SHORT"`** — the underlying-exposure word the cut must never read — and no migration creates the column, so the branch exists only for hand-built row dicts. | after B2 completes |
+
+**(d) For the record, and it is the distinction the two S7 items turn on:** Position Watch's
+**net-delta sign on the underlying is EXPOSURE** (TA-205 S5) and **stays exactly as built** — a
+long SQQQ is short QQQ, and that is the quantity that decides whether an alert is AGAINST. The
+cut alert reads **`orientation_at_entry` only**, which is whether the position was **opened for a
+debit or a credit**. Two different quantities; the right one is already in each place. S7.3
+exists precisely because one branch of the cut could read the exposure word and treat it as the
+orientation.

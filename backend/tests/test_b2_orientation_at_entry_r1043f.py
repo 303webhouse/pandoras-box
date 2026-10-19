@@ -166,3 +166,25 @@ def test_position_orientation_really_is_created_nowhere():
                 if re.search(r"ADD COLUMN IF NOT EXISTS\s+position_orientation", src, re.I):
                     hits.append(f)
     assert not hits, "position_orientation is now migrated by %s -- revisit the SELECTs" % hits
+
+
+def test_the_refusal_clause_states_a_PER_ROW_fact_and_dates_its_context():
+    """R-IV.1233(c)1. This string has been wrong in BOTH directions, so both are pinned.
+
+    It first described a book-wide cause as a fact about one row. R-IV.1226(d)2 corrected that
+    with a present-tense census ("NULL on every open row"), which was true when measured and
+    goes false the moment POSITIONS writes a value -- and TA-205 has now put POSITIONS in
+    charge of writing it. A refusal that asserts a census starts lying with nobody touching it.
+
+    Asserted against the CONSTANT, not the module source, so this test's own prose cannot
+    satisfy it -- the trap that has caught source scans in this repo eight times.
+    """
+    text = b2.BOOK_WIDE
+    # The claim is about the row in hand.
+    assert "this row records no orientation_at_entry" in text
+    # The census survives only as dated context that names what supersedes it.
+    assert "2026-10-18" in text and "for context" in text.lower()
+    assert "expires on its first write" in text
+    # And it must not read as a present-tense book-wide assertion again.
+    assert "is NULL on EVERY open row" not in text
+    assert "can resolve ANY row" not in text
