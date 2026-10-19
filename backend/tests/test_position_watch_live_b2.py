@@ -264,3 +264,35 @@ def test_EVERY_DEFERRED_IMPORT_IN_B2S_LIVE_PATH_RESOLVES():
                     for a in inner.names:
                         assert a.name.split(".")[0] in known, (
                             "%s defers `import %s`, untested" % (rel, a.name))
+
+
+def test_SET_B_SQL_ASKS_ONLY_FOR_REAL_COLUMNS():
+    """THE SECOND PRODUCTION FAULT ON THIS ROUTE, and the same shape as the first: a name I
+    assumed rather than checked.
+
+    The job SELECTed `target`. `unified_positions` has `target_1` and `target_2`; `target` is
+    an alias the /v2/positions ROUTE serves. Reading a served field name as a column name
+    raised UndefinedColumnError on every cycle -- and because the route's error path is honest
+    now, it reported itself instead of 500ing, which is how it was found in one read.
+
+    Checked against the canonical CREATE TABLE plus every ALTER in the same module, which is
+    where this schema is authored. A column added by main.py's startup migrations would also
+    appear there to a reader, so both files are scanned.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    schema = (root.joinpath("database", "postgres_client.py").read_text(encoding="utf-8")
+              + root.joinpath("main.py").read_text(encoding="utf-8"))
+    # The SELECT list, before the FROM, with any `x AS y` reduced to x.
+    select = job.SET_B_SQL.split("FROM")[0].replace("SELECT", "")
+    wanted = []
+    for part in select.split(","):
+        name = part.strip().split()[0].strip()
+        if name:
+            wanted.append(name)
+    assert "target_1" in wanted and "target" not in wanted
+    for col in wanted:
+        assert re.search(r"\b%s\b" % re.escape(col), schema), (
+            "%s is SELECTed by the Position Watch job but is not in the authored schema" % col)
