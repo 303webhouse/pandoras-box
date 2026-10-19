@@ -1294,10 +1294,24 @@ broker-PDF whitelist (what may be read OUT of an outside file, as against how it
 ## #37 (CLARIFIED, R-IV.1224(g)) A PUBLISHED FIGURE NAMES ITS SOURCE AND ITS UNIVERSE IN THE SAME SENTENCE AS ITS AS-OF
 
 **Note on this file's numbering, stated rather than quietly implied.** The register above runs
-to **#32**. Conventions **#33–#45 were ruled later and are not transcribed here yet** — they
-live in the rulings and in the lanes' own memory. This section is appended out of sequence
-because R-IV.1224(g) clarifies #37 *for all lanes*, and a lane looking for a convention looks
-here first. The gap is a transcription backlog, not a numbering error.
+to **#32**, and this section sits out of sequence because R-IV.1224(g) clarified #37 *for all
+lanes* while #33–#36 and #38–#45 were still untranscribed — a lane looking for a convention
+looks here first, so the clarification was appended ahead of them rather than held back.
+
+**That backlog is now cleared (R-IV.1226(e)).** #33–#36 and #38–#46 follow below, after this
+section, so the file reads #1–#32, then #37, then #33–#36 and #38–#46. The order is a record of
+when each was written down, not of priority. **This file has no numbered index at its head** —
+the entries above #19 are titled rather than numbered — so the way to find a convention here is
+to search for `## #NN`, and that is said plainly instead of pointing at an index that does not
+exist. #46 is appended last because it was ruled during the same session that cleared the
+backlog (R-IV.1237(a)).
+
+**Where the wording came from, because three of these were nobody's to hold.** #33, #34, #38,
+#39 and #41–#45 were ruled to CC-BUILD and are transcribed from its own record. **#35 and #36
+were ruled to CC-POSITIONS and #40 to LAB**, and their authoritative wording was read out of
+`C:\lane-state\POSITIONS.md` and `C:\lane-state\LAB.md` rather than reconstructed — a
+convention remembered secondhand is a convention quietly rewritten. Each section below names
+the lane the ruling landed in.
 
 ### The rule
 
@@ -1326,3 +1340,409 @@ figure, in one sentence — plus the standing of the claim ("history, not a fore
 **Kin:** #38 (name the scope — four statuses mean OPEN+CLOSED is never "all"), strategy-lab §3.4
 (n and n distinct dates beside every figure) and §3.6 (every return figure names its price
 source and basis).
+
+---
+
+## #33 A RELAY IS ACKNOWLEDGED BY NUMBER, AND A MISSING NUMBER IS CHASED
+
+*Ruled to CC-BUILD. Transcribed from its record.*
+
+### What its absence cost
+
+Three relay blocks — TA-013, TA-015 and TA-016 — are **cited in the book as though they had
+been acted on, and none of them ever arrived.** The citations were written by the lane that
+expected them, from the ruling that announced them, so the record shows a conversation that
+did not happen. Nothing in the pipeline could tell the difference between a block that landed
+and a block that was merely mentioned: both appear as a number in a document.
+
+### The rule
+
+**Every reply opens with the numbers it received**, as numbers: "Received R-IV.1259." A reply
+that begins with work instead of with numbers leaves no record of what the lane was actually
+holding when it started.
+
+**A gap in the sequence is chased, not inferred.** If 1216–1223 are missing, the lane asks
+whether they were addressed to it. It does not assume they were dropped, and it does not
+assume they were someone else's — R-IV.1224(a) settled that several of them were other lanes',
+so "chase" means **ask**, not conclude.
+
+**A citation is not evidence of arrival.** A block named in a later document proves only that
+somebody wrote its name down. The acknowledgement at the head of a reply is the evidence.
+
+**Kin:** #23 (an adjudication shows its evidence beside its verdict), #44 (a line reference
+carries the sha it was read at) and the relay temporal-anchor law — "past close" and "overdue"
+invert across a relay hop, so a relay states the absolute instant.
+
+---
+
+## #34 A READ-BACK IS VERIFIED BY TWO INDEPENDENT ROUTES
+
+*Ruled to CC-BUILD.*
+
+### What its absence cost
+
+A write was confirmed by reading back the same statement that made it. `RETURNING` says what
+the writer believed it wrote; a cache says what it was told to hold. Neither is an independent
+witness, and a write that half-landed looks identical to one that landed.
+
+The cache made it worse in a way worth naming: `cache_age_seconds` is computed as
+`int(now - entry)`, so **a sub-second read reports 0**, and a 60-second freshness window will
+accept the reader's **own pre-write read** as current. The instrument confirmed the state that
+existed before the write.
+
+### The rule
+
+A write is verified by **two routes that do not share a cache or a statement**: the writing
+statement's `RETURNING`, **and** the uncached single-row route that serves that row. Both must
+agree. If they disagree, the write is unverified — not "probably fine".
+
+**An age in whole seconds is not a freshness guarantee.** Any window measured with integer
+seconds admits reads from inside the same second, so a cache cannot be the second witness to
+a write made in that second.
+
+**Kin:** #30 (positive controls in the same run), #42 (STORED vs DERIVED — a derived field
+read back proves the derivation ran, not that anything was stored).
+
+---
+
+## #35 A PARTIAL CLOSE SPLITS COST AT ACQUISITION, BY LARGEST REMAINDER, TIES TO THE EARLIEST UNIT
+
+*Ruled to CC-POSITIONS. Wording read from `C:\lane-state\POSITIONS.md`, not reconstructed.*
+
+### What its absence cost
+
+A pro-rata split **recomputed at each close is path-dependent**: the same contracts closed in a
+different order give the survivors a different basis. Two books holding identical positions,
+closed in different sequences, then disagree about what is still owned — and neither is wrong
+by its own arithmetic.
+
+### The rule
+
+Each unit's cost is **fixed once, at acquisition**, and never recomputed:
+
+1. divide the lot's cash cost by its unit count;
+2. give every unit the floor in cents;
+3. distribute the remaining cents by **largest remainder**;
+4. **ties go to the earliest units.**
+
+A later partial close then yields the same cents **whatever sequence of closes produced it**.
+
+### The worked instance (HYG row 516, lot 333)
+
+3 contracts at a cash cost of **42.26**. 42.26 / 3 = 14.0866…, so the base is **14.08** each
+with **0.02** left; the remainders are equal, so the two spare cents go to units 1 and 2:
+
+| unit | allocated cost | |
+|---|---|---|
+| 1 | **14.09** | consumed 2026-09-29 |
+| 2 | **14.09** | consumed 2026-09-29 |
+| 3 | **14.08** | still held |
+
+FIFO consumed units 1 and 2, so the closed cost is **28.18** and realized is
+**79.82 − 28.18 = 51.64** — down from the 52.00 a pro-rata split had recorded. The closure's
+per-unit columns move to the cash scale, **14.09 and 39.91**, and **2 × (39.91 − 14.09) =
+51.64** exactly. Basis stays **68.44**.
+
+**Kin:** #27 (money rounds half-up in Decimal wherever quantity × price becomes money) and
+#29 (`quantity` is the size opened; the open remainder is what the lots net to).
+
+---
+
+## #36 A SLICE REF IS CUMULATIVE, NOT AN INDEX
+
+*Ruled to CC-POSITIONS. Wording read from `C:\lane-state\POSITIONS.md`.*
+
+### What its absence cost
+
+A slice named `#1-1`, `#2-2`, `#3-3` reads as three indices into a fill, and **nothing in the
+ref says how many units it covers.** Two conventions were in use at once across 73 refs — some
+cumulative, some INDEX-form — so a reader could not tell from a ref alone which arithmetic
+applied to it, and no check could be written that both forms would pass.
+
+### The rule
+
+A slice ref names a **half-open cumulative span**: `#(i−1)-i` for the i-th unit. The ref then
+carries its own size, and **`b − a == qty` is a self-check every ref must pass** — a single
+assertion that covers the whole book instead of a per-row judgement.
+
+Nothing about the fills changes under the migration; only how the slice is **named**.
+
+### The record of the migration
+
+**26 lots migrated**, every one qty 1, `#i-i` → `#(i−1)-i`; targets distinct from each other;
+no target collided with an existing ref; **69 refs pass the self-check** afterwards (the 43
+already cumulative plus these 26); **0 INDEX-form refs remain.**
+
+**Kin:** #28 (an export's line numbers are CSV record numbers) and #44 (a line reference
+carries the sha it was read at) — all three are about a locator that must mean one thing.
+
+---
+
+## #38 A SCOPE IS NAMED, BECAUSE THE DOMAIN HAS MORE VALUES THAN THE TWO YOU ARE THINKING OF
+
+*Ruled to CC-BUILD.*
+
+### What its absence cost
+
+The book has **four** statuses, so **OPEN + CLOSED is never "all"** — and a figure described as
+"all positions" that summed two of four was reported, quoted onward, and believed. The bucket
+scope that the rulings actually mandate is **`open_quantity > 0`**, which is **not**
+`status = 'OPEN'`: a row can be OPEN with nothing left in it.
+
+The same fault in the other direction: a **NULL with a paired `*_reason`** is a deliberate
+answer, and counting it as "pending" turns a recorded decision into an outstanding task.
+
+### The rule
+
+Every figure **names its scope in the same sentence as the number** (this is #37's other half),
+and the scope is written as the predicate that produced it — `open_quantity > 0`, not "open
+positions".
+
+Before writing a filter over a coded domain, **count the domain's values.** Two-branch
+reasoning over a four-value column is the fault, not the filter.
+
+A field whose NULL is paired with a reason is **STRUCTURAL, not PENDING** (#41).
+
+**Kin:** #37 (source, universe and as-of in the same sentence), #41 (structural vs pending
+nulls), #42 (STORED vs DERIVED).
+
+---
+
+## #39 A SESSION COLUMN SAYS WHICH SESSION, NOT WHICH INSTANT
+
+*Ruled to CC-BUILD. **PROPOSED**, awaiting TA; recorded here because the inventory is already
+built and the fault is already in the data.*
+
+### What its absence cost
+
+`entry_date` and `exit_date` hold **three different conventions at once**:
+
+* **UTC-midnight stamps**, which a session-local read misplaces by **+1 day** — and by **+3
+  days** across a weekend;
+* **Denver-midnight stamps**, which come out right **by accident**, because the offset happens
+  to land inside the same session;
+* **plain dates**, which are what the column is for.
+
+A column holding three conventions cannot be read correctly by any single rule, and the two
+that look right most of the time are the dangerous ones.
+
+### The rule
+
+A column named `*_date` holds **a session**, not an instant: a plain calendar date in the
+market's own session calendar. An instant belongs in a `*_at` column with its zone.
+
+A migration of such a column **inventories every row's convention first** — the inventory and
+verifier live at `C:\lane-state\session_inventory.py` — because a conversion applied uniformly
+to a mixed column corrupts the rows that were already right.
+
+**Kin:** the time-of-day rule in `CLAUDE.md` (pull a real UTC timestamp, convert with
+`zoneinfo`) and the TZ-is-ignored-in-Git-Bash finding, which is the same fault in the tooling.
+
+---
+
+## #40 AN AMENDED REGISTERED DOCUMENT CARRIES ITS WHOLE HASH CHAIN
+
+*Ruled to LAB. Wording read from `C:\lane-state\LAB.md`.*
+
+### What its absence cost
+
+A registration amended six times is **seven documents**, and an amendment quoted on its own
+says nothing about what it amends. Without the chain, a reader cannot tell whether they hold
+the current text, whether a link is missing, or whether two amendments were written against
+different bases — and a registration is the one artefact whose whole value is that it was
+fixed before the data existed.
+
+### The rule
+
+Every stamped amendment states **the full ordered chain of hashes** from the original to
+itself, with its own byte size and stamp time:
+
+> `ba9e77df…` → `d8030b4f…` → `21a2c0e9…` → `c491c196…` → `6d26a90e…` → `8f5931a9…` →
+> `b8a5ff38…`
+
+A chain with a gap is **not** a shorter chain; it is an unverified document. The hash is taken
+on the **committed blob**, never the working-tree file (`core.autocrlf` is on here, so the two
+differ byte for byte) — see strategy-lab §2.
+
+**Kin:** #32 (evidence is hashed on its raw bytes, as received), #44 (a line reference carries
+the sha it was read at), and the gate-hash LF normalisation finding — CRLF checkout makes the
+working tree differ from the filed gate by exactly one byte per line.
+
+---
+
+## #41 A NULL IS STRUCTURAL OR PENDING, AND THE FIELD SAYS WHICH
+
+*Ruled to CC-BUILD.*
+
+### What its absence cost
+
+"No value" is two different facts wearing one representation. A **PENDING** null means nobody
+has computed it yet; a **STRUCTURAL** null means the question does not apply to this row. Read
+as one, a surface either nags about work that does not exist or stays quiet about work that
+does — and a dashboard counting "missing" numbers counts both.
+
+### The rule
+
+Every nullable served field declares which kind of null it can carry, and a STRUCTURAL null
+**travels with a paired reason** (`gap_held` with `gap_held_reason`, `sleeve` with
+`sleeve_reason`). A row that can answer neither way is refused at the writer rather than
+stored as an ambiguous null.
+
+A reader may **never** infer the kind from the value: both are `NULL`.
+
+**Kin:** #38 (a NULL with a reason is deliberate, not pending), #42 (a field declares its
+origin), and "mark_status NULL is not UNAVAILABLE" — a NULL `current_price` on a new row means
+the mark job has never attempted it.
+
+---
+
+## #42 EVERY SERVED FIELD DECLARES STORED OR DERIVED, AND NO GATE READS A DERIVED FIELD
+
+*Ruled to CC-BUILD.*
+
+### What its absence cost
+
+A gate that reads a derived field gates on **whatever the derivation happened to produce at
+read time** — so changing a display formula silently changes a gate, and the change is
+invisible in the gate's own code. The inverse error is just as bad: a surface that treats a
+derived number as stored presents a recomputation as a record.
+
+### The rule
+
+Every payload carries a **`field_origin`** block naming each served field **STORED** or
+**DERIVED**. A gate, a cap, a kill-switch and a journal entry may read only STORED fields.
+Display may read either, and says which.
+
+**STORED is provenance, not a licence**: a field is DERIVED if its origin **varies per row**,
+even when each row's value sits in a column.
+
+### The open tension, recorded rather than smoothed over
+
+#42 forbids gating on DERIVED and **R-IV.844(d)3 mandates filtering by `open_quantity`**, which
+is derived. `gateable_by_ruling` is the proposed reconciliation and is **pending SPINE**. It is
+written down here because an unresolved conflict between two rules is a thing the next reader
+needs, and the version of this file that smoothed it over would be the one that misled them.
+
+**Kin:** #38, #41, #29 (`quantity` vs `open_quantity`).
+
+---
+
+## #43 EVERY REPLACE ANCHORS BOTH ENDS, BY CONTENT
+
+*Ruled to CC-BUILD.*
+
+### What its absence cost
+
+A heading-to-heading replacement **deleted a paragraph** on 2026-10-15. The edit was correct
+about where the section started and wrong about where it ended, because **a section ends where
+its content ends, not at the next heading** — the trailing paragraph belonged to the section
+being replaced and was outside the text that replaced it.
+
+Line-numbered edits fail the same way and more quietly: `sed` with an address that matches no
+line **reports success**. A cache pin went unchanged through two commits for exactly that
+reason, and verifying the route's payload could not see the delivery failure.
+
+### The rule
+
+Every replacement quotes **three** things and asserts all three before writing:
+
+1. the **first** line of the span;
+2. the **last** line of the span;
+3. the line **immediately after** the span.
+
+Anchors are **content**, never line numbers. A tool that cannot fail on a missing anchor is not
+used for the edit.
+
+**Kin:** #31 (stage files by name in the shared working copy) and #44.
+
+---
+
+## #44 A LINE REFERENCE CARRIES THE SHA IT WAS READ AT
+
+*Ruled to CC-BUILD, adopted under R-IV.1133(d).*
+
+### What its absence cost
+
+`file.py:412` is true of one revision and silently false of every other. A citation without a
+revision ages into a wrong one, and the reader who follows it lands on unrelated code with no
+signal that anything has moved.
+
+### The rule
+
+Every line reference in a report, card, brief or ruling carries the **12-character blob or
+commit sha** it was read at: `backend/models/position_watch.py:412 @ 46793bb4f348`. A reference
+whose sha no longer resolves is **stale, not wrong** — and that distinction is only available
+because the sha is there.
+
+**Kin:** #32 and #40 (hashes on raw bytes; the chain), #36 and #28 (a locator means one thing).
+
+---
+
+## #45 A LANE FILE IS WRITTEN BY BACKUP, BUILD-AND-ASSERT, THEN ATOMIC REPLACE
+
+*Ruled to CC-BUILD, shipped under R-IV.1213(c) as `scripts/lane_write.py`.*
+
+### What its absence cost
+
+`open(path, "w")` truncates **before** it writes. A process that dies between the two leaves the
+lane file empty, and the lane file is the only record of what the lane was doing — so the
+failure destroys exactly the thing that would explain it. A second fault compounded it: the old
+writers inserted new entries **at the footer's index**, and the footer is at the **bottom**, so
+every entry written that session went to the oldest end of a file that is read newest-first.
+
+### The rule
+
+Three steps, enforced by `scripts/lane_write.py` rather than trusted to the caller:
+
+1. **back up** the current file to `C:\lane-state\backup\<LANE>-<stamp>.md`;
+2. **build the whole new content in memory and assert it** — the new entry must land on line 1,
+   and the byte count must be reported before and after;
+3. **replace atomically**, never `open("w")`.
+
+Entries are **prepended, newest-first** (`prepend_entry`). A write that cannot satisfy the
+assertions **refuses** (`LaneWriteRefused`) rather than writing a file it cannot vouch for.
+
+**Kin:** #43 (anchor both ends), #31 (stage by name), and the held-commits rule — concurrent
+sessions write the same files, so a writer that cannot prove what it wrote cannot be trusted
+about what it preserved.
+
+---
+
+## #46 A LANE WORKS ITS QUEUE CONTINUOUSLY, AND A "NEXT:" LINE MEANS IT HAS STOPPED
+
+*Ruled to all lanes, R-IV.1237(a).*
+
+### What its absence cost
+
+A lane would finish one authorized item, write a report ending "Next: B4", and stop — waiting
+for a go-ahead that the queue had already given it. The queue existed precisely so the lane
+would not need one per item, so the pattern spent a round trip to re-authorize work that was
+authorized, and the principal's inbox filled with reports that asked for nothing.
+
+### The rule
+
+A lane works its authorized queue **continuously within its turn**, and stops only for one of
+three reasons:
+
+1. **a ruling is needed** — the next step cannot be taken under any defensible reading;
+2. **a fact contradicts a ruling** — the lane has measured something the ruling did not
+   anticipate, and proceeding would build on a premise now known to be false;
+3. **its authorized queue is done.**
+
+An item blocked on someone else (an approval, a ferry file, another lane's write) is **skipped
+with the block named**, not treated as the end of the queue.
+
+**A "Next:" line is therefore a signal, not a courtesy.** Writing one is the lane declaring it
+has stopped, and the report must then say which of the three reasons applies. A report that
+ends "Next: X" without naming the reason is the fault this convention replaced.
+
+### Its own worked example
+
+The session that transcribed this register ran four queue items end to end under it —
+R-IV.1260(c)'s report, R-IV.1239(g)'s route registry, R-IV.1259(i)'s NOTABLES mock and
+R-IV.1257(c)'s intraday overlay — and stopped at **B9**, under reason 2: B9's governing document
+must be re-verified against `3c9c2850…` before any work starts, and the copy on this machine
+hashes to the twice-superseded `5c97eeea…`.
+
+**Kin:** #33 (acknowledge relays by number — the queue arrives numbered) and #23 (an
+adjudication shows its evidence beside its verdict).
