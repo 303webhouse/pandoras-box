@@ -54,7 +54,7 @@ Everything in this queue is **display only (#42)**: nothing gates, grades or fee
 
 | # | Item | State |
 |---|------|-------|
-| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only, **12 today**), 26 batched calls/session. Creates `position_watch_events`. Level break is an **EVENT**, the session's **first closed bar beyond counts** (R-IV.1224(c)), **one level-type push per ticker per session, literal** (R-IV.1224(b)), a **gap-open break needs a second bar beyond to be pushable** (R-IV.1226(b)), and **phone pushes stay OFF through the completion deploy** unless SPINE has ruled on QUERY's (b) recount by then (R-IV.1226(c)). | **IN PROGRESS** — source R-IV.1215(b), detector R-IV.1220(a) + R-IV.1224(b,c,d) + R-IV.1226(b,c) |
+| **B2** | Position Watch live — yfinance 15m, **Set B** (traded sleeves only, **12 today**), 26 batched calls/session. Creates `position_watch_events`. Level break is an **EVENT**, the session's **first closed bar beyond counts** (R-IV.1224(c)), **one level-type push per ticker per session, literal** (R-IV.1224(b)), a **gap-open break needs a second bar beyond to be pushable** (R-IV.1226(b)), a **faded gap pushes nothing and is logged GAP_FADED** (R-IV.1228(b)), and **phone pushes go ON in the completion deploy** (R-IV.1228(c)). Footer carries the ruled phone line (R-IV.1228(d)). | **IN PROGRESS** — source R-IV.1215(b), detector R-IV.1220(a) + R-IV.1224(b,c,d) + R-IV.1226(b,c) + R-IV.1228(b,c,d) |
 | **B3** | Yield curve upgrade — FRED DGS2/DGS3MO/DGS10/DGS30/T10Y2Y/T10Y3M; 3m10s + 2s10s big numbers with 60-day sparklines; shape word; per-tenor z-scores (**UNUSUAL ≥2σ, EXTREME ≥3σ or 10Y ≥10bp** — R-IV.1220(b) **retires "RARE"**); EXTREME still pulses; **every tooltip states that label's measured fires per year**; UN-INVERTED flag. FRED key confirmed present, never printed. | queued |
 | **B4** | Event Strip live — FOMC/CPI/jobs/GDP/PCE, monthly OpEx, book expiries, CHRONOS earnings counts, buyback blackout (est.). | queued |
 | **B5** | Fear Price live — ^VIX/^VXN/^RVX minus 20-day realized; VIX curve; ^SKEW percentile; SPY ATM straddle expected move. | queued |
@@ -532,16 +532,35 @@ the majority of the traffic.
 |---|---|---|---|
 | first closed bar beyond | `LEVEL_BREAK`, `confirmed: false` | **logged** (b)3 | **no** (b)1 |
 | second bar also beyond | `LEVEL_BREAK`, `confirmed: true` — **event time is this bar's close** | logged | yes, if AGAINST |
-| second bar back inside | `FAILED_BREAKOUT` | logged | only if AGAINST (b)2 |
+| second bar back inside | ~~`FAILED_BREAKOUT`, push if AGAINST~~ → **`GAP_FADED`, no push at all** | logged | **no — R-IV.1228(b)** |
 
 One push per ticker per session is unchanged (b)4, and the unconfirmed bar **does not spend
 that slot** — if it did, a gap that confirmed on bar 2 would find its slot already gone.
 
-**Pushes stay OFF (R-IV.1226(c))** until B2's completion deploy, and switch on there only if
-SPINE has by then ruled on QUERY's recount under (b). Not the recount under (a) — that one is
-already in and is what produced the amendment above.
+**Why that last row changed, and it is the most useful thing in this file.** R-IV.1226(b)2's
+version of it was **measured INERT**: the identical push set, **56 labels swapped, 0 pushes
+removed**, because rule 4 spends the ticker's one slot either way — so relabelling *which* event
+spent it changed nothing that reached the phone. A rule can be correctly implemented, fully
+tested, and still do nothing, and only a count over real sessions shows that.
+**Route (a) removes the push rather than renaming it:** 4.0 median / 8.0 p90 / 10 max, taking
+out **17 of 295** pushes, each a session where the faded gap was the *only* adverse event.
+
+**Pushes go ON at B2's completion deploy (R-IV.1228(c)).** No further recount or ruling is
+needed first — R-IV.1224(d)'s condition is **discharged**. After they are on, QUERY counts the
+live pushes over the **first 10 sessions**, and SPINE revisits **if the live median exceeds 5**.
 
 **Queued after B2 (R-IV.1226(e)):** transcribe **Conventions #33–#45** into
 `docs/conventions/conventions.md` from BUILD's own lane records. Any convention whose text
 BUILD does not hold is marked **"ruled; text not in BUILD's record"** — not reconstructed. The
 register currently stops at #32 plus the #37 clarification appended under R-IV.1224(g).
+
+**R-IV.1228(a): the cut-alert orientation gap is TA's** (R-IV.1231) — BUILD must **not populate
+or derive orientation** until SPINE rules on that spec. The refusal text stays as the
+book-wide wording shipped under R-IV.1226(d)2; that was display only and is all BUILD does here.
+
+**B2's completion deploy carries, as one deploy:** the batched 15m fetcher (passing the
+session's bars **from the open**, asserted), the RTH scheduler, the detector run,
+`position_watch_events`, the ntfy send path, **`PUSHES_ENABLED = True`** (R-IV.1228(c)), the
+REVISED marking (R-IV.1215(b)5) and the panel's watched/not-watched footer carrying the ruled
+phone line (R-IV.1228(d), verbatim, bound to `models.position_watch.PANEL_FOOTER_PHONE_LINE`
+by test).

@@ -349,6 +349,19 @@ def failed_breakout(session_closes: List[float], prior_high: Optional[float],
     same side, and the run must be no longer than `within` bars: a break that held for five
     bars before failing is not this event.
 
+    A FADED GAP IS NOT THIS EVENT, R-IV.1228(b) route (a). When the session OPENED beyond and
+    its SECOND bar closed back inside, the panel logs `GAP_FADED` and NOTHING is pushed -- not
+    the break (it never confirmed) and not the failure.
+
+    WHY THE PREVIOUS SHAPE OF THIS RULE DID NOTHING, measured: R-IV.1226(b)2 sent a faded gap
+    down this function's ordinary path, where it pushed if AGAINST. QUERY measured that as
+    INERT -- the identical push set, 56 labels swapped, 0 pushes removed -- because rule 4
+    (one level-type push per ticker per session) spends the ticker's slot either way, so
+    relabelling which event spent it changed nothing that reached the phone. Route (a) removes
+    the push instead of renaming it, and QUERY measured 4.0 median / 8.0 p90 / 10 max, taking
+    out 17 of 295 pushes: each one a session where the faded gap was the ONLY adverse event, so
+    each one is a notification Nick would have acted on and should not have.
+
     `session_closes` is session-scoped and oldest-first, as in `level_break`.
     """
     if len(session_closes) < 2:
@@ -367,6 +380,19 @@ def failed_breakout(session_closes: List[float], prior_high: Optional[float],
     if run > within:
         return None
     level = prior_high if side == "above" else prior_low
+
+    # THE FADED GAP, and the test is exactly the ruling's words: the session opened beyond
+    # (so the break bar is the first bar) and the SECOND bar closed back inside. Two closed
+    # bars is that and nothing else. A gap that HELD through bar 2 and failed later is a
+    # genuine failed breakout of a confirmed break, and keeps that name -- it cannot push
+    # anyway, because confirming at bar 2 already spent the ticker's one slot.
+    if len(session_closes) == 2:
+        return {"event": "GAP_FADED", "side": side, "level": level, "close": last,
+                "bars_ago": run, "pushable": False,
+                "basis": ("opened %s the prior-day %s %.4f and the second bar closed back "
+                          "inside at %.4f, so the gap faded unconfirmed"
+                          % (side, "high" if side == "above" else "low", level, last))}
+
     return {"event": "FAILED_BREAKOUT", "side": side, "level": level, "close": last,
             "bars_ago": run,
             "basis": ("broke %s %.4f %d bar(s) ago and closed back inside at %.4f"
@@ -436,16 +462,27 @@ def action_for(event: str, relation: Optional[str]) -> str:
 PUSH_COOLDOWN_MIN = 30
 PUSH_DAILY_CAP = 20
 
-#: R-IV.1220(a)5, with the switch-on condition fixed by R-IV.1224(d): B2 SHIPS WITH PHONE
-#: PUSHES OFF. The panel is live from the first deploy. The wire stays dark until B2's
-#: COMPLETION deploy, and turns on at that deploy ONLY IF SPINE has by then ruled on QUERY's
-#: Set B recount with the R-IV.1224(c) gap-open rule included (R-IV.1223(d)). If that ruling
-#: has not arrived, B2 completes with the panel live and this still False.
+#: R-IV.1220(a)5 as settled by R-IV.1228(c): THE PANEL IS LIVE NOW, THE PHONE IS NOT, AND THIS
+#: FLIPS TO TRUE IN B2'S COMPLETION DEPLOY. No further recount or ruling is needed before that
+#: -- R-IV.1228(c) granted it, so the earlier condition from R-IV.1224(d) ("only if SPINE has
+#: ruled on the recount") is DISCHARGED, not still pending. Flipping it is the completion
+#: deploy's own change, in the deploy that also lands the fetcher, the scheduler and the table.
+#:
+#: After it goes on: QUERY counts the live pushes over the FIRST 10 SESSIONS, and SPINE
+#: revisits if the live median exceeds 5. So the first ten sessions are a measurement, and a
+#: median over 5 is a signal to go back to SPINE rather than to tune anything here.
 #:
 #: A constant and not an env read on purpose: flipping it is a code change that goes through a
-#: review, which is what "only if SPINE has ruled" means in practice. An env var would let the
-#: wire come up because a deploy variable was set, which is not the same event.
+#: review. An env var would let the wire come up because a deploy variable was set, which is
+#: not the same event as B2 being complete.
 PUSHES_ENABLED = False
+
+#: R-IV.1228(d), VERBATIM: the panel footer's phone line. One line, and it states the two
+#: limits that decide whether Nick's phone stays quiet -- the per-ticker-per-day cap and the
+#: against-you gate. Held here as the single source of the string, with a test binding
+#: `frontend/v2.js` to it: a rule the panel states and the code does not apply (or the reverse)
+#: is worse than no line at all, and two copies of a sentence drift silently.
+PANEL_FOOTER_PHONE_LINE = "Phone: one alert per ticker per day, against-you only"
 
 #: R-IV.1220(a)4: the one push sent when the cap binds. It names no ticker, no level and no
 #: figure -- it points at the panel, which has every alert, because NOTHING is dropped from the
@@ -511,8 +548,9 @@ def may_push(*, relation: Optional[str], event: str, ticker: str,
     if relation != "AGAINST":
         return False, "not AGAINST, so it goes to the panel log (f)4"
     if not pushable:
-        return False, ("the event is not pushable yet (R-IV.1226(b)1: an unconfirmed gap-open "
-                       "break is logged on the panel and waits for the second bar)")
+        return False, ("the event is not pushable: an unconfirmed gap-open break waits for its "
+                       "second bar (R-IV.1226(b)1), and a gap that FADED on that bar is logged "
+                       "as GAP_FADED and pushes nothing at all (R-IV.1228(b))")
     if str(event).upper() in LEVEL_TYPE_EVENTS:
         prior = _level_push_this_session(recent, ticker, session_date)
         if prior is not None:
