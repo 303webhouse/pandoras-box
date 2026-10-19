@@ -86,6 +86,19 @@ STRATEGIES = {
     "PHAETHON": ("BEARISH_BREAKDOWN", "SHORT", "TREND-DOWN/STRESS", False, None, "card states none"),
     "NEMESIS": ("WRR_LONG", "LONG", "RANGE", False, 1, "nemesis-long-v1.md §5 primary h = 1"),
 }
+#: R-IV.1241(b)1: each rule on its own coded universe where it can be rebuilt, the census proxy otherwise;
+#: the report labels each strategy's universe.
+UNIVERSE_BASIS = {
+    "HYPNOS-LELEDC": "own: protocol 1's main arm (250), R-IV.1230",
+    "NEMESIS": "own coded universe: registered_shadow.UNIVERSE (frozen, 196)",
+    "CIRCE": "census proxy (coded universe = PYTHIA-covered tickers, not rebuildable for past dates)",
+    "PHOENIX": "census proxy (coded universe = build_scan_universe(200), dynamic; the proxy is its own fallback)",
+    "HECTOR": "census proxy (cta dynamic universe; the proxy is its own fallback)",
+    "MIDAS": "census proxy (cta dynamic universe; the proxy is its own fallback)",
+    "PERSEPHONE": "census proxy (cta dynamic universe; the proxy is its own fallback)",
+    "SISYPHUS": "census proxy (cta dynamic universe; the proxy is its own fallback)",
+    "PHAETHON": "census proxy (cta dynamic universe; the proxy is its own fallback)",
+}
 NOT_REPLAYABLE = {
     "ACHILLES (SELL_RIP_EMA, SELL_RIP_VWAP, SELL_RIP_EARLY)": "R-IV.877(a): scan-wide composite-bias gate, no history",
     "ARTEMIS (ARTEMIS_SHORT)": "R-IV.877(a): 15-minute TradingView Pine, no hub detector",
@@ -362,6 +375,8 @@ def grade(fires_path, pull_path, themed_path, labels_path, out_dir):
         g = gr[gr.strategy == name]
         r = strategy_result(g, home) if len(g) else {"home": home, "status": "NO FIRES"}
         r.update({"signal_type": stype, "prior_seen": prior, "fires": int(len(g)),
+                  "universe": (", ".join(sorted(g.universe.astype(str).unique())) if len(g) else None),
+                  "universe_basis": UNIVERSE_BASIS.get(name),
                   "ungradeable": int((~g.gradeable).sum()) if len(g) else 0,
                   "null_label": int((g.gradeable & g.group.isna() & ~g.no_label_row).sum()) if len(g) else 0,
                   "no_label_row": int(g.no_label_row.sum()) if len(g) else 0,
@@ -555,6 +570,9 @@ def selftest():
               c_["status"] == "TESTED" and res["k_holm_family"] == 2 and "verdict" in c_)
         check("e2e grade: NULL-label fires are counted", c_["null_label"] > 0)
         check("e2e grade: strategies without fires report NO FIRES", res["primary_h5"]["MIDAS"]["status"] == "NO FIRES")
+        check("e2e grade: each strategy's universe is labelled (R-IV.1241(b)1)",
+              c_["universe"] == "proxy" and c_["universe_basis"].startswith("census proxy")
+              and set(UNIVERSE_BASIS) == set(STRATEGIES))
         check("e2e grade: the card-horizon secondary is outside Holm (CIRCE h1)",
               res["secondary_card_horizon"]["CIRCE"]["horizon"] == 1)
         sig = pd.DataFrame({"arm": ["main", "main", "crypto", "crypto"], "ticker": "X",
