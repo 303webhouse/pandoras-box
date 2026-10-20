@@ -226,10 +226,21 @@ def test_the_renderer_prints_every_ticker_at_26px_mono_bold():
 
 
 def _notables_css(src: str) -> str:
-    """The injected stylesheet, read out of the renderer's source."""
-    start = src.index("NB_CSS")
+    """The injected stylesheet, read out of the renderer's source.
+
+    ANCHORED ON THE DECLARATION, not on the bare name. The first version searched for "NB_CSS"
+    and B9's own stylesheet comment -- which mentions NB_CSS to explain why it carries no
+    backtick -- appears EARLIER in the file, so the slice silently read B9's block instead and
+    the 26px assertion failed on a stylesheet that was never supposed to contain it. A locator
+    that matches prose is a locator, and this one now matches the declaration and asserts both
+    ends (Convention #43).
+    """
+    marker = "const NB_CSS = `"
+    start = src.index(marker) + len(marker)
     end = src.index("`;", start)
-    return src[start:end]
+    css = src[start:end]
+    assert ".nb-card{" in css, "the slice did not land on the NOTABLES stylesheet"
+    return css
 
 
 def test_the_notables_styles_are_injected_and_not_added_to_the_shared_stylesheet():
