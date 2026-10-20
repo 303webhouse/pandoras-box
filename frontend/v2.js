@@ -1561,11 +1561,249 @@
       + '<div class="pv-note m">' + esc(a.where_basis || '') + '</div></div>';
   }
 
+  // ── B9 · the global markets + commodities tracker (MOCK) ────────────────────
+  //
+  // R-IV.1265(e), from GLOBAL-MARKETS-TRACKER-2026-10-18-v3.md, sha256 3c9c2850… verified two
+  // ways before any of this was written. Mock first: every figure comes from
+  // frontend/assets/b9/world_mock.v1.json, which backend/services/b9_world.py lints -- the
+  // same bytes, one author for the text.
+  //
+  // PLACEMENT IS THE SYNTHESIS'S: "section 7 of the left Regime pop-out, next to the
+  // leadership ratios." So it renders immediately after pvLead and before pvRates.
+  //
+  // THE DOCUMENT'S CAVEAT IS ON THE FACE OF THE PANEL, not in a tooltip: every historical
+  // figure in the source is the seats' recollection, and a panel built from recalled figures
+  // that does not say so launders recollection into data. The ONE measured figure -- the race
+  // footnote, QUERY 2026-10-18 -- names its source inside its own sentence, which is why it is
+  // the only historical claim shown.
+  //
+  // THE REFRAME SUPERSEDES THE ASIA FRAMING, so there is no Asia panel: the leader test is
+  // market-neutral and SPY and QQQ are IN the race. The bias check's line is the test -- the
+  // tool must be as loud when SPY reclaims first as when any other market does.
+  // INJECTED, not added to v2.css: that stylesheet is pinned independently by v2.html,
+  // stater.html and abacus.html at three already-diverged values, so a rule added there ships
+  // three times or reaches a stale cache on the pages that were missed.
+  //
+  // NO BACKTICK MAY APPEAR IN HERE. This block is a TEMPLATE LITERAL and one ends it -- a CSS
+  // comment written with backticks around a filename closed NB_CSS mid-block earlier today and
+  // the whole file stopped parsing. A test asserts the absence, because node --check is skipped
+  // when node is not installed.
+  const PW_CSS = `
+#pv-world{display:flex;flex-direction:column;gap:8px}
+.pw-mock{font-size:9px;letter-spacing:1.2px;color:#f5a524;border:1px solid #f5a524;border-radius:999px;padding:2px 6px}
+.pw-basis{font-size:10px;letter-spacing:.6px;color:#8b98ad;display:flex;align-items:center;gap:6px}
+.pw-h2{font-size:10px;letter-spacing:1.6px;color:#70829d;display:flex;align-items:center;gap:6px;padding-top:4px}
+.pw-g{display:flex;flex-direction:column;gap:3px}
+.pw-r{display:flex;align-items:center;gap:8px;font-size:11px}
+.pw-t{width:44px;flex:0 0 44px;font-weight:700;letter-spacing:.4px}
+.pw-n{flex:1 1 auto;color:#8b98ad;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pw-s{flex:0 0 88px;line-height:0}
+.pw-as{flex:0 0 46px;display:flex;gap:3px;justify-content:flex-end}
+.pw-ar{font-size:12px}
+.pw-up{color:#7CFF6B}
+.pw-dn{color:#ff5c33}
+.pw-fl{color:#70829d}
+.pw-st{flex:0 0 62px;text-align:right;font-size:10px;letter-spacing:.8px;color:#8b98ad}
+.pw-st-leading,.pw-st-up{color:#7CFF6B}
+.pw-st-lagging,.pw-st-down{color:#ff5c33}
+.pw-v{flex:0 0 auto;color:#e2e8f0}
+.pw-stale{color:#70829d;font-style:italic}
+.pw-z{font-size:9px;letter-spacing:1px;border-radius:999px;padding:1px 6px;white-space:nowrap}
+.pw-u{color:#f5c46a;border:1px solid rgba(245,165,36,.5)}
+.pw-x{color:#ff5c33;border:1px solid rgba(255,92,51,.6)}
+.pw-cg{font-size:9px;letter-spacing:.6px;color:#f5c46a;border:1px dashed rgba(245,165,36,.5);border-radius:4px;padding:1px 5px;white-space:nowrap}
+.pw-fg{font-size:9px;color:#f5c46a;white-space:nowrap}
+.pw-cross .pw-r,.pw-on .pw-r{gap:6px}
+.pw-lc{font-size:10px;letter-spacing:.6px;color:#5eead4;display:flex;align-items:center;gap:6px}
+.pw-nl{display:flex;gap:10px}
+.pw-nl>div{flex:1 1 0}
+.pw-nl b{display:block;font-size:9px;letter-spacing:1.2px;color:#70829d;font-weight:400;padding-bottom:2px}
+.pw-li{font-size:11px;color:#c8d3e3;padding:1px 0}
+.pw-md{display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:1px;color:#70829d;border:1px solid #1b2745;border-radius:6px;padding:5px 8px}
+.pw-md .pw-n{letter-spacing:0;font-size:10px}
+.pw-armed{color:#ff5c33;border-color:rgba(255,92,51,.6)}
+.pw-cp{font-size:9px;letter-spacing:1px;color:#8b98ad;border:1px solid #223258;border-radius:999px;padding:1px 6px}
+.pw-race{display:flex;flex-direction:column;gap:2px}
+.pw-rr{display:flex;align-items:center;gap:6px;font-size:11px}
+.pw-rr-h{font-size:8px;letter-spacing:.6px;color:#70829d;align-items:flex-end}
+.pw-rr-h .pw-c{white-space:normal;line-height:1.15}
+.pw-c{flex:1 1 0;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace;color:#8b98ad}
+.pw-c1{color:#e2e8f0}
+.pw-first{color:#7CFF6B;font-weight:700}
+.pw-foot{font-size:9px;line-height:1.35;color:#70829d;padding-top:4px;border-top:1px solid #1b2745;margin-top:2px}
+`;
+
+  function pwStyle() {
+    if (document.getElementById('pw-css')) return;
+    const st = document.createElement('style');
+    st.id = 'pw-css';
+    st.textContent = PW_CSS;
+    document.head.appendChild(st);
+  }
+
+  let _b9Mock = null;
+  function b9Load() {
+    if (_b9Mock) return Promise.resolve(_b9Mock);
+    return fetch('/assets/b9/world_mock.v1.json', { cache: 'no-store' })
+      .then((r) => r.json()).then((j) => { _b9Mock = j; return j; })
+      .catch(() => null);
+  }
+
+  const B9_ARROW = { up: '↗', down: '↘', flat: '→' };
+  const b9ArrowCls = (d) => (d === 'up' ? 'pw-up' : d === 'down' ? 'pw-dn' : 'pw-fl');
+
+  // A ratio sparkline. Reuses pvSpark so the pop-out has ONE sparkline renderer: a second one
+  // would eventually scale differently and two lines in the same drawer would not be
+  // comparable.
+  function b9Spark(vals) {
+    return pvSpark(vals, { w: 88, h: 18 });
+  }
+
+  function b9Arrows(a) {
+    return ['1M', '3M', '12M'].map((k) => '<span class="pw-ar ' + b9ArrowCls((a || {})[k])
+      + '" title="' + esc(k) + '">' + (B9_ARROW[(a || {})[k]] || '—') + '</span>').join('');
+  }
+
+  // The z-label. UNUSUAL / EXTREME only, and each carries its MEASURED fires per year in the
+  // tooltip -- a threshold whose frequency is not stated is one nobody can calibrate against.
+  // A z under 2 renders NOTHING rather than a third label: "normal" is not one of the two.
+  function b9ZTag(z, labels) {
+    if (z == null) return '';
+    const a = Math.abs(Number(z));
+    const L = labels || {};
+    const fires = L.fires_per_year || {};
+    let name = null, cls = '';
+    if (a >= (L.extreme_z != null ? L.extreme_z : 3)) { name = 'EXTREME'; cls = 'pw-x'; }
+    else if (a >= (L.unusual_z != null ? L.unusual_z : 2)) { name = 'UNUSUAL'; cls = 'pw-u'; }
+    if (!name) return '';
+    const tip = name + ': |z| over ' + (name === 'EXTREME' ? (L.extreme_z != null ? L.extreme_z : 3)
+      : (L.unusual_z != null ? L.unusual_z : 2)) + ' against the prior '
+      + (L.z_window != null ? L.z_window : 60) + ' sessions excluding today, which fires '
+      + (fires[name] || 'at an unmeasured rate');
+    return '<span class="pw-z ' + cls + '" title="' + esc(tip) + '">' + name + '</span>';
+  }
+
+  function b9Row(r, labels, withGap) {
+    const gap = r.currency_gap_pp;
+    const flagged = withGap && gap != null && Math.abs(Number(gap)) > 1.5;
+    return '<div class="pw-r">'
+      + '<span class="mono pw-t">' + esc(r.ticker) + '</span>'
+      + '<span class="pw-n">' + esc(r.name || '') + '</span>'
+      + '<span class="pw-s">' + b9Spark(r.ratio_spark) + '</span>'
+      + '<span class="pw-as">' + b9Arrows(r.arrows) + '</span>'
+      + '<span class="mono pw-st pw-st-' + esc(String(r.state || r.trend || '').toLowerCase())
+      + '">' + esc(r.state || r.trend || '—') + '</span>'
+      + b9ZTag(r.z, labels)
+      + (flagged
+          ? '<span class="pw-cg" title="' + esc('the ETF’s USD return minus the local '
+              + 'index return, over one month; flagged above 1.5 points') + '">FX '
+            + (Number(gap) > 0 ? '+' : '') + Number(gap).toFixed(1) + 'pp</span>'
+          : '')
+      + '</div>';
+  }
+
+  function b9Race(race) {
+    if (!race) return '';
+    const cols = race.columns || [];
+    const key = ['gained_most', 'first_above_200d', 'first_accepted', 'fell_least'];
+    const head = '<div class="pw-rr pw-rr-h"><span class="mono pw-t"></span>'
+      + cols.map((c, i) => '<span class="pw-c' + (i === 0 ? ' pw-c1' : '') + '">'
+          + esc(c) + '</span>').join('') + '</div>';
+    const rows = (race.rows || []).map((r) => '<div class="pw-rr">'
+      + '<span class="mono pw-t">' + esc(r.ticker) + '</span>'
+      + key.map((k, i) => '<span class="pw-c' + (i === 0 ? ' pw-c1' : '')
+          + (r[k] === 1 ? ' pw-first' : '') + '">' + esc(r[k] == null ? '—' : r[k])
+          + '</span>').join('') + '</div>').join('');
+    return '<div class="pw-race">'
+      + '<div class="pw-h2 mono">' + esc(race.title || 'RECOVERY RACE')
+      + pvInfo((race.universe_note || '') + ' ' + (race.column_authority_note || '')
+               + ' ' + (race.anchor_note || '')) + '</div>'
+      + head + rows
+      + '<div class="pw-foot">' + esc(race.footnote || '') + '</div>'
+      + '</div>';
+  }
+
+  function pvWorld(m) {
+    if (!m) {
+      return '<div id="pv-world">' + pvHead('GLOBAL MARKETS', '')
+        + pvNa('the B9 mock fixture has not been read yet') + '</div>';
+    }
+    const L = m.labels || {};
+    const md = m.meltdown || {};
+    const nl = m.new_leader_panel || {};
+    const lc = m.leadership_change || {};
+    return '<div id="pv-world">'
+      + pvHead('GLOBAL MARKETS',
+               (m.caveat || '') + ' ' + (m.return_basis_note || ''),
+               '<span class="pw-mock mono">' + esc(m.badge || 'MOCK') + '</span>')
+      + '<div class="pw-basis mono">vs ' + esc(m.benchmark || 'SPY') + ' · '
+      + esc(m.return_basis || '') + pvInfo(m.return_basis_note || '') + '</div>'
+      + '<div class="pw-g">'
+      + (m.equities || []).map((r) => b9Row(r, L, true)).join('')
+      + '</div>'
+      + '<div class="pw-h2 mono">COMMODITIES'
+      + pvInfo(m.commodities_note || '') + '</div>'
+      + '<div class="pw-g">'
+      + (m.commodities || []).map((r) => b9Row(r, L, false)).join('')
+      + '</div>'
+      + '<div class="pw-g pw-cross">'
+      + (m.cross_reads || []).map((c) => '<div class="pw-r">'
+          + '<span class="pw-n">' + esc(c.name) + '</span>'
+          + '<span class="mono pw-v">' + esc(c.value) + '</span>'
+          + '<span class="pw-ar ' + b9ArrowCls(c.arrow) + '">'
+          + (B9_ARROW[c.arrow] || '—') + '</span>'
+          + (c.flag ? '<span class="pw-fg">' + esc(c.flag) + '</span>' : '')
+          + '</div>').join('')
+      + '</div>'
+      + '<div class="pw-h2 mono">OVERNIGHT'
+      + pvInfo((m.overnight || {}).label || '') + '</div>'
+      + '<div class="pw-g pw-on">'
+      + (((m.overnight || {}).rows) || []).map((r) => '<div class="pw-r">'
+          + '<span class="pw-n">' + esc(r.index) + '</span>'
+          + '<span class="mono pw-v' + (r.stale ? ' pw-stale' : '') + '"'
+          + (r.stale ? ' title="' + esc(r.stale_reason || 'stale') + '"' : '')
+          + '>' + esc(r.close) + (r.stale ? ' · stale' : '') + '</span>'
+          + '</div>').join('')
+      + '</div>'
+      + (lc.ticker
+          ? '<div class="pw-lc mono">' + esc(lc.ticker) + ' · ' + esc(lc.state)
+            + ' · ' + esc(lc.held_sessions + ' of ' + lc.confirm_after + ' sessions')
+            + pvInfo(lc.basis || '') + '</div>'
+          : '')
+      + '<div class="pw-h2 mono">' + esc(nl.title || 'A NEW LEADER IS REAL IF')
+      + pvInfo(nl.note || '') + '</div>'
+      + '<div class="pw-nl">'
+      + '<div><b class="mono">CONFIRMS</b>'
+      + (nl.confirms || []).map((s) => '<div class="pw-li">' + esc(s) + '</div>').join('')
+      + '</div>'
+      + '<div><b class="mono">REFUTES</b>'
+      + (nl.refutes || []).map((s) => '<div class="pw-li">' + esc(s) + '</div>').join('')
+      + '</div></div>'
+      // NOT ARMED IS A STATE WITH A REASON, not a blank. "SPY is 3.1% below its 252-day high,
+      // inside the 10% arming level" is something a reader can act on; an empty panel is not.
+      + '<div class="pw-md mono' + (md.armed ? ' pw-armed' : '') + '">'
+      + esc(md.armed ? 'MELTDOWN MODE ARMED' : 'MELTDOWN MODE OFF')
+      + '<span class="pw-n">' + esc(md.armed ? (md.arms_at || '') : (md.reason_not_armed || ''))
+      + '</span>'
+      + ((md.coupling || {}).badge
+          ? '<span class="pw-cp" title="' + esc(md.coupling.basis || '') + '">'
+            + esc(md.coupling.badge) + '</span>' : '')
+      + pvInfo(md.push_note || '') + '</div>'
+      + b9Race(m.recovery_race)
+      + '</div>';
+  }
+  // ── end b9 ──────────────────────────────────────────────────────────────────
+
   function renderPopV2(body) {
     const m = _rsLive || {};
     const ft = m.flip_triggers;
     const pending = !!(ft && ft.candidate_differs);
     const S = _rsSections || {};
+    // B9's fixture is fetched ONCE and the drawer repainted when it lands, so the
+    // first paint is never blocked on it and a failed fetch leaves the section
+    // saying "not read yet" rather than replacing the drawer with an error.
+    pwStyle();
+    if (!_b9Mock) { b9Load().then((m) => { if (m) renderPopV2(body); }); }
     body.innerHTML =
       pvHero(ft)
       + '<div class="pv-card">' + pvRibbon(m.ribbon, pending) + '</div>'
@@ -1574,6 +1812,8 @@
       + '<div class="pv-card">' + pvCredit(S.credit) + '</div>'
       + '<div class="pv-card">' + pvBreadth(S.zweig) + '</div>'
       + '<div class="pv-card">' + pvLead(S.leadership) + '</div>'
+      // B9 sits HERE because the synthesis says "next to the leadership ratios".
+      + '<div class="pv-card">' + pvWorld(_b9Mock) + '</div>'
       + '<div class="pv-card">' + pvRates(S.rates) + '</div>'
       + '<div class="pv-card">' + pvAuction(S.auction) + '</div>';
   }
