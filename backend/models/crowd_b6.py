@@ -162,6 +162,34 @@ def short_interest_row(*, mock: bool = True) -> Dict[str, Any]:
          automated file download that this lane could verify. R-IV.1239(d)2's own standard --
          "we don't scrape sites whose terms we can't verify" -- therefore applies here too.
 
+    THE TERMS CHECK IS NOW DONE (R-IV.1265(g)4), and it resolves reason 2 while ADDING A THIRD.
+    Read from FINRA's own developer pages on 2026-10-19:
+
+      * A Public API credential costs $0/month (Firm and Organization are $1,650), obtained
+         through an Individual Account with an OAuth 2.0 client id and secret. Rate limits are
+         1,200 synchronous requests a minute per IP, 5,000 records and 3MB per synchronous
+         request, and 20 asynchronous requests a minute per dataset.
+      * The Equity Data specific terms (last updated December 2022) permit the developer's
+         NON-COMMERCIAL personal or professional use, allow redistribution to third parties
+         only for THEIR non-commercial use, require FINRA to be named as owner and source, and
+         forbid charging an end user for the data. Individual Accounts are "not intended for
+         commercial purposes at this time". For a personal trading tool that is a workable
+         answer -- so reason 2 is no longer "terms we cannot verify".
+      * BUT SHORT INTEREST IS NOT SERVED BY THE API AT ALL. FINRA's own developer support page
+         lists the equity short-interest archive under "data not currently available via API
+         that may be available across other FINRA platforms", alongside TRACE and the short
+         sale volume files. The Query API's "Consolidated Short Interest" entry shows an access
+         level of "Limited" that the fee page never defines, and the support page is the
+         clearer statement of the two.
+
+    So wiring this row would mean downloading finra.org's pipe-delimited file rather than
+    calling an API -- and reason 1 still stands on top of that: the file documents no
+    days-to-cover field, so the figure the ruling asks for would have to be computed against an
+    average daily volume from somewhere else, at which point it is not from FINRA's file.
+
+    THREE REASONS NOW, and only one of them was removable by research. The row stays a mock
+    until SPINE rules on the remaining two.
+
     So the row ships with the mock's shape and an explicit `mock: true`, and the tile shows it
     as a mock while its two siblings are live.
     """
