@@ -5,9 +5,20 @@
   "registered_by": "pending Nick's PR-1 stamp",
   "gating": "DISPLAY ONLY (#42). Nothing computes from the label; the kill switch is untouched.",
   "base_layer": "v2.1 (regime_rules.v2.1.json): the input fixes apply; the rows below replace v2's rows",
-  "order": ["crash_liquidation", "bear_market", "breakdown", "correction", "range_chop", "uptrend", "recovery"],
-  "removed_as_regimes_now_tags": {"bear_market_rally": "BEAR tag 'rally'", "melt_up": "UPTREND tag 'extended'",
-                                  "narrow_uptrend": "UPTREND tag 'narrow'"},
+  "order": [
+    "crash_liquidation",
+    "bear_market",
+    "breakdown",
+    "correction",
+    "range_chop",
+    "uptrend",
+    "recovery"
+  ],
+  "removed_as_regimes_now_tags": {
+    "bear_market_rally": "BEAR tag 'rally'",
+    "melt_up": "UPTREND tag 'extended'",
+    "narrow_uptrend": "UPTREND tag 'narrow'"
+  },
   "shared": {
     "falling_rising_lookback_sessions": 10,
     "rvol_prior_sessions": 20,
@@ -45,29 +56,58 @@
   "hysteresis": {
     "enter_requires_settled_closes": 2,
     "min_sessions_before_change": 5,
-    "toward_risk_regimes": ["breakdown", "crash_liquidation", "bear_market"],
-    "hold_exempt_pairs": [["recovery", "correction"]],
+    "toward_risk_regimes": [
+      "breakdown",
+      "crash_liquidation",
+      "bear_market"
+    ],
+    "hold_exempt_pairs": [
+      [
+        "recovery",
+        "correction"
+      ]
+    ],
     "range_requires_sessions": 10,
     "unmatched_decay_sessions": 10,
     "decay_label": "range_chop"
   },
   "groups": {
-    "TREND-UP": ["uptrend", "recovery"],
-    "RANGE": ["range_chop", "correction"],
-    "TREND-DOWN/STRESS": ["breakdown", "bear_market", "crash_liquidation"]
+    "TREND-UP": [
+      "uptrend",
+      "recovery"
+    ],
+    "RANGE": [
+      "range_chop",
+      "correction"
+    ],
+    "TREND-DOWN/STRESS": [
+      "breakdown",
+      "bear_market",
+      "crash_liquidation"
+    ]
   },
   "crash": "R1 unchanged from v2 and NOT EVALUABLE in v3 (no VIX, VIX3M or credit input; v3.1)",
-  "deleted_never_coded": ["the high-beta breadth clause", "uptrend_strong_adx_min", "crash_universe_down_3pct_share",
-                          "recovery_to_uptrend_requires_closes_above_200dma (absorbed into Door A)"],
-  "dormant_until_v3_1": ["leaving_crash_requires_contango_closes"],
+  "deleted_never_coded": [
+    "the high-beta breadth clause",
+    "uptrend_strong_adx_min",
+    "crash_universe_down_3pct_share",
+    "recovery_to_uptrend_requires_closes_above_200dma (absorbed into Door A)"
+  ],
+  "dormant_until_v3_1": [
+    "leaving_crash_requires_contango_closes"
+  ],
   "open_questions_to_TA": {
-    "Q1_bear_count_horizon_when_no_reclaim_in_window": null,
-    "Q2_decay_session": null,
-    "Q2_decay_bypasses_hold_and_range_entry": null,
-    "Q3_door_b_low_window_includes_today": null,
-    "Q3_door_b_low_tie": null,
-    "Q4_capitulation_low_includes_ties": null,
-    "Q4_capitulation_upper_half_inclusive": null,
-    "rule": "every value here must be set by TA's answer before any real-date run; the code refuses a null"
+    "Q1_bear_count_horizon_when_no_reclaim_in_window": "count_from_window_start",
+    "Q2_decay_session": 11,
+    "Q2_decay_bypasses_hold_and_range_entry": true,
+    "Q3_door_b_low_window_includes_today": true,
+    "Q3_door_b_low_tie": "latest",
+    "Q4_capitulation_low_includes_ties": false,
+    "Q4_capitulation_upper_half_inclusive": false,
+    "rule": "TA's answers (R-IV.1286, relayed 2026-10-21): the reading no less cautious on warnings, no new numbers. Q2 = 11 per SPINE's R-IV.1277(b) wording as TA reads it; TA flagged it to SPINE (set 10 if SPINE reads the 10th).",
+    "confirmed_readings": {
+      "Q5_last_n_closes": "each close against that same day's own average (v2 convention): Door A, BEAR's reclaim, the rally tag",
+      "Q6_row_order": "first match wins; a row above RECOVERY that matches pre-empts its STAY (RANGE_CHOP on its own entry, CORRECTION, UPTREND)"
+    }
   }
 }

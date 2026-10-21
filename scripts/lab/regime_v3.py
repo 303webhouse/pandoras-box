@@ -495,12 +495,19 @@ def selftest():
                                                                      "correction", "range_chop", "uptrend", "recovery"])
     check("v3 JSON: bear_market added to the toward-risk (hold-exempt) set",
           set(r3["hysteresis"]["toward_risk_regimes"]) == {"breakdown", "crash_liquidation", "bear_market"})
+    shipped = resolve_options(r3)
+    check("v3 JSON carries TA's answers (R-IV.1286) exactly",
+          shipped["Q1_bear_count_horizon_when_no_reclaim_in_window"] == "count_from_window_start"
+          and shipped["Q2_decay_session"] == 11 and shipped["Q2_decay_bypasses_hold_and_range_entry"] is True
+          and shipped["Q3_door_b_low_window_includes_today"] is True and shipped["Q3_door_b_low_tie"] == "latest"
+          and shipped["Q4_capitulation_low_includes_ties"] is False
+          and shipped["Q4_capitulation_upper_half_inclusive"] is False)
     try:
-        resolve_options(r3)
+        resolve_options(r3, {"Q2_decay_session": None})
         refused = False
     except SystemExit as e:
         refused = "unanswered" in str(e)
-    check("v3: the open questions are null and the code REFUSES to run without TA's answers", refused)
+    check("v3: a null answer is still REFUSED (no reading is picked by the code)", refused)
     base_opts = {"Q1_bear_count_horizon_when_no_reclaim_in_window": "count_from_window_start", "Q2_decay_session": 10,
                  "Q2_decay_bypasses_hold_and_range_entry": True, "Q3_door_b_low_window_includes_today": True,
                  "Q3_door_b_low_tie": "latest", "Q4_capitulation_low_includes_ties": False,
@@ -686,14 +693,23 @@ def selftest():
     check("pipeline: refuses to run without a PR-1 stamp file", nostamp)
     stamp = os.path.join(tmp, "synthetic-stamp.md")
     open(stamp, "w").write("synthetic test stamp")
+    mod = sys.modules[__name__]
+    saved_path = mod.V3_PATH
+    nulls = load(saved_path)
+    for k in OPEN_KEYS:
+        nulls["open_questions_to_TA"][k] = None
+    mod.V3_PATH = os.path.join(tmp, "v3-nulls.json")
+    json.dump(nulls, open(mod.V3_PATH, "w"))
     try:
         labels_joint(bp, vp, os.path.join(tmp, "y"), stamp, workers=2, _label_from="1999-01-04")
         noans = False
     except SystemExit as e:
         noans = "unanswered" in str(e)
-    check("pipeline: refuses while TA's answers are not in the v3 JSON", noans)
-    meta, l21, l3 = labels_joint(bp, vp, os.path.join(tmp, "z"), stamp, workers=2, _opts_for_tests=opts,
-                                 _label_from="1998-09-01")
+    finally:
+        mod.V3_PATH = saved_path
+    check("pipeline: refuses while any TA answer is null in the v3 JSON", noans)
+    meta, l21, l3 = labels_joint(bp, vp, os.path.join(tmp, "z"), stamp, workers=2, _label_from="1998-09-01")
+    check("pipeline e2e (synthetic) runs on the shipped answers", meta["options"]["Q2_decay_session"] == 11)
     check("pipeline e2e (synthetic): v2.1 and v3 labels for every session, from one input build",
           len(l21) == len(l3) == meta["sessions"] > 100 and set(l3.columns) >= {"shown_regime", "tags", "stale", "by_decay",
                                                                                    "m1_stress_blocked"})
