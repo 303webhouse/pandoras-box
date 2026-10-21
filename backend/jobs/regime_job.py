@@ -230,8 +230,12 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
     # R-IV.1260(c): v2 fills the inputs the v1 rows already read. The VIX pair is fetched
     # ONCE for the whole replay and passed in by date, because the CRASH row needs both legs
     # on the same session and a per-session fetch would be 302 calls for one series.
-    vix_by_date, vix_report = {}, {"skipped": "v1"}
-    if str(rules.get("version")) == "v2":
+    # `uses_v2_inputs`, NOT `== "v2"`. R-IV.1284(c): the literal comparison is False for
+    # "v2.1", so the cutover would have stopped building the v2 inputs and reading the VIX pair
+    # without saying anything -- and 95 of 304 sessions take a different label on that basis.
+    vix_by_date, vix_report = {}, {"skipped": "rules %s does not read the VIX pair"
+                                              % rules.get("version")}
+    if uses_v2_inputs(rules.get("version")):
         from models.regime_vix import by_date as _vix_by_date
 
         vix_by_date, vix_report = _vix_by_date()
@@ -246,7 +250,7 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
     try:
         sessions = sessions_from_series(series, settled_through=through,
                                         vix_by_date=vix_by_date,
-                                        v2=str(rules.get("version")) == "v2")
+                                        v2=uses_v2_inputs(rules.get("version")))
     except Exception as exc:                                        # noqa: BLE001
         detail = "session build failed: %s: %s" % (type(exc).__name__, exc)
         await _audit(conn, action="refused", detail=detail,
@@ -256,7 +260,11 @@ async def run_seed(conn, rules: Optional[Dict[str, Any]] = None) -> Dict[str, An
     await _audit(conn, action="sessions_built",
                  detail="%d session(s) built for rules %s (v2 inputs: %s, vix dates: %d)"
                         % (len(sessions), rules.get("version"),
-                           str(rules.get("version")) == "v2", len(vix_by_date)),
+                           # The same test the build used. A literal `== "v2"` here would have
+                           # AUDITED "v2 inputs: False" on a run that built them, or the
+                           # reverse -- an audit row that disagrees with the run it describes
+                           # is worse than none, because it is the record a later reader trusts.
+                           uses_v2_inputs(rules.get("version")), len(vix_by_date)),
                  rows_written=len(sessions), rules_version=rules.get("version"))
     # A WRITE FAILURE IS AUDITED TOO. The first live seed raised inside the INSERT -- an ISO
     # string handed to a DATE column -- and because only the REFUSAL paths audited, it left no
@@ -372,7 +380,13 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
                     rules_version=version)
         return {"written": 0, "refused": detail, "as_of": target.isoformat()}
 
-    sessions = sessions_from_series(series, settled_through=target.isoformat())
+    # THE SAME BUILD THE SEED USES (R-IV.1284(c) / TA-208 item 7). This line used to be a bare
+    # `sessions_from_series(series, settled_through=...)`, so `v2` defaulted to False and no VIX
+    # pair was passed -- 95 of 304 sessions take a different label on that basis, and a cutover
+    # that "inherits v2's state and runs nightly from there" would have inherited a state built
+    # one way and continued it another.
+    sessions, build = await build_sessions(conn, series, rules=rules,
+                                           settled_through=target.isoformat())
     if not sessions:
         detail = ("no classifiable session: SPY holds %d bar(s), %d needed"
                   % (len(spy), MIN_BARS))
@@ -399,10 +413,16 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
         return {"written": 0, "conflict": detail, "as_of": target.isoformat(),
                 "shown_regime": row.get("shown_regime")}
 
-    detail = ("%s -> %s (raw %s)%s%s"
+    # THE BASIS GOES ON THE RECORD WITH THE LABEL. Whether the v2 inputs were built, and how
+    # many VIX dates were paired, decide which rows were evaluable -- so a later reader of this
+    # row can tell what it was computed from instead of assuming.
+    detail = ("%s -> %s (raw %s)%s%s [v2_inputs=%s vix=%s]"
               % (target.isoformat(), row.get("shown_regime"), row.get("regime"),
                  "; " + row["change"] if row.get("change") else "",
-                 "; " + row["blocked"] if row.get("blocked") else ""))
+                 "; " + row["blocked"] if row.get("blocked") else "",
+                 build.get("v2_inputs"),
+                 (build.get("vix") or {}).get("paired_dates",
+                                              (build.get("vix") or {}).get("error", "n/a"))))
     await _audit(conn, action="nightly", detail=detail, as_of=target, rows_written=1,
                  rules_version=version)
     logger.info("[regime_job] nightly %s", detail)
@@ -758,6 +778,131 @@ async def health(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
     return {"state": state, "reason": reason, "as_of": as_of_d.isoformat(),
             "last_settled_session": newest_settled.isoformat(), "lag_sessions": lag,
             "shown_regime": row["shown_regime"], "rules_version": version}
+
+
+#: Which rules versions build the V2 INPUTS and read the VIX pair. A SET, so a future version
+#: has to opt in deliberately: the seed tested `== "v2"`, which is False for "v2.1", so a
+#: cutover would silently have stopped building them.
+V2_INPUT_VERSIONS = frozenset({"v2", "v2.1"})
+
+
+def uses_v2_inputs(version: Optional[str]) -> bool:
+    return str(version or "") in V2_INPUT_VERSIONS
+
+
+async def build_sessions(conn, series, *, rules, settled_through: str):
+    """The sessions list, built THE SAME WAY for the seed, the nightly and the repair.
+
+    THE SEED AND THE NIGHTLY DISAGREED, and the card has been living with it since the v2
+    cut-over. MEASURED over the stored series, 2026-10-21:
+
+        the seed    sessions_from_series(..., vix_by_date=vix, v2=True)
+        the nightly sessions_from_series(..., settled_through=...)      <- v2 defaults to False
+        result      95 OF 304 SESSIONS take a different label depending on which build ran
+
+    For 2026-10-19 and 10-20 the two disagree outright: the nightly's build says
+    `correction / correction` and the seed's says `range_chop / correction`. So the 302 seeded
+    rows and every nightly row after them were computed on DIFFERENT INPUTS by the same
+    classifier -- two instruments measuring one thing, which is the fault class this board
+    files most often, and here it reached the label on the screen.
+
+    One function, three callers, so they cannot drift again. Returns (sessions, report) and the
+    report names the VIX state, because an absent VIX pair changes which rows are evaluable and
+    a reader of a label is entitled to know it was absent.
+    """
+    version = rules.get("version")
+    vix_by_date: Dict[str, Any] = {}
+    vix_report: Dict[str, Any] = {"skipped": "rules %s does not read the VIX pair" % version}
+    if uses_v2_inputs(version):
+        try:
+            from models.regime_vix import by_date as _vix_by_date
+
+            vix_by_date, vix_report = _vix_by_date()
+        except Exception as exc:                                    # noqa: BLE001
+            vix_by_date, vix_report = {}, {"error": type(exc).__name__}
+    sessions = sessions_from_series(series, settled_through=settled_through,
+                                    vix_by_date=vix_by_date,
+                                    v2=uses_v2_inputs(version))
+    return sessions, {"v2_inputs": uses_v2_inputs(version), "vix": vix_report,
+                      "sessions": len(sessions)}
+
+
+#: TA-208 §7's label groups, which must be THE SAME MAP LAB uses. Copied from
+#: `scripts/lab/regime_filter.py::GROUPS` rather than re-derived: the card's wording and LAB's
+#: scoring have to agree about which labels are bullish, or the same session reads one way on
+#: the screen and another in a scorecard.
+LABEL_GROUPS = {
+    "TREND-UP": ("uptrend", "narrow_uptrend", "melt_up", "recovery"),
+    "RANGE": ("range_chop", "correction"),
+    "TREND-DOWN/STRESS": ("breakdown", "bear_market", "bear_market_rally", "crash_liquidation"),
+}
+LABEL_TO_GROUP = {r: g for g, rs in LABEL_GROUPS.items() for r in rs}
+
+#: The word the card prints under a STALE headline, per group. TA-208 §7's own mapping.
+GROUP_LAST_READING = {
+    "TREND-UP": "BULLISH last reading",
+    "TREND-DOWN/STRESS": "BEARISH last reading",
+    "RANGE": "NEUTRAL last reading",
+}
+
+
+async def unmatched_run(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
+    """How many of the LATEST settled sessions matched no rule at all. TA-208 §7 item 4.
+
+    DERIVED AT READ TIME FROM STORED COLUMNS, no schema change: `regime_snapshots.regime` is the
+    RAW label and is NULL when no section-2 row matched, while `shown_regime` carries whatever
+    hysteresis is still holding. So a run of NULL raw labels beside a non-null shown one is
+    exactly "the card is showing a label no rule currently supports", and the card must say so.
+
+    A DIFFERENT CONDITION FROM `bar_freshness`, and the two must not be confused: that one says
+    the DATA stopped arriving, this one says the data arrived and NOTHING MATCHED. A reader who
+    sees one headline must not be left thinking it is the other, which is why the strings differ.
+
+    AND BLOCKED IS NOT STALE. When a candidate qualifies and hysteresis holds it, `blocked` is
+    non-null and the raw label IS matched -- the card shows the normal label plus the blocked
+    chip. Counting that as "no rule matched" would turn the hysteresis working as designed into
+    an alarm.
+    """
+    version = rules_version or load_rules().get("version")
+    out: Dict[str, Any] = {"rules_version": version, "run": 0, "last_match_as_of": None,
+                           "shown_regime": None, "group": None, "group_word": None,
+                           "stale": False, "chip": None}
+    try:
+        rows = await conn.fetch(
+            """SELECT as_of, regime, shown_regime, blocked
+                 FROM regime_snapshots
+                WHERE rules_version = $1 AND superseded = FALSE AND settled IS TRUE
+                ORDER BY as_of DESC
+                LIMIT 120""", version)
+    except Exception as exc:                                        # noqa: BLE001
+        return dict(out, reason="regime_snapshots unreadable (%s)" % type(exc).__name__)
+    if not rows:
+        return dict(out, reason="no settled snapshot for rules %s" % version)
+
+    run = 0
+    for r in rows:
+        if r["regime"] is None:
+            run += 1
+        else:
+            out["last_match_as_of"] = (r["as_of"].isoformat()
+                                       if hasattr(r["as_of"], "isoformat") else str(r["as_of"]))
+            break
+    shown = rows[0]["shown_regime"]
+    group = LABEL_TO_GROUP.get(str(shown or "").lower())
+    out.update(run=run, shown_regime=shown, group=group,
+               group_word=GROUP_LAST_READING.get(group or ""))
+    if run >= 1:
+        out["stale"] = True
+        out["chip"] = ("HELD · no rule matched %d session%s · last match %s"
+                       % (run, "" if run == 1 else "s",
+                          out["last_match_as_of"] or "never"))
+        out["reason"] = ("the latest %d settled session%s produced no raw label; the card is "
+                         "holding %r, which no rule currently supports"
+                         % (run, "" if run == 1 else "s", shown))
+    else:
+        out["reason"] = ("the latest settled session matched a rule (%r), so the label is not "
+                         "held past its evidence" % rows[0]["regime"])
+    return out
 
 
 #: R-IV.1278(b)4. The headline the card shows when the DATA has stopped arriving. The ruling's

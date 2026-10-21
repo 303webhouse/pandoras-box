@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 #: Served on every payload. The card prints it; nothing computes from it.
 DISPLAY_ONLY = "display only"
 
+#: TA-208 §7: the small line under the label. The thresholds in section 2 were fitted on a span
+#: in which dips were bought, and a reader is entitled to know what the rules were tuned against
+#: before reading a label off them. Stated once, here, rather than written into the renderer.
+TUNED_FOR = "Tuned for: post-2013 dip-buying market"
+
+
+def _drift_prior_for(shown_regime):
+    """LAB's stamped drift prior for a shown label. R-IV.1284(c).
+
+    Imported inside the function because this module is loaded by the route and the table is a
+    leaf module -- and because a failure to read it must cost the card its grey line, not its
+    label. An absent prior is reported, never substituted.
+    """
+    try:
+        from models.regime_drift_prior import for_label
+
+        return for_label(shown_regime)
+    except Exception as exc:                                        # noqa: BLE001
+        return {"available": False,
+                "reason": "LAB's drift-prior table could not be read (%s)" % type(exc).__name__}
+
 #: R-IV.1203(b)4. The designated source, now WIRED. Measured for 2026-10-16:
 #:
 #:   Polygon daily aggregate   SPY 763.25   QQQ 709.80   IWM 270.44   <- designated, and served
@@ -181,7 +202,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
     try:
         from jobs.regime_job import (audit_notes, bar_freshness, flip_history,
                                      health as regime_health, ribbon as regime_ribbon,
-                                     label_diff, latest_with_diff, seed_run)
+                                     label_diff, latest_with_diff, seed_run, unmatched_run)
     except Exception as exc:
         return _unavailable("regime module unavailable (%s)" % type(exc).__name__)
 
@@ -195,6 +216,11 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # and the card showed that label with nothing on its face to say so. This is the
             # one block the headline is allowed to replace a label with.
             fresh = await bar_freshness(conn)
+            # TA-208 section 7 item 4. A DIFFERENT staleness from `bar_freshness`: the data
+            # arrived and NOTHING MATCHED, so the card is holding a label no rule supports.
+            # Derived at read time from stored columns -- `regime_snapshots.regime` is NULL when
+            # no row matched -- so there is no schema change and no second writer.
+            held = await unmatched_run(conn, rules_version)
             # R-IV.1195(b) asks for the seed count executed at deploy. Served here so the
             # number outlives the deploy log it was first read from.
             seeded_run = await seed_run(conn)
@@ -263,6 +289,18 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         # newest BAR's -- and the outage of 2026-10-19/20 is exactly the case where a reader
         # needs to know it is the DATA that stopped, not the classifier that declined.
         "data_freshness": fresh,
+        # TA-208 section 7 item 4: the HELD block. `stale` here means "no rule matched", which
+        # is NOT the same as `data_freshness.stale` ("the bars stopped arriving") -- two causes,
+        # two messages, and a reader who sees one must not think it is the other.
+        "held_no_match": held,
+        # R-IV.1284(c): LAB's stamped drift prior for the label being shown. Descriptive and
+        # nothing gates on it (#42); `available` is False where the table has no row, because
+        # a label v2 has never shown has NO prior, which is not a prior of zero.
+        "drift_prior": _drift_prior_for(snap.get("shown_regime")),
+        # TA-208 section 7: the small line under the label. The classifier's thresholds were
+        # fitted on a market that bought dips, and a reader is entitled to know what the rules
+        # were tuned against before reading a label off them.
+        "tuned_for": TUNED_FOR,
         "basis": snap.get("basis"),
         "not_evaluable": list(snap.get("not_evaluable") or []),
         "pending": snap.get("pending"),
