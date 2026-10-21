@@ -231,20 +231,55 @@ def get_cta_zone(price: float, sma20: float, sma50: float, sma120: float) -> Tup
         return ("TRANSITION", "NEUTRAL")
 
 
+def _as_float_series(result, index) -> pd.Series:
+    """A float Series for an indicator that may have refused, so NO column is ever `None`.
+
+    pandas_ta RETURNS None, NOT A SHORT SERIES, when the window is longer than the input:
+    measured, `ta.sma(s, length=120)` gives a Series at 120+ bars and None at 119 and below.
+    `df[col] = None` then makes an OBJECT column of None, and the very next comparison --
+    `df['Close'] > df['sma120']` -- raises
+
+        TypeError: '>' not supported between instances of 'float' and 'NoneType'
+
+    which the caller logged 96 times on 2026-10-21 alone. `check_ticker_filters` fetches ONE
+    MONTH (~21 bars) and calls this suite for `atr` alone, so that path threw on EVERY ticker
+    of EVERY universe build. It still returned the right answer -- `atr` is assigned before the
+    throw -- but it filled the ERROR channel with a message that names no ticker, which is what
+    makes a real indicator failure on a real 150-bar scan unreadable.
+
+    THE WORSE HALF WAS THE FAIL-OPEN. The `except` logged and returned the PARTIALLY BUILT
+    frame, so `cta_zone`, `days_above_120`, `close_above_50` and the `dist_to_*` columns were
+    simply ABSENT. Four of the seven `check_*` functions then ANSWERED "no signal" on that
+    frame instead of refusing; the ticker only escaped a wrong verdict because
+    `check_golden_touch` is called first and raises KeyError('days_above_120') before they run.
+    A reordering of those calls was all that stood between this and a signal computed from
+    columns that were never built.
+
+    NaN is the honest value and the one every reader here already handles: `pd.isna` guards
+    `get_cta_zone`, and a NaN comparison is False, so a condition that needs a 120dma CANNOT
+    pass without one. The refusal path that was always written now actually runs.
+    """
+    if result is None:
+        return pd.Series(float("nan"), index=index, dtype="float64")
+    return result
+
 def calculate_cta_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate all CTA strategy indicators"""
     if df is None or df.empty:
         return df
     
     try:
-        # Core SMAs
-        df['sma20'] = ta.sma(df['Close'], length=20)
-        df['sma50'] = ta.sma(df['Close'], length=50)
-        df['sma120'] = ta.sma(df['Close'], length=120)
-        df['sma200'] = ta.sma(df['Close'], length=200)
+        # Core SMAs. Each wrapped because pandas_ta returns None, not a short Series, when
+        # the window exceeds the input -- see _as_float_series.
+        idx = df.index
+        df['sma20'] = _as_float_series(ta.sma(df['Close'], length=20), idx)
+        df['sma50'] = _as_float_series(ta.sma(df['Close'], length=50), idx)
+        df['sma120'] = _as_float_series(ta.sma(df['Close'], length=120), idx)
+        df['sma200'] = _as_float_series(ta.sma(df['Close'], length=200), idx)
         
         # ATR for stop calculation
-        df['atr'] = ta.atr(df['High'], df['Low'], df['Close'], length=CTA_CONFIG["risk"]["atr_period"])
+        df['atr'] = _as_float_series(
+            ta.atr(df['High'], df['Low'], df['Close'], length=CTA_CONFIG["risk"]["atr_period"]), idx)
         
         # Volume metrics
         vol_period = CTA_CONFIG["volume"]["avg_period"]
@@ -259,9 +294,11 @@ def calculate_cta_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if adx_data is not None and 'ADX_14' in adx_data.columns:
             df['adx'] = adx_data['ADX_14']
         else:
-            df['adx'] = None
+            # `= None` was the same object-column fault, written out by hand. `classify_regime`
+            # does `if adx > 25`, which a None reaches as a TypeError and a NaN as False.
+            df['adx'] = _as_float_series(None, idx)
 
-        df['rsi'] = ta.rsi(df['Close'], length=14)
+        df['rsi'] = _as_float_series(ta.rsi(df['Close'], length=14), idx)
 
         df['vol_avg_20'] = df['Volume'].rolling(20).mean()
         df['rvol'] = df['Volume'] / df['vol_avg_20']
