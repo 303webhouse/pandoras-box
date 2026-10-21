@@ -21,7 +21,7 @@ nightly's. Before rewriting them, (b)1 asked whether the VIX input changes eithe
 (c) THE CUTOVER INHERITS, AND VERIFIES RATHER THAN COPIES. Copying v2's counters across asserts
 nothing -- it hands v2.1 a state it never computed, and a later divergence would be invisible
 precisely because the numbers were copied. So v2.1 RECOMPUTES the anchor session from the same
-stored series and the answers are compared; a mismatch REFUSES, which is TA-208 item 7's own
+stored series and the answers are compared; a mismatch REFUSES, which is registration §1 / R-IV.1277(b)'s own
 instruction ("STOP and ask SPINE. Do not backfill").
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ from ._srcscan import read_source                                   # noqa: E402
 JOB = _BACKEND / "jobs" / "regime_job.py"
 SEED = _BACKEND / "jobs" / "regime_seed.py"
 PG = _BACKEND / "database" / "postgres_client.py"
-V21 = _BACKEND / "config" / "regime_rules.v2_1.json"
+V21 = _BACKEND / "config" / "regime_rules.v2.1.json"
 V2 = _BACKEND / "config" / "regime_rules.v2.json"
 
 
@@ -161,7 +161,7 @@ async def test_a_predecessor_with_no_settled_row_stops_and_asks():
             return None
     got = await rj.cutover_state(_Conn(), "v2.1")
     assert got["ok"] is False and got["needs_ruling"] is True
-    assert "cannot start without" in got["reason"] and "TA-208 item 7" in got["reason"]
+    assert "cannot start without" in got["reason"] and "registration §1 / R-IV.1277(b)" in got["reason"]
 
 
 def test_the_inheritance_is_verified_rather_than_copied():
@@ -186,7 +186,7 @@ def test_a_disputed_state_refuses_and_names_what_differs():
 
 
 def test_nothing_is_written_and_no_era_is_replayed_onto_disk():
-    """TA-208: "no replay or re-seed of any era: no backfill run of v2.1 over any date." The
+    """registration §1 / R-IV.1277(b): "no replay or re-seed of any era: no backfill run of v2.1 over any date." The
     walk is in memory, which is what every nightly already does to rebuild its counters."""
     src = read_source(str(JOB))
     i = src.index("async def cutover_state")
@@ -205,21 +205,27 @@ def test_the_gate_runs_before_any_label_is_computed():
     assert "cutover_blocked" in block
 
 
-def test_expecting_agreement_is_sound_because_the_files_differ_in_two_keys():
+def test_expecting_agreement_is_sound_because_NO_ARITHMETIC_DIFFERS():
     """The reason a mismatch is a REFUSAL rather than a surprise: there is nothing in v2.1 that
-    could legitimately produce a different hysteresis state."""
-    def flat(o, p=""):
-        if isinstance(o, dict):
-            for k, v in o.items():
-                yield from flat(v, p + "." + str(k))
-        elif isinstance(o, list):
-            yield p, json.dumps(o)
-        else:
-            yield p, o
-    a = dict(flat(json.loads(io.open(V2, encoding="utf-8").read())))
-    b = dict(flat(json.loads(io.open(V21, encoding="utf-8").read())))
-    differ = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
-    assert differ == [".hysteresis.stated_cost", ".version"], differ
+    could legitimately produce a different hysteresis state.
+
+    RESTATED AS A PREDICATE (R-IV.1297(c)). This asserted "exactly two keys differ", and the
+    stamped artifact differs in seven -- every one of them provenance. A count would have gone
+    red while the property it protects was untouched, and the natural fix for a red count is to
+    edit the number, which is how a guard quietly stops guarding. Measured on the stamped file:
+    thresholds, order, confirmed_break, gating, families_v1, tags and every hysteresis RULE are
+    identical, and `stated_cost` is now identical to v2's as well.
+    """
+    a = json.loads(io.open(V2, encoding="utf-8").read())
+    b = json.loads(io.open(V21, encoding="utf-8").read())
+    assert a["thresholds"] == b["thresholds"]
+    assert list(a["order"]) == list(b["order"])
+    assert a.get("confirmed_break") == b.get("confirmed_break")
+    assert a.get("gating") == b.get("gating")
+    assert a.get("families_v1") == b.get("families_v1")
+    for k in a["hysteresis"]:
+        if k != "stated_cost":
+            assert a["hysteresis"][k] == b["hysteresis"][k], k
 
 
 def test_v21_builds_the_v2_inputs_at_the_cutover():

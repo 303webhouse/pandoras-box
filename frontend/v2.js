@@ -2461,7 +2461,7 @@
   // because the decision is the whole point and three callers would eventually disagree:
   //
   //   data_freshness.headline  the BARS stopped arriving (R-IV.1278(b)4) -> "DATA STALE - ..."
-  //   held_no_match.stale      the bars arrived and NO RULE MATCHED (TA-208 s7) -> "STALE"
+  //   held_no_match.stale      the bars arrived and NO RULE MATCHED (registration s1 / R-IV.1277(b)) -> "STALE"
   //
   // The bar case wins when both hold: if the data stopped, "no rule matched" is a consequence
   // of having nothing to match against, and naming the consequence would send a reader looking
@@ -2502,7 +2502,7 @@
                + esc(held.group_word) + '</span>'
              : '');
     }
-    // R-IV.1277(b)/TA-208 s7 item 6: RECOVERY renders dark green. Keyed off the STORED label
+    // R-IV.1277(b)/registration s1 / R-IV.1277(b): RECOVERY renders dark green. Keyed off the STORED label
     // rather than the display string, so a change to the words cannot silently drop the colour.
     const recovery = String(m.regime_key || '') === 'recovery';
     return '<span class="rs-label' + (recovery ? ' rs-recovery' : '') + '">'

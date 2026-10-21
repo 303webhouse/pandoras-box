@@ -36,6 +36,21 @@ from jobs import regime_job as rj                                   # noqa: E402
 
 from ._srcscan import read_source                                   # noqa: E402
 
+def _function_block(src: str, header: str) -> str:
+    """From `header` to the blank-line boundary that ends its definition.
+
+    STRUCTURAL, so it cannot be broken by editing a neighbouring comment. A fixed character
+    window or a slice to the next named line is a locator that fails on unrelated prose, and
+    that has now happened four times in this build alone.
+    """
+    i = src.index(header)
+    for sep in (chr(10) * 3, (chr(13) + chr(10)) * 3):
+        j = src.find(sep, i)
+        if j != -1:
+            return src[i:j]
+    return src[i:]
+
+
 JOB = _BACKEND / "jobs" / "regime_job.py"
 REPAIR = _BACKEND.parent / "scripts" / "regime_bars_repair.py"
 
@@ -80,8 +95,11 @@ def test_no_literal_version_comparison_survives_in_the_build_path():
 
 def test_the_builder_exists_and_passes_both_arguments():
     src = read_source(str(JOB))
-    i = src.index("async def build_sessions")
-    block = src[i:src.index("#: TA-208", i)]
+    # ANCHORED ON THE FUNCTION, not on the comment that happened to follow it. This read
+    # `src.index("#: TA-208", i)`, and R-IV.1297(e) re-cited that very comment -- so the
+    # locator broke on a change to prose it does not test. Three identical copies of it,
+    # which is the fourth window-locator failure of this build.
+    block = _function_block(src, "async def build_sessions")
     assert "vix_by_date=vix_by_date" in block
     assert "v2=uses_v2_inputs(version)" in block
 
@@ -120,8 +138,11 @@ def test_the_builder_reports_the_basis_rather_than_leaving_it_implicit():
     """Whether the v2 inputs were built, and how many VIX dates paired, decide which rows are
     evaluable. A label whose basis is not recorded is one a later reader has to assume about."""
     src = read_source(str(JOB))
-    i = src.index("async def build_sessions")
-    block = src[i:src.index("#: TA-208", i)]
+    # ANCHORED ON THE FUNCTION, not on the comment that happened to follow it. This read
+    # `src.index("#: TA-208", i)`, and R-IV.1297(e) re-cited that very comment -- so the
+    # locator broke on a change to prose it does not test. Three identical copies of it,
+    # which is the fourth window-locator failure of this build.
+    block = _function_block(src, "async def build_sessions")
     assert '"v2_inputs": uses_v2_inputs(version)' in block
     assert '"vix": vix_report' in block
 
@@ -148,8 +169,11 @@ def test_a_vix_read_that_fails_is_recorded_as_an_error_not_an_empty_pair():
     `fredapi` raised a ParseError. A 200 that is not data is the worst shape of outage, and the
     only defence is that the caller records what happened instead of carrying on with {}."""
     src = read_source(str(JOB))
-    i = src.index("async def build_sessions")
-    block = src[i:src.index("#: TA-208", i)]
+    # ANCHORED ON THE FUNCTION, not on the comment that happened to follow it. This read
+    # `src.index("#: TA-208", i)`, and R-IV.1297(e) re-cited that very comment -- so the
+    # locator broke on a change to prose it does not test. Three identical copies of it,
+    # which is the fourth window-locator failure of this build.
+    block = _function_block(src, "async def build_sessions")
     assert 'except Exception as exc:' in block
     assert '{"error": type(exc).__name__}' in block
 

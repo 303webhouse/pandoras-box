@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 #: `thresholds` by key so a threshold change moves the sentence with it -- a hard-coded "2
 #: indices" would quietly disagree with the rules file the day someone edits it.
 #
-# R-IV.1277(b)/TA-208 §7 item 5: THREE OF THESE DESCRIBED SOMETHING THE ROWS DO NOT DO, and a
+# R-IV.1277(b)/registration §1 / R-IV.1277(b): THREE OF THESE DESCRIBED SOMETHING THE ROWS DO NOT DO, and a
 # card that states an entry condition the classifier does not use is worse than one that states
 # none -- a reader checks the stated condition against the tape and concludes the label is
 # wrong. Each was read off `regime_classifier` rather than off the ruling's prose:

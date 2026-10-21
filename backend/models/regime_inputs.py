@@ -109,11 +109,38 @@ def _index_block(bars: Sequence[Bar]) -> Dict[str, Any]:
     }
 
 
+#: The only version whose defect fixes are live. R-IV.1297(b)1.
+RULES_VERSION_V21 = "v2.1"
+
+
+def v21_fixes_apply(rules_version: Optional[str] = None,
+                    rules: Optional[Dict[str, Any]] = None) -> bool:
+    """Whether to compute v2.1's corrected inputs rather than v2's frozen ones.
+
+    WHY A GATE AT ALL. R-IV.1265(a) froze the v2 classifier: "any change is v3 with a ruling."
+    The two v2.1 fixes went into the SHARED builder, and `RULES_VERSION` is still "v2" -- so
+    had 0e301ea8 deployed as written, every row stamped `rules_version = 'v2'` would have
+    carried v2.1 ARITHMETIC. The label would say one thing and the numbers behind it another,
+    and the rows already in the table would no longer be reproducible from the version they
+    name. QUERY caught this before the deploy (M1).
+
+    ONE PREDICATE, read by both gated call sites, because a version test written twice is a
+    version test that will disagree with itself. The explicit argument wins; otherwise the
+    rules file's own `version` answers, which is the file actually being applied. Absent both,
+    the answer is NO -- an unknown version gets the frozen behaviour, never the new one.
+    """
+    if rules_version is not None:
+        return str(rules_version) == RULES_VERSION_V21
+    if rules:
+        return str(rules.get("version") or "") == RULES_VERSION_V21
+    return False
+
 def build_inputs(series: Dict[str, List[Bar]], i: int, *, settled: bool,
                  overlays: Optional[Dict[str, Any]] = None,
                  lenses: Optional[Dict[str, Any]] = None,
                  prior_regime: Optional[str] = None,
-                 vix: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+                 vix: Optional[Dict[str, Any]] = None,
+                 rules_version: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Inputs for the session at index `i` of SPY's series, or None if it predates MIN_BARS.
 
     `series` maps ticker -> oldest-first bars. Each index is sliced to the same SESSION DATE, not
@@ -150,7 +177,11 @@ def build_inputs(series: Dict[str, List[Bar]], i: int, *, settled: bool,
     spy_block["pct_below_52w_high"] = pct_below_52w_high(spy[:i + 1])
     spy_block["window_sessions"] = min(len(_closes(spy[:i + 1])), YEAR_SESSIONS)
     spy_block["ma50_rising"] = _ma50_rising(spy[:i + 1])
-    spy_block["rsi_ge_75_of_last_5"] = _rsi_ge_75_of_last_5(spy[:i + 1])
+    # The KEY name is unchanged on purpose: `regime_classifier` reads
+    # `spy.rsi_ge_75_of_last_5` by name and every stored `inputs_json` already carries it, so
+    # renaming it would orphan both. Only the FUNCTION was renamed (R-IV.1297(e)).
+    spy_block["rsi_ge_75_of_last_5"] = _rsi_hits_above_melt_up_min(
+        spy[:i + 1], rules_version=rules_version)
     # §2's C5 test. None when the series cannot answer -- the Breakdown row then refuses by
     # name rather than being handed a False it did not earn.
     spy_block["confirmed_break_down_50dma"] = confirmed_break_down_50dma(spy[:i + 1])
@@ -311,38 +342,54 @@ def confirmed_break_down_50dma(bars: Sequence[Bar], rules: Optional[Dict[str, An
     return (break_v / avg) >= rvol_min
 
 
-def _rsi_ge_75_of_last_5(bars: Sequence[Bar], threshold: Optional[float] = None,
-                         lookback: int = 5, rules: Optional[Dict[str, Any]] = None
-                         ) -> Optional[int]:
-    """HOW MANY of the last `lookback` settled closes had RSI(14) at or above `threshold`.
+def _rsi_hits_above_melt_up_min(bars: Sequence[Bar], threshold: Optional[float] = None,
+                                lookback: int = 5, rules: Optional[Dict[str, Any]] = None,
+                                rules_version: Optional[str] = None):
+    """The Melt-up row's RSI leg over the last `lookback` settled closes.
 
-    AN INTEGER COUNT, NOT A YES/NO. R-IV.1277(b)/TA-208 §7. It used to return a bool, and
-    `regime_classifier` compares it as `hits >= melt_up_rsi_hits_of_last_5` where that
-    threshold is 2 -- so `float(True)` is 1.0, `1.0 >= 2` is False, and THE MELT-UP RSI LEG
-    COULD NEVER PASS. A yes/no feeding a ">= 2" test is not a stricter rule, it is a rule that
-    cannot fire; the row was unreachable rather than rare.
+    RENAMED FROM `_rsi_ge_75_of_last_5` (R-IV.1297(e)): the 75 belongs to
+    `thresholds.melt_up_rsi_min`, and a name that states it is a second place for one figure --
+    the place nobody edits, and therefore the one that drifts. The DICT KEY keeps its old
+    spelling, because the classifier reads `spy.rsi_ge_75_of_last_5` by name and every stored
+    `inputs_json` already carries it.
 
-    THE THRESHOLD COMES FROM THE RULES FILE, not from this signature's default. 75 was written
-    here as a literal while `thresholds.melt_up_rsi_min` held the same number, which is two
-    places for one figure -- and the one nobody edits is the one that drifts. The parameter
-    stays for tests that want to vary it explicitly.
+    TWO BEHAVIOURS, CHOSEN BY VERSION (R-IV.1297(b)1), because v2 is frozen (R-IV.1265(a)) and
+    the fix changes what the Melt-up row can do:
 
-    None when the series is too short, as before: without that the Melt-up row was NOT
-    EVALUABLE on every session, and "cannot tell" is not "no hits".
+    v2 and anything else  999aae43's exact behaviour: a BOOL -- True on the first close at or
+                          above 75.0, False if none of the `lookback` reach it. The threshold
+                          is this signature's literal, as it was, NOT the rules file's.
+    v2.1                  an INTEGER COUNT, with the threshold read from the rules file.
+
+    WHY v2's BOOL IS KEPT RATHER THAN QUIETLY REPAIRED. `regime_classifier` tests
+    `hits >= melt_up_rsi_hits_of_last_5`, where that threshold is 2: `float(True)` is 1.0 and
+    `1.0 >= 2` is False, so UNDER v2 THE MELT-UP RSI LEG CAN NEVER PASS. That is a defect, and
+    v2.1 is the version that fixes it -- but v2's stored rows were computed with it and must
+    stay reproducible from the version they name. Repairing v2 in place would make 304 stored
+    labels unexplainable by any version in the repo.
+
+    None when the series is too short, or when any session in the window cannot be read: a
+    SESSION THAT CANNOT BE READ MAKES THE COUNT UNKNOWABLE, not smaller. Returning the partial
+    count would understate it, and the row would then fail for a reason about the data rather
+    than about the tape. Both versions agree on that.
     """
     from indicators.rsi import latest_rsi
 
-    if threshold is None:
-        if rules is None:
-            # DEFERRED, like the other reader in this module: `regime_classifier` imports from
-            # here, so a module-level import back would be a cycle. My first version used the
-            # bare name and raised NameError on the very first call -- the same class of fault
-            # the route registry sweeps handler imports for.
-            from models.regime_classifier import load_rules
+    v21 = v21_fixes_apply(rules_version=rules_version, rules=rules)
 
-            rules = load_rules()
-        th = rules.get("thresholds") or {}
-        threshold = float(th.get("melt_up_rsi_min", 75.0))
+    if threshold is None:
+        if not v21:
+            threshold = 75.0   # 999aae43's signature default, frozen with the rest of v2
+        else:
+            if rules is None:
+                # DEFERRED, like the other reader in this module: `regime_classifier` imports
+                # from here, so a module-level import back would be a cycle. My first version
+                # used the bare name and raised NameError on the very first call.
+                from models.regime_classifier import load_rules
+
+                rules = load_rules()
+            th = rules.get("thresholds") or {}
+            threshold = float(th.get("melt_up_rsi_min", 75.0))
 
     cs = _closes(bars)
     if len(cs) < 15 + lookback:
@@ -351,13 +398,12 @@ def _rsi_ge_75_of_last_5(bars: Sequence[Bar], threshold: Optional[float] = None,
     for k in range(lookback):
         r = latest_rsi(cs[:len(cs) - k])
         if r is None or r.get("value") is None:
-            # A SESSION THAT CANNOT BE READ MAKES THE COUNT UNKNOWABLE, not smaller. Returning
-            # the partial count would understate it, and the row would then fail for a reason
-            # that is about the data rather than about the tape.
             return None
         if r["value"] >= threshold:
+            if not v21:
+                return True
             hits += 1
-    return hits
+    return hits if v21 else False
 
 
 def _ma50_rising(bars: Sequence[Bar]) -> Optional[bool]:
@@ -377,7 +423,8 @@ def sessions_from_series(series: Dict[str, List[Bar]], *,
                          overlays: Optional[Dict[str, Any]] = None,
                          lenses: Optional[Dict[str, Any]] = None,
                          vix_by_date: Optional[Dict[str, Dict[str, Any]]] = None,
-                         v2: bool = False) -> List[Dict[str, Any]]:
+                         v2: bool = False,
+                         rules_version: Optional[str] = None) -> List[Dict[str, Any]]:
     """Every classifiable session in `series`, oldest-first, each as a complete inputs dict.
 
     `settled_through` is the last session known to be settled; later sessions are marked unsettled
@@ -391,7 +438,7 @@ def sessions_from_series(series: Dict[str, List[Bar]], *,
         day = _day(spy[i].date)
         settled = True if settled_through is None else (day is not None and day <= settled_through)
         row = build_inputs(series, i, settled=settled, overlays=overlays, lenses=lenses,
-                           prior_regime=prior)
+                           prior_regime=prior, rules_version=rules_version)
         if row is None:
             continue
         if v2:
@@ -399,10 +446,14 @@ def sessions_from_series(series: Dict[str, List[Bar]], *,
             # The two STATEFUL ones -- prior_regime and sessions_since_crash -- are NOT set
             # here: this module must not import the classifier, so it cannot know a label. The
             # replay injects them as it walks, which is what the comment below always claimed.
-            from models.regime_classifier import load_rules
+            from models.regime_classifier import RULES_VERSION, load_rules
             from models.regime_inputs_v2 import fill as _fill_v2
 
-            _fill_v2(row, series, i, rules=load_rules(),
+            # THE RULES FILE MUST MATCH THE VERSION BEING COMPUTED. Loading v2's thresholds
+            # while computing v2.1 would gate the fixes off inside `_fill_v2` (which reads the
+            # version off the rules it is handed) and silently compute a third thing that is
+            # neither version.
+            _fill_v2(row, series, i, rules=load_rules(rules_version or RULES_VERSION),
                      vix=(vix_by_date or {}).get(_day(spy[i].date)),
                      window_dates=[b.date for b in spy[:i + 1]])
         out.append(row)
