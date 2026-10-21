@@ -1,0 +1,73 @@
+{
+  "version": "v3",
+  "source": "REGIME-v3-PREREGISTRATION-TA-208.md sha256 ab015afaeb479f0c8b348771cd847e953c414b04d076e1f96483651baa5f2a96, section 2",
+  "registered": false,
+  "registered_by": "pending Nick's PR-1 stamp",
+  "gating": "DISPLAY ONLY (#42). Nothing computes from the label; the kill switch is untouched.",
+  "base_layer": "v2.1 (regime_rules.v2.1.json): the input fixes apply; the rows below replace v2's rows",
+  "order": ["crash_liquidation", "bear_market", "breakdown", "correction", "range_chop", "uptrend", "recovery"],
+  "removed_as_regimes_now_tags": {"bear_market_rally": "BEAR tag 'rally'", "melt_up": "UPTREND tag 'extended'",
+                                  "narrow_uptrend": "UPTREND tag 'narrow'"},
+  "shared": {
+    "falling_rising_lookback_sessions": 10,
+    "rvol_prior_sessions": 20,
+    "breadth": "C0 (R-IV.1279): SPDRs above their 50dma among those with a bar that day and >= 50 closes, x 11 / usable; percent = rescaled count / 11",
+    "index_stand_ins": "^NDX for QQQ and ^RUT for IWM in the replay (C0); live uses QQQ / IWM",
+    "per_session_comparisons": "a test over 'the last N closes' compares each close with the average AS IT STOOD on that session (the v2 code's convention, regime_inputs.confirmed_break_down_50dma)"
+  },
+  "thresholds": {
+    "bullish_buffer_pct": 1.0,
+    "reclaim_closes": 2,
+    "bear_pct_below_52w_high": 20.0,
+    "bear_closes_below_falling_200dma": 15,
+    "rally_closes_above_20_and_50": 2,
+    "capitulation_low_sessions": 60,
+    "capitulation_rvol_min": 2.0,
+    "correction_indices_below_50dma": 2,
+    "correction_narrow_within_pct_of_high": 5.0,
+    "range_adx_below": 20.0,
+    "range_adx_keep_prior_upper": 25.0,
+    "range_min_sessions": 10,
+    "range_within_pct_of_50dma": 3.0,
+    "narrow_sectors_max": 4,
+    "extended_pct_above_200dma": 12.0,
+    "extended_rsi_min": 75.0,
+    "extended_rsi_hits_of_last_5": 2,
+    "door_a_closes_above_200dma": 5,
+    "door_b_low_lookback_sessions": 60,
+    "door_b_low_min_age_sessions": 10,
+    "door_b_rvol_min": 1.2,
+    "door_b_rvol_window_sessions": 10,
+    "door_c_thrust_from_pct": 15.0,
+    "door_c_thrust_to_pct": 60.0,
+    "door_c_thrust_within_sessions": 10
+  },
+  "hysteresis": {
+    "enter_requires_settled_closes": 2,
+    "min_sessions_before_change": 5,
+    "toward_risk_regimes": ["breakdown", "crash_liquidation", "bear_market"],
+    "hold_exempt_pairs": [["recovery", "correction"]],
+    "range_requires_sessions": 10,
+    "unmatched_decay_sessions": 10,
+    "decay_label": "range_chop"
+  },
+  "groups": {
+    "TREND-UP": ["uptrend", "recovery"],
+    "RANGE": ["range_chop", "correction"],
+    "TREND-DOWN/STRESS": ["breakdown", "bear_market", "crash_liquidation"]
+  },
+  "crash": "R1 unchanged from v2 and NOT EVALUABLE in v3 (no VIX, VIX3M or credit input; v3.1)",
+  "deleted_never_coded": ["the high-beta breadth clause", "uptrend_strong_adx_min", "crash_universe_down_3pct_share",
+                          "recovery_to_uptrend_requires_closes_above_200dma (absorbed into Door A)"],
+  "dormant_until_v3_1": ["leaving_crash_requires_contango_closes"],
+  "open_questions_to_TA": {
+    "Q1_bear_count_horizon_when_no_reclaim_in_window": null,
+    "Q2_decay_session": null,
+    "Q2_decay_bypasses_hold_and_range_entry": null,
+    "Q3_door_b_low_window_includes_today": null,
+    "Q3_door_b_low_tie": null,
+    "Q4_capitulation_low_includes_ties": null,
+    "Q4_capitulation_upper_half_inclusive": null,
+    "rule": "every value here must be set by TA's answer before any real-date run; the code refuses a null"
+  }
+}
