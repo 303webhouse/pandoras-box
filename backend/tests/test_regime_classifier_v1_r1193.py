@@ -514,7 +514,16 @@ def test_the_seed_writer_is_APPEND_ONLY():
     # so the nightly job could reuse it, and this test kept asking `seed` -- it failed on a
     # clause that had moved three lines away, not on a property that had changed.
     src = inspect.getsource(rs)
-    assert "ON CONFLICT (as_of, rules_version, close_source) DO NOTHING" in src
+    # R-IV.1288(b)2 NARROWED THE CONFLICT TARGET, not the behaviour. The index it infers is
+    # now partial (`WHERE superseded = FALSE`), because the unqualified form made the table's
+    # own supersession unusable for one (as_of, rules_version, close_source) -- a superseded
+    # row still occupied the key, so a corrected label could only be written by UPDATEing the
+    # row it corrected. What this guard is FOR is unchanged and still asserted: DO NOTHING,
+    # never DO UPDATE.
+    assert ("ON CONFLICT (as_of, rules_version, close_source) WHERE superseded = FALSE"
+            in src), "the conflict target must match the partial unique index"
+    assert "DO NOTHING" in src
+    assert "DO UPDATE" not in src
     assert "INSERT INTO regime_snapshots" in inspect.getsource(rs._write_snapshot)
     assert not _re.search(r"\bUPDATE\s+regime_snapshots", src, _re.I)
 

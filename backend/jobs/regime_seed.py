@@ -204,6 +204,16 @@ async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool,
     re-run that disagrees with an earlier one therefore leaves both the original row and -- via
     the caller's audit entry -- the fact that it disagreed. Overwriting would destroy exactly
     the evidence a disagreement is worth having.
+
+    THE CONFLICT TARGET IS PARTIAL, over CURRENT rows only (R-IV.1288(b)2). The unique index it
+    infers became `WHERE superseded = FALSE`, because the unqualified form made the table's own
+    supersession mechanism unusable for one (as_of, rules_version, close_source): a superseded
+    row still occupied the key, so a corrected label could only be written by UPDATEing the row
+    it was correcting -- which is the one thing this function exists not to do. The clause here
+    has to match the index or Postgres cannot infer it at all: it raised
+    `InvalidColumnReferenceError: there is no unique or exclusion constraint matching the ON
+    CONFLICT specification` the first time the index was made partial without it, which is the
+    honest failure mode and is why the repair ran in a transaction.
     """
     import json as _json
 
@@ -214,7 +224,8 @@ async def _write_snapshot(conn, row: Dict[str, Any], *, seeded: bool,
                 change, blocked, inputs_json, seeded, close_source)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb,
                    $16, $17)
-           ON CONFLICT (as_of, rules_version, close_source) DO NOTHING
+           ON CONFLICT (as_of, rules_version, close_source) WHERE superseded = FALSE
+               DO NOTHING
            RETURNING as_of""",
         as_date(row.get("as_of")), row.get("rules_version"), row.get("regime"),
         row.get("shown_regime"), row.get("label"), list(row.get("tags") or []),

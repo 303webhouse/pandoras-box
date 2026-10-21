@@ -184,7 +184,16 @@ def test_the_writer_is_APPEND_ONLY_and_a_conflict_is_RECORDED():
     """Not just "does not UPDATE" -- a disagreement with a stored row is itself worth keeping,
     so the conflict path writes an audit entry saying what this run would have said."""
     code = code_of_file(os.path.join(BACKEND, "jobs", "regime_seed.py"))
-    assert "ON CONFLICT (as_of, rules_version, close_source) DO NOTHING" in code
+    # R-IV.1288(b)2 NARROWED THE CONFLICT TARGET, not the behaviour. The index it infers is
+    # now partial (`WHERE superseded = FALSE`), because the unqualified form made the table's
+    # own supersession unusable for one (as_of, rules_version, close_source) -- a superseded
+    # row still occupied the key, so a corrected label could only be written by UPDATEing the
+    # row it corrected. What this guard is FOR is unchanged and still asserted: DO NOTHING,
+    # never DO UPDATE.
+    assert ("ON CONFLICT (as_of, rules_version, close_source) WHERE superseded = FALSE"
+            in code), "the conflict target must match the partial unique index"
+    assert "DO NOTHING" in code
+    assert "DO UPDATE" not in code
     assert not re.search(r"\bUPDATE\s+regime_snapshots", code, re.I)
     job = code_of_file(os.path.join(BACKEND, "jobs", "regime_job.py"))
     assert "would have said" in job
@@ -721,8 +730,17 @@ def test_the_seed_is_IDEMPOTENT_in_two_independent_ways():
     would do; both means a race between a deploy and a nightly cannot double-write."""
     assert "SELECT COUNT(*) FROM regime_snapshots" in read_source(
         os.path.join(BACKEND, "main.py"))
-    assert "ON CONFLICT (as_of, rules_version, close_source) DO NOTHING" in code_of_file(
-        os.path.join(BACKEND, "jobs", "regime_seed.py"))
+    # R-IV.1288(b)2 NARROWED THE CONFLICT TARGET, not the behaviour. The index it infers is
+    # now partial (`WHERE superseded = FALSE`), because the unqualified form made the table's
+    # own supersession unusable for one (as_of, rules_version, close_source) -- a superseded
+    # row still occupied the key, so a corrected label could only be written by UPDATEing the
+    # row it corrected. What this guard is FOR is unchanged and still asserted: DO NOTHING,
+    # never DO UPDATE.
+    seed = code_of_file(os.path.join(BACKEND, "jobs", "regime_seed.py"))
+    assert ("ON CONFLICT (as_of, rules_version, close_source) WHERE superseded = FALSE"
+            in seed), "the conflict target must match the partial unique index"
+    assert "DO NOTHING" in seed
+    assert "DO UPDATE" not in seed
 
 
 # ── the write boundary: a string is not a date ─────────────────────────────

@@ -2530,9 +2530,28 @@ async def init_database():
             ALTER TABLE regime_snapshots
                 DROP CONSTRAINT IF EXISTS regime_snapshots_as_of_rules_version_key
         """)
+        # R-IV.1288(b)2: THE UNIQUE KEY IS NOW PARTIAL, over CURRENT rows only.
+        #
+        # The table is append-only by design -- "a label is a judgement about a session, and
+        # replacing one destroys the evidence that it changed" -- and `superseded` is how a
+        # corrected judgement is supposed to sit beside the one it replaces. But the unqualified
+        # unique index made that impossible for the SAME (as_of, rules_version, close_source):
+        # a superseded row still occupied the key, so the only way to correct a label was to
+        # UPDATE it in place, which is exactly what the design forbids. It had never bitten
+        # because the one supersession so far was v1 -> v2, and those differ in rules_version.
+        #
+        # R-IV.1288(b)2 asks for both at once -- "write the two v2-basis rows now (append-only)
+        # ... and mark the two nightly-basis rows superseded" -- which only the partial form
+        # allows. The invariant it still enforces is the one that matters: AT MOST ONE CURRENT
+        # ROW per (session, rules version, close source). Every read on this table already
+        # filters `superseded = FALSE`.
         await conn.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_regime_snapshots_asof_rules_source
+            DROP INDEX IF EXISTS uq_regime_snapshots_asof_rules_source
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_regime_snapshots_current_asof_rules_source
                 ON regime_snapshots (as_of, rules_version, close_source)
+             WHERE superseded = FALSE
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_regime_snapshots_current
