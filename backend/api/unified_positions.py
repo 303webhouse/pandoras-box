@@ -35,7 +35,7 @@ from models.position_status import DUPLICATE_OF  # R-IV.449(a): retired, not del
 # R-IV.1265(b): a closure's trade_date is derived from ITS OWN disposal lot's session, in the
 # same INSERT. Not from the clock -- `created_at` already records when the row was written, and
 # conflating the two is the fault the column exists to remove.
-from models.session_day import trade_date_from_disposal
+from models.session_day import trade_date_values
 from models.derived_as_of import (  # R-IV.775(f)/792(b): a derived figure carries its own as-of
     as_of_block, drift_between,
 )
@@ -1336,9 +1336,9 @@ async def _settle_expired_lots(expired: List[Dict[str, Any]]) -> Dict[str, Dict[
                 await conn.execute(
                     """INSERT INTO position_lot_closures
                            (position_id, disposal_lot_id, acquired_lot_id, qty, cost_per_unit,
-                            proceeds_per_unit, realized, multiplier, trade_date)
+                            proceeds_per_unit, realized, multiplier, trade_date, trade_date_basis)
                        VALUES ($1, $2, $3, $4, $5, 0, $6, $7, """
-                    + trade_date_from_disposal(2) + ")",
+                    + trade_date_values(2) + ")",
                     pid, disposal, lot["id"], abs(Decimal(str(lot["qty"]))),
                     abs(Decimal(str(lot["price"] or 0))), r, mult)
                 info["closed_lots"] += 1
@@ -2929,9 +2929,9 @@ async def close_position(position_id: str, req: ClosePositionRequest, _=Depends(
                                 """INSERT INTO position_lot_closures
                                        (position_id, disposal_lot_id, acquired_lot_id, qty,
                                         cost_per_unit, proceeds_per_unit, realized,
-                                        multiplier, trade_date)
+                                        multiplier, trade_date, trade_date_basis)
                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, """
-                                + trade_date_from_disposal(2) + ")",
+                                + trade_date_values(2) + ")",
                                 position_id, _disposal_id, _a["lot_id"], _a["qty"],
                                 _a["cost_per_unit"], _a["proceeds_per_unit"],
                                 _a["realized"], _plan["multiplier"])
@@ -4237,9 +4237,9 @@ async def reduce_position(position_id: str, req: ReducePositionRequest,
                 await conn.execute(
                     """INSERT INTO position_lot_closures
                            (position_id, disposal_lot_id, acquired_lot_id, qty, cost_per_unit,
-                            proceeds_per_unit, realized, multiplier, trade_date)
+                            proceeds_per_unit, realized, multiplier, trade_date, trade_date_basis)
                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, """
-                    + trade_date_from_disposal(2) + ")",
+                    + trade_date_values(2) + ")",
                     position_id, disposal_id, a["lot_id"], a["qty"], a["cost_per_unit"],
                     a["proceeds_per_unit"], a["realized"], plan["multiplier"])
 

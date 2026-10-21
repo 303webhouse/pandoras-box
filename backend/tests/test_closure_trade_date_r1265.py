@@ -65,13 +65,20 @@ def test_every_closure_insert_names_trade_date():
     assert len(lits) == 3, "expected 3 closure-insert sites, found %d" % len(lits)
     for sql in lits:
         assert "trade_date" in sql, sql[:200]
+        # R-IV.1272(b)1 "labelled as such": the basis column travels with the date, at every
+        # site. A column named at one site and not another is how two closures written minutes
+        # apart come to disagree about what their dates mean.
+        assert "trade_date_basis" in sql, sql[:240]
 
 
 def test_every_closure_insert_derives_it_from_its_own_disposal_lot():
     """The column list is not enough: it must be FILLED, and filled from the disposal lot. One
     call per insert site, each bound to the disposal id's parameter."""
+    # R-IV.1272(b)1: the helper is now `trade_date_values`, which emits the date AND the basis
+    # label together. The date alone was what 863fae8d shipped; a date with no record of where
+    # it came from is one a later reader has to guess at.
     calls = [n for n in ast.walk(_tree(WRITER))
-             if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "trade_date_from_disposal"]
+             if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "trade_date_values"]
     assert len(calls) == 3, "expected 3 derivations, found %d" % len(calls)
     for c in calls:
         assert len(c.args) == 1 and isinstance(c.args[0], ast.Constant), ast.dump(c)
@@ -88,7 +95,7 @@ def test_the_insert_and_its_derivation_are_one_statement():
         if not isinstance(n, ast.BinOp) or not isinstance(n.op, ast.Add):
             continue
         txt = ast.dump(n)
-        if "INSERT INTO position_lot_closures" in txt and "trade_date_from_disposal" in txt:
+        if "INSERT INTO position_lot_closures" in txt and "trade_date_values" in txt:
             joined += 1
     assert joined >= 3, joined
 
