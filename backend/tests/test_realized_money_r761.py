@@ -70,12 +70,27 @@ class TestTheSqlSaysWhatItMeans:
         from api.abacus import _realized_money_sql
         return _realized_money_sql(first, last)
 
-    def test_branch1_dates_on_the_CLOSURE_and_branch2_on_the_exit(self):
+    def test_branch1_dates_on_the_TRADE_DATE_and_branch2_on_the_exit(self):
         """The whole reason closures are the primary source: they carry their own date, and an
-        open row's `exit_date` is NULL."""
+        open row's `exit_date` is NULL.
+
+        R-IV.1281(b): this asserted `c.created_at`, which was the right column under R-IV.761(b)
+        and became WRONG at R-IV.1270 -- a write timestamp is not a trade date, and dating on it
+        read +3,535.22 for a window whose trades sum to -191.99. The assertion follows the ruling
+        rather than being relaxed: branch 1 dates on `trade_date` and must NOT fall back to
+        `created_at`, because a COALESCE would put an undated closure back in the window by the
+        very timestamp the fix removed.
+        """
         c, f, _ = self._sql(None)
-        assert "c.created_at" in c and "p.exit_date" not in c
+        assert "c.trade_date" in c
+        assert "c.created_at" not in c
+        assert "p.exit_date" not in c
         assert "p.exit_date" in f
+
+    def test_branch1_EXCLUDES_the_undated_rather_than_dating_them_some_other_way(self):
+        """A closure with no trade date is not placed at all -- it is reported separately."""
+        c, _, _ = self._sql(None)
+        assert "c.trade_date IS NOT NULL" in c
 
     def test_both_branches_exclude_DUPLICATE_OF(self):
         c, f, _ = self._sql(None)
@@ -103,22 +118,58 @@ class TestTheSqlSaysWhatItMeans:
 
 
 class _StubPool:
-    """Returns canned rows for the three fetches, in the order `_load_realized_money` makes them."""
+    """Canned rows per QUERY, routed on the SQL — never on the order the calls arrive in.
 
-    def __init__(self, closures, fallback, dropped):
-        self._queued = [closures, fallback, dropped]
-        self.calls = 0
+    R-IV.1281(b). This stub used to queue three lists and `pop(0)` them positionally, with the
+    loader's call ORDER as its contract. R-IV.1270 added a fourth read (the undated closures) and
+    every test here died on `IndexError: pop from empty list` -- ten failures pointing at an empty
+    list rather than at the read that was added, which is the least informative way a fixture can
+    break.
+
+    A POSITIONAL FIXTURE ENCODES THE WRONG FACT. What each test means is "the closures query
+    returns these rows"; what it said was "the second call returns these rows". The two agree only
+    until someone reorders or inserts a read -- and then the fixture hands branch 2's rows to the
+    dropped-row query, which in the worst case passes while testing nothing. Routing on the SQL
+    says the thing the test means, and an unrecognised query raises instead of silently handing
+    back the wrong rows.
+    """
+
+    def __init__(self, closures, fallback, dropped, undated=()):
+        self.closures = list(closures)
+        self.fallback = list(fallback)
+        self.dropped = list(dropped)
+        self.undated = list(undated)
+        self.seen = []
 
     async def fetch(self, sql, *params):
-        self.calls += 1
-        return self._queued.pop(0)
+        if "SUM(c.realized)" in sql:
+            self.seen.append("closures")
+            return self.closures
+        if "c.trade_date IS NULL" in sql:
+            self.seen.append("undated")
+            return self.undated
+        if "p.exit_date IS NOT NULL" in sql:
+            self.seen.append("fallback")
+            return self.fallback
+        if "p.exit_date IS NULL" in sql:
+            self.seen.append("dropped")
+            return self.dropped
+        raise AssertionError("this stub has no route for: %s" % " ".join(sql.split())[:160])
 
 
-async def _run(closures, fallback, dropped=()):
+# Every read the loader is expected to make. Named, so a read that STOPS happening fails here --
+# which is the half of the old `calls == 3` assertion worth keeping. A read that is ADDED no longer
+# breaks the fixture; it fails this list instead, with its own name.
+EXPECTED_READS = {"closures", "fallback", "dropped", "undated"}
+
+
+async def _run(closures, fallback, dropped=(), undated=()):
     from api.abacus import _load_realized_money
-    pool = _StubPool(list(closures), list(fallback), list(dropped))
+    pool = _StubPool(closures, fallback, dropped, undated)
     out = await _load_realized_money(pool, None, date(2026, 10, 8))
-    assert pool.calls == 3, "all three reads must happen, including the dropped-row read"
+    assert set(pool.seen) == EXPECTED_READS, (
+        "the loader's reads changed: saw %r, expected %r" % (sorted(set(pool.seen)),
+                                                             sorted(EXPECTED_READS)))
     return out
 
 
@@ -253,3 +304,58 @@ class TestTheOtherReadersWereNotWidened:
     def test_win_rate_still_comes_from_the_census(self):
         src = self._src(os.path.join("api", "abacus.py"))
         assert 'wins / counted' in src
+
+
+class TestTheUndatedClosuresAppearInExactlyOnePlace:
+    """R-IV.1281(b): the rows the `trade_date IS NOT NULL` filter drops must appear in the
+    "date unknown" line AND NOWHERE ELSE.
+
+    Both halves are asserted, because each alone would pass a broken implementation: a bucket that
+    is served but also summed into the money would satisfy "it appears", and a row dropped from
+    every total without being served would satisfy "it is not in the money". The pair is the
+    contract -- excluded from the figures, present on the page.
+    """
+
+    UNDATED = [
+        {"id": 1942, "position_id": "POS_IWM_20261006_R652", "account": "ROBINHOOD",
+         "ticker": "IWM", "status": "EXPIRED", "realized": -13.08},
+        {"id": 1943, "position_id": "POS_NVDA_20261008_171815", "account": "ROBINHOOD",
+         "ticker": "NVDA", "status": "EXPIRED", "realized": -44.18},
+    ]
+
+    @pytest.mark.asyncio
+    async def test_they_are_served_with_their_money_and_their_rows(self):
+        out = await _run(CONTROL_CLOSURES, CONTROL_FALLBACK, undated=self.UNDATED)
+        u = out["date_unknown"]
+        assert u["count"] == 2
+        assert u["total"] == -57.26, "BUILD's figure, to the cent"
+        assert u["in_any_total"] is False
+        assert [r["ticker"] for r in u["rows"]] == ["IWM", "NVDA"]
+        assert u["by_account"]["ROBINHOOD"] == -57.26
+
+    @pytest.mark.asyncio
+    async def test_their_money_is_in_NO_total(self):
+        """The control is the SAME book without them: every money figure must be identical."""
+        with_them = await _run(CONTROL_CLOSURES, CONTROL_FALLBACK, undated=self.UNDATED)
+        without = await _run(CONTROL_CLOSURES, CONTROL_FALLBACK, undated=[])
+        assert with_them["combined"] == without["combined"]
+        assert with_them["by_account"] == without["by_account"]
+        assert with_them["fallback"]["total"] == without["fallback"]["total"]
+        # And the empty case says nothing is unplaced, with a NULL total rather than 0.00.
+        assert without["date_unknown"]["count"] == 0
+        assert without["date_unknown"]["total"] is None
+
+    @pytest.mark.asyncio
+    async def test_they_are_not_smuggled_into_the_other_two_disclosure_blocks(self):
+        """`fallback` and `excluded_no_date` answer different questions; a row in two blocks at
+        once would be counted twice by any reader that sums the disclosures."""
+        out = await _run(CONTROL_CLOSURES, CONTROL_FALLBACK, undated=self.UNDATED)
+        ids = {r["position_id"] for r in out["date_unknown"]["rows"]}
+        assert not ids & {r["position_id"] for r in out["fallback"]["rows"]}
+        assert not ids & {r["position_id"] for r in out["excluded_no_date"]["rows"]}
+
+    @pytest.mark.asyncio
+    async def test_the_dating_block_names_the_trade_date_as_the_basis(self):
+        out = await _run(CONTROL_CLOSURES, CONTROL_FALLBACK, undated=self.UNDATED)
+        assert out["dating"]["basis"] == "position_lot_closures.trade_date"
+        assert "created_at" not in out["dating"]["basis"]
