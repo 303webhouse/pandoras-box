@@ -5,8 +5,8 @@
       "sha256": "d02ded19b652c3a2365a1acd41df74608850e92d7028c0972d4192d9f581031f"
     },
     "abacus.js": {
-      "pin": 8,
-      "sha256": "a7fd0033aa2d330abd6e9beecbf4ef66c848f445e0e63a374303ab3666ae30ae"
+      "pin": 9,
+      "sha256": "8768fd88bb245dde8cd18dc4f90265239de148aa783738eb4ec247bbbdd7c9ad"
     },
     "v2.css": {
       "pin": 63,
@@ -16,7 +16,7 @@
   "index.html": {
     "app.js": {
       "pin": 180,
-      "sha256": "ee1c8d923e27814f6158e6e9de6b1474f6f2e96da3f8a118b8fa9de0a0b83c4d"
+      "sha256": "08ed256552b3c58c1bb466e91f296e19ffbca0a15994906aa728cd3c39f51885"
     },
     "styles.css": {
       "pin": 156,

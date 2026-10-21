@@ -124,6 +124,26 @@
     if (!b || b.trade_date_exists) return '';
     return ' ' + chip('unknown', 'by write date · ' + basisCount(b), basisTitle(b));
   }
+  // ── R-IV.1270(b) · MONEY THAT NO WINDOW CAN PLACE ───────────────────────────────────────────
+  // A closure with no `trade_date` cannot be dated, so it is outside every period figure on this
+  // page. Excluding it is right; excluding it SILENTLY is the failure this whole sequence of
+  // rulings has been about, so the count AND the money AND the rows are all on the page.
+  //
+  // It reuses the amber `.ab-basis` treatment rather than inventing a near-identical one: the
+  // claim is the same family -- "we cannot place this" -- and two slightly different amber boxes
+  // would read as two different kinds of doubt.
+  function dateUnknownLine(u) {
+    if (!u || !u.count) return '';
+    const rows = (u.rows || []).map((r) => esc(r.ticker || '?')
+      + (r.account_display ? ' (' + esc(r.account_display) + ')' : '')
+      + ' ' + esc(fmt(r.realized, 'usd_cents'))).join(' \u00b7 ');
+    return '<p class="ab-basis" role="note"><b>Date unknown: ' + u.count + ' row'
+      + (u.count === 1 ? '' : 's') + ', ' + esc(fmt(u.total, 'usd_cents')) + '.</b>'
+      + ' Outside every figure on this page, in every range \u2014 a closure with no trade date'
+      + ' cannot be placed in a window.' + (rows ? ' ' + rows + '.' : '')
+      + ' ' + esc(u.note || '') + '</p>';
+  }
+
   function basisLine(b) {
     if (!b || b.trade_date_exists) return '';
     return `<p class="ab-basis" role="note"><b>These period figures are dated by when the row was
@@ -248,7 +268,8 @@
     // fixed string from this file, and every value inside basisLine() is escaped there.
     $('abAccountsNote').innerHTML = (d.combined_is_pooled
       ? '<p>All accounts is pooled over every counted trade, so it is weighted by trade count — not an average of the rates above it.</p>'
-      : '') + basisLine(d.accounts_date_basis || d.date_basis);
+      : '') + basisLine(d.accounts_date_basis || d.date_basis)
+      + dateUnknownLine(d.realized_date_unknown);
   }
   const pick = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s ? s.value : null; };
   const pickN = (d, k) => { const s = (d.stats || []).find((x) => x.key === k); return s && s.n != null ? s.n : 0; };
