@@ -316,11 +316,25 @@ def test_the_hysteresis_has_no_writer_either():
         assert banned not in src, banned
 
 
-def test_the_rules_file_cites_the_registered_source_by_hash():
-    r = load_rules()
-    assert SOURCE_SHA in r["source"]
-    assert r["registered"] is True
-    assert "19:07" in r["registered_by"]
+def test_each_rules_file_cites_ITS_OWN_registered_source_by_hash():
+    """IT READ `load_rules()` WITH NO ARGUMENT, so the cutover pointed it at v2.1 and it
+    asserted v2's provenance about v2.1's file. The two have DIFFERENT and incompatible
+    provenance, and conflating them is exactly what R-IV.1191 refused:
+
+        v2     registered True, Nick 2026-10-16 19:07 MT, REGIME-STRATEGY-DOUBLE-PASS
+        v2.1   registered FALSE, "pending Nick's PR-1 stamp", TA-208 registration ab015afa
+
+    So it names the version it means. A default-argument read in a provenance test is a test
+    that silently changes subject on a version bump."""
+    v2 = load_rules("v2")
+    assert SOURCE_SHA in v2["source"]
+    assert v2["registered"] is True
+    assert "19:07" in v2["registered_by"]
+
+    v21 = load_rules("v2.1")
+    assert "ab015afa" in v21["source"]
+    assert v21["registered"] is False, "R-IV.1191: v2.1 claims no registration it lacks"
+    assert "pending" in v21["registered_by"].lower()
 
 
 def test_the_rules_order_is_section_2s_ten_rows():
@@ -422,11 +436,15 @@ def test_the_cost_line_does_NOT_come_from_the_rules_file():
     The rules file KEEPS its `stated_cost` (it is part of the stamped bytes) and it is simply
     not displayed. So the assertion now runs the other way.
     """
-    rules_cost = load_rules()["hysteresis"]["stated_cost"]
+    rules_cost = load_rules("v2.1")["hysteresis"]["stated_cost"]
     assert "late at V-shaped bottoms" in rules_cost, "the stamped bytes are unchanged"
-    assert cost_statement("v2") == [], "no cost line is served for v2 today"
-    assert rules_cost not in cost_statement("v2")
-    assert cost_statement("v2.1") == [], "QUERY supplies v2.1's under R-IV.1301(c)"
+    assert cost_statement("v2") == [], "no cost line is served for v2"
+    # v2.1 HAS a line since R-IV.1307(b), and it is NOT the stamped file's sentence. That is
+    # the whole property: the served line and the stamped bytes are different strings from
+    # different sources, and only one of them reaches the card.
+    served = cost_statement("v2.1")
+    assert served and rules_cost not in served
+    assert served[0].startswith("SPY 1999-2026")
 
 
 def test_flip_count_is_the_only_history_check_and_is_never_pnl():

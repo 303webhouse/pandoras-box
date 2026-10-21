@@ -281,15 +281,26 @@ def test_build_sessions_passes_the_rules_files_OWN_version():
     assert 'version = rules.get("version")' in block
 
 
-def test_RULES_VERSION_is_still_v2_until_the_cutover_commit():
-    """R-IV.1297(b)2: the flip to v2.1 belongs in the cutover commit, the same one that lets
-    the fixes reach the card. This test is the thing that will go red in that commit, which is
-    the point -- it makes the flip deliberate rather than incidental."""
-    from models.regime_classifier import RULES_VERSION
-    assert RULES_VERSION == "v2", (
-        "if this is intentionally v2.1, this is the cutover commit and this test should be "
-        "updated in it, together with the card and QUERY's review")
+def test_RULES_VERSION_IS_NOW_v21_BECAUSE_THIS_IS_THE_CUTOVER():
+    """THE PIN FIRED AND THIS IS THE COMMIT IT WAS WAITING FOR. R-IV.1303(c) / R-IV.1307(c).
 
+    The previous form asserted `RULES_VERSION == "v2"` and said in its own message: "if this is
+    intentionally v2.1, this is the cutover commit and this test should be updated in it,
+    together with the card and QUERY's review." All three happened -- QUERY cleared c7261e90
+    under R-IV.1301(b) -- so the assertion inverts here rather than being deleted. A pin that is
+    removed when it fires teaches nothing; one that flips records WHEN the flip happened and
+    keeps guarding the other direction.
+    """
+    from models.regime_classifier import RULES_VERSION
+    assert RULES_VERSION == "v2.1", (
+        "the cutover is this branch; a change away from v2.1 needs its own ruling")
+
+
+def test_the_served_rules_file_IS_the_stamped_v21_artifact():
+    """The flip is only real if `load_rules()` with no argument now resolves to v2.1 -- which
+    is the call every default path makes, and the one that raised FileNotFoundError until
+    R-IV.1297(c) renamed the file."""
+    assert load_rules()["version"] == "v2.1"
 
 # ── the loader ──────────────────────────────────────────────────────────────
 

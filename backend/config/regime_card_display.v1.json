@@ -2,7 +2,10 @@
   "version": "v1",
   "authority": "R-IV.1303(b). The card's COST LINE lives here and nowhere else. The stamped rules file (regime_rules.v2.1.json, LF sha256 4bc6d895...) is a CLASSIFICATION artifact and stays byte-identical, so its own `hysteresis.stated_cost` is NOT displayed and must not be read for display.",
   "why_a_separate_file": "A sentence about what a classifier gets wrong is a DISPLAY fact that changes when someone grades the classifier; the thresholds it describes are a CLASSIFICATION fact that must not change at all. Holding both in one file meant the only way to correct the sentence was to edit an immutable artifact -- which is the collision R-IV.1297(e) hit and R-IV.1303(b) resolves.",
-  "cost_lines": {},
-  "absent_means": "A rules_version with no entry in `cost_lines` shows NO cost line on the card -- not a blank heading, and never a line borrowed from another version. QUERY supplies v2.1's line under R-IV.1301(c); v2's own line is QUERY's to supply or withhold as well, because R-IV.1280 found the previous wording misleading (it called QUERY's graded figures 'ungraded' and dropped the censoring: the ~80-session median ranks 11 of 24 never-called recoveries as worst, so for nearly half the events the honest answer is 'never').",
-  "not_mine_to_write": "R-IV.925(b). A cost line is a claim about measured behaviour. BUILD does not author one; it serves what QUERY grades. An empty `cost_lines` is the correct state of this file today, not an unfinished one."
+  "cost_lines": {
+    "v2.1": "SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, never on 11; 200d line 38. (R-IV.1301)"
+  },
+  "absent_means": "A rules_version with no entry in `cost_lines` shows NO cost line on the card -- not a blank heading, and never a line borrowed from another version. v2 has no entry: the line below is v2.1's, supplied for v2.1, and attributing it to the version that did not produce it is the fault R-IV.1280 found in the wording it replaces.",
+  "not_mine_to_write": "R-IV.925(b). A cost line is a claim about measured behaviour. BUILD does not author one; it serves what QUERY grades. v2.1's line is QUERY's under R-IV.1301 and is copied verbatim; v2's absence is deliberate, not pending.",
+  "cost_lines_source": "R-IV.1307(b), verbatim. QUERY's grade of the hysteresis under R-IV.1301; the underlying measurement is R-IV.1280 / R-IV.1273(b) (REGIME-SCORECARD v1, SPY only, labels 1999-01-04 to 2026-10-16). Copied character for character and not paraphrased: a cost line is a claim about measured behaviour, and BUILD does not author one (R-IV.925(b))."
 }
