@@ -2333,7 +2333,22 @@
 
     host.innerHTML =
       '<div class="rs-call">'
-      +   '<span class="rs-label">' + esc(m.regime_label || '\u2014') + '</span>'
+      // R-IV.1278(b)4: "Never a silent old label." When the designated bar series has stopped
+      // arriving, the HEADLINE says so and the label does not appear at all -- shown beside it,
+      // a reader takes the label as current, which is exactly what happened on 2026-10-19 and
+      // 10-20. The last label is still reachable on hover, because it is a true fact about the
+      // last session that WAS labelled, not a reading to act on now.
+      +   (((m.data_freshness || {}).headline)
+            // `.rs-label.rs-stale` is styled in v2.css. I tried inline first, to dodge the
+            // three pins that stylesheet carries, and `test_every_rs_class_the_renderer_emits
+            // _has_a_style` refused it -- correctly: a renderer class with no stylesheet rule
+            // is one nobody can find. Three pins is the documented cost of touching a shared
+            // asset, not a reason to route around it.
+            ? '<span class="rs-label rs-stale" title="'
+              + esc(((m.data_freshness || {}).reason || '') + ' \u00b7 last label: '
+                    + (m.regime_label || 'none')) + '">'
+              + esc((m.data_freshness || {}).headline) + '</span>'
+            : '<span class="rs-label">' + esc(m.regime_label || '\u2014') + '</span>')
       +   (m.tags || []).map((t) =>
             '<span class="chip rs-tag">' + esc(t) + '</span>').join('')
       + '</div>'

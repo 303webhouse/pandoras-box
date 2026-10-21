@@ -179,8 +179,8 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
     screen would be the one nobody tested.
     """
     try:
-        from jobs.regime_job import (audit_notes, flip_history, health as regime_health,
-                                     ribbon as regime_ribbon,
+        from jobs.regime_job import (audit_notes, bar_freshness, flip_history,
+                                     health as regime_health, ribbon as regime_ribbon,
                                      label_diff, latest_with_diff, seed_run)
     except Exception as exc:
         return _unavailable("regime module unavailable (%s)" % type(exc).__name__)
@@ -190,6 +190,11 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         async with pool.acquire() as conn:
             got = await latest_with_diff(conn, rules_version)
             hp = await regime_health(conn, rules_version)
+            # R-IV.1278(b)4. READ EVEN WHEN A LABEL EXISTS, which is the whole point: on
+            # 2026-10-19 and 10-20 a label existed (2026-10-16's) and the BARS had stopped,
+            # and the card showed that label with nothing on its face to say so. This is the
+            # one block the headline is allowed to replace a label with.
+            fresh = await bar_freshness(conn)
             # R-IV.1195(b) asks for the seed count executed at deploy. Served here so the
             # number outlives the deploy log it was first read from.
             seeded_run = await seed_run(conn)
@@ -251,6 +256,13 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "health": "ok" if state == "current" else "unconfirmed",
         "health_reason": (hp or {}).get("reason"),
         "health_detail": hp,
+        # R-IV.1278(b)4: "Never a silent old label." `data_freshness.headline` is non-null ONLY
+        # when the designated bar series has stopped arriving, and the card prints it INSTEAD
+        # of the label. Served as its own block rather than folded into `health` because the
+        # two measure different things -- `health` is the newest LABEL's lag, this is the
+        # newest BAR's -- and the outage of 2026-10-19/20 is exactly the case where a reader
+        # needs to know it is the DATA that stopped, not the classifier that declined.
+        "data_freshness": fresh,
         "basis": snap.get("basis"),
         "not_evaluable": list(snap.get("not_evaluable") or []),
         "pending": snap.get("pending"),

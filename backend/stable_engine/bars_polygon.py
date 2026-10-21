@@ -47,6 +47,16 @@ SOURCE = "polygon"
 #: Seconds between calls. The plan's limit is 5 a minute; a backfill needs three.
 CALL_GAP_S = 13.0
 
+#: How far back `capture_session`'s range starts from the session it wants. A week covers a
+#: holiday weekend, and only the bar for the requested session is ever used -- the window exists
+#: so the request is a RANGE rather than a single session, which is what the plan refuses.
+RANGE_LOOKBACK_DAYS = 7
+
+#: What the plan says when it withholds a session. Matched on the BODY, not only the status:
+#: a 403 can also mean a bad key, and reporting "the session is not released yet" for a dead
+#: credential would send the next reader looking at the calendar instead of the key.
+NOT_AUTHORIZED = "NOT_AUTHORIZED"
+
 #: How far a Polygon close may sit from the UW chart close and still be called the same number.
 #: Half a cent: these are 2-decimal quotes, so anything beyond rounding is a real disagreement.
 CLOSE_TOLERANCE = 0.005
@@ -98,7 +108,22 @@ def _fetch_sync(ticker: str, start: str, end: str) -> List[Dict[str, Any]]:
                 import time
                 time.sleep(CALL_GAP_S * 2)
                 continue
-            raise PolygonUnavailable("%s: HTTP %s" % (ticker, e.code))
+            # THE 403 CARRIES ITS OWN REASON, and the two it can mean are days apart in what
+            # they ask of a reader: an entitlement edge ("this session is not yours yet") and a
+            # dead credential. The body says which, so it is read rather than inferred from the
+            # status -- "SPY: HTTP 403" is what the nightly audited for two nights, and it sent
+            # the diagnosis towards the v2 cut-over instead of towards the plan.
+            detail = ""
+            try:
+                body_txt = (e.read() or b"").decode("utf-8", "replace")
+                if NOT_AUTHORIZED in body_txt:
+                    detail = (" NOT_AUTHORIZED -- this plan withholds the data for that window; "
+                              "for a daily bar that usually means the session is still current")
+                elif body_txt:
+                    detail = " " + body_txt[:120]
+            except Exception:                                    # noqa: BLE001
+                pass
+            raise PolygonUnavailable("%s: HTTP %s%s" % (ticker, e.code, detail))
         except Exception as e:                                   # noqa: BLE001
             raise PolygonUnavailable("%s: %s" % (ticker, type(e).__name__))
     else:
@@ -273,13 +298,34 @@ async def capture_session(conn, session: _dt.date, tickers) -> Dict[str, Any]:
             await asyncio.sleep(CALL_GAP_S)
         first = False
         try:
-            bars = await fetch_daily(t, session, session)
+            # A RANGE, NOT A SINGLE SESSION. R-IV.1278(b)1: asking for exactly one session is
+            # what broke the nightly on two consecutive nights. MEASURED, both ways:
+            #
+            #   /range/1/day/2026-10-21/2026-10-21   HTTP 403 NOT_AUTHORIZED
+            #                                        "Your plan doesn't include this data"
+            #   /range/1/day/2026-10-15/2026-10-21   HTTP 200, n=4, and it simply OMITS 10-21
+            #
+            # On this plan a session that is still current is withheld, and a request for ONLY
+            # that session is refused outright -- so a withheld session arrived as a hard
+            # vendor error instead of as an absence, and `capture_session` reported DEGRADED
+            # with "HTTP 403" for all three tickers. A range that merely includes it answers
+            # 200 and leaves the bar out, which is the same fact in a form the caller can read.
+            #
+            # The window starts a few sessions back so a holiday or a weekend cannot make the
+            # range empty; only the bar FOR THIS SESSION is ever used.
+            bars = await fetch_daily(t, session - _dt.timedelta(days=RANGE_LOOKBACK_DAYS),
+                                     session)
         except PolygonUnavailable as exc:
             problems.append(str(exc))
             continue
         bar = next((b for b in bars if b["date"] == session), None)
         if bar is None:
-            problems.append("%s: polygon has no bar for %s" % (t, session))
+            # NOT YET RELEASED is a different fact from NOT A TRADING DAY and from a vendor
+            # outage, and the caller (and the audit row) must be able to tell them apart.
+            problems.append(
+                "%s: polygon has no bar for %s yet -- this plan withholds a session that is "
+                "still current, and the newest it served in this range is %s"
+                % (t, session, bars[-1]["date"].isoformat() if bars else "none"))
             continue
         ok, why = await verify_close(t, session, bar["c"])
         if not ok:

@@ -1335,6 +1335,22 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   font-family: var(--orbit); font-size: var(--regime-label); letter-spacing: 1.4px;
   font-weight: 400; line-height: 1.1; color: var(--text);
 }
+/* R-IV.1278(b)4. The headline that REPLACES the label when the designated bar series has
+   stopped arriving. Amber rather than red: the data is absent, which is not the same as a
+   reading that says something is wrong, and the card has red reserved for the latter.
+
+   HERE RATHER THAN INLINE, and that was not my first instinct. I styled it inline to avoid
+   bumping the three pins v2.css carries, and `test_every_rs_class_the_renderer_emits_has_a_style`
+   refused it - correctly: a renderer class with no stylesheet rule is one nobody can find, and
+   the guard exists so the stylesheet stays the single place the card's appearance is described.
+   Three pins is the documented cost of touching a shared asset (CLAUDE.md), not a reason to
+   route around it. */
+/* `var(--amber)`, with no hex fallback. My first version wrote `var(--warn, #f5a524)` and
+   `test_NO_RAW_HEX_IN_THE_CARDS_DECLARATIONS` refused it -- also correctly: the token for this
+   colour already exists at the top of this file, and a hex fallback means the card stops
+   following a theme change at exactly the moment the fallback is used. `--warn` is not a token
+   here; `--amber` is, and it is the one the health dot and the degraded readings already use. */
+.rs-label.rs-stale { color: var(--amber); }
 .chip.rs-tag { border-style: dashed; color: var(--text-3); font-size: 11px; padding: 1px 7px; }
 
 /* The one track, vermilion -> lime, with the ten fixed ticks over it. Built on .vc-gauge so
