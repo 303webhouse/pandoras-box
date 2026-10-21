@@ -318,13 +318,41 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
     except Exception as exc:
         capture = {"degraded": True, "written": 0,
                    "reason": "capture raised: %s: %s" % (type(exc).__name__, exc)}
+
+    # R-IV.1278(b)3: A SESSION THE SOURCE WILL NOT SERVE YET MUST NOT COST THE NIGHT.
+    #
+    # MEASURED: the nightly ran on both 2026-10-19 (01:31:09Z) and 2026-10-20 (01:33:33Z),
+    # asked Polygon for that day's bar at ~21:31 ET, and was refused on all three tickers. On
+    # this plan a session is withheld while it is still current -- 5.5 hours after the close is
+    # not late enough -- so the target the CALENDAR calls settled is a session the SOURCE does
+    # not have. Two nights of audit rows read "DEGRADED, no label written: SPY: HTTP 403" and
+    # the card went on showing 10-16 with nothing said.
+    #
+    # So when the target's bar is unavailable, the run FALLS BACK to the newest settled session
+    # that HAS a bar and HAS NO LABEL, and writes that instead. The withheld session is
+    # reported as PENDING, not as a failure: it will be served tomorrow, and tomorrow's run
+    # will label it. A one-session lag is this plan's entitlement edge and is a fact about the
+    # data, not a fault -- which is exactly what (b)4's freshness rule exists to say out loud.
     if capture.get("degraded"):
-        detail = "DEGRADED, no label written: %s" % capture.get("reason")
-        await _audit(conn, action="degraded", detail=detail, as_of=target,
+        pending = target
+        fallback = await _newest_labelable_session(conn, version, before=target)
+        if fallback is None:
+            detail = ("DEGRADED, no label written: %s (and no earlier settled session is "
+                      "unlabelled, so there was nothing to fall back to)"
+                      % capture.get("reason"))
+            await _audit(conn, action="degraded", detail=detail, as_of=target,
+                         rules_version=version)
+            logger.error("[regime_job] nightly %s", detail)
+            return {"written": 0, "degraded": True, "reason": capture.get("reason"),
+                    "as_of": target.isoformat(), "pending": pending.isoformat()}
+        detail = ("%s is not served yet (%s); falling back to %s, which has a bar and no label"
+                  % (pending.isoformat(), capture.get("reason"), fallback.isoformat()))
+        await _audit(conn, action="pending_source", detail=detail, as_of=pending,
                      rules_version=version)
-        logger.error("[regime_job] nightly %s", detail)
-        return {"written": 0, "degraded": True, "reason": capture.get("reason"),
-                "as_of": target.isoformat()}
+        logger.warning("[regime_job] nightly %s", detail)
+        target = fallback
+        capture = {"degraded": False, "written": 0, "skipped": True,
+                   "reason": "bar already stored for %s" % fallback.isoformat()}
 
     settled = is_session_settled(target)
     if settled is not True:
@@ -382,6 +410,35 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
             "regime": row.get("regime"), "label": row.get("label"),
             "tags": row.get("tags"), "basis": row.get("basis"),
             "change": row.get("change"), "blocked": row.get("blocked")}
+
+
+async def _newest_labelable_session(conn, version: Optional[str], *,
+                                    before) -> Optional[Any]:
+    """The newest session that HAS a designated bar and NO label, strictly before `before`.
+
+    R-IV.1278(b)3's fallback. Both halves are required and for different reasons:
+      * a bar must exist, or the classifier would be asked to label a session it cannot read;
+      * a label must NOT exist, because `regime_snapshots` is append-only -- targeting a
+        session that already has one would only produce a `conflict` audit row, which is a
+        quieter way of doing nothing.
+
+    SPY's series decides, because SPY is the shortest and the 200dma warm-up is measured on it;
+    a session QQQ has and SPY does not is not classifiable.
+    """
+    row = await conn.fetchrow(
+        """SELECT b.date
+             FROM regime_daily_bars b
+            WHERE b.ticker = 'SPY'
+              AND b.close_source = $1
+              AND b.date < $2
+              AND NOT EXISTS (
+                    SELECT 1 FROM regime_snapshots s
+                     WHERE s.as_of = b.date
+                       AND s.rules_version = $3
+                       AND s.superseded = FALSE)
+            ORDER BY b.date DESC
+            LIMIT 1""", CLOSE_SOURCE, before, version)
+    return row["date"] if row else None
 
 
 async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
@@ -701,6 +758,84 @@ async def health(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
     return {"state": state, "reason": reason, "as_of": as_of_d.isoformat(),
             "last_settled_session": newest_settled.isoformat(), "lag_sessions": lag,
             "shown_regime": row["shown_regime"], "rules_version": version}
+
+
+#: R-IV.1278(b)4. The headline the card shows when the DATA has stopped arriving. The ruling's
+#: own words, with the last settled bar's date appended -- a bare "STALE" tells a reader to
+#: distrust the screen and nothing about how far back to look.
+DATA_STALE_HEADLINE = "DATA STALE · last settled %s"
+
+#: How many trading days the newest designated bar may lag before the headline fires. ONE, not
+#: zero, and the reason is this plan's own entitlement edge: Polygon withholds a session while
+#: it is still current, so between the close and the next session's release the newest bar is
+#: ALWAYS one session old. A threshold of zero would print DATA STALE every single evening and
+#: the headline would stop meaning anything within a week.
+DATA_STALE_LAG = 1
+
+
+async def bar_freshness(conn) -> Dict[str, Any]:
+    """Is the DESIGNATED BAR SERIES still arriving? R-IV.1278(b)4.
+
+    A DIFFERENT QUESTION FROM `health()`, which measures the newest LABEL's lag. The two come
+    apart in the direction that matters: on 2026-10-19 and 10-20 the nightly ran, Polygon
+    refused the session, and NO BAR AND NO LABEL were written -- while the card went on showing
+    2026-10-16's label with nothing on its face to say the series had stopped. `health` knew
+    (it would have read `dead` by the 20th); the HEADLINE did not say so, and the headline is
+    what a reader sees.
+
+    So this reads the bar table directly, on the designated source, and returns a headline the
+    card prints INSTEAD of a label rather than beside it. Never a silent old label.
+
+    SPY DECIDES, because SPY is the shortest series and the 200dma warm-up is measured on it: a
+    session QQQ has and SPY does not is not classifiable, so SPY's newest bar is the newest
+    session the classifier could use.
+    """
+    out: Dict[str, Any] = {"source": CLOSE_SOURCE, "threshold_sessions": DATA_STALE_LAG}
+    try:
+        row = await conn.fetchrow(
+            """SELECT MAX(date) AS newest FROM regime_daily_bars
+                WHERE ticker = 'SPY' AND close_source = $1""", CLOSE_SOURCE)
+    except Exception as exc:                                        # noqa: BLE001
+        # UNREADABLE IS NOT FRESH. The headline fires, because a card that cannot check its own
+        # data must not imply it did.
+        return dict(out, stale=True, newest_bar=None, lag_sessions=None,
+                    headline=DATA_STALE_HEADLINE % "unknown",
+                    reason="regime_daily_bars unreadable (%s)" % type(exc).__name__)
+    newest = row["newest"] if row else None
+    if newest is None:
+        return dict(out, stale=True, newest_bar=None, lag_sessions=None,
+                    headline=DATA_STALE_HEADLINE % "never",
+                    reason="no %s bar for SPY at all" % CLOSE_SOURCE)
+    newest_d = newest if isinstance(newest, _date) else _date.fromisoformat(str(newest)[:10])
+
+    from stable_engine.market_calendar import CalendarHorizonError, last_settled_session
+    try:
+        settled = last_settled_session()
+    except CalendarHorizonError as exc:
+        return dict(out, stale=True, newest_bar=newest_d.isoformat(), lag_sessions=None,
+                    headline=DATA_STALE_HEADLINE % newest_d.isoformat(),
+                    reason="cannot establish the last settled session (%s)" % exc)
+
+    # TRADING DAYS, not calendar days -- a Friday bar read on Monday is ONE session behind, and
+    # a calendar threshold would call every ordinary Monday stale.
+    from stable_engine.market_calendar import trading_days_between
+    try:
+        lag = max(0, trading_days_between(newest_d, settled))
+    except Exception:                                               # noqa: BLE001
+        lag = max(0, (settled - newest_d).days)
+
+    stale = lag > DATA_STALE_LAG
+    return dict(out, stale=stale, newest_bar=newest_d.isoformat(),
+                last_settled_session=settled.isoformat(), lag_sessions=lag,
+                headline=(DATA_STALE_HEADLINE % newest_d.isoformat()) if stale else None,
+                reason=("the newest %s bar is %s, %d trading session(s) behind the last settled "
+                        "session %s" % (CLOSE_SOURCE, newest_d.isoformat(), lag,
+                                        settled.isoformat())
+                        if stale else
+                        "the newest %s bar is %s, %d session(s) behind %s, inside the %d-session "
+                        "allowance this plan's withheld current session requires"
+                        % (CLOSE_SOURCE, newest_d.isoformat(), lag, settled.isoformat(),
+                           DATA_STALE_LAG)))
 
 
 #: B8 section 7: how many settled sessions the ribbon shows.
