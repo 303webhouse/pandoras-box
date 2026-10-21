@@ -380,6 +380,24 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
                     rules_version=version)
         return {"written": 0, "refused": detail, "as_of": target.isoformat()}
 
+    # THE CUTOVER GATE (TA-208 item 7 / R-IV.1288(c)). On the FIRST run under a new rules
+    # version the starting hysteresis state is inherited from its predecessor -- verified, not
+    # copied -- and if the new version disputes that state the job DECLINES and says so rather
+    # than seeding or backfilling. Checked before any label is computed, because a run that
+    # cannot legitimately start must not write one.
+    gate = await cutover_state(conn, str(version), rules=rules)
+    if not gate.get("ok"):
+        detail = "cutover blocked: %s" % gate.get("reason")
+        await _audit(conn, action="cutover_blocked", detail=detail, as_of=target,
+                     rules_version=version)
+        logger.error("[regime_job] nightly %s", detail)
+        return {"written": 0, "needs_ruling": True, "reason": gate.get("reason"),
+                "as_of": target.isoformat()}
+    if gate.get("inherited"):
+        await _audit(conn, action="cutover", detail=gate.get("reason"), as_of=target,
+                     rules_version=version)
+        logger.info("[regime_job] %s", gate.get("reason"))
+
     # THE SAME BUILD THE SEED USES (R-IV.1284(c) / TA-208 item 7). This line used to be a bare
     # `sessions_from_series(series, settled_through=...)`, so `v2` defaulted to False and no VIX
     # pair was passed -- 95 of 304 sessions take a different label on that basis, and a cutover
@@ -844,6 +862,96 @@ GROUP_LAST_READING = {
     "TREND-DOWN/STRESS": "BEARISH last reading",
     "RANGE": "NEUTRAL last reading",
 }
+
+
+#: Which version each new one inherits its starting state from, at a cutover. Written down
+#: rather than derived from the string, because "the previous version" is a judgement and a
+#: wrong guess silently inherits the wrong hysteresis.
+CUTOVER_PREDECESSOR = {"v2.1": "v2"}
+
+
+async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
+    """Can `to_version` inherit its predecessor's state, and does it agree about it?
+    TA-208 §7 item 7 / R-IV.1288(c).
+
+    THE INHERITANCE IS VERIFIED, NOT COPIED, and that is deliberate. Copying v2's
+    `shown / held_sessions / pending / pending_closes` across asserts nothing: it would hand
+    v2.1 a state it never computed, and if v2.1's rules ever diverged the mismatch would be
+    invisible precisely because the numbers were copied. Instead the new version RECOMPUTES the
+    predecessor's last settled session from the same stored series and the answers are compared.
+
+    IT IS SOUND TO EXPECT AGREEMENT: v2.1's rules file differs from v2's in exactly two leaf
+    keys, `.version` and `.hysteresis.stated_cost`, which is asserted by
+    `test_regime_v21_r1277`. Every threshold, the hysteresis block and the order are identical,
+    so the same series must produce the same shown label and the same counters. If it does not,
+    something changed that nobody declared -- and this function REFUSES rather than carrying on,
+    which is TA-208's own instruction: "If the job cannot start without a seeded history, STOP
+    and ask SPINE. Do not backfill."
+
+    NOTHING IS WRITTEN HERE and no era is replayed onto disk. The walk is in memory, exactly as
+    every nightly run already does to rebuild its counters.
+    """
+    from jobs.regime_seed import replay
+
+    rules = rules or load_rules()
+    out: Dict[str, Any] = {"to_version": to_version, "ok": False, "needs_ruling": False}
+
+    have = await conn.fetchval(
+        "SELECT COUNT(*) FROM regime_snapshots "
+        " WHERE rules_version = $1 AND superseded = FALSE", to_version)
+    if have:
+        return dict(out, ok=True, inherited=False,
+                    reason="%s already has %d current row(s); no cutover needed" % (to_version,
+                                                                                    have))
+
+    frm = CUTOVER_PREDECESSOR.get(to_version)
+    if not frm:
+        return dict(out, needs_ruling=True,
+                    reason=("no predecessor is declared for %s, so there is no state to inherit "
+                            "and a seed would be required -- which TA-208 item 7 forbids "
+                            "without a ruling" % to_version))
+    row = await conn.fetchrow(
+        """SELECT as_of, shown_regime, regime, held_sessions, pending, pending_closes
+             FROM regime_snapshots
+            WHERE rules_version = $1 AND superseded = FALSE AND settled IS TRUE
+            ORDER BY as_of DESC LIMIT 1""", frm)
+    if row is None:
+        return dict(out, needs_ruling=True,
+                    reason=("%s has no settled row to inherit from, so %s cannot start without "
+                            "a seed -- stopping, as TA-208 item 7 directs" % (frm, to_version)))
+
+    anchor = row["as_of"]
+    anchor_s = anchor.isoformat() if hasattr(anchor, "isoformat") else str(anchor)
+    stored = {"shown_regime": row["shown_regime"], "held_sessions": row["held_sessions"],
+              "pending": row["pending"], "pending_closes": row["pending_closes"]}
+
+    series = await load_designated_series(conn)
+    sessions, build = await build_sessions(conn, series, rules=rules,
+                                           settled_through=anchor_s)
+    walked = replay(sessions, rules)
+    mine = next((r for r in walked["shown"] if r.get("as_of") == anchor_s), None)
+    if mine is None:
+        return dict(out, needs_ruling=True, anchor=anchor_s,
+                    reason=("%s produced no row for %s, the session it would inherit from"
+                            % (to_version, anchor_s)))
+    computed = {k: mine.get(k) for k in stored}
+    diffs = {k: (stored[k], computed[k]) for k in stored if stored[k] != computed[k]}
+    if diffs:
+        return dict(out, needs_ruling=True, anchor=anchor_s, stored=stored,
+                    computed=computed, differs=diffs, build=build,
+                    reason=("%s recomputes %s differently from %s's stored row (%s). The rules "
+                            "files differ only in `version` and `stated_cost`, so this should "
+                            "be impossible -- something undeclared changed. STOPPING and asking "
+                            "SPINE rather than inheriting a state the new version disputes"
+                            % (to_version, anchor_s, frm,
+                               ", ".join("%s stored=%r computed=%r" % (k, a, b)
+                                         for k, (a, b) in sorted(diffs.items())))))
+    return dict(out, ok=True, inherited=True, anchor=anchor_s, from_version=frm,
+                stored=stored, computed=computed, build=build,
+                reason=("%s inherits %s's state at %s and agrees about it exactly (%s). No seed, "
+                        "no replay written, no backfill."
+                        % (to_version, frm, anchor_s,
+                           ", ".join("%s=%r" % (k, v) for k, v in sorted(stored.items())))))
 
 
 async def unmatched_run(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:

@@ -290,7 +290,16 @@ def test_the_bar_store_UPSERTS_while_snapshots_stay_append_only():
     src = code_of_file(MODULE)
     assert "ON CONFLICT (ticker, date) DO UPDATE" in src
     seed = code_of_file(os.path.join(BACKEND, "jobs", "regime_seed.py"))
-    assert "ON CONFLICT (as_of, rules_version, close_source) DO NOTHING" in seed
+    # R-IV.1288(b)2 NARROWED THE CONFLICT TARGET, not the behaviour. The index it infers is
+    # now partial (`WHERE superseded = FALSE`), because the unqualified form made the table's
+    # own supersession unusable for one (as_of, rules_version, close_source) -- a superseded
+    # row still occupied the key, so a corrected label could only be written by UPDATEing the
+    # row it corrected. What this guard is FOR is unchanged and still asserted: DO NOTHING,
+    # never DO UPDATE.
+    assert ("ON CONFLICT (as_of, rules_version, close_source) WHERE superseded = FALSE"
+            in seed), "the conflict target must match the partial unique index"
+    assert "DO NOTHING" in seed
+    assert "DO UPDATE" not in seed
 
 
 def test_a_malformed_bar_is_DROPPED_not_defaulted():
