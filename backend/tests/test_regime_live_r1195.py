@@ -453,13 +453,38 @@ def test_DEFECT_a_steady_uptrend_PRODUCES_A_LABEL():
     computed it -- so the most common regime in the book was the one v1 could not name."""
     from jobs.regime_seed import replay
     from models.regime_inputs import sessions_from_series
-    sessions = sessions_from_series(_full_series(_synthetic(300)))
+    # A STEADY uptrend, which the default shape is NOT. R-IV.1277(b) fixed the melt-up RSI leg
+    # -- it had returned a bool into a ">= 2 hits" test and could never pass -- and with the
+    # leg working, this fixture classified as MELT_UP: "17.3% above the 200dma and RSI >= 75 on
+    # 5 of the last 5". By section 2's own rules that IS a melt-up, and melt_up sits above
+    # uptrend in the order, so the classifier was right and the FIXTURE was mislabelled. The
+    # default slope of 0.8 over 300 sessions carries price 17% above its own 200dma, which is
+    # a vertical ramp, not the steady trend this test is named for.
+    #
+    # So the fixture is made into what the test says it is rather than the assertion relaxed:
+    # slope 0.3 keeps the 200dma extension near 8%, under the 12% melt-up threshold, and the
+    # trend is still unambiguous. RSI stays pinned at 100 on any monotonic series, which is why
+    # the EXTENSION leg is the one that has to separate the two rows.
+    gentle = _synthetic(300, shape=lambda i: 300.0 + i * 0.3)
+    sessions = sessions_from_series(_full_series(gentle))
     assert sessions, "300 bars must yield classifiable sessions"
     out = replay(sessions)
     last = out["shown"][-1]
     assert last["regime"] == "uptrend", last["basis"]
     assert last["shown_regime"] == "uptrend"
     assert "11 of 11 sectors" in last["basis"]
+
+
+def test_the_default_synthetic_ramp_IS_a_melt_up_now_that_the_leg_works():
+    """The other half of the same finding, kept so the fix cannot silently regress. The steep
+    default shape satisfies BOTH melt-up legs, and before R-IV.1277(b) it could satisfy only
+    one: `_rsi_ge_75_of_last_5` returned True, `float(True)` is 1.0, and 1.0 >= 2 is False."""
+    from jobs.regime_seed import replay
+    from models.regime_inputs import sessions_from_series
+    out = replay(sessions_from_series(_full_series(_synthetic(300))))
+    last = out["shown"][-1]
+    assert last["regime"] == "melt_up", last["basis"]
+    assert "RSI >= 75 on 5 of the last 5" in last["basis"]
 
 
 def test_only_the_VIX_ROW_is_unevaluable_on_a_complete_series():
