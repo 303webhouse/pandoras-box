@@ -192,6 +192,20 @@ def _families(inputs: Dict[str, Any]) -> list:
     return rows
 
 
+def _cost_lines(rules_version):
+    """The card's cost line(s), or []. Never raises into the payload.
+
+    Guarded like every other leaf read in this module: "a failure to read it must cost the card
+    its grey line, not its label." A display sentence is the least important thing on the card
+    and must never be the reason the label does not render.
+    """
+    try:
+        from models.regime_card_display import cost_lines
+
+        return cost_lines(rules_version)
+    except Exception:                                               # noqa: BLE001
+        return []
+
 async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, Any]:
     """The card's payload, or an `unavailable` one naming why.
 
@@ -310,6 +324,12 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         "blocked": snap.get("blocked"),
         "seeded": bool(snap.get("seeded")),
         "rules_version": got.get("rules_version"),
+        # R-IV.1303(b): THE COST LINE COMES FROM THE DISPLAY CONFIG, never from the stamped
+        # rules file. Empty today and correctly so -- QUERY supplies v2.1's line under
+        # R-IV.1301(c), and R-IV.1280 found the previous wording misleading. The card renders
+        # no COSTS block at all on an empty list, rather than a heading with nothing under it,
+        # which reads as a failed load.
+        "costs": _cost_lines(got.get("rules_version")),
         "display_only": DISPLAY_ONLY,
         "diff": got.get("diff"),
         "seed_run": seeded_run,

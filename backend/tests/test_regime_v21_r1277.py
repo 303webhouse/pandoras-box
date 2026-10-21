@@ -36,9 +36,6 @@ from models.regime_inputs_v2 import confirmed_break_up_50dma         # noqa: E40
 V2 = _BACKEND / "config" / "regime_rules.v2.json"
 V21 = _BACKEND / "config" / "regime_rules.v2.1.json"
 
-MEASURED_COST = ("Measured 1999-2026 (LAB b6a6abd9, ungraded): danger called about 2 sessions "
-                 "after a peak; recoveries about 80 sessions after a trough; the 200-day line "
-                 "alone about 38.")
 
 
 def _load(p):
@@ -129,25 +126,25 @@ def test_the_thresholds_the_hysteresis_and_the_order_are_byte_identical():
             assert a["hysteresis"][k] == b["hysteresis"][k], k
 
 
-def test_the_stated_cost_no_longer_claims_to_be_UNGRADED():
-    """R-IV.1297(e) asks for the string to become QUERY's graded sentence and for "ungraded"
-    to go. HALF OF THAT IS DONE HERE AND HALF IS BLOCKED, deliberately and reported:
+def test_the_RULES_FILE_IS_NOT_THE_SOURCE_OF_THE_COST_LINE():
+    """R-IV.1303(b) RESOLVED THE COLLISION THIS TEST USED TO RECORD.
 
-      done     "ungraded" is gone. It lived in f1777f80's file -- "Measured 1999-2026 (LAB
-               b6a6abd9, ungraded)" -- and that file is retired by (c).
-      blocked  the replacement sentence cannot be written here. `stated_cost` is read from the
-               RULES FILE and nowhere else (models/regime_hysteresis.py), so setting it means
-               editing the stamped artifact -- which (c) requires to be byte-identical to a
-               named sha256, and R-IV.1043(c) makes immutable. (c) names an exact hash and (e)
-               names no hash, so the hash is the instruction that cannot be satisfied two ways.
+    R-IV.1297(e) asked for the cost sentence to change; R-IV.1297(c) required this file to stay
+    byte-identical to a named sha256; `cost_statement` read the sentence out of it. No common
+    satisfaction, so the item was reported blocked. The fault was PLACEMENT: a sentence about
+    what a classifier gets wrong is a DISPLAY fact that changes when someone grades the
+    classifier, while the thresholds it describes must not change at all.
 
-    So this asserts what IS true of the file in the tree, and the collision is SPINE's to
-    resolve: either LAB re-stamps the artifact carrying the sentence, or the card's displayed
-    cost comes from somewhere other than the rules file.
+    So the line moved to `backend/config/regime_card_display.v1.json` and this file keeps its
+    own `stated_cost` -- part of the stamped bytes -- undisplayed. R-IV.1307(b) supplies the
+    real line, and the phrase that called QUERY's graded figures ungraded is gone from the
+    repo's live text entirely.
     """
-    cost = _load(V21)["hysteresis"]["stated_cost"]
-    assert "ungraded" not in cost
-    assert "b6a6abd9" not in cost, "the retired file's LAB commit must not survive"
+    from models.regime_hysteresis import cost_statement
+
+    stamped = _load(V21)["hysteresis"]["stated_cost"]
+    assert "V-shaped bottoms" in stamped, "the stamped bytes are unchanged"
+    assert stamped not in cost_statement("v2.1"), "the rules file must not be the display source"
 
 def test_v2s_own_file_is_untouched():
     """v2's rows stay in regime_snapshots beside v2.1's, so v2 must keep working exactly as it

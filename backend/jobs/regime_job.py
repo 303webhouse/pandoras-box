@@ -923,9 +923,11 @@ async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
     invisible precisely because the numbers were copied. Instead the new version RECOMPUTES the
     predecessor's last settled session from the same stored series and the answers are compared.
 
-    IT IS SOUND TO EXPECT AGREEMENT: v2.1's rules file differs from v2's in exactly two leaf
-    keys, `.version` and `.hysteresis.stated_cost`, which is asserted by
-    `test_regime_v21_r1277`. Every threshold, the hysteresis block and the order are identical,
+    IT IS SOUND TO EXPECT AGREEMENT: v2.1's rules file differs from v2's ONLY IN PROVENANCE --
+    seven leaf keys, every one of them metadata, asserted by `test_regime_v21_r1277` and
+    `test_regime_cutover_r1288`. Every threshold, the row order, `confirmed_break`, `gating`,
+    the families and every hysteresis RULE are identical (and since R-IV.1303(b) so is
+    `stated_cost`, which is no longer displayed from here),
     so the same series must produce the same shown label and the same counters. If it does not,
     something changed that nobody declared -- and this function REFUSES rather than carrying on,
     which is what the cutover was
@@ -983,7 +985,7 @@ async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
         return dict(out, needs_ruling=True, anchor=anchor_s, stored=stored,
                     computed=computed, differs=diffs, build=build,
                     reason=("%s recomputes %s differently from %s's stored row (%s). The rules "
-                            "files differ only in `version` and `stated_cost`, so this should "
+                            "files differ only in provenance keys, so this should "
                             "be impossible -- something undeclared changed. STOPPING and asking "
                             "SPINE rather than inheriting a state the new version disputes"
                             % (to_version, anchor_s, frm,

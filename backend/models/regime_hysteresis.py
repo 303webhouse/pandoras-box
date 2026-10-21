@@ -148,7 +148,22 @@ def flip_count(series: List[Dict[str, Any]]) -> int:
     return sum(1 for r in series if r.get("change"))
 
 
-def cost_statement(rules: Optional[Dict[str, Any]] = None) -> str:
-    """The sentence §2 requires on the card. Served from the rules file so it cannot drift from
-    the rules it describes."""
-    return (rules or load_rules())["hysteresis"]["stated_cost"]
+def cost_statement(rules_version: Optional[str] = None) -> List[str]:
+    """The cost line(s) §2 requires on the card, or an EMPTY LIST when there is none.
+
+    IT NO LONGER READS THE RULES FILE (R-IV.1303(b)). The old form returned
+    `rules["hysteresis"]["stated_cost"]`, on the reasoning that a sentence describing the rules
+    should live beside them so it cannot drift. That put a DISPLAY fact -- which changes
+    whenever someone grades the classifier -- inside a CLASSIFICATION artifact that is stamped,
+    hashed and immutable. R-IV.1297(e) asked for the sentence to change and (c) of the same
+    ruling required the file to stay byte-identical to `4bc6d895...`; there was no way to do
+    both. The rules file keeps its own `stated_cost` and it is NOT displayed.
+
+    THE SIGNATURE CHANGED DELIBERATELY, from `rules` to `rules_version`. Passing a rules dict
+    would let a caller hand this function the very file it must not read, and the type change
+    (str -> List[str]) makes every caller fail loudly rather than render a dict key error or,
+    worse, iterate a sentence into one bullet per character.
+    """
+    from models.regime_card_display import cost_lines
+
+    return cost_lines(rules_version)
