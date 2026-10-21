@@ -1351,6 +1351,21 @@ body.is-mobile-grid .tile-grip { display: none !important; }
    following a theme change at exactly the moment the fallback is used. `--warn` is not a token
    here; `--amber` is, and it is the one the health dot and the degraded readings already use. */
 .rs-label.rs-stale { color: var(--amber); }
+/* TA-208 section 7 item 6: RECOVERY renders dark green, and nothing else changes.
+   DERIVED FROM THE TOKEN, not a hex: `--up` is the card's green and mixing it toward
+   black darkens it while still following a theme change. A literal dark green would
+   also trip the no-raw-hex guard, which is the second time today that guard has been
+   the thing stopping a shortcut. */
+.rs-label.rs-recovery { color: color-mix(in srgb, var(--up) 72%, black); }
+/* The two small lines under the label, and the held chip. Grey and quiet by design:
+   the drift prior is DESCRIPTIVE and nothing gates on it, so it must not compete with
+   the label for attention. */
+.rs-sub-line { display: block; font-size: 10px; letter-spacing: 0.2px; color: var(--text-3); margin-top: 2px; }
+.rs-sub-line.rs-drift { color: var(--text-2); }
+.rs-last-reading { font-size: 11px; letter-spacing: 0.6px; margin-left: 6px; }
+.rs-last-reading.g-up { color: color-mix(in srgb, var(--up) 55%, var(--text-2)); }
+.rs-last-reading.g-down { color: color-mix(in srgb, var(--down) 60%, var(--text-2)); }
+.rs-last-reading.g-range { color: var(--text-2); }
 .chip.rs-tag { border-style: dashed; color: var(--text-3); font-size: 11px; padding: 1px 7px; }
 
 /* The one track, vermilion -> lime, with the ten fixed ticks over it. Built on .vc-gauge so

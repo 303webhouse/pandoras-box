@@ -39,6 +39,14 @@ ALLOWED_READERS = {
     "backend/services/read_only/regime_strategy.py": "serves the card (the only reader)",
     "backend/database/postgres_client.py": "owns the DDL",
     "backend/main.py": "runs the seed at startup behind an empty-table guard",
+    # R-IV.1284(b) AUTHORISED A SECOND WRITER, for as long as Railway's builds are paused: the
+    # evening repair that does by hand what the fixed nightly will do by itself. It is on this
+    # list rather than exempted by a pattern, so it is visible as an addition and comes off the
+    # list when the ruling's condition ends. It reuses the job's own `replay`,
+    # `_write_snapshot`, `bars_polygon.store` and `bar_freshness` -- it names the tables only
+    # to ask what is missing, and computes no label of its own.
+    "scripts/regime_bars_repair.py": ("R-IV.1284(b): the manual evening repair while builds "
+                                      "are paused; reuses the job's own writer and classifier"),
 }
 
 

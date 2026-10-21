@@ -215,12 +215,18 @@ def test_the_card_serves_the_block_even_when_a_label_exists():
 
 def test_the_headline_replaces_the_label_rather_than_sitting_beside_it():
     """Beside it, a reader takes the label as current -- which is what happened."""
+    # ANCHORED ON THE FUNCTION, not on a window around a word. R-IV.1284(c) moved this logic
+    # into `rsHeadline`, and a +/- 700-character slice around the first mention of
+    # `data_freshness` then landed in a comment block. A locator sized by guess is the fault
+    # this file already corrected once today.
     src = read_source(str(V2JS))
-    i = src.index("data_freshness")
-    block = src[i - 700:i + 700]
+    start = src.index("function rsHeadline(m) {")
+    block = src[start:src.index("function rsStateChips(m) {", start)]
     assert "rs-stale" in block
     assert "Never a silent old label" in src
     assert "last label: " in block, "the old label stays reachable on hover, as a past fact"
+    # And the headline is what the render emits, in place of the label.
+    assert "+   rsHeadline(m)" in src
 
 
 def test_the_two_stale_headlines_are_different_strings():

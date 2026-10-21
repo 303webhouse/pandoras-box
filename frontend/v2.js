@@ -2333,24 +2333,15 @@
 
     host.innerHTML =
       '<div class="rs-call">'
-      // R-IV.1278(b)4: "Never a silent old label." When the designated bar series has stopped
-      // arriving, the HEADLINE says so and the label does not appear at all -- shown beside it,
-      // a reader takes the label as current, which is exactly what happened on 2026-10-19 and
-      // 10-20. The last label is still reachable on hover, because it is a true fact about the
-      // last session that WAS labelled, not a reading to act on now.
-      +   (((m.data_freshness || {}).headline)
-            // `.rs-label.rs-stale` is styled in v2.css. I tried inline first, to dodge the
-            // three pins that stylesheet carries, and `test_every_rs_class_the_renderer_emits
-            // _has_a_style` refused it -- correctly: a renderer class with no stylesheet rule
-            // is one nobody can find. Three pins is the documented cost of touching a shared
-            // asset, not a reason to route around it.
-            ? '<span class="rs-label rs-stale" title="'
-              + esc(((m.data_freshness || {}).reason || '') + ' \u00b7 last label: '
-                    + (m.regime_label || 'none')) + '">'
-              + esc((m.data_freshness || {}).headline) + '</span>'
-            : '<span class="rs-label">' + esc(m.regime_label || '\u2014') + '</span>')
+      // The headline, the state chip and the two quiet lines are each decided in one
+      // place (rsHeadline / rsStateChips / rsSubLines) rather than inline here: the
+      // choice between the two stalenesses is the whole point, and three callers would
+      // eventually disagree about it.
+      +   rsHeadline(m)
       +   (m.tags || []).map((t) =>
             '<span class="chip rs-tag">' + esc(t) + '</span>').join('')
+      +   rsStateChips(m)
+      +   rsSubLines(m)
       + '</div>'
       + '<div class="vc-gauge rs-slider">' + ticks + marker + '</div>'
       + '<div class="rs-tw">'
@@ -2463,6 +2454,106 @@
     'bull': 'color-mix(in srgb, var(--up) 55%, var(--text-2))',
     'strong-bull': 'var(--up)',
   };
+
+  // ── The regime card's headline, and the three quiet lines under it ──────────
+  //
+  // TWO STALENESSES, AND THEY ARE NOT THE SAME FACT. Deciding between them in one place, once,
+  // because the decision is the whole point and three callers would eventually disagree:
+  //
+  //   data_freshness.headline  the BARS stopped arriving (R-IV.1278(b)4) -> "DATA STALE - ..."
+  //   held_no_match.stale      the bars arrived and NO RULE MATCHED (TA-208 s7) -> "STALE"
+  //
+  // The bar case wins when both hold: if the data stopped, "no rule matched" is a consequence
+  // of having nothing to match against, and naming the consequence would send a reader looking
+  // at section 2 instead of at the feed.
+  //
+  // AND A BLOCKED CANDIDATE IS NEITHER. When hysteresis holds a label that DOES match, the
+  // card shows the normal label plus the blocked chip -- the mechanism working as designed is
+  // not an alarm. `held_no_match.stale` is false in that case by construction, because the raw
+  // label is not null.
+  //
+  // R-IV.1278(b)4's standing instruction, kept with the code that honours it, and kept ON ONE
+  // LINE so it is greppable: "Never a silent old label."
+  //
+  // In either stale case the headline REPLACES the label rather than sitting beside it --
+  // beside it, a reader takes the label as current, which is exactly what happened on
+  // 2026-10-19 and 10-20. The last label stays reachable on hover, as a true fact about the
+  // last session that WAS labelled rather than a reading to act on now.
+  function rsHeadline(m) {
+    const fresh = m.data_freshness || {};
+    const held = m.held_no_match || {};
+    if (fresh.headline) {
+      return '<span class="rs-label rs-stale" title="'
+        + esc((fresh.reason || '') + ' \u00b7 last label: ' + (m.regime_label || 'none'))
+        + '">' + esc(fresh.headline) + '</span>';
+    }
+    if (held.stale) {
+      const g = String(held.group || '');
+      const cls = g === 'TREND-UP' ? 'g-up' : (g === 'RANGE' ? 'g-range' : 'g-down');
+      return '<span class="rs-label rs-stale" title="'
+        + esc((held.reason || '') + ' \u00b7 last label: ' + (m.regime_label || 'none'))
+        + '">STALE</span>'
+        // The group word is SMALL and COLOURED BY THE HELD LABEL'S GROUP, as the spec asks --
+        // so a reader of a stale card still learns which way the last real reading leaned,
+        // without the label itself claiming to be current.
+        + (held.group_word
+             ? '<span class="rs-last-reading ' + cls + '" title="'
+               + esc('the group of the label still being held: ' + g) + '">'
+               + esc(held.group_word) + '</span>'
+             : '');
+    }
+    // R-IV.1277(b)/TA-208 s7 item 6: RECOVERY renders dark green. Keyed off the STORED label
+    // rather than the display string, so a change to the words cannot silently drop the colour.
+    const recovery = String(m.regime_key || '') === 'recovery';
+    return '<span class="rs-label' + (recovery ? ' rs-recovery' : '') + '">'
+      + esc(m.regime_label || '\u2014') + '</span>';
+  }
+
+  // The chips that belong beside the label: the held chip when no rule matched, and the
+  // hysteresis chip when a candidate qualifies and is being held back. They are DIFFERENT
+  // chips because they are different facts, and only one of them can be true at a time.
+  function rsStateChips(m) {
+    const held = m.held_no_match || {};
+    let out = '';
+    if (held.stale && held.chip) {
+      out += '<span class="chip rs-tag" title="' + esc(held.reason || '') + '">'
+        + esc(held.chip) + '</span>';
+    }
+    if (!held.stale && m.blocked) {
+      // "RECOVERY qualifies, hold 3 of 5" -- the classifier's own words, not a paraphrase.
+      out += '<span class="chip rs-tag" title="'
+        + esc('a candidate qualifies and hysteresis is holding it; this is not stale')
+        + '">' + esc(m.blocked) + '</span>';
+    }
+    return out;
+  }
+
+  // The two quiet lines under the label. Both DESCRIPTIVE, and neither gates anything (#42).
+  function rsSubLines(m) {
+    const dp = m.drift_prior || {};
+    let out = '';
+    if (m.tuned_for) {
+      out += '<span class="rs-sub-line">' + esc(m.tuned_for) + '</span>';
+    }
+    // R-IV.1284(c): LAB's stamped drift prior. Values BLANK until LAB supplies them was the
+    // earlier instruction; LAB has now stamped the table (c9a00aab...), so the figures are
+    // real and carry their source, their n and the independence caveat in the same breath.
+    // A label with NO row says so -- "never shown by v2" is not a prior of zero.
+    if (dp.available) {
+      out += '<span class="rs-sub-line rs-drift" title="' + esc(
+        (dp.text || '') + ' \u00b7 ' + (dp.standing || '')
+        + (dp.small_cell_note ? ' \u00b7 ' + dp.small_cell_note : '')) + '">'
+        + esc('drift prior: ' + Number(dp.higher_pct).toFixed(1) + '% higher in '
+              + dp.horizon_sessions + ' sessions, typical worst dip '
+              + Number(dp.worst_dip_pct).toFixed(1) + '% \u00b7 n=' + dp.n
+              + ' (' + (dp.independence || '') + ')')
+        + '</span>';
+    } else if (dp.reason) {
+      out += '<span class="rs-sub-line rs-drift" title="' + esc(dp.reason) + '">'
+        + esc('drift prior: none for this label') + '</span>';
+    }
+    return out;
+  }
 
   function leanColor(lean) {
     return LEAN_COLOR[String(lean || 'neutral')] || LEAN_COLOR.neutral;

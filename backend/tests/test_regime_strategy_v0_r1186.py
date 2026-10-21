@@ -429,7 +429,11 @@ def test_LENS_2_IS_LABELLED_AN_ALARM_AND_IS_NOT_THE_HEADLINE():
     body = js[i:js.index("function renderRegimePlaybook", i)]
     assert "Watchlist \\u2014" not in body
     assert "(high-beta) alarm" in body
-    assert body.index("rs-label") < body.index("rs-lens"), (
+    # THE HEADLINE'S EMITTER, not the class name. R-IV.1284(c) moved the label into
+    # `rsHeadline(m)` -- which decides between the two stalenesses in one place -- so the
+    # literal `rs-label` no longer appears in this body and `index` raised ValueError. The
+    # ORDER is what this test is about, and the emitter is where the headline now comes from.
+    assert body.index("rsHeadline(m)") < body.index("rs-lens"), (
         "the base regime must render before the watchlist lens")
     m = rp.load_mock()
     assert "NEVER the headline" in m["lens_split"]["headline_rule"]

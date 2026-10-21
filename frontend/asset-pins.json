@@ -9,8 +9,8 @@
       "sha256": "8768fd88bb245dde8cd18dc4f90265239de148aa783738eb4ec247bbbdd7c9ad"
     },
     "v2.css": {
-      "pin": 64,
-      "sha256": "d13171a1bd92fe327722aaf1adac034ca1d747908829b1d1b7edd1ea2177327d"
+      "pin": 65,
+      "sha256": "5b7092845efbd0e3847208a440f4be811de1b5cef28d82d818fd6e38a86ccc97"
     }
   },
   "index.html": {
@@ -43,8 +43,8 @@
       "sha256": "ff00b4a10e8d4b87fd880cc5c4a31e803a37f7a4d7dded39fd59b6c87944c2e3"
     },
     "v2.css": {
-      "pin": 65,
-      "sha256": "d13171a1bd92fe327722aaf1adac034ca1d747908829b1d1b7edd1ea2177327d"
+      "pin": 66,
+      "sha256": "5b7092845efbd0e3847208a440f4be811de1b5cef28d82d818fd6e38a86ccc97"
     }
   },
   "v2.html": {
@@ -53,12 +53,12 @@
       "sha256": "1f97b39c3af961830aea8f92195c1ea25eba3e6fb59cae37765d16e8cd6447fe"
     },
     "v2.css": {
-      "pin": 69,
-      "sha256": "d13171a1bd92fe327722aaf1adac034ca1d747908829b1d1b7edd1ea2177327d"
+      "pin": 70,
+      "sha256": "5b7092845efbd0e3847208a440f4be811de1b5cef28d82d818fd6e38a86ccc97"
     },
     "v2.js": {
-      "pin": 93,
-      "sha256": "719e57142f0a7abbc15ed45f80fa68511040d5ec91abc97faa1807fe42a0bd0e"
+      "pin": 96,
+      "sha256": "c8ddefa6ad0724fa2a3e61deed65ce0187cc572e8a87d375c6d40aa560d4af76"
     }
   }
 }

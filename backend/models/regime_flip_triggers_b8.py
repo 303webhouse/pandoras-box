@@ -29,9 +29,26 @@ from typing import Any, Dict, List, Optional, Tuple
 #: What each label's own entry condition is, in the words the card can show. Taken from
 #: `thresholds` by key so a threshold change moves the sentence with it -- a hard-coded "2
 #: indices" would quietly disagree with the rules file the day someone edits it.
+#
+# R-IV.1277(b)/TA-208 §7 item 5: THREE OF THESE DESCRIBED SOMETHING THE ROWS DO NOT DO, and a
+# card that states an entry condition the classifier does not use is worse than one that states
+# none -- a reader checks the stated condition against the tape and concludes the label is
+# wrong. Each was read off `regime_classifier` rather than off the ruling's prose:
+#
+#   CORRECTION  the 5%-from-the-high clause is a TAG (`_annotate`, "narrow"), NOT an entry
+#               rule. The row has two clauses and neither mentions it, so the old text turned a
+#               label's decoration into a condition for having it.
+#   UPTREND     the row ALSO requires SPY above a RISING 50dma above the 200dma and IWM above
+#               its own 50dma. The sector count was the only part shown, which reads as though
+#               five sectors alone could name an uptrend.
+#   RECOVERY    the row has TWO entries (a confirmed upside 50dma break with the 20dma crossing
+#               above the 50dma, OR a breadth thrust with the close above the 50dma) and a hard
+#               precondition the text omitted entirely: the PRIOR label must be one of rows
+#               1-4. Without that, Recovery reads as reachable from an uptrend.
 ENTRY_CONDITIONS = {
-    "correction": ("{correction_indices_below_50dma} of the indices closing below their 50d, "
-                   "within {correction_narrow_within_pct_of_high}% of the high"),
+    "correction": ("SPY below its 50d while above its 200d with the 50d above the 200d, or "
+                   "SPY ranging or trending while {correction_indices_below_50dma} of 3 "
+                   "indices close below their 50d"),
     "breakdown": "a confirmed break of the prior structure",
     "bear_market": ("{bear_pct_below_52w_high}% below the 52-week high, or "
                     "{bear_closes_below_falling_200dma} closes below a falling 200d"),
@@ -39,14 +56,18 @@ ENTRY_CONDITIONS = {
                           "50d inside a bear market"),
     "crash_liquidation": ("{crash_universe_down_3pct_share}% of the universe down 3% with "
                           "{crash_families_required} families confirming"),
-    "recovery": ("a breadth thrust from {recovery_breadth_thrust_from_pct}% to "
+    "recovery": ("only from crash / bear market / bear rally / breakdown, and then either a "
+                 "confirmed upside 50d break with the 20d crossing above the 50d, or a breadth "
+                 "thrust from {recovery_breadth_thrust_from_pct}% to "
                  "{recovery_breadth_thrust_to_pct}% within "
-                 "{recovery_breadth_thrust_within_sessions} sessions"),
+                 "{recovery_breadth_thrust_within_sessions} sessions with the close above the "
+                 "50d"),
     "range_chop": ("ADX below {range_adx_below} for {range_min_sessions} sessions, within "
                    "{range_within_pct_of_50dma}% of the 50d"),
     "melt_up": ("{melt_up_pct_above_200dma}% above the 200d with RSI over {melt_up_rsi_min} "
                 "on {melt_up_rsi_hits_of_last_5} of the last 5"),
-    "uptrend": ("{uptrend_sectors_above_50dma_min} of {uptrend_sectors_total} sectors above "
+    "uptrend": ("SPY above a rising 50d above the 200d, IWM above its 50d, and "
+                "{uptrend_sectors_above_50dma_min} of {uptrend_sectors_total} sectors above "
                 "their 50d"),
     "narrow_uptrend": ("{narrow_uptrend_sectors_max} or fewer sectors leading, high-beta "
                        "breadth under {narrow_uptrend_high_beta_breadth_below_pct}%"),
