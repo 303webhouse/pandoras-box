@@ -226,6 +226,108 @@ async def lifespan(app: FastAPI):
             await conn.execute(
                 "ALTER TABLE position_lot_closures "
                 "  ADD COLUMN IF NOT EXISTS trade_date DATE")
+            # ── R-IV.1272(b): THE DECAY, AND WHY A CODE FIX COULD NOT HAVE STOPPED IT ──────
+            #
+            # Closures 1971 and 1972 were written 2026-10-21 12:22:44Z (06:22 MT) with
+            # trade_date NULL, on a production carrying 863fae8d's writer. Their disposal lot
+            # 3947 has fill_time 2026-10-19T06:00:00Z -- Mountain midnight on a Monday -- so
+            # the app's derivation would have produced 2026-10-19. It did not run, because
+            # THE WRITER IS NOT IN THIS REPO: `source` MANUAL, `provenance` UNKNOWN, no
+            # broker_ref, two closures sharing one disposal lot, on POS_IWM_20261016_R1268.
+            # A lane's own script wrote them directly.
+            #
+            # There are exactly three `INSERT INTO position_lot_closures` statements in the
+            # tree and all three set trade_date. So patching app paths cannot close this, and
+            # neither can a suite guard: the suite cannot see a script that is not here. The
+            # only thing that covers EVERY writer is the database.
+            #
+            # Same reasoning, and the same house pattern, as R-IV.517(c)'s legs trigger and
+            # R-IV.454(d)'s terminal-status trigger: "the app routes are closed in code; this
+            # trigger closes the door for direct writes."
+            #
+            # THE TRIGGER FILLS, THE CHECK REFUSES. A check alone would have REJECTED those two
+            # inserts, which turns a missing label into a failed write for a lane doing
+            # legitimate work. The trigger derives the date first and the check only catches a
+            # row that could not be derived at all. NOT VALID so it binds new rows only --
+            # 840-odd historical closures predate the column and are history, not violations.
+            #
+            # AND THE DISCRIMINATOR IS KEPT, measured on the two closures that still carry no
+            # date (1942, 1943, written 2026-10-13 before the column existed):
+            #
+            #   lot 3900  2026-10-09 00:00:00 UTC   as written 10-09 Fri   ET 10-08 Thu
+            #   lot 3901  2026-10-12 00:00:00 UTC   as written 10-12 Mon   ET 10-11 SUNDAY
+            #
+            # A BLANKET ET CONVERSION WOULD HAVE DATED LOT 3901'S TRADE TO A SUNDAY. A
+            # midnight-UTC stamp is a DAY WRITTEN DOWN, not a moment, and converting it moves
+            # it backwards -- R-IV.726's finding over 557 rows, which does not stop being true
+            # because the target column changed. So the ruling's ET rule applies to a real fill
+            # time and a written-down day is taken as written, with the basis label saying
+            # which branch ran.
+            try:
+                from models.session_day import session_basis_sql as _TD_BASIS_SQL
+                from models.session_day import session_date_sql as _TD_DATE_SQL
+
+                await conn.execute(
+                    "ALTER TABLE position_lot_closures "
+                    "  ADD COLUMN IF NOT EXISTS trade_date_basis TEXT,"
+                    "  ADD COLUMN IF NOT EXISTS trade_date_reason TEXT")
+                for _lbl, _sql in (
+                    ("closure trade_date function", """
+                        CREATE OR REPLACE FUNCTION position_lot_closures_trade_date()
+                        RETURNS trigger AS $$
+                        DECLARE
+                            v_fill timestamptz;
+                        BEGIN
+                            -- A row that states a REASON is left alone: R-IV.1272(b)2's one
+                            -- exemption is a MANUAL lot whose date is genuinely unknown, and
+                            -- the reason is what makes that a decision rather than an omission.
+                            IF NEW.trade_date IS NOT NULL OR NEW.trade_date_reason IS NOT NULL THEN
+                                RETURN NEW;
+                            END IF;
+                            SELECT fill_time INTO v_fill
+                              FROM position_lots WHERE id = NEW.disposal_lot_id;
+                            IF v_fill IS NOT NULL THEN
+                                NEW.trade_date := %s;
+                                NEW.trade_date_basis := %s;
+                            END IF;
+                            RETURN NEW;
+                        END $$ LANGUAGE plpgsql
+                    """ % (_TD_DATE_SQL("v_fill"), _TD_BASIS_SQL("v_fill"))),
+                    ("closure trade_date trigger drop", """
+                        DROP TRIGGER IF EXISTS trg_position_lot_closures_trade_date
+                            ON position_lot_closures
+                    """),
+                    ("closure trade_date trigger", """
+                        CREATE TRIGGER trg_position_lot_closures_trade_date
+                            BEFORE INSERT ON position_lot_closures
+                            FOR EACH ROW EXECUTE FUNCTION position_lot_closures_trade_date()
+                    """),
+                    ("closure trade_date check", """
+                        ALTER TABLE position_lot_closures
+                            ADD CONSTRAINT position_lot_closures_trade_date_known
+                            CHECK (trade_date IS NOT NULL OR trade_date_reason IS NOT NULL)
+                            NOT VALID
+                    """),
+                ):
+                    try:
+                        await conn.execute(_sql)
+                    except Exception as _one:
+                        name = type(_one).__name__
+                        # A second run re-adds the constraint and raises DuplicateObject. Caught
+                        # BY NAME so a different failure here is still reported, which is the
+                        # fault the R-IV.449 pattern above exists to avoid.
+                        if "Duplicate" not in name:
+                            logger.warning("closure trade_date: %s failed: %s: %s",
+                                           _lbl, name, _one)
+                # ONE AUTHOR FOR THE EXPRESSION: the trigger's body is BUILT FROM the same
+                # helpers the app paths use, so the two cannot drift to different zones or to
+                # different discriminators. Interpolated, not retyped.
+                assert "America/New_York" in _TD_DATE_SQL("v_fill")
+                assert "FILL_TIME_DAY" in _TD_BASIS_SQL("v_fill")
+                logger.info("✅ closure trade_date trigger + check ready")
+            except Exception as _td_err:
+                logger.warning("closure trade_date migration failed: %s: %s",
+                               type(_td_err).__name__, _td_err)
             # R-IV.1233(b): position_watch_events, created AT STARTUP because
             # api/position_watch SELECTs it. Fifth instance of the same guard: a READ must
             # never wait on a writer having run. The DDL is the model's own constant, so
