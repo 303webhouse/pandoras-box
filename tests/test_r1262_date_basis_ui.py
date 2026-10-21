@@ -5,6 +5,13 @@ Run it:   python tests/test_r1262_date_basis_ui.py            (Chromium)
 
 WHAT IT GUARDS, and why each one needs a test rather than a look:
 
+  R-IV.1270 UPDATE. `trade_date` is live, the realized window is `c.trade_date` alone, and the
+  two undated closures are excluded and reported outside every total. So the (b)1 warning below is
+  now EXPECTED TO BE ABSENT on live data, and the test that matters most is the one that was
+  written for this moment: the label removes itself. Both states are still exercised, because the
+  payload decides which one applies and a page that could only render the happy state would be
+  untested the next time a backfill lags.
+
   (b)1  Every Abacus PERIOD figure states its date basis on its face, with the COUNT of rows whose
         write date and trade date differ. The count is in the visible label, not only a tooltip: a
         reader who must hover to learn that a figure is on the wrong date basis has been told
@@ -134,6 +141,21 @@ SUMMARY = {
          'computed_at': '2026-01-01T00:00:00Z'},
     ],
     'realized_fallback': {'count': 0, 'rows': []}, 'realized_excluded_no_date': [],
+    # R-IV.1270(b). Two rows, both Robinhood expiries, outside every total.
+    'realized_dating': {'basis': 'position_lot_closures.trade_date', 'note': 'the broker action date'},
+    'realized_date_unknown': {
+        'count': 2, 'total': -57.26, 'in_any_total': False,
+        'by_account': {'ROBINHOOD': -57.26},
+        'rows': [
+            {'closure_id': 1942, 'position_id': 'POS_IWM_20261006_R652', 'ticker': 'IWM',
+             'status': 'EXPIRED', 'account': 'ROBINHOOD', 'account_display': 'Robinhood',
+             'realized': -13.08},
+            {'closure_id': 1943, 'position_id': 'POS_NVDA_20261008_171815', 'ticker': 'NVDA',
+             'status': 'EXPIRED', 'account': 'ROBINHOOD', 'account_display': 'Robinhood',
+             'realized': -44.18},
+        ],
+        'note': 'closures with no trade_date, so no window can place them.',
+    },
 }
 
 # Three accounts, one of each state the chips must tell apart.
@@ -294,6 +316,18 @@ with sync_playwright() as p:
           '803 of 839' in note and 'written between' in note, note[:200])
     check('...and keeps the pooled sentence beside it', 'pooled' in note, note[:120])
 
+    # R-IV.1270(b): MONEY NO WINDOW CAN PLACE must be on the page, with its count and its money,
+    # and must say it is outside every total. A count on its own would not answer the question a
+    # reader actually has, which is how much money is unplaced.
+    note = pg.evaluate("() => (document.querySelector('#abAccountsNote') || {}).textContent || ''")
+    check('the date-unknown money is on the page, with its count', 'Date unknown: 2 rows' in note,
+          note[:240])
+    check('...and its total', '-$57.26' in note or '\u2212$57.26' in note, note[:240])
+    check('...and says it is outside every figure, in every range',
+          'Outside every figure' in note and 'every range' in note, note[:240])
+    check('...and names the rows that hold it',
+          'IWM' in note and 'NVDA' in note, note[:300])
+
     panels = pg.evaluate("""() => [...document.querySelectorAll('.ab-panel-chip')].map(
         (e) => e.textContent)""")
     check('a live breakdown panel states the basis',
@@ -318,6 +352,11 @@ with sync_playwright() as p:
           'by write date' not in body and 'dated by when the row was' not in body,
           [t for t in body.split('\n') if 'write date' in t][:2])
     check('...and the figures are still there', 'Net profit' in body, body[:120])
+    # R-IV.1270(b): the warning going away must NOT take the unplaced money with it. They are
+    # different claims -- "these figures are on the wrong date" and "this money is on no date" --
+    # and the second outlives the first.
+    check('...and the date-unknown money SURVIVES the label removing itself',
+          'Date unknown: 2 rows' in body, body[:200])
     check('...with no console errors on that path', not errs, errs)
     for d in [BASIS] + [b2.get('date_basis') for b2 in SUMMARY['breakdowns'] if b2.get('date_basis')]:
         d['trade_date_exists'] = False
