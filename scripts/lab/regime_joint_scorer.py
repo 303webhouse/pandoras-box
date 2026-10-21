@@ -161,6 +161,8 @@ def score_joint(labels, bars_path, out_dir, pr1_stamp_path, expected=None):
     started = datetime.now(timezone.utc)
     spy = RS.spy_frame(bars_path)
     L = {k: pd.read_csv(p, dtype={"shown_regime": "string"}) for k, p in labels.items()}
+    for k in L:   # R-IV.1290(c): NA -> None before any table reaches the frozen ruler, as regime_scorecard.score() does
+        L[k]["shown_regime"] = L[k].shown_regime.astype(object).where(L[k].shown_regime.notna(), None)
     common = sorted(set.intersection(*[set(v.as_of) for v in L.values()]))
     d = spy[spy.date.isin(common)].reset_index(drop=True)
     vol, mdd, ret = RS.fwd_vol_mdd_ret(d.adj_close.to_numpy(float))
@@ -263,6 +265,30 @@ def score_joint(labels, bars_path, out_dir, pr1_stamp_path, expected=None):
 
 
 # ── self-test (SYNTHETIC ONLY) ──────────────────────────────────────────────────────────────────
+def na_test(score_fn, tmp):
+    """R-IV.1290(c): label files WITH UNLABELLED SESSIONS (empty shown_regime, as before a first label qualifies)
+    must score end to end. On 2ef7f2cc this raised 'boolean value of NA is ambiguous' at the full-sample item."""
+    n = 700
+    dates = pd.bdate_range("2012-03-01", periods=n)
+    px = np.r_[np.linspace(100, 150, 300), np.linspace(150, 120, 80), np.linspace(120, 170, 320)]
+    bp = os.path.join(tmp, "na_bars.parquet")
+    pd.DataFrame({"ticker": "SPY", "date": dates, "close": px, "adj_close": px}).to_parquet(bp, index=False)
+    lab = np.array(["uptrend"] * n, dtype=object)
+    lab[:27] = None                                        # unlabelled sessions before the first label
+    lab[305:420] = "breakdown"
+    paths = {}
+    for k in ("v2", "v2.1", "v3"):
+        df = pd.DataFrame({"as_of": dates.strftime("%Y-%m-%d"), "regime": lab, "shown_regime": lab})
+        if k == "v3":
+            df["m1_stress_blocked"] = False
+        paths[k] = os.path.join(tmp, "na_" + k + ".csv")
+        df.to_csv(paths[k], index=False)
+    st = os.path.join(tmp, "na_stamp.md")
+    open(st, "w").write("synthetic")
+    r = score_fn(paths, bp, os.path.join(tmp, "na_out"), st)
+    return r, int(pd.read_csv(paths["v3"]).shown_regime.isna().sum())
+
+
 def selftest():
     import tempfile
     ok = fail = 0
@@ -358,6 +384,12 @@ def selftest():
     check("e2e: section 6 items written (per-event table, false all-clears, full sample, flips vs 6)",
           os.path.exists(os.path.join(tmp, "o2", "per_event_table.csv")) and "full_sample" in r["reported"]
           and "flips_per_year_vs_6" in r["reported"] and "RECOVERY_own_fwd20" in r["reported"])
+    try:
+        rn, n_na = na_test(score_joint, tempfile.mkdtemp())
+        na_ok = n_na == 27 and "full_sample" in rn["reported"] and rn["reported"]["full_sample"]["v3"]["none_label"] == 27
+    except TypeError:
+        na_ok = False
+    check("R-IV.1290(c): 27 unlabelled sessions score end to end; full-sample counts them as no label", na_ok)
     print(f"{ok}/{ok + fail}")
     return fail == 0
 
