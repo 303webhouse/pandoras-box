@@ -206,7 +206,7 @@ def test_STEP_2_HAS_NOT_HAPPENED_YET_and_this_is_deliberate():
 
     THIS TEST IS MEANT TO GO RED in the commit that does step 2 -- that is what makes the flip
     deliberate rather than incidental, and it is the same device as
-    `test_RULES_VERSION_is_still_v2_until_the_cutover_commit`. Until then it pins the ordering
+    `test_RULES_VERSION_IS_NOW_v21_BECAUSE_THIS_IS_THE_CUTOVER` (which has since fired and flipped). Until then it pins the ordering
     that R-IV.617(b), R-IV.800(b) and R-IV.1059(b) all insisted on: a class re-pointed at
     `job_runs` before anything writes the row renders `no_data`, which does not degrade, so the
     sentinel switches off while /health goes green.

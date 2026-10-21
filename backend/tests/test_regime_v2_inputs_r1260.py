@@ -59,8 +59,12 @@ def test_V2_DIFFERS_FROM_V1_IN_THE_VERSION_STRING_ONLY():
     assert v1["order"] == v2r["order"]
 
 
-def test_THE_ACTIVE_VERSION_IS_V2():
-    assert load_rules()["version"] == "v2"
+def test_THE_ACTIVE_VERSION_IS_V21_AFTER_THE_CUTOVER():
+    """A SECOND VERSION PIN, found by the suite rather than by me. R-IV.1307(c) named "the pin
+    test" singular; there were two, and only the by-name baseline distinguished this from a
+    regression. v2.1 computes the v2 input rows (`uses_v2_inputs`), so everything this file
+    tests still applies -- the version is what moved, not the inputs."""
+    assert load_rules()["version"] == "v2.1"
 
 
 # ── 1. RANGE_CHOP's ADX count ─────────────────────────────────────────────
