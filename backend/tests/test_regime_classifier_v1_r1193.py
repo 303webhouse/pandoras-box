@@ -408,13 +408,25 @@ def test_a_None_label_is_carried_as_no_label_not_as_the_previous_one():
         "the SHOWN label persists, but the raw reading stays None")
 
 
-def test_the_cost_is_stated_and_comes_from_the_rules_file():
-    """§2 requires the cost on the card, and serving it from the rules file stops it drifting
-    from the rules it describes."""
-    c = cost_statement()
-    assert "late at V-shaped bottoms" in c
-    assert "flatters a bearish lean" in c
-    assert c == load_rules()["hysteresis"]["stated_cost"]
+def test_the_cost_line_does_NOT_come_from_the_rules_file():
+    """INVERTED BY R-IV.1303(b), and the inversion is the point.
+
+    This asserted `cost_statement() == load_rules()["hysteresis"]["stated_cost"]` -- that the
+    sentence came FROM the rules file, so it could not drift from the rules it described. The
+    reasoning was sound and the placement was not: a sentence about what a classifier gets
+    wrong changes whenever someone GRADES the classifier, while the thresholds it describes
+    must not change at all. Putting both in one file made correcting the sentence require
+    editing an artifact pinned to `4bc6d895...` and made immutable by R-IV.1043(c) -- two
+    instructions with no common satisfaction, which is where R-IV.1297(e) stopped.
+
+    The rules file KEEPS its `stated_cost` (it is part of the stamped bytes) and it is simply
+    not displayed. So the assertion now runs the other way.
+    """
+    rules_cost = load_rules()["hysteresis"]["stated_cost"]
+    assert "late at V-shaped bottoms" in rules_cost, "the stamped bytes are unchanged"
+    assert cost_statement("v2") == [], "no cost line is served for v2 today"
+    assert rules_cost not in cost_statement("v2")
+    assert cost_statement("v2.1") == [], "QUERY supplies v2.1's under R-IV.1301(c)"
 
 
 def test_flip_count_is_the_only_history_check_and_is_never_pnl():

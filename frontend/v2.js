@@ -2400,8 +2400,16 @@
       + '<div class="rs-row">' + esc(r.ending_signs || '') + '</div>'
       + '<div class="rs-h">WHAT WOULD PROVE THIS WRONG</div>'
       + '<div class="rs-row">' + esc(r.proves_wrong || '') + '</div>'
-      + '<div class="rs-h">COSTS, STATED</div><ul class="rs-list">'
-      +   (_rsLive.costs || []).map((c) => '<li>' + esc(c) + '</li>').join('') + '</ul>'
+      // R-IV.1303(b): NO LINE MEANS NO BLOCK. This rendered the heading unconditionally and
+      // the payload has never carried `costs`, so the live card has been showing
+      // "COSTS, STATED" over an empty list -- which reads as a read that failed, not as
+      // "there is no stated cost yet". The cost line now comes from the display config
+      // (never the stamped rules file) and is empty until QUERY supplies v2.1's under
+      // R-IV.1301(c), so the honest render is nothing at all.
+      + ((_rsLive.costs || []).length
+          ? '<div class="rs-h">COSTS, STATED</div><ul class="rs-list">'
+            + (_rsLive.costs || []).map((c) => '<li>' + esc(c) + '</li>').join('') + '</ul>'
+          : '')
       + '<div class="rs-foot">Excluded: '
       +   esc((_rsLive.excluded_inputs || []).join(', '))
       +   ' \u00b7 News watch: ' + esc(_rsLive.news_watch || '\u2014')
