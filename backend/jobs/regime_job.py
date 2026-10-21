@@ -380,7 +380,7 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
                     rules_version=version)
         return {"written": 0, "refused": detail, "as_of": target.isoformat()}
 
-    # THE CUTOVER GATE (TA-208 item 7 / R-IV.1288(c)). On the FIRST run under a new rules
+    # THE CUTOVER GATE (R-IV.1288(c)). On the FIRST run under a new rules
     # version the starting hysteresis state is inherited from its predecessor -- verified, not
     # copied -- and if the new version disputes that state the job DECLINES and says so rather
     # than seeding or backfilling. Checked before any label is computed, because a run that
@@ -398,7 +398,7 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
                      rules_version=version)
         logger.info("[regime_job] %s", gate.get("reason"))
 
-    # THE SAME BUILD THE SEED USES (R-IV.1284(c) / TA-208 item 7). This line used to be a bare
+    # THE SAME BUILD THE SEED USES (R-IV.1284(c) / registration §1 / R-IV.1277(b)). This line used to be a bare
     # `sessions_from_series(series, settled_through=...)`, so `v2` defaulted to False and no VIX
     # pair was passed -- 95 of 304 sessions take a different label on that basis, and a cutover
     # that "inherits v2's state and runs nightly from there" would have inherited a state built
@@ -838,25 +838,68 @@ async def build_sessions(conn, series, *, rules, settled_through: str):
             vix_by_date, vix_report = _vix_by_date()
         except Exception as exc:                                    # noqa: BLE001
             vix_by_date, vix_report = {}, {"error": type(exc).__name__}
+    # R-IV.1297(b)1: the VERSION, not just the v2-inputs flag. `v2` decides whether the v2
+    # input rows are built at all; `rules_version` decides WHICH ARITHMETIC builds them. Both
+    # v2 and v2.1 want the rows, and only v2.1 wants the fixes.
     sessions = sessions_from_series(series, settled_through=settled_through,
                                     vix_by_date=vix_by_date,
-                                    v2=uses_v2_inputs(version))
+                                    v2=uses_v2_inputs(version),
+                                    rules_version=version)
     return sessions, {"v2_inputs": uses_v2_inputs(version), "vix": vix_report,
                       "sessions": len(sessions)}
 
 
-#: TA-208 §7's label groups, which must be THE SAME MAP LAB uses. Copied from
-#: `scripts/lab/regime_filter.py::GROUPS` rather than re-derived: the card's wording and LAB's
-#: scoring have to agree about which labels are bullish, or the same session reads one way on
-#: the screen and another in a scorecard.
-LABEL_GROUPS = {
+#: Which group each label belongs to. THE SAME MAP LAB USES, taken verbatim from
+#: `scripts/lab/regime_filter.py::GROUPS`, because the card's wording and LAB's scoring must
+#: agree about which labels are bullish or the same session reads one way on the screen and
+#: another in a scorecard. The ASSIGNMENT is a judgement and is not mine to invent
+#: (R-IV.925(b)); registration §1 / R-IV.1277(b) adopts LAB's.
+_GROUP_MEMBERS = {
     "TREND-UP": ("uptrend", "narrow_uptrend", "melt_up", "recovery"),
     "RANGE": ("range_chop", "correction"),
     "TREND-DOWN/STRESS": ("breakdown", "bear_market", "bear_market_rally", "crash_liquidation"),
 }
-LABEL_TO_GROUP = {r: g for g, rs in LABEL_GROUPS.items() for r in rs}
 
-#: The word the card prints under a STALE headline, per group. TA-208 §7's own mapping.
+
+def label_groups(rules: Optional[Dict[str, Any]] = None) -> Dict[str, tuple]:
+    """The group map, with its DOMAIN TAKEN FROM THE RULES FILE. R-IV.1297(e).
+
+    WHAT "derived from the rules file" CAN AND CANNOT MEAN HERE, stated rather than silently
+    chosen. The rules file lists every label exactly once, in `order` -- that is the authority
+    on WHICH LABELS EXIST. It does NOT record which of them are bullish: `tags` is a different
+    thing entirely ("Section 2: tags, not regimes"), and there is no group key. So the
+    partition cannot be read out of the file, and inventing one in code would be exactly the
+    thing R-IV.925(b) forbids.
+
+    What IS derived, and what the hardcoded list could not do, is the CHECK: `order` is the
+    domain, and a label in one and not the other raises here instead of going quiet. The old
+    form was a literal dict, so a label added to `order` by a later version would simply have
+    been missing from `LABEL_TO_GROUP`, `.get()` would return None, and the STALE line would
+    print no last-reading word at all -- a blank where a word belongs, with nothing failing.
+
+    Raises ValueError rather than warning: a group map that does not cover the labels in play
+    cannot produce a correct card, and the cutover is the moment to find that out.
+    """
+    from models.regime_classifier import load_rules
+
+    order = [str(k).lower() for k in (rules or load_rules()).get("order") or []]
+    if not order:
+        raise ValueError("the rules file lists no `order`; the label domain is unknown")
+    mapped = {r for rs in _GROUP_MEMBERS.values() for r in rs}
+    missing = [k for k in order if k not in mapped]
+    extra = sorted(mapped - set(order))
+    if missing or extra:
+        raise ValueError(
+            "the group map does not match the rules file's labels: "
+            "ungrouped=%r, grouped-but-absent=%r" % (missing, extra))
+    return {g: tuple(k for k in order if k in set(rs)) for g, rs in _GROUP_MEMBERS.items()}
+
+
+def label_to_group(rules: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """label -> group, over the rules file's own label list."""
+    return {r: g for g, rs in label_groups(rules).items() for r in rs}
+
+#: The word the card prints under a STALE headline, per group. registration §1 / R-IV.1277(b)'s own mapping.
 GROUP_LAST_READING = {
     "TREND-UP": "BULLISH last reading",
     "TREND-DOWN/STRESS": "BEARISH last reading",
@@ -872,7 +915,7 @@ CUTOVER_PREDECESSOR = {"v2.1": "v2"}
 
 async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
     """Can `to_version` inherit its predecessor's state, and does it agree about it?
-    TA-208 §7 item 7 / R-IV.1288(c).
+    R-IV.1288(c).
 
     THE INHERITANCE IS VERIFIED, NOT COPIED, and that is deliberate. Copying v2's
     `shown / held_sessions / pending / pending_closes` across asserts nothing: it would hand
@@ -885,8 +928,8 @@ async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
     `test_regime_v21_r1277`. Every threshold, the hysteresis block and the order are identical,
     so the same series must produce the same shown label and the same counters. If it does not,
     something changed that nobody declared -- and this function REFUSES rather than carrying on,
-    which is TA-208's own instruction: "If the job cannot start without a seeded history, STOP
-    and ask SPINE. Do not backfill."
+    which is what the cutover was
+    required to do: refuse and ask SPINE rather than backfill (registration §1 / R-IV.1277(b)).
 
     NOTHING IS WRITTEN HERE and no era is replayed onto disk. The walk is in memory, exactly as
     every nightly run already does to rebuild its counters.
@@ -908,7 +951,7 @@ async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
     if not frm:
         return dict(out, needs_ruling=True,
                     reason=("no predecessor is declared for %s, so there is no state to inherit "
-                            "and a seed would be required -- which TA-208 item 7 forbids "
+                            "and a seed would be required -- which registration §1 / R-IV.1277(b) forbids "
                             "without a ruling" % to_version))
     row = await conn.fetchrow(
         """SELECT as_of, shown_regime, regime, held_sessions, pending, pending_closes
@@ -918,7 +961,7 @@ async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
     if row is None:
         return dict(out, needs_ruling=True,
                     reason=("%s has no settled row to inherit from, so %s cannot start without "
-                            "a seed -- stopping, as TA-208 item 7 directs" % (frm, to_version)))
+                            "a seed -- stopping, as registration §1 / R-IV.1277(b) directs" % (frm, to_version)))
 
     anchor = row["as_of"]
     anchor_s = anchor.isoformat() if hasattr(anchor, "isoformat") else str(anchor)
@@ -955,7 +998,7 @@ async def cutover_state(conn, to_version: str, *, rules=None) -> Dict[str, Any]:
 
 
 async def unmatched_run(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
-    """How many of the LATEST settled sessions matched no rule at all. TA-208 §7 item 4.
+    """How many of the LATEST settled sessions matched no rule at all. registration §1 / R-IV.1277(b).
 
     DERIVED AT READ TIME FROM STORED COLUMNS, no schema change: `regime_snapshots.regime` is the
     RAW label and is NULL when no section-2 row matched, while `shown_regime` carries whatever
@@ -996,7 +1039,7 @@ async def unmatched_run(conn, rules_version: Optional[str] = None) -> Dict[str, 
                                        if hasattr(r["as_of"], "isoformat") else str(r["as_of"]))
             break
     shown = rows[0]["shown_regime"]
-    group = LABEL_TO_GROUP.get(str(shown or "").lower())
+    group = label_to_group().get(str(shown or "").lower())
     out.update(run=run, shown_regime=shown, group=group,
                group_word=GROUP_LAST_READING.get(group or ""))
     if run >= 1:

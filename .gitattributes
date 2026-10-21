@@ -1,0 +1,4 @@
+# R-IV.1297(c): the stamped v2.1 rules artifact is pinned by LF sha256
+# 4bc6d895484a2f581efa3b4356591209b966351183d693cd158eedb240974e9a. A CRLF checkout would
+# change its bytes by one per line and the gate test would read drift where there is none.
+backend/config/regime_rules.v2.1.json -text

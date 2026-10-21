@@ -3462,6 +3462,28 @@ async def _fallback_scheduler():
 # CTA SCANNER SCHEDULED TASK
 # =========================================================================
 
+async def _finish_cta_run(run_id, status: str, rows: int,
+                          skip_reason=None, error=None) -> None:
+    """Close the CTA scan's job_runs record. Never raises into the scan.
+
+    Written beside `_finish_crypto_run` and deliberately not shared with it: the two differ in
+    nothing today, and a single helper taking a job name would be the right move LATER, once a
+    third caller exists. Two four-line functions that cannot affect each other are safer than
+    one that both scans depend on while one of them is being changed.
+
+    A failure to RECORD the run must not fail the run, but it must not look like success
+    either -- the freshness check will read this row, so a silent write failure would leave the
+    job looking dead. Logged at ERROR instead.
+    """
+    if run_id is None:
+        return
+    try:
+        from jobs.job_runs import finish_run
+        await finish_run(run_id, status, rows_touched=rows,
+                         skip_reason=skip_reason, error=error)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("CTA scan: could not close its job_runs record (%s): %s", status, exc)
+
 async def run_cta_scan_scheduled():
     """
     Run CTA scanner automatically and push signals to Trade Ideas
@@ -3469,6 +3491,27 @@ async def run_cta_scan_scheduled():
     """
     logger.info("ðŸŽ¯ Running scheduled CTA scan...")
     
+    # R-IV.1297(f)1: THE SCAN RECORDS THAT IT RAN, one row per scan.
+    #
+    # Until now it kept its state only in `_scheduler_status`, an in-memory dict lost on every
+    # restart and served by NO route -- so the only thing /health could measure was the age of
+    # the newest cta_scanner SIGNAL. That made a quiet tape indistinguishable from a dead job,
+    # and on 2026-10-21 it raised a flatline while the scanner was running on cadence: 19 scans,
+    # 43 setups found, 36 of them suppressed by the 24h per-ticker cooldown.
+    #
+    # THIS IS STEP 1 OF TWO, IN THIS ORDER ON PURPOSE (R-IV.617(b), R-IV.800(b), R-IV.1059(b)
+    # all insist on it). Re-pointing the class at `job_runs` before anything writes the row
+    # renders it `no_data`, which does NOT degrade -- /health would go green while the sentinel
+    # became incapable of ever firing, and the approval's own check would pass vacuously. So
+    # the row comes first and is verified live; the AGE_SOURCE move is step 2.
+    _run_id = None
+    try:
+        from datetime import date as _date
+        from jobs.job_runs import start_run as _start_run
+        _run_id = await _start_run("cta_scanner", _date.today())
+    except Exception as _jr:  # noqa: BLE001
+        logger.warning("CTA scan: could not open a job_runs record: %s", _jr)
+
     try:
         from scanners.cta_scanner import run_cta_scan, CTA_SCANNER_AVAILABLE
         from websocket.broadcaster import manager
@@ -3478,6 +3521,8 @@ async def run_cta_scan_scheduled():
         
         if not CTA_SCANNER_AVAILABLE:
             logger.warning("CTA Scanner not available - skipping scheduled scan")
+            await _finish_cta_run(_run_id, "skipped", 0,
+                                  skip_reason="CTA_SCANNER_AVAILABLE is False")
             return
         
         # Run the scan
@@ -3485,6 +3530,7 @@ async def run_cta_scan_scheduled():
         
         if result.get("error"):
             logger.error(f"CTA scan error: {result['error']}")
+            await _finish_cta_run(_run_id, "error", 0, error=str(result["error"])[:300])
             return
         
         # Get all signals
@@ -3492,6 +3538,9 @@ async def run_cta_scan_scheduled():
         
         if not all_signals:
             logger.info("CTA scan complete - no new signals found")
+            # A SCAN THAT FOUND NOTHING IS A SUCCESSFUL SCAN. This is the whole point of
+            # judging the job rather than its output: `ok` with rows_touched 0.
+            await _finish_cta_run(_run_id, "ok", 0)
             return
         
         logger.info(f"CTA scan found {len(all_signals)} signals")
@@ -3539,7 +3588,28 @@ async def run_cta_scan_scheduled():
                         f"â³ Skipping CTA signal for {ticker}/{signal.get('signal_type')} "
                         f"(cooldown {cooldown_hours}h)"
                     )
+
+                    # R-IV.1297(f)3: A SUPPRESSION IS AN ATTEMPT THAT DID NOT PERSIST.
+                    #
+                    # This `continue` sits BEFORE `process_signal_unified`, which is where
+                    # `record_attempt` is called -- so a cooldown skip reached no counter at
+                    # all. /health read `deduped: 5` on 2026-10-21 while 36 suppressions had
+                    # happened that session, and `deduped` is the ONE field that could have
+                    # shown "the producer is working and its output is being held back". The
+                    # field that would have answered the question was blind to it.
+                    #
+                    # TELEMETRY ONLY. `continue` still runs; no signal's fate changes. A
+                    # cooldown skip is a DEDUPE in that counter's own vocabulary -- "ON
+                    # CONFLICT DO NOTHING, a correct no-op" -- which is exactly what this is,
+                    # one layer up.
+                    try:
+                        from stable_engine.signals_freshness import record_attempt
+                        record_attempt("cta_scanner", persisted=False)
+                    except Exception:  # noqa: BLE001
+                        pass    # metrics must never break the pipeline
+
                     continue
+
             except Exception as dedupe_err:
                 logger.warning(f"CTA cooldown check failed for {ticker}: {dedupe_err}")
 
@@ -3657,10 +3727,13 @@ async def run_cta_scan_scheduled():
             f"{min(10, len(scored_signals))} top-scored signals pushed "
             f"({len(scored_signals)} eligible after cooldown)"
         )
-        
+
+        await _finish_cta_run(_run_id, "ok", pushed_count)
+
     except Exception as e:
         _scheduler_status["cta_scanner"]["status"] = f"error: {str(e)}"
         logger.error(f"Error in scheduled CTA scan: {e}")
+        await _finish_cta_run(_run_id, "error", 0, error=str(e)[:300])
 
 
 async def trigger_cta_scan_now():

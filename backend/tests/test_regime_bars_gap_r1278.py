@@ -230,7 +230,7 @@ def test_the_headline_replaces_the_label_rather_than_sitting_beside_it():
 
 
 def test_the_two_stale_headlines_are_different_strings():
-    """R-IV.1278(b)4's headline is about the DATA; TA-208 §7's STALE is about no RULE matching.
+    """R-IV.1278(b)4's headline is about the DATA; registration §1 / R-IV.1277(b)'s STALE is about no RULE matching.
     Two causes, two messages - a reader who sees one must not be left thinking it is the other.
     """
     from jobs.regime_job import DATA_STALE_HEADLINE

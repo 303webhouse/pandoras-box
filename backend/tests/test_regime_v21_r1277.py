@@ -1,4 +1,4 @@
-"""Regime classifier v2.1, the parts built so far. R-IV.1277(b) / R-IV.1278(c) / TA-208 §7.
+"""Regime classifier v2.1, the parts built so far. R-IV.1277(b) / R-IV.1278(c), registration §1.
 
 THE BUILD'S OWN FIRST RULE IS "NO new thresholds", so the rules file is asserted to differ from
 v2 in exactly two keys. A copy made by hand and eyeballed is how a threshold moves by one
@@ -29,11 +29,12 @@ import pytest
 _BACKEND = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
-from models.regime_inputs import Bar, _rsi_ge_75_of_last_5           # noqa: E402
+from models.regime_inputs import (Bar,                                # noqa: E402
+                                  _rsi_hits_above_melt_up_min)
 from models.regime_inputs_v2 import confirmed_break_up_50dma         # noqa: E402
 
 V2 = _BACKEND / "config" / "regime_rules.v2.json"
-V21 = _BACKEND / "config" / "regime_rules.v2_1.json"
+V21 = _BACKEND / "config" / "regime_rules.v2.1.json"
 
 MEASURED_COST = ("Measured 1999-2026 (LAB b6a6abd9, ungraded): danger called about 2 sessions "
                  "after a peak; recoveries about 80 sessions after a trough; the 200-day line "
@@ -58,9 +59,51 @@ def test_the_v21_file_exists_and_is_tagged_v21():
     assert _load(V21)["version"] == "v2.1"
 
 
-def test_it_differs_from_v2_in_EXACTLY_TWO_KEYS():
+#: R-IV.1297(c): the stamped artifact's LF sha256, as the ruling states it.
+STAMPED_SHA256 = "4bc6d895484a2f581efa3b4356591209b966351183d693cd158eedb240974e9a"
+
+
+def test_the_v21_file_IS_LABs_STAMPED_ARTIFACT_byte_for_byte():
+    """R-IV.1297(c): "production must read the stamped artifact."
+
+    f1777f80's file was written here from the spec; this one is LAB's, copied. The difference
+    matters because that file is the only statement of what v2.1 IS -- a hand-written copy of a
+    stamped artifact is a second original, and the two drift silently because nothing compares
+    them. It also carried `registered: True`, which R-IV.1191 does not support: v2.1's
+    authority is TA-208, registration ab015afa, stamp PR-1b, and LAB's file says
+    `registered: false` with "pending Nick's PR-1 stamp".
+
+    HASHED ON LF BYTES, which is what the ruling specifies and also what survives this
+    machine. `core.autocrlf` is true, so a CRLF checkout would change the file by one byte per
+    line and a raw hash would read drift where there is none; `.gitattributes` pins the path
+    with `-text` as well, so both halves hold.
+    """
+    import hashlib
+    raw = V21.read_bytes()
+    lf = raw.replace(b"\r\n", b"\n")
+    assert hashlib.sha256(lf).hexdigest() == STAMPED_SHA256, (
+        "backend/config/regime_rules.v2.1.json is not LAB's stamped artifact")
+
+
+def test_it_claims_NO_REGISTRATION_IT_DOES_NOT_HAVE():
+    """R-IV.1297(c) / R-IV.1191."""
+    d = _load(V21)
+    assert d["registered"] is False
+    assert "pending" in d["registered_by"].lower()
+    assert "ab015afa" in d["source"], d["source"]
+
+
+def test_it_differs_from_v2_ONLY_IN_PROVENANCE():
     """"NO new thresholds. Every number is already in regime_rules.v2.json." Asserted over
-    every leaf, so a digit moved anywhere in the file is a failure rather than a reading."""
+    every leaf, so a digit moved anywhere in the file is a failure rather than a reading.
+
+    STATED AS A PREDICATE OVER THE KEYS, not as a count. The earlier version asserted
+    `differ == [".hysteresis.stated_cost", ".version"]` -- exactly two keys -- and the stamped
+    artifact differs in seven, every one of them provenance. A count would have failed here
+    while the thing it existed to protect was intact, and the fix for a failing count is to
+    edit the number, which is how a guard stops guarding. What matters is that NOTHING
+    ARITHMETIC MOVED, so that is what this asserts.
+    """
     def flat(o, p=""):
         if isinstance(o, dict):
             for k, v in o.items():
@@ -71,8 +114,11 @@ def test_it_differs_from_v2_in_EXACTLY_TWO_KEYS():
             yield p, o
     a, b = dict(flat(_load(V2))), dict(flat(_load(V21)))
     differ = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
-    assert differ == [".hysteresis.stated_cost", ".version"], differ
-
+    allowed = {".version", ".registered", ".registered_by", ".source", ".authority",
+               ".hysteresis.stated_cost"}
+    offending = [k for k in differ
+                 if k not in allowed and not k.startswith(".v2_1_defect_pack.")]
+    assert offending == [], offending
 
 def test_the_thresholds_the_hysteresis_and_the_order_are_byte_identical():
     a, b = _load(V2), _load(V21)
@@ -83,16 +129,25 @@ def test_the_thresholds_the_hysteresis_and_the_order_are_byte_identical():
             assert a["hysteresis"][k] == b["hysteresis"][k], k
 
 
-def test_the_stated_cost_is_the_measured_sentence():
-    """The replacement is MEASURED and says so -- it names the LAB commit and that the figures
-    are ungraded. The v2 text it replaces was a description of a tendency with no numbers."""
-    cost = _load(V21)["hysteresis"]["stated_cost"]
-    assert cost == MEASURED_COST
-    for part in ("Measured 1999-2026", "b6a6abd9", "ungraded", "about 2 sessions",
-                 "about 80 sessions", "about 38"):
-        assert part in cost, part
-    assert "V-shaped bottoms" not in cost, "v2's unmeasured text must be gone"
+def test_the_stated_cost_no_longer_claims_to_be_UNGRADED():
+    """R-IV.1297(e) asks for the string to become QUERY's graded sentence and for "ungraded"
+    to go. HALF OF THAT IS DONE HERE AND HALF IS BLOCKED, deliberately and reported:
 
+      done     "ungraded" is gone. It lived in f1777f80's file -- "Measured 1999-2026 (LAB
+               b6a6abd9, ungraded)" -- and that file is retired by (c).
+      blocked  the replacement sentence cannot be written here. `stated_cost` is read from the
+               RULES FILE and nowhere else (models/regime_hysteresis.py), so setting it means
+               editing the stamped artifact -- which (c) requires to be byte-identical to a
+               named sha256, and R-IV.1043(c) makes immutable. (c) names an exact hash and (e)
+               names no hash, so the hash is the instruction that cannot be satisfied two ways.
+
+    So this asserts what IS true of the file in the tree, and the collision is SPINE's to
+    resolve: either LAB re-stamps the artifact carrying the sentence, or the card's displayed
+    cost comes from somewhere other than the rules file.
+    """
+    cost = _load(V21)["hysteresis"]["stated_cost"]
+    assert "ungraded" not in cost
+    assert "b6a6abd9" not in cost, "the retired file's LAB commit must not survive"
 
 def test_v2s_own_file_is_untouched():
     """v2's rows stay in regime_snapshots beside v2.1's, so v2 must keep working exactly as it
@@ -104,14 +159,16 @@ def test_v2s_own_file_is_untouched():
 # ── 2 · the melt-up count ────────────────────────────────────────────────────
 
 def test_it_returns_an_integer_count_not_a_boolean():
-    hits = _rsi_ge_75_of_last_5(_bars([100 + i * 2.0 for i in range(40)]))
+    hits = _rsi_hits_above_melt_up_min(_bars([100 + i * 2.0 for i in range(40)]),
+                                       rules_version="v2.1")
     assert isinstance(hits, int) and not isinstance(hits, bool), type(hits)
 
 
 def test_a_ramp_counts_every_hit_and_a_flat_series_counts_none():
-    assert _rsi_ge_75_of_last_5(_bars([100 + i * 2.0 for i in range(40)])) == 5
+    assert _rsi_hits_above_melt_up_min(_bars([100 + i * 2.0 for i in range(40)]),
+                                       rules_version="v2.1") == 5
     flat = _bars([100.0 + (0.01 if i % 2 else -0.01) for i in range(40)])
-    assert _rsi_ge_75_of_last_5(flat) == 0
+    assert _rsi_hits_above_melt_up_min(flat, rules_version="v2.1") == 0
 
 
 def test_the_old_boolean_could_never_satisfy_the_two_hit_test():
@@ -120,11 +177,12 @@ def test_the_old_boolean_could_never_satisfy_the_two_hit_test():
     assert need == 2
     assert float(True) == 1.0
     assert not (float(True) >= need), "this is why the Melt-up row was unreachable"
-    assert _rsi_ge_75_of_last_5(_bars([100 + i * 2.0 for i in range(40)])) >= need
+    assert _rsi_hits_above_melt_up_min(_bars([100 + i * 2.0 for i in range(40)]),
+                                       rules_version="v2.1") >= need
 
 
 def test_exactly_one_hit_is_not_a_melt_up_and_two_is():
-    """TA-208 §7's own test: "a series with exactly 1 hit gives no melt-up; one with 2 hits
+    """registration §1 / R-IV.1277(b)'s own test: "a series with exactly 1 hit gives no melt-up; one with 2 hits
     passes the RSI leg."
 
     THE SERIES IS MEASURED, NOT ASSUMED. My first attempt climbed hard then drifted down, and
@@ -143,7 +201,8 @@ def test_exactly_one_hit_is_not_a_melt_up_and_two_is():
     base = [100.0 + (0.05 if i % 2 else -0.05) for i in range(30)]
 
     def with_spikes(n):
-        return _rsi_ge_75_of_last_5(_bars(base + [100.0 + 12.0 * (k + 1) for k in range(n)]))
+        return _rsi_hits_above_melt_up_min(
+            _bars(base + [100.0 + 12.0 * (k + 1) for k in range(n)]), rules_version="v2.1")
 
     assert with_spikes(0) == 0
     one, two = with_spikes(1), with_spikes(2)
@@ -156,24 +215,25 @@ def test_the_threshold_is_read_from_the_rules_file():
     """75 was a literal in the signature while `thresholds.melt_up_rsi_min` held the same
     number -- two places for one figure, and the one nobody edits is the one that drifts."""
     import inspect
-    sig = inspect.signature(_rsi_ge_75_of_last_5)
+    sig = inspect.signature(_rsi_hits_above_melt_up_min)
     assert sig.parameters["threshold"].default is None, (
         "the default must come from the rules file, not from the signature")
-    assert "melt_up_rsi_min" in inspect.getsource(_rsi_ge_75_of_last_5)
+    assert "melt_up_rsi_min" in inspect.getsource(_rsi_hits_above_melt_up_min)
     assert _load(V21)["thresholds"]["melt_up_rsi_min"] == 75.0
 
 
 def test_a_series_too_short_is_none_and_not_zero():
     """"Cannot tell" is not "no hits": zero would make the row FAIL on a reason that is about
     the data rather than about the tape."""
-    assert _rsi_ge_75_of_last_5(_bars([100 + i for i in range(10)])) is None
+    assert _rsi_hits_above_melt_up_min(_bars([100 + i for i in range(10)]),
+                                       rules_version="v2.1") is None
 
 
 def test_an_unreadable_session_makes_the_whole_count_unknowable():
     """A partial count would understate it. Read from the source, because the behaviour is a
     branch rather than a value a fixture can reach easily here."""
     import inspect
-    src = inspect.getsource(_rsi_ge_75_of_last_5)
+    src = inspect.getsource(_rsi_hits_above_melt_up_min)
     assert "MAKES THE COUNT UNKNOWABLE, not smaller" in src
     assert src.count("return None") >= 2
 
@@ -184,14 +244,16 @@ def test_short_volume_history_is_none_not_true():
     """It used to SKIP the volume test and fall through to `return True` -- so a series too
     short to confirm a break returned a CONFIRMED break, dropping the one leg that separates a
     real break from a drift."""
-    assert confirmed_break_up_50dma(_bars([100 + i for i in range(260)],
-                                          vols=[None] * 260)) is None
-    assert confirmed_break_up_50dma(_bars([100 + i for i in range(260)],
-                                          vols=([None] * 245 + [1_000_000] * 15))) is None
+    assert confirmed_break_up_50dma(_bars([100 + i for i in range(260)], vols=[None] * 260),
+                                    rules_version="v2.1") is None
+    assert confirmed_break_up_50dma(
+        _bars([100 + i for i in range(260)], vols=([None] * 245 + [1_000_000] * 15)),
+        rules_version="v2.1") is None
 
 
 def test_a_full_history_still_answers_true_or_false():
-    got = confirmed_break_up_50dma(_bars([100 + i for i in range(260)]))
+    got = confirmed_break_up_50dma(_bars([100 + i for i in range(260)]),
+                                   rules_version="v2.1")
     assert got in (True, False), got
 
 
@@ -202,8 +264,8 @@ def test_it_now_mirrors_the_downward_one():
     from models.regime_inputs import confirmed_break_down_50dma
     short = _bars([100 - i for i in range(260)], vols=[None] * 260)
     assert confirmed_break_down_50dma(short) is None
-    assert confirmed_break_up_50dma(_bars([100 + i for i in range(260)],
-                                          vols=[None] * 260)) is None
+    assert confirmed_break_up_50dma(_bars([100 + i for i in range(260)], vols=[None] * 260),
+                                    rules_version="v2.1") is None
 
 
 # ── the consequence of the melt-up fix, pinned ───────────────────────────────
@@ -229,8 +291,13 @@ def test_the_steep_synthetic_ramp_is_a_melt_up_and_the_gentle_one_is_an_uptrend(
             s[t] = bars
         return s
 
-    steep = replay(sessions_from_series(series(0.8)))["shown"][-1]
-    gentle = replay(sessions_from_series(series(0.3)))["shown"][-1]
+    # BOTH SIDES NAME v2.1 (R-IV.1297(b)1). The fix is gated now, so inputs built without a
+    # version get v2's bool and the Melt-up row goes back to being unreachable -- this test
+    # would then assert v2's defect while claiming to test the fix.
+    from models.regime_classifier import load_rules
+    r21 = load_rules("v2.1")
+    steep = replay(sessions_from_series(series(0.8), rules_version="v2.1"), r21)["shown"][-1]
+    gentle = replay(sessions_from_series(series(0.3), rules_version="v2.1"), r21)["shown"][-1]
     assert steep["regime"] == "melt_up", steep["basis"]
     assert gentle["regime"] == "uptrend", gentle["basis"]
     assert "RSI >= 75 on 5 of the last 5" in steep["basis"]

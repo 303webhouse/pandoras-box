@@ -1,8 +1,8 @@
 {
   "version": "v2.1",
-  "source": "REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md sha256 61940f0264a91839b8c47353b25a5cd421ee0bdba8f35c99d8cc8670eec0247b",
-  "registered": true,
-  "registered_by": "Nick, 2026-10-16 19:07 MT (R-IV.1191(a) / R-IV.1187)",
+  "source": "REGIME-v3-PREREGISTRATION-TA-208.md sha256 ab015afaeb479f0c8b348771cd847e953c414b04d076e1f96483651baa5f2a96, section 1",
+  "registered": false,
+  "registered_by": "pending Nick's PR-1 stamp",
   "authority": "Section 2 (the 10 base regimes, checked top-down, first match wins) and its hysteresis block. Thresholds are round textbook values registered as written and NOT fitted to any week (TA-193).",
   "gating": "DISPLAY ONLY. The label drives the card and nothing else. No cap, gate, filter, kill-switch or journal entry may be computed from it (convention 42, section 1).",
   "confirmed_break": {
@@ -50,7 +50,7 @@
     "leaving_crash_requires_contango_closes": 2,
     "recovery_to_uptrend_requires_closes_above_200dma": 5,
     "range_requires_sessions": 10,
-    "stated_cost": "Measured 1999-2026 (LAB b6a6abd9, ungraded): danger called about 2 sessions after a peak; recoveries about 80 sessions after a trough; the 200-day line alone about 38.",
+    "stated_cost": "This makes the module late at V-shaped bottoms, and fast-toward-risk flatters a bearish lean. Section 2 requires that cost to be stated on the card.",
     "check": "A history dry-run tests one property only: roughly 6 or fewer market-label flips a year. Never P&L."
   },
   "order": [
@@ -94,5 +94,10 @@
     "absent_rule": "an absent family is counted neither way and never inferred; only row 1 counts families, and row 1 is NOT EVALUABLE in v1",
     "why_flagged": "section 2 names the five families but v1 has no feed for three of them and no stated per-family test for the two it can measure, so these two reuse clauses section 2 already applies to the Correction row rather than asserting anything new",
     "flip_rate_review": "R-IV.1198(c)+(e): the per-family tests and the flip-rate gap are reviewed together."
+  },
+  "v2_1_defect_pack": {
+    "melt_up_rsi_hits": "spy.rsi_ge_75_of_last_5 is an INTEGER COUNT of the last 5 closes with RSI(14) >= thresholds.melt_up_rsi_min (read from this file); v2 passed a boolean, so 'hits >= 2' could never hold",
+    "confirmed_break_up_50dma_volume": "returns None (not True) when fewer than 21 volume values exist",
+    "other_rules": "unchanged: every threshold, the row order and the hysteresis are v2's"
   }
 }

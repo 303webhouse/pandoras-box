@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence
 
-from models.regime_inputs import (Bar, MIN_BARS, _closes, _day, latest_adx,
+from models.regime_inputs import (Bar, MIN_BARS, _closes, _day, latest_adx, v21_fixes_apply,
                                   latest_moving_averages, sectors_above_50dma)
 
 
@@ -143,12 +143,37 @@ def closes_above_20_and_50(bars: Sequence[Bar]) -> Optional[int]:
 
 
 def confirmed_break_up_50dma(bars: Sequence[Bar],
-                             rules: Optional[Dict[str, Any]] = None) -> Optional[bool]:
+                             rules: Optional[Dict[str, Any]] = None,
+                             rules_version: Optional[str] = None) -> Optional[bool]:
     """§2's C5 test applied UPWARD, mirroring `confirmed_break_down_50dma` exactly.
 
     The same N closes, the same stack requirement and the same volume confirmation, with every
     comparison reversed -- written beside the downward one rather than as a flag on it, because
     a single function with a direction argument is where a sign error hides.
+
+    THE VOLUME GUARD IS LAB's, AND IT RUNS FIRST (R-IV.1297(d)). LAB's graded implementation
+    puts it ahead of the original body; mine had it after the stack check, and the two differ
+    on a real case: with fewer than 21 volume values AND a bearish stack, the stack test
+    returns False before the guard is ever reached, so the function claims "not a confirmed
+    break" on a series that cannot answer the question at all. LAB's order returns None there.
+    Between a False that was never earned and a None that says so, the graded implementation is
+    the one that counts -- and it is also the more conservative of the two.
+
+    WHAT THE GUARD COUNTS IS VOLUME VALUES, NOT SERIES LENGTH (R-IV.1297(d)). My earlier
+    comment said "a series too short to confirm a break", which is wrong and misleading: the
+    bar count can be 250 while `b.v` is None on all but a handful. The 21 is the 20-session
+    baseline plus the break day itself, and it is a count of USABLE volumes.
+
+    SHORT VOLUME HISTORY IS "CAN'T CHECK", NOT "CHECK PASSED". v2 SKIPPED the volume test when
+    fewer than 21 values were available and fell through to `return True` -- so a series that
+    could not confirm a break reported a CONFIRMED break, and the one leg distinguishing a real
+    break from a drift was silently dropped. Failing open on "could not tell" is the fault class
+    this board files most often. `confirmed_break_down_50dma` already returns None here and the
+    two are meant to mirror each other exactly; the mirror had drifted on the one branch nobody
+    exercised, because a short volume history is rare once the 200dma warm-up has been served.
+
+    GATED BY VERSION (R-IV.1297(b)1): v2 is frozen at 999aae43's behaviour, fail-open included,
+    so its 304 stored rows stay reproducible from the version they name. v2.1 applies the fix.
     """
     if rules is None:
         from models.regime_classifier import load_rules
@@ -157,6 +182,12 @@ def confirmed_break_up_50dma(bars: Sequence[Bar],
     need = int(cb.get("closes_through_50dma") or 2)
     rvol_min = float(cb.get("rvol_min_on_break_day") or 1.2)
 
+    if v21_fixes_apply(rules_version=rules_version, rules=rules):
+        vols = [b.v for b in bars if b.v is not None]
+        if len(vols) < 21:
+            return None
+
+    # ── 999aae43's body, unchanged, from here down ──────────────────────────
     cs = _closes(bars)
     if len(cs) < MIN_BARS or len(bars) < need + 20:
         return None
@@ -173,23 +204,11 @@ def confirmed_break_up_50dma(bars: Sequence[Bar],
             return None
         if stack == "bearish":
             return False
-    # SHORT VOLUME HISTORY IS "CAN'T CHECK", NOT "CHECK PASSED". R-IV.1277(b)/TA-208 §7.
-    #
-    # This used to SKIP the volume test when fewer than 21 values were available and fall
-    # through to `return True` -- so a series too short to confirm a break returned a CONFIRMED
-    # break, and the one leg that distinguishes a real break from a drift was silently dropped.
-    # Failing open on "could not tell" is the fault class this board files most often.
-    #
-    # `confirmed_break_down_50dma` already returns None here (regime_inputs.py: "if not vols or
-    # break_v is None: return None"), and the two are meant to mirror each other exactly -- the
-    # mirror had drifted on the one branch nobody exercised, because a short series is rare
-    # once the 200dma warm-up has been served.
     vols = [b.v for b in bars if b.v is not None]
-    if len(vols) < 21:
-        return None
-    base = sum(vols[-21:-1]) / 20.0
-    if base > 0 and (vols[-1] / base) < rvol_min:
-        return False
+    if len(vols) >= 21:
+        base = sum(vols[-21:-1]) / 20.0
+        if base > 0 and (vols[-1] / base) < rvol_min:
+            return False
     return True
 
 
@@ -281,7 +300,7 @@ def fill(inputs: Dict[str, Any], series: Dict[str, List[Bar]], i: int, *,
     put(spy_block, "closes_below_falling_200dma", closes_below_falling_200dma(bars))
     put(spy_block, "below_falling_200dma", below_falling_200dma(bars))
     put(spy_block, "closes_above_20_and_50", closes_above_20_and_50(bars))
-    put(spy_block, "confirmed_break_up_50dma", confirmed_break_up_50dma(bars, rules))
+    put(spy_block, "confirmed_break_up_50dma", confirmed_break_up_50dma(bars, rules))   # version rides on `rules`
     put(spy_block, "ma20_crossed_above_ma50", ma20_crossed_above_ma50(bars))
     put(breadth, "thrust", breadth_thrust(series, _day(bars[-1].date), rules,
                                           window_dates or [b.date for b in bars]))

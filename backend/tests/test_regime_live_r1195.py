@@ -494,11 +494,19 @@ def test_DEFECT_a_steady_uptrend_PRODUCES_A_LABEL():
 
 def test_the_default_synthetic_ramp_IS_a_melt_up_now_that_the_leg_works():
     """The other half of the same finding, kept so the fix cannot silently regress. The steep
-    default shape satisfies BOTH melt-up legs, and before R-IV.1277(b) it could satisfy only
-    one: `_rsi_ge_75_of_last_5` returned True, `float(True)` is 1.0, and 1.0 >= 2 is False."""
+    default shape satisfies BOTH melt-up legs, and under v2 it could satisfy only one: the
+    melt-up count returned True, `float(True)` is 1.0, and 1.0 >= 2 is False.
+
+    IT NAMES v2.1 ON BOTH SIDES (R-IV.1297(b)1). The fix is gated now, so inputs built with no
+    version get v2's boolean and this ramp goes back to `uptrend` -- the test would then be
+    asserting v2's defect while its name says it tests the fix. The version has to be stated
+    for the assertion to mean what it says.
+    """
     from jobs.regime_seed import replay
+    from models.regime_classifier import load_rules
     from models.regime_inputs import sessions_from_series
-    out = replay(sessions_from_series(_full_series(_synthetic(300))))
+    r21 = load_rules("v2.1")
+    out = replay(sessions_from_series(_full_series(_synthetic(300)), rules_version="v2.1"), r21)
     last = out["shown"][-1]
     assert last["regime"] == "melt_up", last["basis"]
     assert "RSI >= 75 on 5 of the last 5" in last["basis"]

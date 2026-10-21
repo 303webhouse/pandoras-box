@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 #: Served on every payload. The card prints it; nothing computes from it.
 DISPLAY_ONLY = "display only"
 
-#: TA-208 §7: the small line under the label. The thresholds in section 2 were fitted on a span
+#: registration §1 / R-IV.1277(b): the small line under the label. The thresholds in section 2 were fitted on a span
 #: in which dips were bought, and a reader is entitled to know what the rules were tuned against
 #: before reading a label off them. Stated once, here, rather than written into the renderer.
 TUNED_FOR = "Tuned for: post-2013 dip-buying market"
@@ -216,7 +216,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # and the card showed that label with nothing on its face to say so. This is the
             # one block the headline is allowed to replace a label with.
             fresh = await bar_freshness(conn)
-            # TA-208 section 7 item 4. A DIFFERENT staleness from `bar_freshness`: the data
+            # registration §1 / R-IV.1277(b). A DIFFERENT staleness from `bar_freshness`: the data
             # arrived and NOTHING MATCHED, so the card is holding a label no rule supports.
             # Derived at read time from stored columns -- `regime_snapshots.regime` is NULL when
             # no row matched -- so there is no schema change and no second writer.
@@ -289,7 +289,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         # newest BAR's -- and the outage of 2026-10-19/20 is exactly the case where a reader
         # needs to know it is the DATA that stopped, not the classifier that declined.
         "data_freshness": fresh,
-        # TA-208 section 7 item 4: the HELD block. `stale` here means "no rule matched", which
+        # registration §1 / R-IV.1277(b): the HELD block. `stale` here means "no rule matched", which
         # is NOT the same as `data_freshness.stale` ("the bars stopped arriving") -- two causes,
         # two messages, and a reader who sees one must not think it is the other.
         "held_no_match": held,
@@ -297,7 +297,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         # nothing gates on it (#42); `available` is False where the table has no row, because
         # a label v2 has never shown has NO prior, which is not a prior of zero.
         "drift_prior": _drift_prior_for(snap.get("shown_regime")),
-        # TA-208 section 7: the small line under the label. The classifier's thresholds were
+        # registration §1 / R-IV.1277(b): the small line under the label. The classifier's thresholds were
         # fitted on a market that bought dips, and a reader is entitled to know what the rules
         # were tuned against before reading a label off them.
         "tuned_for": TUNED_FOR,
