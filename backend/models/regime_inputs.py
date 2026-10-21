@@ -311,26 +311,53 @@ def confirmed_break_down_50dma(bars: Sequence[Bar], rules: Optional[Dict[str, An
     return (break_v / avg) >= rvol_min
 
 
-def _rsi_ge_75_of_last_5(bars: Sequence[Bar], threshold: float = 75.0,
-                         lookback: int = 5) -> Optional[bool]:
-    """Did RSI(14) reach `threshold` on any of the last `lookback` sessions? §2's Melt-up test.
+def _rsi_ge_75_of_last_5(bars: Sequence[Bar], threshold: Optional[float] = None,
+                         lookback: int = 5, rules: Optional[Dict[str, Any]] = None
+                         ) -> Optional[int]:
+    """HOW MANY of the last `lookback` settled closes had RSI(14) at or above `threshold`.
 
-    Walks the series and recomputes RSI as of each of those sessions, through the same
-    `indicators/rsi.py` the rest of the hub uses. None when the series is too short -- without
-    this the Melt-up row was NOT EVALUABLE on every session, so a melt-up could never be named.
+    AN INTEGER COUNT, NOT A YES/NO. R-IV.1277(b)/TA-208 §7. It used to return a bool, and
+    `regime_classifier` compares it as `hits >= melt_up_rsi_hits_of_last_5` where that
+    threshold is 2 -- so `float(True)` is 1.0, `1.0 >= 2` is False, and THE MELT-UP RSI LEG
+    COULD NEVER PASS. A yes/no feeding a ">= 2" test is not a stricter rule, it is a rule that
+    cannot fire; the row was unreachable rather than rare.
+
+    THE THRESHOLD COMES FROM THE RULES FILE, not from this signature's default. 75 was written
+    here as a literal while `thresholds.melt_up_rsi_min` held the same number, which is two
+    places for one figure -- and the one nobody edits is the one that drifts. The parameter
+    stays for tests that want to vary it explicitly.
+
+    None when the series is too short, as before: without that the Melt-up row was NOT
+    EVALUABLE on every session, and "cannot tell" is not "no hits".
     """
     from indicators.rsi import latest_rsi
+
+    if threshold is None:
+        if rules is None:
+            # DEFERRED, like the other reader in this module: `regime_classifier` imports from
+            # here, so a module-level import back would be a cycle. My first version used the
+            # bare name and raised NameError on the very first call -- the same class of fault
+            # the route registry sweeps handler imports for.
+            from models.regime_classifier import load_rules
+
+            rules = load_rules()
+        th = rules.get("thresholds") or {}
+        threshold = float(th.get("melt_up_rsi_min", 75.0))
 
     cs = _closes(bars)
     if len(cs) < 15 + lookback:
         return None
+    hits = 0
     for k in range(lookback):
         r = latest_rsi(cs[:len(cs) - k])
         if r is None or r.get("value") is None:
+            # A SESSION THAT CANNOT BE READ MAKES THE COUNT UNKNOWABLE, not smaller. Returning
+            # the partial count would understate it, and the row would then fail for a reason
+            # that is about the data rather than about the tape.
             return None
         if r["value"] >= threshold:
-            return True
-    return False
+            hits += 1
+    return hits
 
 
 def _ma50_rising(bars: Sequence[Bar]) -> Optional[bool]:

@@ -173,11 +173,23 @@ def confirmed_break_up_50dma(bars: Sequence[Bar],
             return None
         if stack == "bearish":
             return False
+    # SHORT VOLUME HISTORY IS "CAN'T CHECK", NOT "CHECK PASSED". R-IV.1277(b)/TA-208 §7.
+    #
+    # This used to SKIP the volume test when fewer than 21 values were available and fall
+    # through to `return True` -- so a series too short to confirm a break returned a CONFIRMED
+    # break, and the one leg that distinguishes a real break from a drift was silently dropped.
+    # Failing open on "could not tell" is the fault class this board files most often.
+    #
+    # `confirmed_break_down_50dma` already returns None here (regime_inputs.py: "if not vols or
+    # break_v is None: return None"), and the two are meant to mirror each other exactly -- the
+    # mirror had drifted on the one branch nobody exercised, because a short series is rare
+    # once the 200dma warm-up has been served.
     vols = [b.v for b in bars if b.v is not None]
-    if len(vols) >= 21:
-        base = sum(vols[-21:-1]) / 20.0
-        if base > 0 and (vols[-1] / base) < rvol_min:
-            return False
+    if len(vols) < 21:
+        return None
+    base = sum(vols[-21:-1]) / 20.0
+    if base > 0 and (vols[-1] / base) < rvol_min:
+        return False
     return True
 
 

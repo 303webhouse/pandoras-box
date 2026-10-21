@@ -1,0 +1,98 @@
+{
+  "version": "v2.1",
+  "source": "REGIME-STRATEGY-DOUBLE-PASS-2026-10-16.md sha256 61940f0264a91839b8c47353b25a5cd421ee0bdba8f35c99d8cc8670eec0247b",
+  "registered": true,
+  "registered_by": "Nick, 2026-10-16 19:07 MT (R-IV.1191(a) / R-IV.1187)",
+  "authority": "Section 2 (the 10 base regimes, checked top-down, first match wins) and its hysteresis block. Thresholds are round textbook values registered as written and NOT fitted to any week (TA-193).",
+  "gating": "DISPLAY ONLY. The label drives the card and nothing else. No cap, gate, filter, kill-switch or journal entry may be computed from it (convention 42, section 1).",
+  "confirmed_break": {
+    "closes_through_50dma": 2,
+    "stack_must_turn": true,
+    "rvol_min_on_break_day": 1.2,
+    "basis": "section 2, C5's test"
+  },
+  "thresholds": {
+    "bear_pct_below_52w_high": 20.0,
+    "bear_closes_below_falling_200dma": 15,
+    "bear_rally_closes_above_20_and_50": 2,
+    "bear_rally_sessions_after_crash": 30,
+    "correction_narrow_within_pct_of_high": 5.0,
+    "correction_indices_below_50dma": 2,
+    "range_adx_below": 20.0,
+    "range_adx_keep_prior_upper": 25.0,
+    "range_min_sessions": 10,
+    "range_within_pct_of_50dma": 3.0,
+    "melt_up_pct_above_200dma": 12.0,
+    "melt_up_rsi_min": 75.0,
+    "melt_up_rsi_hits_of_last_5": 2,
+    "uptrend_sectors_above_50dma_min": 5,
+    "uptrend_sectors_total": 11,
+    "uptrend_strong_adx_min": 25.0,
+    "narrow_uptrend_sectors_max": 4,
+    "narrow_uptrend_high_beta_breadth_below_pct": 40.0,
+    "recovery_breadth_thrust_from_pct": 15.0,
+    "recovery_breadth_thrust_to_pct": 60.0,
+    "recovery_breadth_thrust_within_sessions": 10,
+    "recovery_to_uptrend_closes_above_200dma": 5,
+    "crash_universe_down_3pct_share": 60.0,
+    "crash_families_required": 3,
+    "crash_families_total": 5
+  },
+  "hysteresis": {
+    "enter_requires_settled_closes": 2,
+    "min_sessions_before_change": 5,
+    "toward_risk_exempt_from_min_sessions": true,
+    "toward_risk_still_requires_closes": 2,
+    "toward_risk_regimes": [
+      "breakdown",
+      "crash_liquidation"
+    ],
+    "leaving_crash_requires_contango_closes": 2,
+    "recovery_to_uptrend_requires_closes_above_200dma": 5,
+    "range_requires_sessions": 10,
+    "stated_cost": "Measured 1999-2026 (LAB b6a6abd9, ungraded): danger called about 2 sessions after a peak; recoveries about 80 sessions after a trough; the 200-day line alone about 38.",
+    "check": "A history dry-run tests one property only: roughly 6 or fewer market-label flips a year. Never P&L."
+  },
+  "order": [
+    "crash_liquidation",
+    "bear_market",
+    "bear_market_rally",
+    "breakdown",
+    "recovery",
+    "correction",
+    "range_chop",
+    "melt_up",
+    "uptrend",
+    "narrow_uptrend"
+  ],
+  "tags": {
+    "available": [
+      "narrow",
+      "credit-stress",
+      "recession-backed",
+      "lens-split",
+      "index-divergence",
+      "capitulation-day"
+    ],
+    "basis": "Section 2: tags, not regimes."
+  },
+  "feeds_absent_in_v1": {
+    "vix": "no raw VIX series. The Crash hard requirement (VIX above VIX3M on a close) cannot be tested, so row 1 is NOT EVALUABLE and is never read as 'not a crash'.",
+    "vix3m": "same; v2 prerequisite (section 6).",
+    "hy_oas_level": "the credit factor is pinned at -1.0 and cannot show further widening; the spread LEVEL is a v2 feed.",
+    "brent": "v2 feed; the oil and war keys need it.",
+    "carry_strip": "the FX strip exists but is not wired into the evidence count.",
+    "rule": "A family with no feed renders as NO DATA and is never inferred (R-IV.1193(d))."
+  },
+  "families_v1": {
+    "status": "INTERIM, ratified R-IV.1198(e). Not final: section 2 names five families but states no per-family test, so these two reuse the Correction row's own clauses. Per-family tests are designed at the same review as the flip rate.",
+    "structure": "risk-off when SPY closes below its 50dma -- the Correction row's own first test",
+    "breadth": "risk-off when >= 2 of 3 indices (SPY/QQQ/IWM) close below their 50dma -- the Correction row's second test",
+    "credit": null,
+    "vol": null,
+    "carry": null,
+    "absent_rule": "an absent family is counted neither way and never inferred; only row 1 counts families, and row 1 is NOT EVALUABLE in v1",
+    "why_flagged": "section 2 names the five families but v1 has no feed for three of them and no stated per-family test for the two it can measure, so these two reuse clauses section 2 already applies to the Correction row rather than asserting anything new",
+    "flip_rate_review": "R-IV.1198(c)+(e): the per-family tests and the flip-rate gap are reviewed together."
+  }
+}
