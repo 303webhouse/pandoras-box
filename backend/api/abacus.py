@@ -664,14 +664,18 @@ async def _load_equity(pool) -> dict:
 # 2026-10-19, Abacus read +3,535.22 "since 2026-09-01" where the period's own trades were roughly
 # flat, and FID ROTH's sign flipped (R-IV.1255(a)).
 #
-# THE BASIS IS MIXED, and saying only "written, not closed" would be its own half-truth: branch 2
-# (rows with no closures at all) windows on `exit_date`, which IS the trade's own day. Both halves
-# are stated, with the count of rows where the two disagree, so a reader can see how far the figure
-# can be out rather than being told to distrust it in the abstract.
+# THAT IS HISTORY NOW. R-IV.1270: `trade_date` is live and backfilled (840 of 842 closures), the
+# realized window is `c.trade_date` alone, and the two undated closures are EXCLUDED and reported
+# as "date unknown" outside every total. So both branches are on the trade's own day -- closures by
+# `trade_date`, rows the ledger does not cover by their own `exit_date` -- and no figure on this
+# page is dated by a write timestamp any more.
 #
-# This is a LABEL, not a fix. The fix is BUILD's `trade_date` column (R-IV.1260(d)) and POSITIONS'
-# backfill (R-IV.1263); when it lands, both branches window on the same real-world day and rows
-# without one appear as "date unknown", outside every period total (R-IV.1262(c)).
+# THIS BLOCK STAYS ANYWAY, and not out of sentiment. It is what makes the page's own caption fall
+# away by itself: the frontend hides the warning when `trade_date_exists` is true, so the label
+# that was needed in October disappears without anyone remembering to delete it. The counts below
+# are kept because they are the evidence for the claim -- a reader who wants to know how badly the
+# old basis differed can still see 805 of 842, rather than being told to take the correction on
+# trust.
 _DATE_BASIS_SQL = """
     SELECT COUNT(*) AS n_rows,
            COUNT(*) FILTER (WHERE exit_day IS NOT NULL AND write_day <> exit_day) AS differing,
@@ -712,20 +716,33 @@ async def _load_date_basis(pool) -> dict:
     _keys = r.keys() if (r is not None and hasattr(r, "keys")) else ()
     trade_dated = int(r["trade_dated"] or 0) if "trade_dated" in _keys else None
     write_dated = int(r["write_dated"] or 0) if "write_dated" in _keys else None
+    # R-IV.1270(b): `trade_date_exists` means THE PERIOD FIGURES ARE WINDOWED ON THE TRADE'S OWN
+    # DAY. It does NOT mean every closure is dated: an undated one is excluded from the window and
+    # reported separately, so a partial backfill still leaves every figure on the trade's own day.
+    #
+    # It is a COUNT test, not a presence test. Three states, and only the middle one is subtle:
+    #   * the column is absent from the query (None)   -> false: nothing can be claimed
+    #   * the column is there and the count is ZERO    -> false: the figures would be windowed on
+    #     a column no row fills, so the warning has to come BACK
+    #   * the count is non-zero                        -> true, however short of the full book
+    # Writing this as `is not None` made the zero case claim the fix, which is the one reading that
+    # would leave a wrong figure on the page with no caption.
+    on_trade_date = bool(trade_dated)
     return {
-        "label": ("by each closure's TRADE DATE where it is recorded, otherwise by the day the "
-                  "closure row was written"
-                  if trade_dated else
+        "label": ("by each closure's TRADE DATE, the broker action date"
+                  if on_trade_date else
                   "by the day each closure row was WRITTEN, not the day the trade closed"),
-        "trade_date_exists": trade_dated is not None,
+        "trade_date_exists": on_trade_date,
         "trade_dated_rows": trade_dated,
         "write_dated_rows": write_dated,
-        "column": "COALESCE(position_lot_closures.trade_date, position_lot_closures.created_at)",
+        "column": ("position_lot_closures.trade_date" if on_trade_date
+                   else "position_lot_closures.created_at"),
+        # Two branches, two columns -- but both are the trade's own day now, which is the point.
         "mixed": True,
-        "mixed_detail": ("A row with closures is placed by the day its closure was WRITTEN. A row "
-                         "with no closures is placed by its own `exit_date`, which is the trade's "
-                         "day. The two halves of this page's realized total are therefore on "
-                         "different bases."),
+        "mixed_detail": ("A closure is placed by its `trade_date`, the broker action date. A row the "
+                         "closures ledger does not cover is placed by its own `exit_date`. Both are "
+                         "the trade's own day, so the halves agree in kind; neither is a write "
+                         "timestamp."),
         "closure_rows": n,
         "rows_differing": differing,
         "rows_agreeing": agreeing,
@@ -733,13 +750,21 @@ async def _load_date_basis(pool) -> dict:
         "earliest_exit_in_ledger": _d(r["earliest_exit"] if r else None),
         "written_from": _d(r["first_write"] if r else None),
         "written_to": _d(r["last_write"] if r else None),
-        "meaning": ("`position_lot_closures` carries no trade date -- only `created_at`, the instant "
-                    "the reconciliation wrote the row. So a period figure here is 'what was written "
-                    "in this period', which is not 'what was traded in it'. On %d of %d closure rows "
-                    "the two days differ." % (differing, n)),
-        "fix": ("BUILD's `trade_date` column (R-IV.1260(d)) and POSITIONS' backfill (R-IV.1263). "
-                "Then every period figure windows on the trade's own day, and rows without one are "
-                "shown as 'date unknown' outside the totals (R-IV.1262(c))."),
+        "meaning": (("A period figure here is what was TRADED in the period. `trade_date` is the "
+                     "broker action date; the write timestamp it replaced disagreed with the "
+                     "trade's own day on %d of %d closure rows, which is why 'since 2026-09-01' "
+                     "once read +3,535.22 for a window whose trades sum to about -104. Closures "
+                     "with no trade date are excluded and reported in `realized_date_unknown`."
+                     % (differing, n))
+                    if on_trade_date else
+                    ("`position_lot_closures` carries no trade date -- only `created_at`, the "
+                     "instant the reconciliation wrote the row. So a period figure here is 'what "
+                     "was written in this period', which is not 'what was traded in it'. On %d of "
+                     "%d closure rows the two days differ." % (differing, n))),
+        "fix": (None if on_trade_date else
+                ("BUILD's `trade_date` column (R-IV.1260(d)) and POSITIONS' backfill (R-IV.1263). "
+                 "Then every period figure windows on the trade's own day, and rows without one "
+                 "are shown as 'date unknown' outside the totals (R-IV.1262(c)).")),
     }
 
 
@@ -775,31 +800,38 @@ def _realized_money_sql(first: Optional[date], last: date) -> tuple:
     R-IV.760(c), and `fallback.count` is expected to reach zero. It stays so that a row the
     closures ledger does not cover can never silently vanish from the total.
     """
-    # R-IV.1260(d): DATED BY THE TRADE, falling back to the write time only where the trade
-    # date is not recorded -- and the fallback is COUNTED below rather than assumed empty.
+    # R-IV.1270(b): THE WINDOW IS THE TRADE DATE, FULL STOP.
     #
-    # `created_at` alone was wrong by more than the figure itself: the R-IV.760(c) backfill
-    # wrote old closures recently, so a "since 2026-09-01" window swept in trades that closed
-    # months earlier and reported +3,535.22 where those trades sum to about -30. A write
-    # timestamp is not a trade date.
+    # `created_at` alone was wrong by more than the figure itself: the R-IV.760(c) backfill wrote
+    # old closures recently, so a "since 2026-09-01" window swept in trades that closed months
+    # earlier and reported +3,535.22 where those trades sum to about -104. A write timestamp is
+    # not a trade date.
     #
-    # NOT `p.exit_date` EITHER, which (d) rules out and PDBC shows why: a partial exit leaves
-    # the row OPEN with exit_date NULL, so a window bounded on it cannot place the closure at
-    # all.
-    day_closure = _day_sql("COALESCE(c.trade_date, c.created_at)")
+    # NOT `p.exit_date` EITHER, which PDBC shows why: a partial exit leaves the row OPEN with
+    # exit_date NULL, so a window bounded on it cannot place the closure at all.
+    #
+    # AND NO LONGER `COALESCE(trade_date, created_at)`, which was the interim while the backfill
+    # ran. A COALESCE puts an UNDATED closure back into the window by the very timestamp this
+    # whole fix exists to stop using -- so it would read as a period figure while being none.
+    # Undated closures are now EXCLUDED here and reported separately as "date unknown", outside
+    # every total (R-IV.1262(c)).
+    #
+    # NO DAY-VS-MOMENT CONVERSION ON `trade_date`: it is a DATE column, already a calendar day.
+    # `_day_sql` would cast it to a timestamp and read it through a time zone, which is exactly
+    # the error R-IV.726 exists to prevent, committed in the other direction.
+    day_closure = "c.trade_date"
     day_exit = _day_sql("p.exit_date")
     params: list = [last]
-    bound_c = f"{day_closure} <= $1"
+    bound_c = f"c.trade_date IS NOT NULL AND {day_closure} <= $1"
     bound_p = f"{day_exit} <= $1"
     if first is not None:
         params.append(first)
         bound_c += f" AND {day_closure} >= $2"
         bound_p += f" AND {day_exit} >= $2"
 
-    # Branch 1 -- the closures ledger, dated by the closure itself.
+    # Branch 1 -- the closures ledger, dated by the trade.
     closures_sql = f"""
-        SELECT p.account AS account, SUM(c.realized) AS v, COUNT(*) AS n,
-               COUNT(*) FILTER (WHERE c.trade_date IS NULL) AS n_fallback_date
+        SELECT p.account AS account, SUM(c.realized) AS v, COUNT(*) AS n
           FROM position_lot_closures c
           JOIN unified_positions p ON p.position_id = c.position_id
          WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF'
@@ -821,6 +853,20 @@ def _realized_money_sql(first: Optional[date], last: date) -> tuple:
          ORDER BY p.position_id
     """
     return closures_sql, fallback_sql, params
+
+
+# R-IV.1270(b): THE CLOSURES WITH NO TRADE DATE. Outside every period total, by name, with
+# their money -- because a row excluded from a total and not shown is a row that has silently
+# vanished, which is the failure this whole sequence of rulings is about. Not windowed at all: an
+# undated row cannot be placed in a window, so it is reported in full whatever the range.
+_REALIZED_UNDATED_SQL = """
+    SELECT c.id, c.position_id, p.account, p.ticker, p.status, c.realized
+      FROM position_lot_closures c
+      JOIN unified_positions p ON p.position_id = c.position_id
+     WHERE UPPER(COALESCE(p.status, '')) <> 'DUPLICATE_OF'
+       AND c.trade_date IS NULL
+     ORDER BY c.id
+"""
 
 
 # Rows that BOTH branches miss: realized recorded, no closures, and no exit_date to window on.
@@ -848,6 +894,7 @@ async def _load_realized_money(pool, first: Optional[date], last: date) -> dict:
     closure_rows = await pool.fetch(closures_sql, *params)
     fallback_rows = await pool.fetch(fallback_sql, *params)
     dropped_rows = await pool.fetch(_REALIZED_DROPPED_SQL)
+    undated_rows = await pool.fetch(_REALIZED_UNDATED_SQL)
 
     totals: Dict[Optional[str], Decimal] = {}
     closures_n: Dict[Optional[str], int] = {}
@@ -860,16 +907,10 @@ async def _load_realized_money(pool, first: Optional[date], last: date) -> dict:
     # closure is trade-dated — the opposite of what this field exists to disclose. One missing
     # row makes the whole count None, because a partial count of "how much is mis-dated" would
     # understate it.
-    dated_by_write: Optional[int] = 0
     for r in closure_rows:
         key = r["account"] or None
         totals[key] = totals.get(key, Decimal("0")) + Decimal(str(r["v"] or 0))
         closures_n[key] = closures_n.get(key, 0) + int(r["n"] or 0)
-        has_fb = "n_fallback_date" in (r.keys() if hasattr(r, "keys") else ())
-        if not has_fb:
-            dated_by_write = None
-        elif dated_by_write is not None:
-            dated_by_write += int(r["n_fallback_date"] or 0)
 
     fallback: list = []
     fallback_total = Decimal("0")
@@ -884,6 +925,20 @@ async def _load_realized_money(pool, first: Optional[date], last: date) -> dict:
             "position_id": r["position_id"], "ticker": r["ticker"], "status": r["status"],
             "account": key, "realized_pnl": _money_in(r["v"]),
             "exit_day": r["exit_day"].isoformat() if r["exit_day"] else None,
+        })
+
+    undated: list = []
+    undated_total = Decimal("0")
+    undated_by_account: Dict[Optional[str], Decimal] = {}
+    for r in undated_rows:
+        key = r["account"] or None
+        v = Decimal(str(r["realized"] or 0))
+        undated_total += v
+        undated_by_account[key] = undated_by_account.get(key, Decimal("0")) + v
+        undated.append({
+            "closure_id": r["id"], "position_id": r["position_id"], "ticker": r["ticker"],
+            "status": r["status"], "account": key, "account_display": display_name(key) if key else None,
+            "realized": _money_in(r["realized"]),
         })
 
     dropped = [{
@@ -904,12 +959,23 @@ async def _load_realized_money(pool, first: Optional[date], last: date) -> dict:
         # much of it is not yet, so a figure drawn while the backfill is incomplete carries its
         # own caveat instead of needing one from a report.
         "dating": {
-            "basis": "COALESCE(trade_date, created_at)",
-            "closures_dated_by_write_time": dated_by_write,
-            "note": ("trade_date is the broker action date, written by POSITIONS; until it is "
-                     "backfilled these rows are still dated by when the closure row was "
-                     "WRITTEN, which is what reported +3,535.22 for a window whose trades sum "
-                     "to about -30"),
+            "basis": "position_lot_closures.trade_date",
+            "note": ("the broker action date, written by POSITIONS (R-IV.1260(d)) and backfilled "
+                     "under R-IV.1263. A closure with no trade date is NOT placed by when its row "
+                     "was written -- it is excluded from this total and reported in "
+                     "`date_unknown`"),
+        },
+        # R-IV.1270(b): outside every total, and SAID. A count alone would not do: the question a
+        # reader has is how much money is unplaced, so the money is here with the rows that hold it.
+        "date_unknown": {
+            "count": len(undated),
+            "total": _money(undated_total) if undated else None,
+            "by_account": {k: _money(v) for k, v in undated_by_account.items()},
+            "rows": undated,
+            "in_any_total": False,
+            "note": ("closures with no `trade_date`, so no window can place them. They are OUTSIDE "
+                     "every period figure on this page, in every range. POSITIONS fills these and "
+                     "the count should reach zero (R-IV.1263)"),
         },
         "fallback": {
             "count": len(fallback),
@@ -1000,8 +1066,11 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
             # A key is not a label: the display name is served, never inferred by a reader.
             "account_display": display_name(account) if account else None,
             "net_profit": net,
-            "net_profit_basis": ("closures dated in the window, plus rows the ledger does not "
-                                 "cover, dated on exit_date; DUPLICATE_OF excluded (R-IV.761(b))"),
+            "net_profit_basis": ("closures whose TRADE DATE falls in the window, plus rows the "
+                                 "ledger does not cover, dated on their own exit_date; "
+                                 "DUPLICATE_OF excluded, and closures with no trade date excluded "
+                                 "and reported in `realized_date_unknown` (R-IV.761(b), "
+                                 "R-IV.1270(b))"),
             "win_rate": round(wins / counted, 4) if counted else None,
             "win_rate_n": counted,
             # Mean realised return per trade. NULL, never 0, when nothing in this book has a
@@ -1047,6 +1116,8 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
     # Served, never assumed: what the fallback branch carried, and what NEITHER branch could place.
     out["realized_fallback"] = realized["fallback"]
     out["realized_excluded_no_date"] = realized["excluded_no_date"]
+    out["realized_dating"] = realized["dating"]
+    out["realized_date_unknown"] = realized["date_unknown"]
     return out
 
 
@@ -1281,6 +1352,11 @@ async def abacus_summary(
     # silently. Caught against the live endpoint, not in a test.
     out["realized_fallback"] = book["realized_fallback"]
     out["realized_excluded_no_date"] = book["realized_excluded_no_date"]
+    # R-IV.1270(b). Selected BY NAME here, like the two above -- the fault R-IV.761(b) caught was
+    # a loader computing a block the route then dropped, and a block whose whole purpose is "this
+    # money is not in any total" is the worst possible one to drop silently.
+    out["realized_dating"] = book["realized_dating"]
+    out["realized_date_unknown"] = book["realized_date_unknown"]
 
     out["range"] = rng
     out["range_applied"] = True
