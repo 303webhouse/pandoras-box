@@ -39,7 +39,7 @@ class _FakePool:
     """
 
     def __init__(self, rows=None, snapshots=None, cash=None,
-                 closures=None, fallback=None, dropped=None, basis=None):
+                 closures=None, fallback=None, dropped=None, basis=None, undated=None):
         self.rows = list(rows or [])
         self.snapshots = list(snapshots or [])
         self.cash = list(cash or [])
@@ -53,6 +53,10 @@ class _FakePool:
         # that needs a particular basis (a write date that disagrees with the trade's own day, or
         # a trade date that exists) passes one.
         self.basis = basis
+        # R-IV.1270(b): closures with no `trade_date`. Empty by default, which is the book's
+        # direction of travel (2 of 842 and falling), and suppliable because the whole point of
+        # the block is what happens when it is NOT empty.
+        self.undated = list(undated or [])
         self.calls = []
 
     async def fetch(self, sql, *params):
@@ -66,6 +70,11 @@ class _FakePool:
         # would hand census rows to a query expecting `v`/`n` and the route would 500. That is
         # the same hazard this stub's docstring already names for the snapshot query.
         if "position_lot_closures" in sql:
+            # Routed BEFORE the SUM test: the undated query selects raw rows, and the fall-through
+            # at the end of this branch would hand it `self.dropped`, whose columns are named
+            # differently. The route is explicit for the same reason the snapshot one is.
+            if "c.trade_date IS NULL" in sql:
+                return list(self.undated)
             if "SUM(c.realized)" in sql:
                 # Branch 1, modelled on the book's norm: 560 of 568 rows have closures that
                 # agree with their `realized_pnl` exactly (measured 2026-10-08), so a row's
@@ -103,8 +112,12 @@ class _FakePool:
             # construction, and a test that wants a non-zero one must pass `basis=` explicitly.
             counted = [r for r in self.rows if r.get("realized_pnl") is not None]
             with_exit = [r for r in counted if r.get("exit_date") is not None]
+            # R-IV.1270: `trade_dated` present and non-zero is what tells the route the figures
+            # are on the trade's own day, so the default fixture carries it. A test that wants the
+            # OLD state passes `basis={... "trade_dated": 0 ...}` and gets the warning back.
             return {"n_rows": len(counted), "differing": 0, "agreeing": len(with_exit),
                     "no_exit_day": len(counted) - len(with_exit),
+                    "trade_dated": len(counted), "write_dated": 0,
                     "earliest_exit": min((r["exit_date"] for r in with_exit), default=None),
                     "first_write": None, "last_write": None}
         rows = await self.fetch(sql, *params)
@@ -159,8 +172,8 @@ def book_pool():
 
 
 def _patch_book(rows, snapshots=None, cash=None, closures=None, fallback=None, dropped=None,
-                basis=None):
-    pool = _FakePool(rows, snapshots, cash, closures, fallback, dropped, basis)
+                basis=None, undated=None):
+    pool = _FakePool(rows, snapshots, cash, closures, fallback, dropped, basis, undated)
     return pool, patch("api.abacus.get_postgres_client", new=AsyncMock(return_value=pool))
 
 
@@ -1060,7 +1073,7 @@ class TestTheRouteSurfacesWhatTheLoaderComputed:
         with p:
             d = _get(client, test_api_key).json()
         net = _stat(d, "net_profit")
-        assert "closures dated in the window" in net["basis"]
+        assert "TRADE DATE falls in the window" in net["basis"]
         assert net["coverage"]["predicate"] != net["basis"]
 
 class TestTheDateBasisIsServed:
@@ -1106,26 +1119,87 @@ class TestTheDateBasisIsServed:
         with p:
             d = _get(client, test_api_key).json()
         b = d["date_basis"]
-        # R-IV.1260(d): the column EXISTS now and the window reads
-        # COALESCE(trade_date, created_at), so the basis names both. This asserted the
-        # pre-column reality -- correct when it was written (R-IV.1262(b), which named
-        # BUILD's column as the fix) and false the moment that column landed. Updated
-        # by BUILD under (d) rather than left to fail, with the reason recorded here.
-        assert b["column"] == ("COALESCE(position_lot_closures.trade_date, "
-                               "position_lot_closures.created_at)")
-        assert b["trade_date_exists"] is False
+        # R-IV.1270(b): THE WINDOW IS THE TRADE DATE. The COALESCE onto `created_at` was the
+        # interim while POSITIONS backfilled; it is gone, because a COALESCE puts an UNDATED
+        # closure back into the window by the very timestamp the whole fix exists to stop using.
+        # This expectation has now been rewritten twice -- once when the column landed, once when
+        # the COALESCE went -- and each time the caption had to follow the field, which is the
+        # fault this test exists to catch.
+        assert b["column"] == "position_lot_closures.trade_date"
+        assert b["trade_date_exists"] is True
         assert b["mixed"] is True
+        # Both halves are the trade's own day now; the detail must say so rather than claim a
+        # write timestamp is still in use.
         assert "exit_date" in b["mixed_detail"]
-        # The fix is named ON the payload, so the page can say what it is waiting for.
-        assert "trade_date" in b["fix"]
+        assert "trade's own day" in b["mixed_detail"]
+        assert "WRITTEN" not in b["mixed_detail"]
+        # Nothing to wait for any more, so there is no fix to name.
+        assert b["fix"] is None
+        assert "TRADED in the period" in b["meaning"]
+
+    def test_the_old_write_dated_state_is_still_renderable(self, client, test_api_key):
+        """A backfill that lags must bring the warning BACK, not leave a silent wrong figure.
+
+        The page hides its caption on `trade_date_exists`, so if that flag could only ever be
+        true the warning would be unreachable code the first time a closure arrived undated.
+        """
+        pool, p = _patch_book([_row(100.0, 1000.0)], basis={
+            "n_rows": 10, "differing": 9, "agreeing": 1, "no_exit_day": 0,
+            "trade_dated": 0, "write_dated": 10,
+            "earliest_exit": _dt.date(2025, 12, 11), "first_write": _dt.date(2026, 9, 23),
+            "last_write": _dt.date(2026, 10, 15)})
+        with p:
+            d = _get(client, test_api_key).json()
+        b = d["date_basis"]
+        assert b["trade_date_exists"] is False
+        assert b["column"] == "position_lot_closures.created_at"
+        assert "WRITTEN" in b["label"]
+        assert b["fix"] and "trade_date" in b["fix"]
+
+    def test_the_undated_closures_are_served_and_outside_every_total(self, client, test_api_key):
+        """R-IV.1270(b): excluded from the totals, and SAID -- count, money, and the rows.
+
+        Excluding them is right. Excluding them silently is the failure this whole sequence of
+        rulings has been about, so the test asserts both halves: the money is NOT in net profit,
+        and it IS on the payload.
+        """
+        undated = [
+            {"id": 1942, "position_id": "POS_IWM_1", "account": "ROBINHOOD", "ticker": "IWM",
+             "status": "EXPIRED", "realized": -13.08},
+            {"id": 1943, "position_id": "POS_NVDA_1", "account": "ROBINHOOD", "ticker": "NVDA",
+             "status": "EXPIRED", "realized": -44.18},
+        ]
+        pool, p = _patch_book([_row(100.0, 1000.0)], undated=undated)
+        with p:
+            d = _get(client, test_api_key).json()
+        u = d["realized_date_unknown"]
+        assert u["count"] == 2
+        assert u["total"] == -57.26
+        assert u["in_any_total"] is False
+        assert [r["ticker"] for r in u["rows"]] == ["IWM", "NVDA"]
+        # The name travels with the row, as it does everywhere else on this page.
+        assert u["rows"][0]["account_display"] == "Robinhood"
+        assert u["by_account"]["ROBINHOOD"] == -57.26
+        # AND IT IS NOT IN THE MONEY. The census row contributes 100.00 and nothing else does.
+        assert _stat(d, "net_profit")["value"] == 100.0
+        assert d["realized_dating"]["basis"] == "position_lot_closures.trade_date"
+
+    def test_no_undated_closures_serves_a_zero_count_and_a_null_total(self, client, test_api_key):
+        """Null, never 0.00: "nothing is unplaced" and "the unplaced money nets to nothing" are
+        different claims, and the second would read as a reconciled book."""
+        pool, p = _patch_book([_row(100.0, 1000.0)])
+        with p:
+            d = _get(client, test_api_key).json()
+        u = d["realized_date_unknown"]
+        assert u["count"] == 0
+        assert u["total"] is None
+        assert u["rows"] == []
 
     def test_the_basis_reaches_the_accounts_block_and_the_live_breakdowns(self, client, test_api_key):
         pool, p = _patch_book([_row(100.0, 1000.0)])
         with p:
             d = _get(client, test_api_key).json()
-        assert d["accounts_date_basis"]["column"] == (
-            "COALESCE(position_lot_closures.trade_date, "
-            "position_lot_closures.created_at)")
+        assert d["accounts_date_basis"]["column"] == "position_lot_closures.trade_date"
         live = [b for b in d["breakdowns"] if b["source"] == "live"]
         assert live, "no live breakdown to check"
         for b in live:
