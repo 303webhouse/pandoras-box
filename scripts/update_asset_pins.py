@@ -66,7 +66,14 @@ def record() -> dict:
             target = os.path.join(FRONTEND, asset.lstrip("/"))
             if not os.path.exists(target):
                 continue
-            digest = hashlib.sha256(io.open(target, "rb").read()).hexdigest()
+            # LF-NORMALISED, R-IV.1321(c). `core.autocrlf` is true on this machine, so the
+            # SAME committed file is checked out LF in one worktree and CRLF in another --
+            # app.js is 583,978 bytes here and 597,844 in C:	h-abacus, a delta of exactly one
+            # byte per line, and identical after normalisation. Hashing raw bytes made this
+            # manifest a record of a CHECKOUT rather than of a FILE: two lanes kept overwriting
+            # each other's value and the guard was red or green by accident.
+            digest = hashlib.sha256(
+                io.open(target, "rb").read().replace(b"\r\n", b"\n")).hexdigest()
             out.setdefault(page, {})[asset] = {"pin": int(pin), "sha256": digest}
     io.open(MANIFEST, "w", encoding="utf-8").write(
         json.dumps(out, indent=2, sort_keys=True) + "\n")

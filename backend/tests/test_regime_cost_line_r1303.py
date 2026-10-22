@@ -179,7 +179,11 @@ def test_the_cards_pin_moved_with_its_file():
     frontend = _BACKEND.parent / "frontend"
     manifest = json.loads(frontend.joinpath("asset-pins.json").read_text(encoding="utf-8"))
     recorded = manifest["v2.html"]["v2.js"]
-    digest = hashlib.sha256(frontend.joinpath("v2.js").read_bytes()).hexdigest()
+    # LF-NORMALISED, as the manifest and the pin guard now are (R-IV.1321(c)). This test
+    # hashed RAW bytes and went red the moment the normalisation landed -- the same
+    # checkout-versus-file confusion, in a test I had written before the fix.
+    digest = hashlib.sha256(
+        frontend.joinpath("v2.js").read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     assert recorded["sha256"] == digest, "the manifest does not match the file on disk"
     html = frontend.joinpath("v2.html").read_text(encoding="utf-8")
     assert '/v2.js?v=%d"' % recorded["pin"] in html
