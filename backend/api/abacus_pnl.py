@@ -67,6 +67,37 @@ _OPEN_SQL = """
      WHERE UPPER(COALESCE(p.status, '')) = 'OPEN'
 """
 
+#: R-IV.1349(b): PAST EXPIRY WITH SIZE STILL ON THE BOOK -- money the book is still carrying on
+#: contracts the broker has moved past. Outside every total here, exactly as the undated closures
+#: are, and for the same reason: it is not realized, it is not unrealized, it is UNBOOKED.
+#:
+#: THE PREDICATE IS LIMB 6's, COPIED RATHER THAN RE-DERIVED (`C:/lane-state/basis_check.py`,
+#: R-IV.1341(b)): `expiry < current_date`, any status but DUPLICATE_OF, and SUM(position_lots.qty)
+#: above zero. Two details matter and both are deliberate:
+#:
+#:   * OPEN QUANTITY IS THE LOT SUM, not `quantity` (Convention #29) -- `quantity` is the size
+#:     OPENED and would count a fully closed row forever.
+#:   * ANY STATUS. Limb 6's first version used `status = 'OPEN'` and reached 1 row of 9: the other
+#:     eight sat under `EXPIRED` with size still on them, because the expiry sweep writes STATUS
+#:     and books nothing. Keying on status is keying on the symptom.
+#:
+#: `current_date` is the DATABASE's date (UTC), used verbatim so this page and POSITIONS' check
+#: cannot disagree. It can differ from the page's Mountain period boundaries for the few hours
+#: either side of UTC midnight; agreeing with the check that owns the question is worth more than
+#: internal tidiness here, and the figure is a standing count rather than a period one.
+_EXPIRED_UNBOOKED_SQL = """
+    SELECT p.id, p.ticker, p.account, p.status, p.structure, p.expiry, p.cost_basis,
+           (SELECT COALESCE(SUM(l.qty), 0) FROM position_lots l
+             WHERE l.position_id = p.position_id) AS open_qty,
+           (current_date - p.expiry) AS days_past
+      FROM unified_positions p
+     WHERE p.expiry IS NOT NULL AND p.expiry < current_date
+       AND p.status <> 'DUPLICATE_OF'
+       AND (SELECT COALESCE(SUM(l.qty), 0) FROM position_lots l
+             WHERE l.position_id = p.position_id) > 0
+     ORDER BY p.expiry, p.id
+"""
+
 #: Closures with no trade date: outside every period figure here, as R-IV.1270(b) requires.
 _UNDATED_SQL = """
     SELECT c.id, c.realized, p.account, p.ticker
@@ -241,6 +272,7 @@ async def load_pnl(pool, period: str = "month", account: str = "ALL") -> dict:
         r["realized"] = Decimal(str(r["realized"] or 0))
     open_rows = [dict(r) for r in await pool.fetch(_OPEN_SQL)]
     undated = [dict(r) for r in await pool.fetch(_UNDATED_SQL)]
+    unbooked = [dict(r) for r in await pool.fetch(_EXPIRED_UNBOOKED_SQL)]
 
     today = datetime.now(MT).date()
     win = resolve_period(period, today, first)
@@ -330,6 +362,28 @@ async def load_pnl(pool, period: str = "month", account: str = "ALL") -> dict:
         "in_any_total": False,
         "note": ("closures with no trade_date, so no window can place them. Outside every figure "
                  "on this page, in every period (R-IV.1270(b))"),
+    }
+    # R-IV.1349(b). Not windowed: a row past its expiry with size on it is wrong in every
+    # period, so narrowing it to the selected month would hide it the moment the month turned.
+    out["expired_unbooked"] = {
+        "count": len(unbooked),
+        "cost": _money(sum((Decimal(str(r["cost_basis"] or 0)) for r in unbooked), Decimal("0")))
+                if unbooked else None,
+        "in_any_total": False,
+        "rows": [{"id": r["id"], "ticker": r["ticker"],
+                  "account_display": display_name(r["account"]) if r["account"] else None,
+                  "status": r["status"], "structure": r["structure"],
+                  "expiry": r["expiry"].isoformat() if r["expiry"] else None,
+                  "days_past": int(r["days_past"]) if r["days_past"] is not None else None,
+                  "open_quantity": float(r["open_qty"]) if r["open_qty"] is not None else None,
+                  "cost_basis": _money(Decimal(str(r["cost_basis"] or 0)))} for r in unbooked],
+        "predicate": ("expiry < current_date AND SUM(position_lots.qty) > 0, any status but "
+                      "DUPLICATE_OF -- limb 6 of the basis check (R-IV.1341(b)), copied so the "
+                      "page and that check cannot disagree"),
+        "note": ("positions the broker has moved past while the book still carries their size. "
+                 "Neither realized nor unrealized: UNBOOKED, and outside every figure here. This "
+                 "line exists because eight Robinhood expiries sat unbooked from 10-16 to 10-22 "
+                 "and October read $485.03 better than it was (R-IV.1346)"),
     }
     out["computed_at"] = now.isoformat().replace("+00:00", "Z")
     out["preview"] = "pnl=v1"
