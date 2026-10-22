@@ -27,7 +27,7 @@ from fastapi import HTTPException
 from config.accounts import OUT_OF_SCOPE
 from config.accounts import is_in_scope
 from config.accounts import normalize_account as scope_normalize
-from models.accounts import (ACCOUNT_BY_NUMBER, ACCOUNT_NUMBERS, ALIASES, FIDELITY_401A,
+from models.accounts import (ACCOUNT_BY_LAST4, ACCOUNT_LAST4, ALIASES, FIDELITY_401A,
                              FIDELITY_ROTH, HISTORICAL_SPELLINGS, RETIRED_FIDELITY_NAMES,
                              ROBINHOOD, account_choices, account_for_number,
                              canonical_account, describe_accounts, is_fidelity_name,
@@ -68,10 +68,10 @@ def _code(rel):
 class TestIdentityByNumber:
 
     def test_both_fidelity_accounts_are_keyed_by_number(self):
-        assert ACCOUNT_NUMBERS[FIDELITY_ROTH] == "...3158"
-        assert ACCOUNT_NUMBERS[FIDELITY_401A] == "...1836"
-        assert ACCOUNT_BY_NUMBER["...3158"] == FIDELITY_ROTH
-        assert ACCOUNT_BY_NUMBER["...1836"] == FIDELITY_401A
+        assert ACCOUNT_LAST4[FIDELITY_ROTH] == "3158"
+        assert ACCOUNT_LAST4[FIDELITY_401A] == "1836"
+        assert ACCOUNT_BY_LAST4["3158"] == FIDELITY_ROTH
+        assert ACCOUNT_BY_LAST4["1836"] == FIDELITY_401A
 
     @pytest.mark.parametrize("raw,expected", [
         ("...3158", FIDELITY_ROTH),
@@ -82,10 +82,48 @@ class TestIdentityByNumber:
     def test_a_number_resolves_however_it_is_written(self, raw, expected):
         assert account_for_number(raw) == expected
 
-    @pytest.mark.parametrize("raw", ["1836", "652", "", None, "99999999"])
-    def test_a_partial_or_unknown_number_resolves_to_nothing(self, raw):
-        """A partial match on an account number is how money lands in the wrong account."""
+    @pytest.mark.parametrize("raw,expected", [
+        ("3158", FIDELITY_ROTH),
+        ("1836", FIDELITY_401A),
+    ])
+    def test_a_BARE_LAST_FOUR_now_resolves_and_this_is_a_RELAXATION(self, raw, expected):
+        """R-IV.1332(c)2, AND IT IS A DELIBERATE WEAKENING OF WHAT THIS FILE USED TO ASSERT.
+
+        This case used to be in the refusal list, on the module's own reasoning that "a partial
+        match on an account number is how money lands in the wrong account". That reasoning was
+        sound. The full numbers could not stay in a PUBLIC repository (they were committed in
+        de9c86f on 2026-10-01 and readable on GitHub from that day), and the last four are the
+        most that can safely remain, so identification now matches on them.
+
+        What keeps it safe enough is not that partial matching became a good idea -- it is that
+        the tracked last-4s are DISTINCT BY ASSERTION at import, so no two tracked accounts can
+        collide, and that an untracked account still refuses rather than landing on a near
+        miss. The residual risk is a real account ending 3158 that is not the Roth; nothing in
+        the repo can rule that out, and it is recorded here rather than left implicit.
+        """
+        assert account_for_number(raw) == expected
+
+    @pytest.mark.parametrize("raw", ["652", "", None, "999", "12"])
+    def test_an_UNKNOWN_or_TOO_SHORT_number_still_resolves_to_nothing(self, raw):
+        """The half of the old guard that survives, and the half that matters most: an account
+        the hub does not track is not a near miss, and fewer than four digits is nothing to
+        match on at all."""
         assert account_for_number(raw) is None
+
+    @pytest.mark.parametrize("raw", ["99999999", "653641999", "000000000"])
+    def test_a_FULL_LENGTH_number_we_do_not_track_refuses(self, raw):
+        """Nine digits that are not ours -- including one sharing our first five -- must refuse.
+        A prefix is not an identity any more than a suffix is."""
+        assert account_for_number(raw) is None
+
+    def test_the_tracked_LAST_FOUR_are_DISTINCT_by_assertion(self):
+        """The guard that replaces exact matching. If two tracked accounts ever shared a last-4,
+        last-4 identity could not separate them -- so the module raises at IMPORT, which is the
+        one moment a human is looking, rather than resolving one of them silently."""
+        from models.accounts import ACCOUNT_LAST4
+
+        assert len(set(ACCOUNT_LAST4.values())) == len(ACCOUNT_LAST4)
+        assert all(len(v) == 4 and v.isdigit() for v in ACCOUNT_LAST4.values())
 
     def test_a_number_resolves_through_the_write_path_too(self):
         """The refusal tells a caller to send a number; it would be a poor instruction if the
@@ -199,7 +237,7 @@ class TestTheRetiredSnapshotIsUnreachable:
             canonical_account(RETIRED_LABEL)
         d = str(e.value.detail)
         assert "RETIRED" in d
-        assert FIDELITY_401A in d and ACCOUNT_NUMBERS[FIDELITY_401A] in d
+        assert FIDELITY_401A in d and ACCOUNT_LAST4[FIDELITY_401A] in d
 
     def test_the_committee_cannot_ask_for_the_retired_snapshot(self):
         """(b)4. Offering it beside the traded accounts is how a committee member sizes off
@@ -270,7 +308,7 @@ class TestToolsServeTheRegistry:
 
     def test_the_description_names_every_account_and_its_number(self):
         d = describe_accounts()
-        for key, num in ACCOUNT_NUMBERS.items():
+        for key, num in ACCOUNT_LAST4.items():
             assert key in d and num in d
         assert "FID 401A" in d
 

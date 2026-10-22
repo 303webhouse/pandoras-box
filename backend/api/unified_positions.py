@@ -759,10 +759,13 @@ async def create_position(req: CreatePositionRequest, _=Depends(require_api_key)
     # money in the wrong account invisibly, which with three accounts is the worst outcome
     # available -- and the form's own hard-coded list is being fixed beside this (R-IV.651).
     if not (req.account or "").strip():
-        from models.accounts import ACCOUNT_NUMBERS, CANONICAL_ACCOUNTS
+        # R-IV.1332(c)3: LAST FOUR ONLY on every surface, this error included. It used to
+        # interpolate the full account number, so a 400 from a write that forgot its account
+        # handed the number back to whoever triggered it.
+        from models.accounts import CANONICAL_ACCOUNTS, account_display_number
 
         pairs = ", ".join(
-            f"{k}" + (f" (#{ACCOUNT_NUMBERS[k]})" if k in ACCOUNT_NUMBERS else "")
+            f"{k}" + (f" (#{account_display_number(k)})" if account_display_number(k) else "")
             for k in CANONICAL_ACCOUNTS)
         raise HTTPException(
             status_code=400,
