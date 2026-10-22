@@ -1,6 +1,7 @@
 """The report card wired to QUERY's spec. R-IV.1321(b).
 
-SPEC: `SPEC-REGIME-REPORT-CARD-v1-R-IV.1316.md` sha256 876a74b3..., verified before use; every
+SPEC: `SPEC-REGIME-REPORT-CARD-v1-R-IV.1316.md` sha256 dbe09fff... (R-IV.1332(b) moved it
+from 876a74b3, which stays citable in the spec's own change log); verified before use; every
 P-item adopted (R-IV.1320). Staged outside the repo, not committed.
 
 THE LAYOUT IS A FINDING, NOT A PREFERENCE. QUERY measured time-to-a-verdict for each panel:
@@ -291,16 +292,36 @@ def test_THE_TWO_BASES_ARE_DISTINCT_AND_EACH_FIGURE_CARRIES_ONE():
     assert _rows()[0]["basis"] == rs.BASIS_ADJUSTED
 
 
-def test_the_read_path_REFUSES_to_compute_outcomes_on_the_WRONG_basis():
-    """`regime_daily_bars` holds split-adjusted, dividend-unadjusted closes only. Using it for
-    "higher 20 sessions later" would silently produce figures that cannot be compared with the
-    base rates beside them -- so those panels report the absence instead."""
+def test_the_outcome_panels_COMPUTE_ON_THE_MATCHED_SERIES():
+    """INVERTED BY R-IV.1327(b), and the inversion is the point.
+
+    This asserted that the panels REFUSED, because `regime_daily_bars` holds only the
+    split-adjusted series and a forward-20 figure computed on it could not sit beside base
+    rates measured on the fully adjusted one. The refusal was right while that was the only
+    series available; now the matched one exists, so they compute -- on `Adj Close` from the
+    same `auto_adjust=False` pull LAB used.
+    """
     src = read_source(SERVICE)
     i = src.index("async def _report_card")
     block = src[i:src.index("async def _ma200_row", i)]
-    assert "does not store" in block
-    assert "BASIS_ADJUSTED" in block and "BASIS_SPLIT_ONLY" in block
+    assert "spy_adjusted_closes" in block, "the matched series is what it reads"
+    assert "score_sessions" in block
 
+
+def test_ALL_CLEARS_still_refuses_and_names_the_basis_it_needs():
+    """The one panel that still reports an absence, and for the opposite reason: its test is
+    R4/G4, a new 60-session CLOSING low, which section 6 defines on the SPLIT-ADJUSTED series.
+    Using the fully adjusted one here would be the same basis mixing pointed the other way."""
+    src = read_source(SERVICE)
+    i = src.index("async def _report_card")
+    block = src[i:src.index("async def _ma200_row", i)]
+    # ANCHORED ON THE ASSIGNMENT, not on the first mention: the first `all_clears_held` in that
+    # block is my own COMMENT about it, and a +600 window from there stops short of the code.
+    # Seventh window-locator miss of this build.
+    k = block.index('out["all_clears_held"] = {')
+    near = block[k:k + 600]
+    assert "BASIS_ALL_CLEAR" in near
+    assert "60-session closing low" in near
 
 # ── the empty state ─────────────────────────────────────────────────────────
 
