@@ -625,14 +625,61 @@ def decide(row: Dict[str, Any], *, now: Optional[datetime] = None) -> Dict[str, 
     return out
 
 
-def is_in_scope(row: Dict[str, Any]) -> bool:
-    """B2 only, and open only.
+def session_date_et(now: Optional[datetime] = None) -> date:
+    """Today's session date in Eastern time. The expiry guard needs a DAY, not an instant.
+
+    ET and not UTC, and not the server's local clock: a contract expiring 10/19 is dead for a
+    reader in New York from the 20th, and a UTC date rolls over at 20:00 ET -- so a UTC-dated
+    guard would call a contract expired for the last four hours of the session before it.
+    """
+    n = now or datetime.now(timezone.utc)
+    return (n.astimezone(ET) if n.tzinfo else n.replace(tzinfo=timezone.utc).astimezone(ET)).date()
+
+
+def is_expired(row: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+    """Is this row's contract past expiry as of the current ET session? R-IV.1342(d).
+
+    STRICTLY BEFORE TODAY. A contract expiring TODAY is still live -- it can be closed during
+    the session, and the cut logic already hands that case to EXPIRY_STOPPED. What this catches
+    is the day AFTER and later.
+
+    An unreadable or absent expiry is NOT expired. A row whose expiry cannot be parsed is a row
+    we know nothing about, and dropping it from scope on that basis would silently stop alerting
+    on live positions -- the opposite failure, and an invisible one.
+    """
+    expiry = _as_date(row.get("expiry"))
+    if expiry is None:
+        return False
+    return expiry < session_date_et(now)
+
+
+def is_in_scope(row: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+    """B2 only, open only, and NOT PAST EXPIRY.
 
     OPEN is decided by `open_quantity > 0` and never by status or a tag (R-IV.844(d)3): a
     partial exit leaves a row OPEN with real size, and a status string has been the wrong
     question before. The bucket match is case-insensitive -- stored casing is not guaranteed,
     which `Whale_Hunter` taught (R-IV.849(d)).
+
+    THE EXPIRY GUARD, R-IV.1342(d), AND WHY IT IS NOT REDUNDANT. `cut_verdict` already returns
+    EXPIRY_STOPPED when the 3rd session falls on or after expiry -- but that is a verdict ABOUT
+    a row in scope, and it only fires when the CUT lands past expiry. A row whose cut session
+    was weeks ago and whose contract has since expired passes that test and stays in scope.
+
+    MEASURED, which is why this exists: row 1004 (IWM 10/19 269P, bucket B2, open quantity 2) is
+    three days past expiry and sits in scope TODAY. The only thing stopping it alerting is that
+    the vendor has no quote for a dead strike -- so the guard is a vendor's silence, not a rule.
+    A vendor that returned a last price for an expired contract would send Nick a cut alert on a
+    position that cannot be cut. Row 980 (IBIT, bucket B2) has status EXPIRED with open quantity
+    and may sit there too.
+
+    WHATEVER ITS STATUS OR OPEN QUANTITY, as the ruling says: the expiry test runs FIRST and
+    does not consult either. A row can be EXPIRED-with-size, OPEN-with-size or anything else --
+    past expiry it is out, because the alert asks "should this be cut today" and a dead contract
+    cannot be.
     """
+    if is_expired(row, now):
+        return False
     if (row.get("bucket") or "").strip().upper() != BUCKET:
         return False
     try:
