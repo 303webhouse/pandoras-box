@@ -1,0 +1,112 @@
+{
+  "_mock": true,
+  "version": "v1",
+  "authority": "R-IV.1309(b), design board 13 (\"Agora additions\", states A/B/C). MOCK-FIRST: every value in the three states below is FAKE and exists so Nick can approve the layout before the live path renders it. The live card reads /api/stable/regime-strategy and never this file.",
+  "why_a_fixture": "The three states cannot all occur on one day. A is today's; B needs a session where no rule matched; C needs the bar series to stop. Waiting for the tape to produce B and C is waiting for two faults, so the fixture forces each one and the live renderer is the SAME code path reading the SAME field names.",
+  "field_contract": "Each state is a partial /api/stable/regime-strategy payload. The keys here are the keys the live payload uses -- regime_label, regime_key, held_no_match, data_freshness, blocked, costs, ma200_row -- so a renderer that works on the fixture works on the live read. backend/services/regime_card_v21.py lints that, and the suite runs the lint.",
+  "states": {
+    "A": {
+      "_label": "A · a rule matched (today's real shape, fake numbers)",
+      "regime_label": "RANGE / CHOP",
+      "regime_key": "range_chop",
+      "rules_version": "v2.1",
+      "held_sessions": 5,
+      "blocked": "correction qualifies on the tape but is held back: range_chop has held 4 of 5 sessions",
+      "held_no_match": { "stale": false },
+      "data_freshness": {},
+      "costs": [
+        "SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, never on 11; 200d line 38. (R-IV.1301)"
+      ],
+      "ma200_row": {
+        "available": true,
+        "side": "ABOVE",
+        "since": "2026-04-08",
+        "sessions": 136,
+        "pct": 5.9,
+        "close": 769.05,
+        "ma": 725.87,
+        "window_bounded": false,
+        "display_only": true,
+        "basis": "strict close vs the SMA200 including that day (the PR-6 baseline definition)",
+        "caveat": "45% of up-crosses since 1999 were followed by a new 60-session low within 60 sessions (LAB R-IV.1279)",
+        "text": "SPY vs 200-day: ABOVE since 2026-04-08 · +5.9%"
+      }
+    },
+    "B": {
+      "_label": "B · STALE: no rule matched, a label is being held",
+      "regime_label": "UPTREND",
+      "regime_key": "uptrend",
+      "rules_version": "v2.1",
+      "held_sessions": 7,
+      "blocked": null,
+      "held_no_match": {
+        "stale": true,
+        "sessions": 7,
+        "last_match_as_of": "2026-10-10",
+        "group": "TREND-UP",
+        "group_word": "BULLISH last reading",
+        "chip": "HELD · no rule matched 7 sessions · last match 2026-10-10",
+        "reason": "no section 2 row matched for 7 settled sessions; the card is holding the label from 2026-10-10",
+        "decay": {
+          "steps": 10,
+          "elapsed": 7,
+          "falls_back_to": "RANGE / CHOP",
+          "falls_back_on_day": 11,
+          "text": "→ RANGE / CHOP on day 11"
+        }
+      },
+      "data_freshness": {},
+      "costs": [
+        "SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, never on 11; 200d line 38. (R-IV.1301)"
+      ],
+      "ma200_row": {
+        "available": true,
+        "side": "ABOVE",
+        "since": "2026-04-08",
+        "sessions": 136,
+        "pct": 5.9,
+        "close": 769.05,
+        "ma": 725.87,
+        "window_bounded": false,
+        "display_only": true,
+        "basis": "strict close vs the SMA200 including that day (the PR-6 baseline definition)",
+        "caveat": "45% of up-crosses since 1999 were followed by a new 60-session low within 60 sessions (LAB R-IV.1279)",
+        "text": "SPY vs 200-day: ABOVE since 2026-04-08 · +5.9%"
+      }
+    },
+    "C": {
+      "_label": "C · DATA STALE: the bar series stopped",
+      "regime_label": "RANGE / CHOP",
+      "regime_key": "range_chop",
+      "rules_version": "v2.1",
+      "held_sessions": 5,
+      "blocked": null,
+      "held_no_match": { "stale": false },
+      "data_freshness": {
+        "stale": true,
+        "last_settled": "2026-10-16",
+        "lag_sessions": 3,
+        "headline": "DATA STALE · last settled 2026-10-16",
+        "chip": "DATA STALE · last settled 2026-10-16",
+        "reason": "the newest settled bar is 3 trading sessions old; the label below predates it and is not current"
+      },
+      "costs": [
+        "SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, never on 11; 200d line 38. (R-IV.1301)"
+      ],
+      "ma200_row": {
+        "available": true,
+        "side": "ABOVE",
+        "since": "2026-04-08",
+        "sessions": 130,
+        "pct": 5.1,
+        "close": 766.48,
+        "ma": 729.29,
+        "window_bounded": false,
+        "display_only": true,
+        "basis": "strict close vs the SMA200 including that day (the PR-6 baseline definition)",
+        "caveat": "45% of up-crosses since 1999 were followed by a new 60-session low within 60 sessions (LAB R-IV.1279)",
+        "text": "SPY vs 200-day: ABOVE since 2026-04-08 · +5.1%"
+      }
+    }
+  }
+}

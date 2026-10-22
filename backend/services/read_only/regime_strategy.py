@@ -192,6 +192,28 @@ def _families(inputs: Dict[str, Any]) -> list:
     return rows
 
 
+async def _ma200_row(conn):
+    """SPY against its 200-day line, as a display row. R-IV.1309(b)3. Never raises.
+
+    SPY ONLY, deliberately. `load_designated_series` defaults to fourteen tickers and takes
+    0.72s; this row is about SPY and SPY alone, and the narrower load measures 0.13s for an
+    identical answer. The compute itself is free (a rolling sum, under a millisecond).
+
+    Guarded like every other leaf read here: a failure costs the card this ROW, never its
+    label. Convention #42 -- nothing gates on it, so losing it loses a sentence and no more.
+    """
+    try:
+        from jobs.regime_job import load_designated_series
+        from models.regime_ma200 import ma200_row, row_text
+
+        series = await load_designated_series(conn, tickers=("SPY",))
+        bars = (series or {}).get("SPY") or []
+        row = ma200_row(bars)
+        row["text"] = row_text(row)
+        return row
+    except Exception as exc:                                        # noqa: BLE001
+        return {"available": False, "reason": "%s" % type(exc).__name__}
+
 def _cost_lines(rules_version):
     """The card's cost line(s), or []. Never raises into the payload.
 
@@ -235,6 +257,9 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # Derived at read time from stored columns -- `regime_snapshots.regime` is NULL when
             # no row matched -- so there is no schema change and no second writer.
             held = await unmatched_run(conn, rules_version)
+            # R-IV.1309(b)3: the 200-day row, DISPLAY ONLY (#42). Read beside the others so it
+            # shares the one connection rather than opening a second.
+            ma200 = await _ma200_row(conn)
             # R-IV.1195(b) asks for the seed count executed at deploy. Served here so the
             # number outlives the deploy log it was first read from.
             seeded_run = await seed_run(conn)
@@ -330,6 +355,9 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         # no COSTS block at all on an empty list, rather than a heading with nothing under it,
         # which reads as a failed load.
         "costs": _cost_lines(got.get("rules_version")),
+        # R-IV.1309(b)3. `display_only` rides on the row itself as well, so a later reader of
+        # the payload alone cannot mistake it for an input.
+        "ma200_row": ma200,
         "display_only": DISPLAY_ONLY,
         "diff": got.get("diff"),
         "seed_run": seeded_run,
