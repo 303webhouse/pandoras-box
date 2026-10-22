@@ -124,14 +124,29 @@ def payload() -> Dict[str, Any]:
     spreads = {n: _spread_block(n, s) for n, s in yc.SPREAD_SERIES.items()}
     word, why = yc.shape_word(spreads.get("2s10s", {}).get("bp"),
                               spreads.get("3m10s", {}).get("bp"))
-    as_ofs = [t["as_of"] for t in tenors if t["as_of"]] + [
-        s["as_of"] for s in spreads.values() if s["as_of"]]
+    # R-IV.1343(c): `as_of` IS THE LEVELS' DATE, not the newest date in the payload.
+    #
+    # IT USED TO BE `max()` OVER TENORS AND SPREADS TOGETHER, and the two do not move
+    # together: FRED publishes the computed spread series (T10Y2Y) a session ahead of the
+    # DGS levels. Measured 2026-10-22: the five tenor rows were all as of 10-20 while 2s10s
+    # was as of 10-21, so the header read "as of 2026-10-21" directly above five numbers that
+    # were a session older than it claimed.
+    #
+    # THE CENSUS DECIDED IT (Convention #29: a field whose MEANING changes needs one). All
+    # three readers of this field are in the yield box header and its tooltips -- v2.js 3823,
+    # 3825 and 3832 -- and every one of them words it as the date of "the FRED values", which
+    # is the levels. No test pinned it to the old meaning. So the field now means what its
+    # only readers already say it means, and the spreads' own date is served beside it rather
+    # than folded into it. Each spread row still carries its own `as_of` as well.
+    level_as_ofs = [t["as_of"] for t in tenors if t["as_of"]]
+    spread_as_ofs = [s["as_of"] for s in spreads.values() if s["as_of"]]
     return {
         "live": True,
         "source": fred.SOURCE,
         "terms": fred.TERMS,
         "key_present": fred.key_present(),
-        "as_of": max(as_ofs) if as_ofs else None,
+        "as_of": max(level_as_ofs) if level_as_ofs else None,
+        "as_of_spreads": max(spread_as_ofs) if spread_as_ofs else None,
         "fetched_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "tenors": tenors,
         "spreads": spreads,
@@ -147,8 +162,15 @@ def payload() -> Dict[str, Any]:
         # and the reader could not tell which one they had -- and a label computed off the
         # merged value would be computed off an unsettled number.
         "intraday": _intraday_block(),
+        # R-IV.1343(c): the FRED side now says how old its copy is, which is what the
+        # intraday block has always done (`cached` / `cache_age_seconds`). Without it a
+        # one-session-stale reading is indistinguishable from a current one, which is
+        # exactly how this went unnoticed.
+        "fred_cache": fred.cache_state(),
         "field_origin": {"tenors": "derived", "spreads": "derived", "shape": "derived",
-                         "fires": "derived", "as_of": "stored", "intraday": "derived"},
+                         "fires": "derived", "as_of": "stored",
+                         "as_of_spreads": "stored", "fred_cache": "derived",
+                         "intraday": "derived"},
     }
 
 

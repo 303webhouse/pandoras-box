@@ -5,9 +5,25 @@ exists; this module reports only whether it is PRESENT. Every log line here says
 "FRED_API_KEY present/missing", never a value, never a length, never a prefix -- a prefix is
 enough to confirm a guess.
 
-ONE CALL PER SERIES PER DAY. These are daily series: FRED publishes one observation a session,
-so polling them more often spends a call to receive the same number. The cache key is the
-series id plus the UTC date, and a miss is the only thing that reaches the network.
+A SHORT TTL, NOT ONE CALL PER UTC DAY -- and the original rule is worth stating because it
+read as obviously right. It was: "these are daily series, so polling them more often spends a
+call to receive the same number", with the cache keyed on the series id plus the UTC date.
+The premise is FALSE for the two hours a day that matter. FRED's H.15 Treasury series publish
+session D's value on the NEXT business day, late in the ET afternoon, so a process that fetches
+before that release caches a copy whose newest observation is a session old -- and a key of
+(series, UTC date) then pins that copy until the UTC date rolls at 20:00 ET.
+
+MEASURED 2026-10-22 22:22Z, which is why this changed. The hub started 19:03:00Z, about 75
+minutes before FRED published 10-21. Asked directly at 22:22Z, FRED served DGS10 10-21=5.13
+and T10Y2Y 10-22=0.31; the hub's own /api/yield-curve served 10Y as of 10-20=5.12 and 2s10s as
+of 10-21=0.32. Every figure in the yield box was EXACTLY ONE SESSION behind its own source,
+with no error anywhere and nothing blank -- the box looked healthy and was wrong.
+
+THE OTHER HALF OF THIS BOX ALREADY LEARNED THIS. `models/yield_intraday.py` carries
+`CACHE_SECONDS = 15 * 60` and a test named `test_the_cache_is_one_bar_long_and_not_one_day`,
+whose reason -- "a day-long cache on an intraday series serves the open all afternoon" -- is
+the same fault one tier up. A daily series does not need a 15-minute window, but it does need
+one shorter than the gap between a release and the end of the UTC day.
 """
 
 from __future__ import annotations
@@ -15,6 +31,7 @@ from __future__ import annotations
 import datetime as _dt
 import logging
 import os
+import time as _time
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("fred_series")
@@ -30,7 +47,25 @@ TERMS = ("FRED's API terms permit automated retrieval with a registered key; the
 #: series' nature.
 HISTORY_YEARS = 6
 
-_cache: Dict[str, Tuple[_dt.date, List[Tuple[_dt.date, Optional[float]]]]] = {}
+#: How long a fetched series is reused, in seconds. 30 minutes bounds the post-release lag to
+#: half an hour while keeping the call count trivial: six series at 48 refreshes a day is 288
+#: requests, against a FRED allowance of 120 a MINUTE. The old rule spent 6 calls a day and
+#: was wrong for four hours of it, which is not a trade worth having.
+CACHE_SECONDS = 30 * 60
+
+
+def _now() -> float:
+    """The cache's clock, as a seam. A test advances THIS rather than patching the stdlib
+    `time.monotonic`, which pytest and asyncio also read -- and more importantly, a test that
+    reaches into `_cache` to fake an expiry proves nothing about the fix, because the old
+    day-keyed predicate never looked at the stored number at all. Advancing the clock is what
+    distinguishes the two rules."""
+    return _time.monotonic()
+
+#: series id -> (monotonic seconds at fetch, points). NOT keyed on the date: see the module
+#: docstring. `time.monotonic` rather than wall clock so a clock correction cannot make an
+#: entry look fresh for hours.
+_cache: Dict[str, Tuple[float, List[Tuple[_dt.date, Optional[float]]]]] = {}
 
 
 def key_present() -> bool:
@@ -49,7 +84,7 @@ def fetch_series(series_id: str, *,
     """
     today = today or _dt.datetime.now(_dt.timezone.utc).date()
     hit = _cache.get(series_id)
-    if hit and hit[0] == today:
+    if hit and (_now() - hit[0]) < CACHE_SECONDS:
         return hit[1]
     if not key_present():
         logger.warning("[fred] FRED_API_KEY is missing; %s not fetched", series_id)
@@ -79,7 +114,7 @@ def fetch_series(series_id: str, *,
             f = None
         out.append((d, f))
     out.sort(key=lambda p: p[0])
-    _cache[series_id] = (today, out)
+    _cache[series_id] = (_now(), out)
     logger.info("[fred] %s: %d observations %s..%s", series_id, len(out),
                 out[0][0].isoformat(), out[-1][0].isoformat())
     return out
@@ -96,3 +131,30 @@ def latest(points: List[Tuple[_dt.date, Optional[float]]]) -> Tuple[Optional[_dt
         if v is not None:
             return d, v
     return None, None
+
+
+def cache_state() -> Dict[str, Any]:
+    """What is held, and how old it is. R-IV.1343(c).
+
+    THE POINT IS THAT STALENESS BE VISIBLE. A one-session-stale series and a current one look
+    identical in the payload -- same shape, no error, nothing blank -- which is how the yield
+    box served a full set of numbers that were all a session behind their own source and
+    nobody could tell. The age and the newest observation date together make it readable.
+
+    NAMES NO KEY AND NO VALUE, like everything else here: series ids, ages and observation
+    DATES only.
+    """
+    now = _now()
+    series: Dict[str, Any] = {}
+    for sid, (at, pts) in _cache.items():
+        newest = None
+        for d, v in reversed(pts):
+            if v is not None:
+                newest = d.isoformat()
+                break
+        series[sid] = {"age_seconds": int(now - at), "newest_observation": newest,
+                       "observations": len(pts)}
+    return {"ttl_seconds": CACHE_SECONDS, "key_present": key_present(),
+            "basis": ("a fetched series is reused for at most ttl_seconds; it is NOT one call "
+                      "per UTC day, which pinned a pre-release copy for the rest of the day"),
+            "series": series}

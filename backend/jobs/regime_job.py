@@ -26,6 +26,8 @@ import json
 import logging
 import re
 from datetime import date as _date
+from datetime import datetime as _datetime
+from datetime import timezone as _timezone
 from typing import Any, Dict, List, Optional
 
 from jobs.regime_seed import as_date, replay, seed, seed_depth_report
@@ -509,7 +511,29 @@ async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[st
                 """SELECT action, detail, created_at FROM regime_audit
                     ORDER BY created_at DESC LIMIT 1""")
             if a is not None:
-                why = "%s; last run: %s - %s" % (why, a["action"], a["detail"])
+                # R-IV.1343(b): THE TIMESTAMP AND THE AGE, because without them a refusal
+                # from days ago reads as one from minutes ago. This string said "last run:
+                # degraded - ... SPY: HTTP 403" on 2026-10-22 while the row behind it was
+                # written on 10-20, and it cost a wrong first reading of the v2.1 cutover:
+                # a stale audit row looked like a live Polygon failure on the new code.
+                #
+                # NOTE WHAT THIS QUERY DOES NOT DO (unchanged, and the reason the row can be
+                # old at all): it is ORDER BY created_at DESC LIMIT 1 over the WHOLE table --
+                # no rules_version filter and no date bound -- so the newest row may belong
+                # to another version or another week. Narrowing it is a behaviour change and
+                # is not what (b) approved; saying how old it is, is.
+                _ca = a["created_at"]
+                _when = "an unrecorded time"
+                if _ca is not None:
+                    # TIMESTAMPTZ, so asyncpg hands back an aware value -- but a naive one is
+                    # read as UTC rather than allowed to raise, because this whole block sits
+                    # inside an `except Exception` that would turn a formatting slip into
+                    # "regime_audit unreadable" and hide the real reason.
+                    _c = _ca if _ca.tzinfo else _ca.replace(tzinfo=_timezone.utc)
+                    _hours = ((_datetime.now(_timezone.utc) - _c).total_seconds() / 3600.0)
+                    _when = "%s (%.1fh ago)" % (
+                        _c.astimezone(_timezone.utc).isoformat(timespec="seconds"), _hours)
+                why = "%s; last run: %s at %s - %s" % (why, a["action"], _when, a["detail"])
         except Exception as exc:
             why = "%s; regime_audit unreadable (%s)" % (why, type(exc).__name__)
         return {"snapshot": None, "diff": None, "unavailable_reason": why}
