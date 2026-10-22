@@ -35,8 +35,8 @@ REQUIRED = ("regime_label", "regime_key", "rules_version", "held_no_match",
 #: sentence the live card will not print.
 COST_LINE = ("SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, "
              "never on 11; 200d line 38. (R-IV.1301)")
-CAVEAT = ("45% of up-crosses since 1999 were followed by a new 60-session low within "
-          "60 sessions (LAB R-IV.1279)")
+CAVEAT = ("Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session "
+          "low within 60 sessions. (LAB R-IV.1279)")
 
 
 def load_fixture(path: str = FIXTURE) -> Dict[str, Any]:

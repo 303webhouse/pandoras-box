@@ -194,6 +194,45 @@ def test_the_fixture_uses_the_LIVE_payloads_field_names():
             assert field in st, (key, field)
 
 
+def test_the_whipsaw_line_carries_BOTH_ERAS():
+    """R-IV.1311(b). QUERY measured 50.00% (19 of 38) since 2013 against 44.79% (43 of 96)
+    since 1999, and the line this replaces reported only the second.
+
+    THAT UNDERSTATED THE ERA NICK TRADES by five points, on the half of the record that is his.
+    One rate over a span that straddles a regime change is an average of two different things,
+    and a reader cannot recover either figure from it -- Conventions #37/#38, where here there
+    are TWO universes and TWO spans and both have to travel with the numbers.
+
+    Pinned as a PROPERTY (both eras present, in order, with their spans) and as the exact
+    string, because a paraphrase of a graded figure is BUILD authoring one (R-IV.925(b)).
+    """
+    want = ("Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session low "
+            "within 60 sessions. (LAB R-IV.1279)")
+    assert DRIFT_CAVEAT == want
+    assert CAVEAT == want, "the lint and the model must quote ONE sentence, not two copies"
+    # the property, so a future edit that keeps the shape but drops an era still fails
+    assert "since 2013" in DRIFT_CAVEAT and "since 1999" in DRIFT_CAVEAT
+    assert DRIFT_CAVEAT.index("2013") < DRIFT_CAVEAT.index("1999"), (
+        "the era Nick trades leads; the longer history is the parenthetical")
+    assert "50%" in DRIFT_CAVEAT and "45%" in DRIFT_CAVEAT
+    assert "LAB R-IV.1279" in DRIFT_CAVEAT, "the measurement keeps its source"
+
+
+def test_the_superseded_single_era_wording_is_GONE_from_every_live_file():
+    """The old sentence reported one rate for a span straddling a regime change. It must not
+    survive anywhere a reader or a renderer can reach."""
+    needle = "were followed by a new 60-session low"
+    offenders = []
+    for path in sorted(_BACKEND.rglob("*.py")):
+        if "__pycache__" in str(path) or path.name == pathlib.Path(__file__).name:
+            continue
+        if needle in path.read_text(encoding="utf-8"):
+            offenders.append(str(path))
+    for path in sorted((_BACKEND.parent / "frontend" / "assets" / "regime").glob("*.json")):
+        if needle in path.read_text(encoding="utf-8"):
+            offenders.append(str(path))
+    assert offenders == [], offenders
+
 def test_the_fixtures_sentences_are_the_RULINGS_verbatim():
     for key, st in load_fixture()["states"].items():
         assert COST_LINE in st["costs"], key
