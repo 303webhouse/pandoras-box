@@ -1,8 +1,15 @@
 """The Regime Report Card's scoring, to QUERY's spec. R-IV.1321(b).
 
 SPEC: `SPEC-REGIME-REPORT-CARD-v1-R-IV.1316.md`, sha256
-876a74b3f5e544d78871928b2633b8ad47658198a28e63ce7313ab81d086852e, verified before use. Every
-P-item adopted (R-IV.1320). The spec is staged outside the repo and is not committed.
+dbe09fff0fb9c2507185411f43828e03796a18cd7125b9c14ae5aa2664bc7961 (28,146 bytes), verified
+before use. Every P-item adopted (R-IV.1320).
+
+THE HASH MOVED (R-IV.1332(b)). QUERY settled the empty state as "E1" and amended the spec IN
+PLACE, so the adopted hash is now dbe09fff and the superseded 876a74b3 stays citable in the
+spec's own section 14 change log. The pin is updated rather than kept "for continuity": a hash
+that names a file nobody is working from is worse than no hash, because it reads as verified.
+
+The spec is staged outside the repo and is not committed.
 
 THE FINDING THAT SHAPES THE LAYOUT, which is QUERY's and not mine. Three of the four panels in
 the original mock cannot mean anything for years, and the mock gave the most space to the
@@ -341,6 +348,79 @@ def _reach_note(label: str, have_indep: Optional[int]) -> Optional[Dict[str, Any
     return {"state": EARLY, "years": round(yrs, 1),
             "text": "%s · %d of %d" % (EARLY, have, MIN_INDEP_LABEL_SHARE)}
 
+
+def score_sessions(sessions: Sequence[Dict[str, Any]], adj_rows: Sequence[Dict[str, Any]],
+                   label_to_group: Dict[str, str],
+                   horizon: int = WINDOW_SESSIONS) -> Dict[str, Any]:
+    """Score the live sessions against the fully adjusted series. R-IV.1327(b).
+
+    `sessions` is `[{as_of, shown_regime}]`, oldest-first, v2.1 only. `adj_rows` is
+    `integrations.spy_adjusted_closes.closes()["rows"]` -- the series MATCHED to LAB's
+    drift-prior pull, which is the only reason the live shares can sit beside its base rates.
+
+    A SESSION IS "CHECKED" ONLY WHEN ITS WHOLE WINDOW EXISTS (P1). A label with 30 sessions and
+    11 complete windows reports 11 checked and 19 pending -- never 30 scored off partial data,
+    which would be a different quantity under the same name.
+    """
+    from integrations.spy_adjusted_closes import forward_outcome
+
+    by_date = {r["date"]: i for i, r in enumerate(adj_rows)}
+    per: Dict[str, Dict[str, Any]] = {}
+    dips_by_group: Dict[str, List[float]] = {}
+    warn_checked = warn_held = warn_pending = 0
+    checked_total = 0
+
+    for row in sessions:
+        label = row.get("shown_regime")
+        if not label:
+            continue
+        slot = per.setdefault(label, {"sessions": 0, "checked": 0, "higher": 0, "dips": []})
+        slot["sessions"] += 1
+        i = by_date.get(str(row.get("as_of"))[:10])
+        out = None if i is None else forward_outcome(list(adj_rows), i, horizon)
+        group = label_to_group.get(label)
+        if out is None:
+            # NOT YET KNOWABLE. Counted as pending, never as a zero.
+            if group in ("TREND-DOWN/STRESS", "TREND-UP"):
+                pass
+            if group == "TREND-DOWN/STRESS":
+                warn_pending += 1
+            continue
+        slot["checked"] += 1
+        checked_total += 1
+        if out["higher"]:
+            slot["higher"] += 1
+        slot["dips"].append(out["worst_dip_pct"])
+        if group:
+            dips_by_group.setdefault(group, []).append(out["worst_dip_pct"])
+        # P5a: a "warning" is a STRESS label, and it HELD if the forward-20 dip reached the
+        # registered ALL-sessions median.
+        if group == "TREND-DOWN/STRESS":
+            warn_checked += 1
+            if out["worst_dip_pct"] >= WARNING_DIP_PCT:
+                warn_held += 1
+
+    def med(xs):
+        xs = sorted(xs)
+        if not xs:
+            return None
+        m = len(xs) // 2
+        return round(xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2.0, 2)
+
+    for slot in per.values():
+        slot["worst_dip_median"] = med(slot.pop("dips"))
+
+    return {
+        "per_label": per,
+        "checked_total": checked_total,
+        "dips_by_group": dips_by_group,
+        "warnings": {"checked": warn_checked, "held": warn_held, "pending": warn_pending,
+                     "share": (None if warn_checked <= 0
+                               else round(warn_held / float(warn_checked) * 100.0, 1)),
+                     "threshold_pct": WARNING_DIP_PCT,
+                     "min_indep": MIN_INDEP_HELD,
+                     "basis": BASIS_ADJUSTED},
+    }
 
 def calls_block(total: int, checked: int) -> Dict[str, Any]:
     """P1/P2: three counts, and `pending` is PRINTED rather than inferred by the reader.

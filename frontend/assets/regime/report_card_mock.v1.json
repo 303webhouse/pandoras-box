@@ -1,7 +1,7 @@
 {
   "_mock": true,
   "version": "v2",
-  "authority": "R-IV.1321(b), to SPEC-REGIME-REPORT-CARD-v1-R-IV.1316.md sha256 876a74b3f5e544d78871928b2633b8ad47658198a28e63ce7313ab81d086852e (verified). EVERY VALUE IS FAKE. It exists to force the populated state, which cannot occur until the v2.1 cutover deploys and 20 sessions have passed.",
+  "authority": "R-IV.1321(b), to SPEC-REGIME-REPORT-CARD-v1-R-IV.1316.md sha256 dbe09fff0fb9c2507185411f43828e03796a18cd7125b9c14ae5aa2664bc7961 (verified). EVERY VALUE IS FAKE. It exists to force the populated state, which cannot occur until the v2.1 cutover deploys and 20 sessions have passed.",
   "why_this_layout": "QUERY's reachability finding (spec section 9) inverts the original mock: flips per year pays off in ~1.3 years and the 200-day row in ~2.9, while the per-label share table needs ~14.6 years POOLED. So flips and the 200-day row lead, the worst-dip ORDER panel is added (P10, the only grading panel reachable this decade), and the per-label table is the smallest element with no verdict column.",
   "available": true,
   "display_only": "display only (#42)",

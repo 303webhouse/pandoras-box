@@ -245,20 +245,60 @@ async def _report_card(conn):
         out["calls"] = rs.calls_block(len(rows), 0)
         out["v2_divergence"] = rs.divergence_block(0, 0)
         out["ma200"] = rs.ma200_panel(0, 0, 0)
-        # The three outcome panels: STATED ABSENCE, not a figure on the wrong basis.
-        no_basis = {"available": False,
-                    "reason": ("needs %s, which the hub does not store; "
-                               "regime_daily_bars is %s"
-                               % (rs.BASIS_ADJUSTED, rs.BASIS_SPLIT_ONLY))}
-        out["by_label"] = []
-        out["by_label_unavailable"] = no_basis
-        out["warnings_held"] = dict(no_basis)
-        out["all_clears_held"] = dict(no_basis)
-        out["dip_order"] = dict(no_basis)
+        # R-IV.1327(b): THE OUTCOME PANELS NOW COMPUTE, from the SPY series matched to LAB's
+        # drift-prior pull (yfinance, auto_adjust=False, Adj Close). Until this existed they
+        # reported an absence rather than a figure on the wrong basis, because a live share
+        # computed on the split-only series cannot sit beside a base rate measured on the
+        # fully adjusted one -- spec section 1.2's named error.
+        #
+        # `all_clears_held` STILL REPORTS AN ABSENCE, and deliberately: its test is R4/G4, a new
+        # 60-session CLOSING low, which section 6 defines on the SPLIT-ADJUSTED series. The
+        # ruling asked for the fully adjusted series, and using it here would be the same basis
+        # mixing pointed the other way.
         try:
-            out["groups"] = label_to_group()
+            from integrations.spy_adjusted_closes import closes as _adj
+
+            adj = _adj()
         except Exception:                                           # noqa: BLE001
-            out["groups"] = {}
+            adj = {"available": False, "reason": "the adjusted series could not be read"}
+
+        groups = {}
+        try:
+            groups = label_to_group()
+        except Exception:                                           # noqa: BLE001
+            groups = {}
+
+        if adj.get("available"):
+            scored = rs.score_sessions(
+                [{"as_of": r["as_of"], "shown_regime": r["shown_regime"]} for r in rows],
+                adj["rows"], groups)
+            out["by_label"] = rs.label_rows(scored["per_label"], groups)
+            out["calls"] = rs.calls_block(len(rows), scored["checked_total"])
+            out["warnings_held"] = dict(scored["warnings"], available=True)
+            dips = scored["dips_by_group"]
+            out["dip_order"] = dict(
+                rs.dip_order_panel(dips.get("TREND-DOWN/STRESS", []), dips.get("TREND-UP", [])),
+                available=True)
+            out["series"] = {"basis": adj["basis"], "n": adj["n"],
+                             "first": adj.get("first"), "last": adj.get("last"),
+                             "matched_to": adj.get("matched_to")}
+        else:
+            no_series = {"available": False,
+                         "reason": adj.get("reason") or "the adjusted series is unavailable"}
+            out["by_label"] = []
+            out["warnings_held"] = dict(no_series, pending=None,
+                                        threshold_pct=rs.WARNING_DIP_PCT,
+                                        basis=rs.BASIS_ADJUSTED)
+            out["dip_order"] = dict(no_series, basis=rs.BASIS_ADJUSTED,
+                                    question="does STRESS's median forward-20 dip exceed UP's?")
+
+        out["all_clears_held"] = {
+            "available": False,
+            "reason": ("needs the 60-session closing low on %s, which R4/G4 defines and this "
+                       "card does not yet read" % rs.BASIS_ALL_CLEAR),
+            "pending": None, "horizon_sessions": rs.ALL_CLEAR_HORIZON,
+            "basis": rs.BASIS_ALL_CLEAR}
+        out["groups"] = groups
         return out
     except Exception as exc:                                        # noqa: BLE001
         from models import regime_report_scoring as rs
