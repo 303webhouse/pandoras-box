@@ -49,6 +49,16 @@
       : '<span class="' + (cls || '') + '">' + esc(v) + '</span>';
   }
 
+  // The rows behind the unbooked line, named so the figure can be acted on rather than merely
+  // noticed: a count the reader cannot trace is a count they have to come and ask about.
+  function unbookedRows(eu) {
+    return (eu.rows || []).map(function (r) {
+      return r.ticker + (r.account_display ? ' (' + r.account_display + ')' : '')
+        + ' ' + (usd(r.cost_basis) || '?')
+        + (r.days_past != null ? ', ' + r.days_past + 'd past expiry' : '');
+    }).join(' · ');
+  }
+
   function kpi(label, body, sub, title) {
     return '<section class="ab-card pnl-kpi"' + (title ? ' title="' + esc(title) + '"' : '') + '>'
       + '<span class="k">' + esc(label) + '</span>'
@@ -145,6 +155,7 @@
     var u = d.unrealized || {};
     var b = d.by_bucket || {};
     var dk = d.date_unknown || {};
+    var eu = d.expired_unbooked || {};
 
     var winSub = d.win_rate_n
       ? d.wins + ' of ' + d.win_rate_n + ' decided'
@@ -172,7 +183,15 @@
       + 'fees. Open positions are shown separately as unrealized and never mix into the realized '
       + 'totals.' + (dk.count ? ' <b>Date unknown: ' + dk.count + ' closure'
         + (dk.count === 1 ? '' : 's') + ', ' + esc(usd(dk.total, true) || '?')
-        + '</b> — outside every figure here, in every period.' : '') + '</div>'
+        + '</b> — outside every figure here, in every period.' : '')
+      // R-IV.1349(b): the same pattern, for money the broker has moved past while the book still
+      // carries its size. Neither realized nor unrealized: UNBOOKED. It is NOT windowed — a row
+      // past its expiry is wrong in every period, and narrowing it to the selected month would
+      // hide it the moment the month turned. This line exists because eight Robinhood expiries
+      // sat unbooked from 10-16 to 10-22 and October read $485.03 better than it was.
+      + (eu.count ? ' <b>Expired, not yet booked: ' + eu.count + ' position'
+        + (eu.count === 1 ? '' : 's') + ', cost ' + esc(usd(eu.cost) || '?')
+        + '</b> — outside every total here. ' + esc(unbookedRows(eu)) : '') + '</div>'
 
       + '<div class="pnl-head"><span class="pnl-title">P&amp;L</span>'
       + '<span class="pnl-sub">realized, by trade date · ' + esc(p.from || '?') + ' → ' + esc(p.to || '?') + '</span>'
