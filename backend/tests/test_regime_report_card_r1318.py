@@ -1,0 +1,226 @@
+"""The Regime Report Card skeleton, and the CSS tokens that do not exist. R-IV.1318(c).
+
+SKELETON ONLY, MOCK VALUES ONLY. QUERY is writing the scoring spec under R-IV.1316 and the
+wiring waits for it. A report card is the most trustable-looking surface on this hub: a
+plausible number on it gets believed immediately and questioned late, which is backwards for a
+figure whose definition nobody has agreed yet.
+
+THE SCOPE RULE is the part worth guarding now rather than later. When it is wired, its only
+reads are rows AFTER the v2.1 cutover, and nothing is backfilled -- with 304 pre-cutover rows
+sitting in the same table behind nothing but a `rules_version` column, a report card that graded
+the earlier era would be marking a different classifier's homework and reporting it as this
+one's. That is one forgotten predicate away at all times.
+
+AND THE CSS TOKENS. The last class of test here exists because the first render of this card
+was silently half-invisible: `var(--muted)` and `var(--line)` ARE NOT DEFINED in this
+stylesheet, and I used them seventeen times. `color: var(--undefined)` falls back to INHERIT and
+looks perfectly fine, so the text read correctly -- while `background: var(--undefined)` falls
+back to TRANSPARENT. The history tick on every table row was invisible, and so were the three
+unfilled segments of the decay bar shipped in 78518228, which turned a "7 of 10" bar into a bare
+7-segment one. The real tokens are `--text-3` and `--border`.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import pathlib
+import re
+import sys
+
+import pytest
+
+_BACKEND = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND))
+
+from services.regime_report_card import (FERRY_SHA256, SCOPE_RULE,  # noqa: E402
+                                         SCORED_VERSION, load_fixture, lint_report_mock)
+
+from ._srcscan import read_source                                  # noqa: E402
+
+V2JS = str(_BACKEND.parent / "frontend" / "v2.js")
+V2CSS = str(_BACKEND.parent / "frontend" / "v2.css")
+FERRY = pathlib.Path(r"C:\temp\cc-query-handoff\AGORA-MOCK-RegimeReport.dc.html")
+
+
+# ── the design it was built from ────────────────────────────────────────────
+
+def test_the_ferry_file_hashes_to_the_rulings_sha256():
+    """R-IV.1318(c) names it. Verified before anything was written; raw and LF hashes agree
+    because the file is LF already, so one value pins it either way."""
+    if not FERRY.exists():
+        pytest.skip("the ferry file is not on this machine")
+    raw = FERRY.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == FERRY_SHA256
+    assert hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest() == FERRY_SHA256
+
+
+# ── the fixture ─────────────────────────────────────────────────────────────
+
+def test_the_fixture_lints_clean():
+    assert lint_report_mock(load_fixture()) == []
+
+
+def test_it_announces_itself_as_a_mock():
+    """The most important chip on this card. Everything on it is invented."""
+    f = load_fixture()
+    assert f["_mock"] is True
+    assert "Mock values" in f["footer"]
+
+
+def test_the_footer_states_the_scope_and_that_nothing_gates_on_it():
+    foot = load_fixture()["footer"]
+    assert "backfilled" in foot
+    assert "#42" in foot
+    assert "never change the label" in foot
+
+
+def test_every_stat_cell_carries_its_DEFINITION():
+    """A bare score on a report card is a number whose meaning the reader has to guess, and a
+    guessed meaning is how a figure comes to be trusted for something it does not measure."""
+    for cell in load_fixture()["stats"]:
+        assert cell.get("note"), cell.get("key")
+
+
+@pytest.mark.parametrize("mutate,expect", [
+    (lambda f: f["table"]["rows"][1].update({"checked": 99}), "more checked calls"),
+    (lambda f: f["table"]["rows"][2].update({"live_pct": 72.0}), "0 checked calls but a live"),
+    (lambda f: f["ma200"].update({"whipsaws": 3}), "more whipsaws"),
+    (lambda f: f["stats"][0].pop("note"), "no note"),
+    (lambda f: f.update({"_mock": False}), "must be true"),
+    (lambda f: f.update({"footer": "no caveats here"}), "#42"),
+])
+def test_the_lint_CATCHES_each_fault_it_claims_to(mutate, expect):
+    """CONVENTION #30. The impossible shapes -- more checked than sessions, a score with nothing
+    checked, more whipsaws than crossings -- are what a half-written scorer produces first."""
+    f = load_fixture()
+    mutate(f)
+    assert any(expect in m for m in lint_report_mock(f)), lint_report_mock(f)
+
+
+# ── the scope rule ──────────────────────────────────────────────────────────
+
+def test_only_post_cutover_rows_may_ever_be_scored():
+    assert SCORED_VERSION == "v2.1"
+    assert "v2.1" in SCOPE_RULE
+    assert "No backfill" in SCOPE_RULE
+    assert "settled IS TRUE" in SCOPE_RULE
+
+
+def test_the_skeleton_reads_NOTHING_yet():
+    """Mock values only until QUERY's spec lands. A module that quietly started reading rows
+    would be scoring against a spec nobody has written."""
+    src = read_source(str(_BACKEND / "services" / "regime_report_card.py"))
+    for needle in ("SELECT", "fetchrow", "fetchval", "get_postgres_client", "conn"):
+        assert needle not in src, needle
+
+
+def test_NOTHING_imports_it_the_same_rule_as_regime_ma200():
+    """#42, stated by R-IV.1318(c) in those words. A score is precisely what a later reader
+    reaches for when they want to gate something, and an import is the first step."""
+    for mod in ("regime_classifier.py", "regime_inputs.py", "regime_inputs_v2.py",
+                "regime_hysteresis.py", "regime_ma200.py"):
+        assert "regime_report_card" not in read_source(str(_BACKEND / "models" / mod)), mod
+    assert "regime_report_card" not in read_source(str(_BACKEND / "jobs" / "regime_job.py"))
+
+    # COUNTED AS IMPORTS, from the parsed tree. A substring sweep flags a file that merely
+    # MENTIONS the module -- which is how the twin of this test broke when this very module's
+    # docstring named `regime_ma200` while explaining it follows the same rule.
+    import ast
+
+    hits = []
+    for path in sorted(_BACKEND.rglob("*.py")):
+        if "__pycache__" in str(path) or path.name.startswith("test_"):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""] + [a.name for a in node.names]
+            else:
+                continue
+            if any("regime_report_card" in (n or "") for n in names):
+                hits.append(path.name)
+                break
+    # EMPTY, not ["regime_report_card.py"]: a module does not name itself, so the sweep finds
+    # NOTHING at all. That is a stronger result than the one I expected and it is the correct
+    # state for a skeleton -- the same correction this suite made for `regime_ma200`.
+    assert hits == [], hits
+
+
+# ── the renderer ────────────────────────────────────────────────────────────
+
+def test_the_card_is_GATED_on_report_1():
+    js = read_source(V2JS)
+    i = js.index("function rcRender(")
+    assert "if (!REPORT_ON || !m) return" in js[i:i + 200]
+    j = js.index("const REPORT_ON")
+    assert "get('report') === '1'" in js[j:j + 240]
+
+
+def test_an_unchecked_row_draws_NO_LIVE_BAR_rather_than_a_zero_width_one():
+    """A zero-width bar beside a history tick reads as "measured, and it was nil"."""
+    js = read_source(V2JS)
+    i = js.index("function rcRender(")
+    block = js[i:i + 2600]
+    assert "r.live_pct == null ? null" in block
+    assert "live == null ? '' :" in block
+
+
+def test_the_fixture_and_the_renderer_agree_about_the_column_count():
+    cols = load_fixture()["table"]["columns"]
+    assert len(cols) == 6
+    assert cols[0] == "LABEL" and cols[-1] == "VERDICT"
+
+
+# ── the tokens, which is where the first render went wrong ──────────────────
+
+def _declared_tokens() -> set:
+    css = read_source(V2CSS)
+    return set(re.findall(r"--([a-z0-9-]+)\s*:", css))
+
+
+def test_EVERY_CSS_VARIABLE_THE_INJECTED_BLOCKS_USE_IS_ACTUALLY_DEFINED():
+    """THE BUG THIS EXISTS FOR, found by a screenshot and not by any assertion.
+
+    `var(--muted)` and `var(--line)` are not defined in this stylesheet. I used them seventeen
+    times across two injected blocks. `color: var(--undefined)` falls back to INHERIT and looks
+    right, so every line of text read correctly; `background: var(--undefined)` falls back to
+    TRANSPARENT. The history tick on every report-card row was invisible, and so were the three
+    unfilled segments of the decay bar already shipped in 78518228 -- a "7 of 10" bar rendering
+    as a bare 7.
+
+    A value test could not see this: the DOM was correct, the computed background was
+    `rgba(0, 0, 0, 0)`, and only pixels showed it. So the guard is on the SOURCE of the injected
+    CSS, where the token name is written.
+    """
+    js = read_source(V2JS)
+    declared = _declared_tokens()
+    assert "text-3" in declared and "border" in declared, "the real tokens must exist"
+    used = set()
+    for name in ("RS21_CSS", "RC_CSS"):
+        i = js.index("const %s" % name)
+        block = js[i:js.index("].join('')", i)]
+        used |= set(re.findall(r"var\(--([a-z0-9-]+)\)", block))
+    missing = sorted(t for t in used if t not in declared)
+    assert missing == [], missing
+
+
+def test_the_two_tokens_that_do_not_exist_are_gone_from_the_frontend():
+    for path in (V2JS, V2CSS):
+        src = read_source(path)
+        assert "var(--muted)" not in src, path
+        assert "var(--line)" not in src, path
+
+
+def test_the_decay_bars_unfilled_segments_have_a_VISIBLE_background():
+    """The specific regression: the bar must read as N of 10, not as N."""
+    js = read_source(V2JS)
+    i = js.index("'.rs-decay i{")
+    rule = js[i:js.index("',", i)]
+    m = re.search(r"background:var\(--([a-z0-9-]+)\)", rule)
+    assert m, rule
+    assert m.group(1) in _declared_tokens(), m.group(1)

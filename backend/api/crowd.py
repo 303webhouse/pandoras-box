@@ -165,7 +165,16 @@ async def get_crowd() -> Dict[str, Any]:
             degraded.append("CFTC TFF: %s" % type(exc).__name__)
             rows.append(cb.cftc_row({k: None for k in cb.CFTC_CONTRACTS}, [], None))
 
-        rows.append(cb.short_interest_row())
+        # R-IV.1318(b): LIVE, from FINRA's free twice-monthly file. Guarded like its
+        # siblings -- a failed fetch costs this ROW its value and says so, never the panel.
+        try:
+            from integrations.finra_short_interest import short_interest as _finra_si
+
+            _si = await _finra_si("SPY")
+        except Exception as exc:                                    # noqa: BLE001
+            degraded.append("FINRA short interest: %s" % type(exc).__name__)
+            _si = None
+        rows.append(cb.short_interest_row(_si))
         word, lean, basis = cb.headline(rows)
         return {
             "live": True,

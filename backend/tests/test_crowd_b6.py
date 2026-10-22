@@ -67,24 +67,50 @@ def test_AN_UNKNOWN_UNIVERSE_SAYS_SO_RATHER_THAN_IMPLYING_BREADTH():
     assert "universe unknown" in row["sub"]
 
 
-# ── 3. the FINRA row is a mock, and the reason is in the row ──────────────
+# ── 3. the FINRA row is LIVE, and both dates travel with it ──────────
 
-def test_THE_SHORT_INTEREST_ROW_IS_A_MOCK_AND_CARRIES_BOTH_REASONS():
-    """R-IV.1239(d)3 said ship the mock first. It stays a mock on two findings from reading the
-    source rather than assuming it:
+def test_THE_SHORT_INTEREST_ROW_IS_LIVE_AND_BOTH_REASONS_ARE_ANSWERED():
+    """INVERTED BY R-IV.1318(b). It shipped as a mock on two findings, and MEASUREMENT
+    CONTRADICTED BOTH:
 
-      1. FINRA's own equity short interest catalogue documents NEITHER days to cover NOR
-         average daily volume, so "days to cover from FINRA's own file" is not satisfiable as
-         written -- computing it from another source's volume makes it not FINRA's figure.
-      2. FINRA Data states non-commercial use with no licence for automated download that this
-         lane could verify, so (d)2's own standard applies.
+      1. "FINRA's catalogue documents neither days to cover nor average daily volume" --
+         FALSE. The free twice-monthly file carries `daysToCoverQuantity` AND
+         `averageDailyVolumeQuantity`. Measured AAPL 2026-09-30: short 120,763,539, ADV
+         39,858,260, days to cover 3.03. So R-IV.1239(d)3's wording is satisfiable exactly as
+         written -- the figure is FINRA's, not one computed against another source's volume.
+      2. "no licence for automated download this lane could verify" -- ANSWERED by
+         R-IV.1318(a): the Equity Data terms permit non-commercial personal or professional
+         use, require FINRA to be named as owner and source, and forbid charging for the data.
+
+    The reasons were honestly held and honestly recorded; they were also wrong, which is why
+    the docstring that carried them is replaced rather than deleted.
     """
-    row = cb.short_interest_row()
-    assert row["mock"] is True
+    si = {"available": True, "symbol": "SPY", "days_to_cover": 2.02,
+          "settlement_date": "2026-09-30", "publish_date": "2026-10-12",
+          "attribution": "Source: FINRA",
+          "cadence": "twice-monthly settlement data, published about 7 business days after "
+                     "each settlement date - not real-time"}
+    row = cb.short_interest_row(si)
+    assert row["mock"] is False
+    assert row["value"] == "2.02"
     assert row["crowded_short_at"] == 5.0
-    assert "not a documented field" in row["source"]
-    assert "non-commercial" in row["source"]
+    # BOTH DATES, R-IV.1318(b). A positioning figure without its settlement date reads as
+    # current, and this one can be three weeks old by design.
+    assert row["settlement_date"] == "2026-09-30"
+    assert row["publish_date"] == "2026-10-12"
+    assert row["attribution"] == "Source: FINRA"
+    assert "not real-time" in row["cadence"]
+    assert "cdn.finra.org" in row["source"]
 
+
+def test_AN_UNAVAILABLE_READ_IS_NOT_A_MOCK_AND_NOT_A_ZERO():
+    """The third state. A failed fetch must not resurrect the mock and must not print a number;
+    it prints an em dash and says why."""
+    row = cb.short_interest_row({"available": False, "reason": "no file read"})
+    assert row["mock"] is False
+    assert row["value"] == "—"
+    assert row["crowded_short"] is None
+    assert "unavailable this read" in row["source"]
 
 def test_THE_CROWDED_SHORT_FLAG_IS_THE_RULED_THRESHOLD():
     assert cb.crowded_short(5.0) is True

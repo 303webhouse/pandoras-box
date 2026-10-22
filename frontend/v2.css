@@ -1504,6 +1504,11 @@ body.is-mobile-grid .tile-grip { display: none !important; }
 
 .ag-head { font: 700 15px var(--mono); letter-spacing: 1px; margin-bottom: 1px; }
 .ag-sub { font: 10px var(--mono); color: var(--text-3); margin-bottom: 7px; }
+/* R-IV.1318(b): FINRA's settlement and publish dates ride under the value, and the panel
+   names FINRA as the source. Both are required by the Equity Data terms and by the fact that
+   the number is up to three weeks old by design. */
+.ag-dates{display:block;font-size:8.5px;letter-spacing:.2px;color:var(--text-3);margin-top:2px;white-space:nowrap}
+.ag-attrib{font-size:9px;letter-spacing:.4px;color:var(--text-3);margin-top:4px;opacity:.85}
 .ag-cap { font: 9px var(--mono); color: var(--text-3); margin-top: 7px; letter-spacing: .2px; }
 .ag-foot { font: 9px var(--mono); color: var(--text-3); margin-top: 6px; }
 .ag-scale {

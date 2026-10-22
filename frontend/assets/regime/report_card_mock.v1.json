@@ -1,0 +1,66 @@
+{
+  "_mock": true,
+  "version": "v1",
+  "authority": "R-IV.1318(c), from C:\\temp\\cc-query-handoff\\AGORA-MOCK-RegimeReport.dc.html sha256 ffd15cc3bc775a70e94b26b68775a475b2556e4e7bb10e2e11405bd85ff4e51b (verified byte-identical, LF and raw hashes agree). EVERY VALUE HERE IS FAKE.",
+  "why_mock_only": "QUERY is writing the scoring spec under R-IV.1316. Wiring waits for it. A skeleton built on invented scoring would have to be rebuilt once the spec lands, and worse, a plausible number on a report card is exactly the thing a reader starts trusting before anyone has agreed what it measures.",
+  "scope": "Scores ONLY sessions after the v2.1 cutover. Nothing is backfilled -- a report card that graded the era before the version it grades would be marking a different classifier's homework.",
+  "display_only": "#42. The scores never change the label, never feed a section 2 row, and never touch the kill switch.",
+
+  "headline": "REGIME REPORT CARD",
+  "sub": "live sessions only \u00b7 since v2.1 cutover 2026-10-23 \u00b7 21 sessions so far",
+  "badge": "EARLY \u00b7 TOO FEW TO JUDGE",
+  "badge_tone": "amber",
+
+  "stats": [
+    {
+      "key": "CALLS CHECKED",
+      "value": "1",
+      "of": "of 21",
+      "note": "a call is checked 20 sessions after it was made"
+    },
+    {
+      "key": "FLIPS PER YEAR",
+      "value": "12",
+      "of": null,
+      "note": "history 12.8 \u00b7 target \u2264 6"
+    },
+    {
+      "key": "WARNINGS THAT HELD",
+      "value": "\u2014",
+      "of": null,
+      "note": "danger label \u2192 a 3%+ dip within 20 sessions"
+    },
+    {
+      "key": "ALL-CLEARS THAT HELD",
+      "value": "\u2014",
+      "of": null,
+      "note": "uptrend / recovery \u2192 no new 60-session low"
+    }
+  ],
+
+  "table": {
+    "title": "BY LABEL \u00b7 DID SPY RISE OVER THE NEXT 20 SESSIONS?",
+    "sub": "live vs the 1999\u20132026 base rate",
+    "columns": ["LABEL", "SESSIONS", "CHECKED",
+                "HIGHER 20 SESSIONS LATER \u00b7 live \u25ae vs history \u2503", "WORST DIP", "VERDICT"],
+    "rows": [
+      {"label": "RANGE / CHOP", "sessions": 14, "checked": 1,
+       "live_pct": null, "history_pct": 64.4, "worst_dip": "\u22121.2%", "verdict": "n = 1"},
+      {"label": "UPTREND", "sessions": 7, "checked": 0,
+       "live_pct": null, "history_pct": 71.2, "worst_dip": "\u2014", "verdict": "n = 0"},
+      {"label": "CORRECTION", "sessions": 0, "checked": 0,
+       "live_pct": null, "history_pct": 58.9, "worst_dip": "\u2014", "verdict": "\u2014"},
+      {"label": "BREAKDOWN", "sessions": 0, "checked": 0,
+       "live_pct": null, "history_pct": 49.6, "worst_dip": "\u2014", "verdict": "\u2014"}
+    ]
+  },
+
+  "ma200": {
+    "title": "SPY vs 200-DAY ROW \u00b7 LIVE",
+    "up_crosses": 0,
+    "whipsaws": 0,
+    "history": "history: 50% since 2013 (45% since 1999)"
+  },
+
+  "footer": "Mock values. Scores only sessions after the cutover; nothing is backfilled. Amber means too few checked calls to judge. A verdict appears only after QUERY's minimum count. Display only (#42); the scores never change the label or the kill switch."
+}

@@ -137,19 +137,36 @@ def test_NOTHING_in_the_classifier_or_the_inputs_imports_this_module():
     assert "regime_ma200" not in job, "the nightly must not read it either"
 
 
-def test_the_only_readers_are_the_READ_PATH_and_the_tests():
-    """If a third importer appears, it needs a ruling -- which is what this test is for."""
-    hits = []
+def test_the_only_IMPORTER_is_the_read_path():
+    """If a second importer appears it needs a ruling -- which is what this test is for.
+
+    COUNTED AS IMPORTS, FROM THE PARSED TREE, not as a substring. The substring form broke the
+    moment `regime_report_card` mentioned `regime_ma200` IN ITS DOCSTRING, explaining that it
+    follows the same import rule -- a file that only TALKS about the module was counted as
+    reading it. Thirteenth time in this build that a scan has been defeated by prose about the
+    thing it scans for, and the fix is the same each time: ask the tree, not the text.
+    """
+    import ast
+
+    importers = []
     for path in sorted(_BACKEND.rglob("*.py")):
         if "__pycache__" in str(path) or path.name.startswith("test_"):
             continue
-        if "regime_ma200" in path.read_text(encoding="utf-8"):
-            hits.append(path.name)
-    # EXACTLY ONE production reader: the card's read path. `regime_ma200.py` is absent from
-    # this list because a module does not name itself -- my first expectation included it and
-    # was wrong about the code rather than the other way round.
-    assert sorted(hits) == ["regime_strategy.py"], hits
-
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""] + [a.name for a in node.names]
+            else:
+                continue
+            if any("regime_ma200" in (n or "") for n in names):
+                importers.append(path.name)
+                break
+    assert sorted(set(importers)) == ["regime_strategy.py"], importers
 
 # ── the payload ─────────────────────────────────────────────────────────────
 
