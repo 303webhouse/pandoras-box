@@ -6,7 +6,7 @@ READ-ONLY. Touches no database. Writes only to --outdir.
 Usage:
     python scripts/merge_halves.py ^
         --db "C:/trading-hub/data/imports/90d/fidelity_db_half.csv" ^
-        --export "C:/trading-hub/data/imports/90d/fidelity_652303158_trades.csv" ^
+        --export "C:/trading-hub/data/imports/90d/fidelity_...3158_trades.csv" ^
         --outdir "C:/trading-hub/data/imports/90d"
 
 PROVENANCE: this script is the derivation of record for the merged ledger. Re-run and

@@ -62,11 +62,44 @@ PROVISIONAL_NAMES = (FIDELITY_401A,)
 # 401(a) into scope by NAME would have pulled the parked history in with it.
 #
 # So the account number is the identity. POSITIONS read both from the principal's files.
-ACCOUNT_NUMBERS = {
-    FIDELITY_ROTH: "652303158",
-    FIDELITY_401A: "653641836",
+# R-IV.1332(c): THE LAST FOUR DIGITS, NOT THE FULL NUMBERS. The full account numbers were
+# committed here in de9c86f (2026-10-01) and this repository is PUBLIC (verified with `gh repo
+# view`: visibility PUBLIC), so they were readable on GitHub from that day. They are gone from
+# every tracked file.
+#
+# WHAT THIS COSTS, STATED PLAINLY, because the docstring below used to argue the other way:
+# `account_for_number` matched on the FULL number precisely so that "...1836" could NOT
+# resolve, on the reasoning that "a partial match on an account number is how money lands in
+# the wrong account". That reasoning was sound and this is a deliberate relaxation of it. Two
+# things make it safe enough to take:
+#
+#   1. the tracked last-4s are DISTINCT, asserted at import -- so "ambiguous" is impossible
+#      within the tracked set, and a future third account ending 3158 breaks the import
+#      instead of silently resolving to the Roth;
+#   2. the full number is only ever an INPUT. R-IV.1332(c)3 requires every API, MCP and error
+#      surface to show the last four only, so nothing downstream needs it.
+#
+# The alternative -- keeping the full numbers in a Railway variable or an untracked file --
+# would add a deploy dependency for a value with no consumer, and a missing variable would
+# stop account resolution working. Reported as the chosen option under R-IV.1332(c)2.
+ACCOUNT_LAST4 = {
+    FIDELITY_ROTH: "3158",
+    FIDELITY_401A: "1836",
 }
-ACCOUNT_BY_NUMBER = {num: key for key, num in ACCOUNT_NUMBERS.items()}
+
+#: Distinct by assertion, not by hope. If two tracked accounts ever share a last-4 this raises
+#: at import, which is the only moment a human is looking.
+assert len(set(ACCOUNT_LAST4.values())) == len(ACCOUNT_LAST4), (
+    "two tracked accounts share a last-4; last-4 identity cannot separate them")
+
+ACCOUNT_BY_LAST4 = {v: k for k, v in ACCOUNT_LAST4.items()}
+
+#: How an account number is SHOWN, anywhere it is shown. R-IV.1332(c)3.
+def account_display_number(key: str) -> Optional[str]:
+    """`...1836` for a tracked account, or None. Never the full number."""
+    v = ACCOUNT_LAST4.get(key)
+    return None if v is None else "..." + v
+
 
 # Names that USED to route to FIDELITY_ROTH and no longer route anywhere. Kept as a declared
 # set so the refusal can name them, rather than a caller guessing why its string stopped
@@ -105,7 +138,7 @@ def describe_accounts() -> str:
     parts = []
     for key in CANONICAL_ACCOUNTS:
         name = DISPLAY_NAMES[key]
-        num = ACCOUNT_NUMBERS.get(key)
+        num = account_display_number(key)
         parts.append(f"{name} ({key}{', #' + num if num else ''})")
     return ", ".join(parts)
 
@@ -121,16 +154,26 @@ def account_choices() -> list:
 
 
 def account_for_number(number) -> Optional[str]:
-    """The canonical key for an account NUMBER, or None if it is not one we track.
+    """The canonical key for an account number, by its LAST FOUR digits, or None.
 
-    Digits only, so '653641836', 'X653641836' and '...1836' do not accidentally agree: a
-    partial match on an account number is how money lands in the wrong account.
+    R-IV.1332(c)2. It used to require the whole number, so `"...1836"` refused. The full
+    numbers cannot stay in a public repository, and the last four are unique across the two
+    tracked accounts (asserted at import), so identification survives the removal.
+
+    REFUSES rather than guesses:
+      * fewer than four digits -- there is nothing to match on;
+      * a last-4 that is not one of ours -- an untracked account is not a near miss;
+      * `None` or a value with no digits at all.
+
+    It does NOT refuse a longer number whose last four match, because that is the normal case:
+    a broker file carries the full number and the hub carries the last four.
     """
     if number is None:
         return None
     digits = "".join(ch for ch in str(number) if ch.isdigit())
-    return ACCOUNT_BY_NUMBER.get(digits)
-
+    if len(digits) < 4:
+        return None
+    return ACCOUNT_BY_LAST4.get(digits[-4:])
 
 def is_fidelity_name(value: Optional[str]) -> bool:
     """True when `value` is a Fidelity-ish NAME that can no longer resolve on its own."""
@@ -199,10 +242,10 @@ def canonical_account(value: Optional[str], *, field: str = "account") -> str:
                     f"401(a) + 403(b), under a label disputed as to which plan it names "
                     f"(DEF-ACCOUNT-LABEL-DUP). It is not a write target, and it is not the "
                     f"traded 401(a): that is {FIDELITY_401A} "
-                    f"({ACCOUNT_NUMBERS[FIDELITY_401A]})."))
+                    f"(#{account_display_number(FIDELITY_401A)})."))
 
     if is_fidelity_name(value):
-        pairs = ", ".join(f"{k} ({ACCOUNT_NUMBERS[k]})" for k in ACCOUNT_NUMBERS)
+        pairs = ", ".join(f"{k} (#{account_display_number(k)})" for k in ACCOUNT_LAST4)
         raise HTTPException(
             status_code=400,
             detail=(f"{field}: '{value}' names Fidelity without saying WHICH Fidelity "

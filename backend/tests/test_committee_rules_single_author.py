@@ -42,8 +42,8 @@ SYNC = _load_sync()
 # A marker must be on ONE line: these files are wrapped, and a needle that straddles a break can
 # only fail, which would read as missing rule text.
 APPLIED_MARKERS = (
-    "FIDELITY_401A — BrokerageLink, account 653641836",
-    "FIDELITY_ROTH — Roth Brokerage, account 652303158",
+    "FIDELITY_401A — BrokerageLink, account ...1836",
+    "FIDELITY_ROTH — Roth Brokerage, account ...3158",
     "10% of all three tracked accounts combined (FIDELITY_401A + FIDELITY_ROTH +",
     "20% portfolio risk cap — tactical positions in BOTH Fidelity accounts.",
     "Deployment schedule — RULED 2026-10-07 [R-IV.730(a), R-IV.734(a)]",

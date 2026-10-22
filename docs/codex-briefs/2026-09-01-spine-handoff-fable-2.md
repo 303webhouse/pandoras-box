@@ -57,7 +57,7 @@ Cowork — Battlefield Brief task LIVE (Sunday cadence, self-adjusts, archives t
   project). Optional prompts on request: Monday book-hygiene, Friday UW usage-ledger.
 
 ## 3 · Trading state (broker-true at handoff)
-Roth 652303158: QQQM 5 @ 291.32 (core T1 of 3 · T2 697-equiv backstop 9/25 · T3
+Roth ...3158: QQQM 5 @ 291.32 (core T1 of 3 · T2 697-equiv backstop 9/25 · T3
   681-equiv backstop 10/9 · acceleration < 200-SMA 654.7 · invalidation weekly close
   > 748.65 · NO price stop by design — pause-rule pending Olympus D1) · GUSH 40 @
   44.25 · MOO 10 @ 85.17 · ~$6.7K FDRXX. SOXS/RAMZ closed 09-01 for gains; R-IV.129

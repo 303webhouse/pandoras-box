@@ -47,13 +47,13 @@ def test_the_retired_alias_is_now_refused_naming_both_accounts():
         with pytest.raises(HTTPException) as e:
             canonical_account(spelling)
         assert e.value.status_code == 400
-        assert "652303158" in str(e.value.detail) and "653641836" in str(e.value.detail)
+        assert "...3158" in str(e.value.detail) and "...1836" in str(e.value.detail)
 
 
 def test_the_number_is_what_resolves_now():
     """POSITIVE CONTROL for the refusal above: it instructs the caller to send a number, and
     a number must therefore work."""
-    assert canonical_account("652303158") == FIDELITY_ROTH
+    assert canonical_account("...3158") == FIDELITY_ROTH
 
 
 def test_an_unknown_label_is_refused_and_the_refusal_quotes_what_arrived():

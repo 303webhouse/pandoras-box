@@ -92,7 +92,7 @@ class TestRegistered:
         'FIDELITY 401A' as well — and those name the PARKED money, which collapses to the
         same normalised string as the traded key. The account number is the identity now."""
         assert normalize_account("FIDELITY_401A") == FIDELITY_401A
-        assert normalize_account("653641836") == FIDELITY_401A
+        assert normalize_account("...1836") == FIDELITY_401A
         assert normalize_account("fidelity 401a") is None   # a name no longer routes
 
 

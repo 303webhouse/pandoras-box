@@ -22,7 +22,7 @@ import os
 import pytest
 from fastapi import HTTPException
 
-from models.accounts import (ACCOUNT_NUMBERS, CANONICAL_ACCOUNTS, FIDELITY_401A,
+from models.accounts import (ACCOUNT_LAST4, CANONICAL_ACCOUNTS, FIDELITY_401A,
                              FIDELITY_ROTH, ROBINHOOD)
 
 BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -82,7 +82,7 @@ class TestTheRefusalIsUseful:
 
         if not (value or "").strip():
             pairs = ", ".join(
-                f"{k}" + (f" (#{ACCOUNT_NUMBERS[k]})" if k in ACCOUNT_NUMBERS else "")
+                f"{k}" + (f" (#...{ACCOUNT_LAST4[k]})" if k in ACCOUNT_LAST4 else "")
                 for k in CANONICAL_ACCOUNTS)
             return (f"account is required: this hub tracks {len(CANONICAL_ACCOUNTS)} accounts "
                     f"— {pairs}. It used to default to ROBINHOOD, which was safe while that "
@@ -104,8 +104,8 @@ class TestTheRefusalIsUseful:
         """Because a Fidelity name alone cannot identify an account (R-IV.638(b)1), telling a
         caller to "name the account" is only actionable with the numbers beside it."""
         d = self._detail(None)
-        assert ACCOUNT_NUMBERS[FIDELITY_ROTH] in d
-        assert ACCOUNT_NUMBERS[FIDELITY_401A] in d
+        assert ACCOUNT_LAST4[FIDELITY_ROTH] in d
+        assert ACCOUNT_LAST4[FIDELITY_401A] in d
 
     def test_the_refusal_says_what_changed(self):
         """The old default was reasonable in its time. A caller that relied on it deserves to
@@ -127,8 +127,8 @@ class TestAStatedAccountStillWorks:
         ("robinhood", ROBINHOOD),
         ("FIDELITY_ROTH", FIDELITY_ROTH),
         ("FIDELITY_401A", FIDELITY_401A),
-        ("652303158", FIDELITY_ROTH),
-        ("653641836", FIDELITY_401A),
+        ("...3158", FIDELITY_ROTH),
+        ("...1836", FIDELITY_401A),
     ])
     def test_a_named_or_numbered_account_resolves(self, value, expected):
         assert self._resolve(value) == expected

@@ -186,7 +186,7 @@ dollar figure is unavailable. It does not substitute a hub number.
 There are **three** tracked accounts, by number. They are distinct. Any text
 treating BrokerageLink as part of the Roth is superseded.
 
-**FIDELITY_401A — BrokerageLink, account 653641836.** Carries the long-term core
+**FIDELITY_401A — BrokerageLink, account ...1836.** Carries the long-term core
 in full. One plan with FIDELITY_ROTH (see § One plan, two tax locations).
 - Strategic holdings sit **outside** the 20% risk cap, governed instead by the
   **per-position limit** below and a **15% total real-asset** limit. [TA-098 §1a;
@@ -273,7 +273,7 @@ market data. [TA-110 §7]
 market-data field.** `spot` is not a fill. TA-008 ranks *sources* for a figure and
 says nothing about taking the wrong *field* from the right source. [TA-109]
 
-**FIDELITY_ROTH — Roth Brokerage, account 652303158.** 50% core, 50% trading
+**FIDELITY_ROTH — Roth Brokerage, account ...3158.** 50% core, 50% trading
 sleeve. [R-IV.730(a)]
 - **The 50% split is measured on total account value** — holdings at market plus
   cash — **at the measurement close.**
@@ -671,7 +671,7 @@ trade. With PDBC fixed in shares, this split converges the core to
 fund — GLD, IAU/IAUM, SGOL, FGDL, GLDM. That structure is *what permits direct
 physical holding*, so it is not incidental, and plan sponsors commonly exclude
 commodity grantor trusts alongside LPs. **The principal confirmed on 2026-10-08
-that both 653641836 and 652303158 block gold** (R-IV.762(a)).
+that both ...1836 and ...3158 block gold** (R-IV.762(a)).
 
 **There is no mainstream '40-Act bullion substitute.** A registered fund cannot
 hold physical metal directly at scale; it holds futures through a Cayman
@@ -746,8 +746,8 @@ tranches land. Two holdings are handled explicitly:
   homes of the thesis roster.** Neither hosts it; both rosters are inline in the
   respective `SKILL.md`. Corrected at SECTION D. [R-IV.786(b)]
 - **"FIDELITY_ROTH — ONE account (Roth / 401(k) / 403(b) / BrokerageLink, …3158)."**
-  Factually wrong on account identity. BrokerageLink is 653641836; the Roth is
-  652303158. Retired 2026-10-07.
+  Factually wrong on account identity. BrokerageLink is ...1836; the Roth is
+  ...3158. Retired 2026-10-07.
 - **The 2026-09-23 retirement of the separate BrokerageLink entry** ("it is part of
   FIDELITY_ROTH, not a second account") is itself **reversed**. It is a second
   account.

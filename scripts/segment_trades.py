@@ -5,7 +5,7 @@ READ-ONLY. Touches no database. Writes only to --outdir.
 
 Usage:
     python scripts/segment_trades.py ^
-        --fills "C:/trading-hub/data/imports/fidelity_652303158_fills_normalized.csv" ^
+        --fills "C:/trading-hub/data/imports/fidelity_...3158_fills_normalized.csv" ^
         --account FIDELITY_ROTH ^
         --outdir "C:/trading-hub/data/imports"
 
@@ -160,7 +160,7 @@ def main():
     cols = ["account", "symbol", "status", "entry_date", "exit_date", "fills", "max_qty",
             "cost", "proceeds", "realized", "basis_known", "unsettled", "fill_hashes"]
     trades = trades.reindex(columns=cols + [c for c in trades.columns if c not in cols])
-    trades.to_csv(os.path.join(a.outdir, "fidelity_652303158_trades.csv"), index=False)
+    trades.to_csv(os.path.join(a.outdir, "fidelity_...3158_trades.csv"), index=False)
 
     closed = trades[trades.status == "CLOSED"]
     priced = closed[closed.basis_known]
