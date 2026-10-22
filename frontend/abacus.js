@@ -522,6 +522,11 @@
     render(d);
   }
 
-  wireRange();
-  load();
+  // R-IV.1315(c): with `?pnl=v1` the P&L preview owns the page (it sets this flag before this
+  // file runs and hides the summary's sections). Without the guard BOTH views paint into #abPage
+  // and the one that wins is whichever fetch returns second -- a race, not a layout.
+  if (!window.__ABACUS_PNL) {
+    wireRange();
+    load();
+  }
 })();

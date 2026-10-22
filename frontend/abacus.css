@@ -14,9 +14,14 @@
   --r-1: 4px; --r-2: 6px; --r-3: 10px;
   --fs-1: 11px; --fs-2: 12px; --fs-3: 14px; --fs-4: 16px; --fs-5: 20px; --fs-6: 28px;
 
+  /* R-IV.1319(b): FULL WIDTH, like the rest of the hub. This was `max-width: 1180px` with
+     `margin: 0 auto`, which is the mockup's page size rather than a ruling -- (d) asked whether
+     the narrow column was deliberate anywhere and it is not: the comment above explains the TOKEN
+     SCALE and the breakpoints, and neither the code nor the lane file gives a reason for the
+     width. So it matches `.v2-page`'s 14px gutter rather than inventing a third page container,
+     and the bottom allowance stays because the deck bar is fixed over it. */
   display: block;
-  max-width: 1180px; margin: 0 auto;
-  padding: var(--sp-5) var(--sp-4) 64px;
+  padding: 14px 14px 64px;
   font-size: var(--fs-3); line-height: 1.5;
 }
 .ab-page button { font: inherit; color: inherit; cursor: pointer; }
@@ -184,7 +189,8 @@
   .ab-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {                 /* ab-phone: v2's; the deck bar is fixed */
-  .ab-page { padding: var(--sp-3) var(--sp-3) calc(64px + env(safe-area-inset-bottom, 0px)); }
+  /* v2's own phone gutter is 10px (`.v2-page`), so this matches it rather than sitting 2px in. */
+  .ab-page { padding: 10px 10px calc(64px + env(safe-area-inset-bottom, 0px)); }
   .ab-seg button { min-height: 44px; padding: 8px 14px; }
   .ab-tabs button { min-height: 44px; }
   .ab-dates input { min-height: 44px; font-size: 16px; }
@@ -216,3 +222,56 @@
 .ab-acct-table tr.ab-dim td { color: var(--text-3); }
 .ab-acct-note { font-size: 11px; color: var(--text-3); line-height: 1.5; margin: 8px 0 0; }
 @media (max-width: 820px) { .ab-acct-table { overflow-x: auto; } .ab-acct-ctl button { min-height: 44px; } }
+
+/* ── R-IV.1315 · THE P&L PREVIEW (?pnl=v1) ───────────────────────────────────────────────────
+   Tokens only (D6), and the panel/chip furniture is this page's existing `.ab-card`/`.ab-chip`
+   rather than a second set. The grids are `auto-fit` so the tiles GROW into a 2560px screen
+   instead of leaving a gutter (R-IV.1319(c)) -- a fixed 5-column grid would have been the narrow
+   column's problem again, one layer down. */
+.pnl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); }
+.pnl-title { font-size: var(--fs-6); letter-spacing: 2px; }
+.pnl-sub { font-family: var(--mono); font-size: var(--fs-1); color: var(--text-2); }
+.pnl-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.pnl-tabs button {
+  font-family: var(--mono); font-size: var(--fs-1); letter-spacing: 1px; text-transform: uppercase;
+  padding: 4px 11px; border-radius: var(--r-2); border: 1px solid var(--border);
+  background: transparent; color: var(--text-2); min-height: 32px;
+}
+.pnl-tabs button[aria-pressed="true"] { border-color: var(--teal); color: var(--teal); }
+.pnl-kpis { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.pnl-kpi { display: flex; flex-direction: column; gap: 2px; }
+.pnl-kpi .k { font-family: var(--mono); font-size: var(--fs-1); letter-spacing: 1.4px; color: var(--text-2); }
+.pnl-kpi .v { font-size: var(--fs-6); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.pnl-kpi .sub { font-family: var(--mono); font-size: var(--fs-1); color: var(--text-2); }
+/* FULL HEIGHT as well as full width (R-IV.1319(b)): the preview is a column that fills the
+   viewport, and the main grid takes the slack so the panels grow instead of leaving 400px of
+   empty page under them on a 1080-tall screen -- which is what the first screenshot showed. */
+#abPnl { min-height: calc(100vh - 110px); }
+.pnl-main { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: stretch; flex: 1; min-height: 0; }
+.pnl-main > .ab-card, .pnl-main > div { min-height: 0; }
+.pnl-side { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+/* The closes list is the one that should absorb the extra height, and scroll rather than push. */
+.pnl-side .pnl-closes-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pnl-side .pnl-closes-wrap { overflow-y: auto; min-height: 0; }
+@media (max-width: 1100px) { .pnl-main { grid-template-columns: minmax(0, 1fr); } }
+.pnl-curve { display: flex; flex-direction: column; }
+.pnl-curve svg { width: 100%; height: 220px; display: block; flex: 0 0 auto; }
+.pnl-row { display: grid; grid-template-columns: 112px minmax(60px, 1fr) 92px 56px 56px;
+  gap: var(--sp-2); align-items: center; font-family: var(--mono); font-size: var(--fs-1);
+  padding: 5px 0; border-top: 1px solid var(--border); }
+.pnl-row:first-of-type { border-top: none; }
+.pnl-closes { display: grid; grid-template-columns: 74px 66px minmax(80px, 1fr) 92px 64px;
+  gap: var(--sp-2); align-items: center; font-family: var(--mono); font-size: var(--fs-1);
+  padding: 5px 0; border-top: 1px solid var(--border); }
+.pnl-closes .r, .pnl-row .r { text-align: right; }
+.pnl-up { color: var(--up); }
+.pnl-dn { color: var(--down); }
+.pnl-flat { color: var(--text-2); }
+/* "Not available yet" is a full-strength statement, never dimmed into the furniture (H-13/R8). */
+.pnl-na { color: var(--amber); font-family: var(--mono); font-size: var(--fs-2); line-height: 1.45; }
+.pnl-banner {
+  font-family: var(--mono); font-size: var(--fs-1); line-height: 1.5; color: var(--amber);
+  border: 1px dashed var(--amber); border-radius: var(--r-2); padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
