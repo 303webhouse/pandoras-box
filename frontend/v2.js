@@ -2144,7 +2144,10 @@
         // line and a reader of the network tab see the same number.
         fetch('/assets/regime/playbooks.v2.json', { cache: 'no-store' }).then((r) => r.json()),
       ]);
-      _rsLive = m; _rsPlaybooks = p;
+      // R-IV.1309(b): the preview flag. `rs21MockState` is a no-op unless ?state= names
+      // one of board 13s states, so the live path is byte-identical without the flag.
+      rs21InjectCss();
+      _rsLive = await rs21MockState(m); _rsPlaybooks = p;
     } catch (e) {
       // Says what is missing. A card that renders an empty shell reads as "no regime", which
       // is a claim; "the read failed" is the fact.
@@ -2331,6 +2334,9 @@
       + (hasPrem ? '<b style="left:' + Number(prem.position_pct).toFixed(1) + '%"></b>' : '')
       + '</div>';
 
+    // R-IV.1309(b)2: state C dims the whole card, so it is applied to the HOST before
+    // the body is written rather than to any one row.
+    rs21Dim(host, m);
     host.innerHTML =
       '<div class="rs-call">'
       // The headline, the state chip and the two quiet lines are each decided in one
@@ -2341,7 +2347,11 @@
       +   (m.tags || []).map((t) =>
             '<span class="chip rs-tag">' + esc(t) + '</span>').join('')
       +   rsStateChips(m)
+      +   rs21DataChip(m)
       +   rsSubLines(m)
+      +   rs21Decay(m)
+      +   rs21Ma200(m)
+      +   rs21Cost(m)
       + '</div>'
       + '<div class="vc-gauge rs-slider">' + ticks + marker + '</div>'
       + '<div class="rs-tw">'
@@ -2487,6 +2497,138 @@
   // beside it, a reader takes the label as current, which is exactly what happened on
   // 2026-10-19 and 10-20. The last label stays reachable on hover, as a true fact about the
   // last session that WAS labelled rather than a reading to act on now.
+  // R-IV.1309(b): the ?card=v21 PREVIEW. Two display-only additions behind one flag, so the
+  // live card is untouched until Nick approves design board 13.
+  //
+  //   ?card=v21            the live payload, with the preview rows
+  //   ?card=v21&state=A|B|C  board 13s three states from the fixture (mock-first)
+  //
+  // THE SAME RENDERER DRAWS BOTH. A preview that rendered the fixture through its own code
+  // path would approve a layout the live read cannot produce -- which is the one thing
+  // mock-first is for. The fixture carries the LIVE payload field names and
+  // backend/services/regime_card_v21.py lints that from the suite.
+  const CARD_V21 = (() => {
+    try { return new URLSearchParams(location.search).get('card') === 'v21'; }
+    catch (_) { return false; }
+  })();
+  const CARD_STATE = (() => {
+    try {
+      const s = new URLSearchParams(location.search).get('state');
+      return (CARD_V21 && ['A', 'B', 'C'].indexOf(s) >= 0) ? s : null;
+    } catch (_) { return null; }
+  })();
+
+  // INJECTED, not added to v2.css: that stylesheet is pinned INDEPENDENTLY by v2.html,
+  // stater.html and abacus.html and the three values have already diverged, so a rule added
+  // there ships three times or reaches a stale cache on the pages that were missed.
+  const RS21_CSS = [
+    '.rs-ma200{display:block;flex:0 0 100%;font-size:11px;letter-spacing:.3px;margin-top:6px}',
+    '.rs-ma200 b{font-weight:600}',
+    '.rs-ma200.above b{color:var(--up)}',
+    '.rs-ma200.below b{color:var(--down)}',
+    '.rs-ma200-note{display:block;flex:0 0 100%;font-size:9.5px;color:var(--muted);margin-top:2px;line-height:1.35}',
+    '.rs-cost21{margin-top:5px;border-top:1px solid var(--line);padding-top:4px}',
+    '.rs-decay{display:flex;flex:0 0 100%;align-items:center;gap:4px;margin-top:6px;font-size:9.5px;color:var(--muted)}',
+    '.rs-decay i{width:12px;height:4px;border-radius:2px;background:var(--line);display:inline-block}',
+    '.rs-decay i.on{background:var(--amber)}',
+    '.rs-decay span{margin-left:4px;letter-spacing:.4px}',
+    '.rs-dim{opacity:.55;filter:saturate(.6)}',
+    '.rs-datachip{font-size:9px;letter-spacing:1.2px;color:var(--amber);border:1px solid var(--amber);border-radius:999px;padding:2px 6px;margin-left:6px}',
+    '.rs-21mock{font-size:9px;letter-spacing:1.2px;color:var(--amber);border:1px solid var(--amber);border-radius:999px;padding:2px 6px;margin-left:6px}',
+  ].join('');
+
+  function rs21InjectCss() {
+    if (!CARD_V21 || document.getElementById('rs21-css')) return;
+    const s = document.createElement('style');
+    s.id = 'rs21-css';
+    s.textContent = RS21_CSS;
+    document.head.appendChild(s);
+  }
+
+  // R-IV.1309(b)3. DISPLAY ONLY (#42): it returns a string and nothing reads it back.
+  function rs21Ma200(m) {
+    if (!CARD_V21) return '';
+    const row = m.ma200_row || {};
+    if (!row.available) {
+      return '<span class="rs-ma200" title="' + esc(row.reason || 'not available')
+        + '">SPY vs 200-day: <b>—</b></span>';
+    }
+    const cls = String(row.side) === 'ABOVE' ? 'above' : 'below';
+    // THE TEXT COMES FROM THE PAYLOAD, built in models/regime_ma200.py, so the words and the
+    // numbers cannot drift apart between the two renderers that show them.
+    const txt = row.text || ('SPY vs 200-day: ' + row.side + ' since ' + (row.since || '?'));
+    return '<span class="rs-ma200 ' + cls + '" title="' + esc(String(row.basis || ''))
+      + '"><b>' + esc(txt) + '</b></span>'
+      + (row.caveat ? '<span class="rs-ma200-note">' + esc(row.caveat) + '</span>' : '');
+  }
+
+  // R-IV.1309(b)2: the header chip for state C. The HEADLINE already replaces the label with
+  // "DATA STALE ..." (R-IV.1278(b)4); board 13 adds the chip and the dim, so the whole card
+  // reads as not-current rather than only its first line.
+  function rs21DataChip(m) {
+    if (!CARD_V21) return '';
+    const f = m.data_freshness || {};
+    if (!f.stale && !f.headline) return '';
+    const txt = f.chip || f.headline || 'DATA STALE';
+    return '<span class="rs-datachip" title="' + esc(f.reason || '') + '">'
+      + esc(txt) + '</span>';
+  }
+
+  // The dim is on the HOST, not on a row: state C is a statement about everything on the card.
+  function rs21Dim(host, m) {
+    if (!host) return;
+    const stale = !!((m.data_freshness || {}).stale || (m.data_freshness || {}).headline);
+    host.classList.toggle('rs-dim', !!(CARD_V21 && stale));
+  }
+
+  // Mock-first (R-IV.1309(b)): one of board 13s three states, from the linted fixture. Merged
+  // OVER a real payload so every field the preview does not exercise still comes from the live
+  // read -- a fixture that replaced the whole payload would approve a layout against absences
+  // the live card never has.
+  async function rs21MockState(live) {
+    if (!CARD_STATE) return live;
+    try {
+      const r = await fetch('/assets/regime/card_v21_mock.v1.json', { cache: 'no-store' });
+      const f = await r.json();
+      const st = ((f || {}).states || {})[CARD_STATE];
+      if (!st) return live;
+      return Object.assign({}, live || {}, st, { _cardMock: CARD_STATE });
+    } catch (_) {
+      return live;
+    }
+  }
+  // R-IV.1309(b)4: the cost line ON THE CARD FACE.
+  //
+  // It already had a home -- the DETAILS drawer's "COSTS, STATED" list -- but that drawer is
+  // closed by default, so a cost line that lives only there is a cost line almost nobody reads.
+  // Board 13 lists it as item 4 of the CARD preview, beside the 200-day row, so it renders
+  // here too. The drawer's own block is untouched; both read the same `costs` field, which
+  // since R-IV.1303(b) comes from the display config and never from the stamped rules file.
+  //
+  // EMPTY MEANS NOTHING RENDERED, as everywhere else on this card: a heading over an empty
+  // list reads as a read that failed. On main `cost_lines` is empty until the cutover branch
+  // merges, so this is blank today and that is correct.
+  function rs21Cost(m) {
+    if (!CARD_V21) return '';
+    const cs = (m.costs || []).filter(Boolean);
+    if (!cs.length) return '';
+    return cs.map((c) => '<span class="rs-ma200-note rs-cost21" title="'
+      + esc('the stated cost of this classifier, as graded') + '">' + esc(c)
+      + '</span>').join('');
+  }
+  // R-IV.1309(b)1: the 10-step decay bar under a STALE headline.
+  function rs21Decay(m) {
+    if (!CARD_V21) return '';
+    const d = ((m.held_no_match || {}).decay) || {};
+    const steps = Number(d.steps || 0);
+    if (!steps) return '';
+    const on = Math.max(0, Math.min(steps, Number(d.elapsed || 0)));
+    let bar = '';
+    for (let i = 0; i < steps; i++) bar += '<i class="' + (i < on ? 'on' : '') + '"></i>';
+    return '<span class="rs-decay" title="'
+      + esc('the held label gives way after ' + steps + ' sessions with no match')
+      + '">' + bar + '<span>' + esc(d.text || '') + '</span></span>';
+  }
   function rsHeadline(m) {
     const fresh = m.data_freshness || {};
     const held = m.held_no_match || {};
