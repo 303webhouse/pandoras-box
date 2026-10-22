@@ -147,68 +147,87 @@ def put_call_row(ratio: Optional[float], history: Sequence[Optional[float]], *,
     }
 
 
-def short_interest_row(*, mock: bool = True) -> Dict[str, Any]:
-    """The FINRA short-interest row. MOCK in this deploy, R-IV.1239(d)3.
+def short_interest_row(si: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The FINRA short-interest row. LIVE since R-IV.1318(b); a stated refusal without data.
 
-    AND IT STAYS MOCK UNTIL SPINE RULES, for two reasons found while researching the source
-    rather than assumed:
+    IT WAS A MOCK ON THREE REASONS AND ALL THREE ARE NOW ANSWERED, two of them by measurement
+    that contradicted what this docstring previously asserted:
 
-      1. R-IV.1239(d)3 asks for days to cover "from FINRA's own file". FINRA's own equity
-         short interest catalogue page documents NEITHER a days-to-cover field NOR an average
-         daily volume one. If the figure has to be computed as short interest divided by
-         average daily volume from some other source, it is no longer from FINRA's file and
-         the ruling's own wording stops being satisfiable as written.
-      2. FINRA Data describes "non-commercial use of data" and publishes no licence for
-         automated file download that this lane could verify. R-IV.1239(d)2's own standard --
-         "we don't scrape sites whose terms we can't verify" -- therefore applies here too.
+      1. "days to cover is not a documented field in FINRA's own file" -- FALSE. The free
+         twice-monthly file carries `daysToCoverQuantity` AND `averageDailyVolumeQuantity`.
+         Measured AAPL 2026-09-30: short 120,763,539, ADV 39,858,260, days to cover 3.03. The
+         figure comes from FINRA, not from a volume series borrowed elsewhere, so
+         R-IV.1239(d)3's wording is satisfiable exactly as written.
+      2. "no verifiable licence for automated download" -- ANSWERED by R-IV.1318(a): the
+         Equity Data terms allow non-commercial personal or professional use, require FINRA to
+         be named as owner and source, and forbid charging for the data. Nothing is
+         redistributed and nothing is charged for, and the attribution is asserted below.
+      3. "short interest is not served by the API at all" -- WRONG IN DETAIL and it did not
+         matter. `Equity/consolidatedShortInterest` answers 401, not 404, so the dataset is
+         real and merely token-gated; and the route actually used is not the API at all but
+         the free CDN file, which needs no credential and no account.
 
-    THE TERMS CHECK IS NOW DONE (R-IV.1265(g)4), and it resolves reason 2 while ADDING A THIRD.
-    Read from FINRA's own developer pages on 2026-10-19:
+    TWICE MONTHLY, NEVER REAL-TIME, AND BOTH DATES TRAVEL WITH THE VALUE. The newest file is
+    typically the previous settlement -- today's is 2026-09-30, published 2026-10-12, while
+    2026-10-15 is still 403 -- so the number on the card can be three weeks old BY DESIGN. A
+    positioning figure without its settlement date would read as current, which is the fault
+    this tile's siblings were built to avoid.
 
-      * A Public API credential costs $0/month (Firm and Organization are $1,650), obtained
-         through an Individual Account with an OAuth 2.0 client id and secret. Rate limits are
-         1,200 synchronous requests a minute per IP, 5,000 records and 3MB per synchronous
-         request, and 20 asynchronous requests a minute per dataset.
-      * The Equity Data specific terms (last updated December 2022) permit the developer's
-         NON-COMMERCIAL personal or professional use, allow redistribution to third parties
-         only for THEIR non-commercial use, require FINRA to be named as owner and source, and
-         forbid charging an end user for the data. Individual Accounts are "not intended for
-         commercial purposes at this time". For a personal trading tool that is a workable
-         answer -- so reason 2 is no longer "terms we cannot verify".
-      * BUT SHORT INTEREST IS NOT SERVED BY THE API AT ALL. FINRA's own developer support page
-         lists the equity short-interest archive under "data not currently available via API
-         that may be available across other FINRA platforms", alongside TRACE and the short
-         sale volume files. The Query API's "Consolidated Short Interest" entry shows an access
-         level of "Limited" that the fee page never defines, and the support page is the
-         clearer statement of the two.
+    `pct` STAYS None, DELIBERATELY. A percentile needs a history, and this route serves one
+    settlement per 2.7MB file; building a distribution would mean dozens of downloads for a
+    single line. So the row carries a real VALUE and no percentile, and `headline()` already
+    refuses to count a row without one -- the row displays, and it does not vote.
 
-    So wiring this row would mean downloading finra.org's pipe-delimited file rather than
-    calling an API -- and reason 1 still stands on top of that: the file documents no
-    days-to-cover field, so the figure the ruling asks for would have to be computed against an
-    average daily volume from somewhere else, at which point it is not from FINRA's file.
-
-    THREE REASONS NOW, and only one of them was removable by research. The row stays a mock
-    until SPINE rules on the remaining two.
-
-    So the row ships with the mock's shape and an explicit `mock: true`, and the tile shows it
-    as a mock while its two siblings are live.
+    #42: display only. The CROWDED SHORT flag is a label on the same line, not a gate.
     """
+    if not (si or {}).get("available"):
+        return {
+            "key": "SHORT INT",
+            "sub": "FINRA · DAYS TO COVER",
+            "value": "—",
+            "pct": None,
+            "pct_label": None,
+            "extreme": False,
+            "thin": True,
+            "mock": False,
+            "crowded_short": None,
+            "crowded_short_at": CROWDED_SHORT_DTC,
+            "settlement_date": None,
+            "publish_date": None,
+            "attribution": (si or {}).get("attribution") or "Source: FINRA",
+            "cadence": (si or {}).get("cadence"),
+            # UNAVAILABLE IS NOT A MOCK AND NOT A ZERO. The reason travels so a reader learns
+            # which of the two it is.
+            "source": ("FINRA equity short interest, unavailable this read: %s"
+                       % ((si or {}).get("reason") or "not fetched")),
+        }
+
+    dtc = si.get("days_to_cover")
     return {
         "key": "SHORT INT",
         "sub": "FINRA · DAYS TO COVER",
-        "value": "—",
+        "value": ("—" if dtc is None else "%.2f" % dtc),
         "pct": None,
         "pct_label": None,
         "extreme": False,
+        # THIN, because one settlement is one observation. The word is honest about what this
+        # row can support, and it is what keeps the row out of the headline.
         "thin": True,
-        "mock": mock,
-        "crowded_short": None,
+        "mock": False,
+        "crowded_short": crowded_short(dtc),
         "crowded_short_at": CROWDED_SHORT_DTC,
-        "source": ("FINRA equity short interest. NOT WIRED: days to cover is not a documented "
-                   "field in FINRA's own file, and FINRA Data's terms say non-commercial use "
-                   "with no verifiable licence for automated download (R-IV.1239(d)3)"),
+        "symbol": si.get("symbol"),
+        "settlement_date": si.get("settlement_date"),
+        "publish_date": si.get("publish_date"),
+        "attribution": si.get("attribution") or "Source: FINRA",
+        "cadence": si.get("cadence"),
+        "current_short": si.get("current_short"),
+        "average_daily_volume": si.get("average_daily_volume"),
+        "source": ("FINRA equity short interest, free twice-monthly file "
+                   "(cdn.finra.org/equity/otcmarket/biweekly). %s settlement, published %s. "
+                   "Days to cover is FINRA’s own field, not computed here."
+                   % (si.get("settlement_date"), si.get("publish_date"))),
     }
-
 
 def crowded_short(days_to_cover: Optional[float]) -> Optional[bool]:
     """R-IV.1239(d)3's flag: CROWDED SHORT at days to cover >= 5. None when it is unknown."""

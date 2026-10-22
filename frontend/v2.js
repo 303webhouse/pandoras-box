@@ -2147,6 +2147,7 @@
       // R-IV.1309(b): the preview flag. `rs21MockState` is a no-op unless ?state= names
       // one of board 13s states, so the live path is byte-identical without the flag.
       rs21InjectCss();
+      await rcLoad();          // R-IV.1318(c): no-op unless ?report=1
       _rsLive = await rs21MockState(m); _rsPlaybooks = p;
     } catch (e) {
       // Says what is missing. A card that renders an empty shell reads as "no regime", which
@@ -2337,6 +2338,9 @@
     // R-IV.1309(b)2: state C dims the whole card, so it is applied to the HOST before
     // the body is written rather than to any one row.
     rs21Dim(host, m);
+    // R-IV.1318(c): the report card is APPENDED to the card body, so it shares the tile
+    // rather than needing new HTML -- and renders nothing at all without ?report=1.
+    const rcHtml = rcRender(_rcMock);
     host.innerHTML =
       '<div class="rs-call">'
       // The headline, the state chip and the two quiet lines are each decided in one
@@ -2381,7 +2385,8 @@
       +   '\u21c4 <span class="rs-lenslabel">Watchlist (high-beta) alarm</span> <b>'
       +   esc((m.lens_split || {}).watchlist_alarm || '\u2014') + '</b>'
       +   '<span class="rs-vs">vs macro</span> <b>'
-      +   esc((m.lens_split || {}).macro || '\u2014') + '</b></div>';
+      +   esc((m.lens_split || {}).macro || '\u2014') + '</b></div>'
+    host.innerHTML += rcHtml;
   }
 
   // "Open" expands the CURRENT regime's playbook. Read-only: the texts come from the
@@ -2458,7 +2463,7 @@
   const AGORA_LIVE = {
     eventStrip: '/api/event-strip',   // B4
     fear: '/api/fear-price',          // B5
-    crowd: '/api/crowd',              // B6 — two rows live, the FINRA row still a mock
+    crowd: '/api/crowd',              // B6 — all three rows live since R-IV.1318(b)
   };
   const _agora = { crowd: null, fear: null, bookStress: null, eventStrip: null };
 
@@ -2526,10 +2531,10 @@
     '.rs-ma200 b{font-weight:600}',
     '.rs-ma200.above b{color:var(--up)}',
     '.rs-ma200.below b{color:var(--down)}',
-    '.rs-ma200-note{display:block;flex:0 0 100%;font-size:9.5px;color:var(--muted);margin-top:2px;line-height:1.35}',
-    '.rs-cost21{margin-top:5px;border-top:1px solid var(--line);padding-top:4px}',
-    '.rs-decay{display:flex;flex:0 0 100%;align-items:center;gap:4px;margin-top:6px;font-size:9.5px;color:var(--muted)}',
-    '.rs-decay i{width:12px;height:4px;border-radius:2px;background:var(--line);display:inline-block}',
+    '.rs-ma200-note{display:block;flex:0 0 100%;font-size:9.5px;color:var(--text-3);margin-top:2px;line-height:1.35}',
+    '.rs-cost21{margin-top:5px;border-top:1px solid var(--border);padding-top:4px}',
+    '.rs-decay{display:flex;flex:0 0 100%;align-items:center;gap:4px;margin-top:6px;font-size:9.5px;color:var(--text-3)}',
+    '.rs-decay i{width:12px;height:4px;border-radius:2px;background:var(--border);display:inline-block}',
     '.rs-decay i.on{background:var(--amber)}',
     '.rs-decay span{margin-left:4px;letter-spacing:.4px}',
     '.rs-dim{opacity:.55;filter:saturate(.6)}',
@@ -2628,6 +2633,100 @@
     return '<span class="rs-decay" title="'
       + esc('the held label gives way after ' + steps + ' sessions with no match')
       + '">' + bar + '<span>' + esc(d.text || '') + '</span></span>';
+  }
+  // R-IV.1318(c): the REGIME REPORT CARD skeleton, behind ?report=1. MOCK VALUES ONLY.
+  //
+  // QUERY is writing the scoring spec (R-IV.1316) and the wiring waits for it. The skeleton
+  // ships first because a report card is the most trustable-looking surface on this hub -- a
+  // plausible number on it gets believed immediately and questioned late, which is backwards
+  // for a figure whose definition nobody has agreed yet. So the shape is reviewable now and
+  // every value is visibly fake.
+  //
+  // Built from C:	emp\cc-query-handoff\AGORA-MOCK-RegimeReport.dc.html, sha256 ffd15cc3...,
+  // verified byte-identical before anything was written.
+  const REPORT_ON = (() => {
+    try { return new URLSearchParams(location.search).get('report') === '1'; }
+    catch (_) { return false; }
+  })();
+
+  const RC_CSS = [
+    '.rc-wrap{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}',
+    '.rc-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}',
+    '.rc-h b{font-size:12px;letter-spacing:1.4px}',
+    '.rc-h i{font-style:normal;font-size:9.5px;color:var(--text-3)}',
+    '.rc-badge{font-size:9px;letter-spacing:1.1px;border-radius:999px;padding:2px 7px;border:1px solid var(--amber);color:var(--amber)}',
+    '.rc-mock{font-size:9px;letter-spacing:1.2px;color:var(--amber);border:1px solid var(--amber);border-radius:999px;padding:2px 6px}',
+    '.rc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}',
+    '.rc-cell{border:1px solid var(--border);border-radius:6px;padding:7px 8px}',
+    '.rc-cell u{display:block;text-decoration:none;font-size:8.5px;letter-spacing:.9px;color:var(--text-3)}',
+    '.rc-cell b{display:block;font-size:17px;line-height:1.3;margin-top:2px}',
+    '.rc-cell s{text-decoration:none;font-size:9px;color:var(--text-3)}',
+    '.rc-cell em{display:block;font-style:normal;font-size:8.5px;color:var(--text-3);margin-top:3px;line-height:1.35}',
+    '.rc-tt{margin-top:12px;font-size:9.5px;letter-spacing:.8px}',
+    '.rc-tt i{font-style:normal;color:var(--text-3);display:block;margin-top:1px;letter-spacing:.3px}',
+    '.rc-tbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:9.5px}',
+    '.rc-tbl th{text-align:left;font-weight:500;color:var(--text-3);font-size:8.5px;letter-spacing:.7px;padding:3px 6px;border-bottom:1px solid var(--border)}',
+    '.rc-tbl td{padding:4px 6px;border-bottom:1px solid var(--border)}',
+    '.rc-bars{position:relative;height:9px;min-width:90px}',
+    '.rc-bars s{position:absolute;top:3px;height:3px;background:var(--up);text-decoration:none}',
+    '.rc-bars u{position:absolute;top:0;width:2px;height:9px;background:var(--text-3);text-decoration:none}',
+    '.rc-ma{margin-top:10px;font-size:9.5px}',
+    '.rc-ma i{font-style:normal;color:var(--text-3)}',
+    '.rc-foot{margin-top:10px;font-size:8.5px;color:var(--text-3);line-height:1.45}',
+  ].join('');
+
+  let _rcMock = null;
+
+  async function rcLoad() {
+    if (!REPORT_ON || _rcMock) return _rcMock;
+    try {
+      const r = await fetch('/assets/regime/report_card_mock.v1.json', { cache: 'no-store' });
+      _rcMock = await r.json();
+    } catch (_) { _rcMock = null; }
+    if (_rcMock && !document.getElementById('rc-css')) {
+      const s = document.createElement('style');
+      s.id = 'rc-css'; s.textContent = RC_CSS; document.head.appendChild(s);
+    }
+    return _rcMock;
+  }
+
+  function rcRender(m) {
+    if (!REPORT_ON || !m) return '';
+    const stats = (m.stats || []).map((c) =>
+      '<div class="rc-cell"><u>' + esc(c.key) + '</u><b>' + esc(c.value)
+      + (c.of ? ' <s>' + esc(c.of) + '</s>' : '') + '</b><em>' + esc(c.note || '') + '</em></div>'
+    ).join('');
+    const t = m.table || {};
+    const head = (t.columns || []).map((c) => '<th>' + esc(c) + '</th>').join('');
+    const body = (t.rows || []).map((r) => {
+      // THE LIVE BAR IS ABSENT WHEN NOTHING IS CHECKED, rather than drawn at zero. A zero-width
+      // bar beside a history tick reads as "measured, and it was nil".
+      const hist = Math.max(0, Math.min(100, Number(r.history_pct) || 0));
+      const live = r.live_pct == null ? null : Math.max(0, Math.min(100, Number(r.live_pct)));
+      return '<tr><td>' + esc(r.label) + '</td><td>' + esc(String(r.sessions))
+        + '</td><td>' + esc(String(r.checked)) + '</td>'
+        + '<div/>'.replace('<div/>', '<td><div class="rc-bars" title="'
+            + esc('history base rate ' + hist.toFixed(1) + '%') + '">'
+            + (live == null ? '' : '<s style="width:' + live.toFixed(1) + '%"></s>')
+            + '<u style="left:' + hist.toFixed(1) + '%"></u></div></td>')
+        + '<td>' + esc(r.worst_dip || '—') + '</td>'
+        + '<td>' + esc(r.verdict || '—') + '</td></tr>';
+    }).join('');
+    const ma = m.ma200 || {};
+    return '<div class="rc-wrap">'
+      + '<div class="rc-h"><b>' + esc(m.headline || '') + '</b>'
+      +   '<span class="rc-badge">' + esc(m.badge || '') + '</span>'
+      +   (m._mock ? '<span class="rc-mock">MOCK</span>' : '')
+      +   '<i>' + esc(m.sub || '') + '</i></div>'
+      + '<div class="rc-stats">' + stats + '</div>'
+      + '<div class="rc-tt">' + esc(t.title || '') + '<i>' + esc(t.sub || '') + '</i></div>'
+      + '<table class="rc-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body
+      +   '</tbody></table>'
+      + '<div class="rc-ma">' + esc(ma.title || '') + ' <i>' + esc('up-crosses since start: ')
+      +   esc(String(ma.up_crosses)) + ' \u00b7 whipsaws: ' + esc(String(ma.whipsaws))
+      +   ' \u00b7 ' + esc(ma.history || '') + '</i></div>'
+      + '<div class="rc-foot">' + esc(m.footer || '') + '</div>'
+      + '</div>';
   }
   function rsHeadline(m) {
     const fresh = m.data_freshness || {};
@@ -2756,6 +2855,20 @@
 
   // \u2500\u2500 board 1: Crowd \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   function renderCrowd() {
+    // R-IV.1318(b): BOTH DATES ON EVERY VALUE. FINRA publishes twice monthly about 7 business
+    // days after settlement, so this number can be three weeks old BY DESIGN -- today's is the
+    // 2026-09-30 settlement, published 2026-10-12, because 2026-10-15 is not out yet. A
+    // positioning figure printed bare reads as current, which is the one thing this tile's
+    // siblings exist not to do. The publish date is OBSERVED (the file Last-Modified header),
+    // never a rule-of-thumb date computed from the settlement.
+    function agDates(r) {
+      if (!r.settlement_date) return '';
+      const t = 'settled ' + r.settlement_date
+        + (r.publish_date ? ' \u00b7 published ' + r.publish_date : '');
+      return '<span class="ag-dates" title="' + esc(r.cadence || '') + '">'
+        + esc(t) + '</span>';
+    }
+
     const host = $('crowdGauge');
     if (!host) return;
     const m = _agora.crowd;
@@ -2769,10 +2882,11 @@
       // amber "n / N" with the percentile starred -- amber is "cannot confirm", which is
       // exactly what a percentile over 9 weeks is.
       const cls = r.thin ? 'ag-thin' : (r.extreme ? 'ag-extreme' : '');
-      // B6: THE MOCK MARK IS PER ROW, because this tile is now part live. Two rows are read
-      // from CFTC and UW flow; the FINRA row is still a fixture (R-IV.1239(d)3), and a tile
-      // that marked itself wholly live or wholly mock would be wrong either way. The row also
-      // carries no gauge dot when it has no percentile: a dot at 0 would read as a reading.
+      // B6: THE MOCK MARK IS PER ROW. All three rows are live since R-IV.1318(b) -- CFTC, UW
+      // flow and now FINRA short interest from the free twice-monthly file -- but the mark
+      // stays per row, because "which rows are live" is a fact that has changed twice and
+      // will change again. The row carries no gauge dot when it has no percentile: a dot at
+      // 0 would read as a reading.
       const hasPct = r.pct != null;
       const pos = Math.max(0, Math.min(100, Number(r.pct) || 0));
       return '<div class="ag-row' + (r.mock ? ' ag-row-mock' : '') + '" title="'
@@ -2780,7 +2894,7 @@
         + '<div class="ag-rk"><b>' + esc(r.key) + '</b>'
         + (r.mock ? '<span class="ag-rmock" title="not wired: see the footnote">MOCK</span>'
           : '')
-        + '<i>' + esc(r.sub || '') + '</i></div>'
+        + '<i>' + esc(r.sub || '') + '</i>' + agDates(r) + '</div>'
         + '<div class="ag-rv">' + esc(r.value == null ? '—' : r.value) + '</div>'
         + '<div class="vc-gauge ag-g">'
         + (hasPct ? '<b class="' + cls + '" style="left:' + pos.toFixed(1) + '%"></b>' : '')
@@ -2796,6 +2910,14 @@
       + '<div class="ag-scale"><span>\u25c2 BEARS</span><span>BULLS \u25b8</span></div>'
       + rows
       + '<div class="ag-foot">' + (m.footnotes || []).map(esc).join(' \u00b7 ') + '</div>'
+      // R-IV.1318(b): FINRA must be identified as owner and source wherever its data shows,
+      // which its Equity Data terms require. Rendered from the ROW rather than hardcoded, so a
+      // panel that stops carrying FINRA data stops claiming FINRA as a source.
+      + (() => {
+          const f = (m.rows || []).find((r) => r.attribution && r.settlement_date);
+          return f ? '<div class="ag-attrib">' + esc(f.attribution) + ' \u00b7 '
+            + esc(f.cadence || '') + '</div>' : '';
+        })()
       + '<div class="ag-cap">' + esc(m.caption || '') + '</div>';
   }
 
