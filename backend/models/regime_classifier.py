@@ -34,7 +34,14 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-RULES_VERSION = "v2"   # R-IV.1260(c): v2 fills the inputs the v1 rows already read
+#: THE CUTOVER. R-IV.1303(c) / R-IV.1307(c), after QUERY cleared c7261e90 under R-IV.1301(b).
+#:
+#: v2.1 inherits v2's shown label and hysteresis state; it does NOT re-seed and does NOT replay
+#: any era (registration section 1 / R-IV.1277(b) item 7). `cutover_state` verifies the
+#: inheritance by RECOMPUTING v2's anchor session and comparing all four counters, and REFUSES
+#: rather than carrying on if they differ -- measured against row 929 (2026-10-20): shown
+#: range_chop, held 5, pending correction, pending_closes 3, all four agreeing.
+RULES_VERSION = "v2.1"
 _RULES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            "config", "regime_rules.%s.json" % RULES_VERSION)
 
