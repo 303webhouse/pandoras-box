@@ -218,6 +218,56 @@ def test_the_whipsaw_line_carries_BOTH_ERAS():
     assert "LAB R-IV.1279" in DRIFT_CAVEAT, "the measurement keeps its source"
 
 
+def test_the_caveats_FIGURES_and_WORDING_are_attributed_SEPARATELY():
+    """R-IV.1313(b)1. The declaration called the sentence LAB's, "verbatim", and no such
+    sentence exists in LAB's artifacts: LAB produced FIGURES, not prose.
+
+    That is the hardest kind of citation error to catch, because both names are real and both
+    belong somewhere -- the numbers are LAB R-IV.1279 (44.8% and 50.0%, rounded from 44.79%
+    and 50.00%) and the words are SPINE R-IV.1311(b). A reader checking the claim would have
+    gone to LAB's artifact looking for a sentence that was never there, and concluded the
+    citation was stale rather than mis-aimed.
+
+    The CARD TEXT is unchanged: its "(LAB R-IV.1279)" cites the figures, which is what a
+    reader of a base rate needs to chase.
+    """
+    src = read_source(str(_BACKEND / "models" / "regime_ma200.py"))
+    i = src.index("DRIFT_CAVEAT = (")
+    decl = src[max(0, i - 1400):i]
+    assert "the FIGURES" in decl and "the WORDING" in decl, "both sources must be named"
+    assert "LAB R-IV.1279" in decl and "R-IV.1311(b)" in decl
+    assert "LAB's stamped caveat" not in decl
+    # the card text keeps its figure citation and gains no author claim
+    assert "(LAB R-IV.1279)" in DRIFT_CAVEAT
+
+
+def test_NO_live_file_calls_the_wording_LABs():
+    """The sweep, because the claim lived in two files and one of them was a lint MESSAGE --
+    text a reader only ever sees when something else has already gone wrong."""
+    needles = ("LAB's sentence", "LAB's stamped caveat", "LAB's wording", "LAB's prose")
+    offenders = []
+    for path in sorted(_BACKEND.rglob("*.py")):
+        if "__pycache__" in str(path) or path.name == pathlib.Path(__file__).name:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for n in needles:
+            if n in text:
+                offenders.append("%s :: %s" % (path.name, n))
+    assert offenders == [], offenders
+
+
+def test_v2s_missing_cost_line_is_explained_by_WHO_GRADED_IT():
+    """R-IV.1313(b)2. The reason given was about R-IV.1280 finding the old wording misleading,
+    which is a fact about a DIFFERENT sentence. The actual reason v2 has no line is simply
+    that the line was graded and supplied FOR v2.1."""
+    import json as _json
+    cfg = _json.loads((_BACKEND / "config" / "regime_card_display.v1.json")
+                      .read_text(encoding="utf-8"))
+    reason = cfg["absent_means"]
+    assert "graded and supplied for v2.1" in reason
+    assert "R-IV.1301(c)" in reason
+    assert "R-IV.1280" not in reason, "that ruling is about a different sentence"
+
 def test_the_superseded_single_era_wording_is_GONE_from_every_live_file():
     """The old sentence reported one rate for a span straddling a regime change. It must not
     survive anywhere a reader or a renderer can reach."""

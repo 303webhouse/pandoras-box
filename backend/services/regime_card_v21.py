@@ -31,8 +31,12 @@ STATES = ("A", "B", "C")
 REQUIRED = ("regime_label", "regime_key", "rules_version", "held_no_match",
             "data_freshness", "costs", "ma200_row")
 
-#: R-IV.1309(b)3/4, verbatim. A fixture that paraphrases either would show Nick a layout for a
-#: sentence the live card will not print.
+#: The two sentences the card prints, verbatim. A fixture that paraphrases either would show
+#: Nick a layout for a sentence the live card will not print.
+#:
+#: COST_LINE   wording and figures both R-IV.1307(b), from QUERY's grade under R-IV.1301.
+#: CAVEAT      figures LAB R-IV.1279 (44.8% and 50.0%, rounded); WORDING SPINE R-IV.1311(b).
+#:             LAB supplied the numbers and not the sentence (R-IV.1313(b)1).
 COST_LINE = ("SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, "
              "never on 11; 200d line 38. (R-IV.1301)")
 CAVEAT = ("Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session "
@@ -85,7 +89,8 @@ def lint_card_mock(obj: Any) -> List[str]:
             if row.get("display_only") is not True:
                 bad.append("state %s's ma200_row must say `display_only` (#42)" % key)
             if row.get("caveat") != CAVEAT:
-                bad.append("state %s's ma200_row.caveat is not LAB's sentence verbatim" % key)
+                bad.append("state %s's ma200_row.caveat is not R-IV.1311(b)'s sentence "
+                           "verbatim" % key)
             if not row.get("text"):
                 bad.append("state %s's ma200_row needs the `text` the card prints" % key)
 

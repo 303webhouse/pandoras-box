@@ -42,14 +42,26 @@ ABOVE, BELOW = "ABOVE", "BELOW"
 #: definition it did not use.
 BASIS = ("strict close vs the SMA%d including that day (the PR-6 baseline definition)" % WINDOW)
 
-#: QUERY's whipsaw line, R-IV.1311(b), verbatim. Small grey text under the row.
+#: The whipsaw line. Small grey text under the row.
 #:
-#: BOTH ERAS, WHICH IS THE POINT. R-IV.1310 measured 50.00% (19 of 38) since 2013 against
-#: 44.79% (43 of 96) since 1999, so the single "45% since 1999" figure this replaces
-#: UNDERSTATED the era Nick actually trades -- by five points, on the half of the record that
-#: is his. One number over a span that straddles a regime change is an average of two
-#: different things, and the reader cannot recover either from it. Conventions #37/#38: the
-#: universe and the span travel with the figure, and here there are two of each.
+#: TWO SOURCES, AND THEY ARE NOT THE SAME SOURCE (R-IV.1313(b)1). This comment used to call
+#: the sentence LAB's, "verbatim", and NO SUCH SENTENCE EXISTS IN LAB'S ARTIFACTS -- LAB
+#: produced figures, not prose, and a citation that hands an author's words to whoever
+#: supplied the numbers is wrong in the direction that is hardest to catch, because both names
+#: are real and both belong somewhere.
+#:
+#:     the FIGURES   LAB R-IV.1279: 44.8% and 50.0%, rounded here from 44.79% and 50.00%
+#:     the WORDING    SPINE R-IV.1311(b)
+#:
+#: The card text is unchanged and its "(LAB R-IV.1279)" is correct: that cites the FIGURES,
+#: which is what a reader of a base rate needs to chase.
+#:
+#: BOTH ERAS, WHICH IS THE POINT. 50.00% (19 of 38) since 2013 against 44.79% (43 of 96)
+#: since 1999, so the single "45% since 1999" figure this replaces UNDERSTATED the era Nick
+#: actually trades -- by five points, on the half of the record that is his. One number over a
+#: span that straddles a regime change is an average of two different things, and the reader
+#: cannot recover either from it. Conventions #37/#38: the universe and the span travel with
+#: the figure, and here there are two of each.
 #:
 #: NOT a prediction and not a gate -- it is the base rate of what followed an up-cross.
 DRIFT_CAVEAT = ("Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session "
