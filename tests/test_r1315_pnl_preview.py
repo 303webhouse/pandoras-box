@@ -100,6 +100,14 @@ UNDATED = [
 ]
 
 
+# R-IV.1349(b): a row past its expiry with size still on the book. One row, as the book has today.
+UNBOOKED = [
+    {'id': 1004, 'ticker': 'IWM', 'account': 'ROBINHOOD', 'status': 'EXPIRED',
+     'structure': 'long_call', 'expiry': date(2026, 10, 19), 'cost_basis': 14.08,
+     'open_qty': 2, 'days_past': 3},
+]
+
+
 class _Pool:
     """Routed on the SQL, never on call order -- the fault R-IV.1281 fixed in the other fixture."""
 
@@ -111,6 +119,10 @@ class _Pool:
     async def fetch(self, sql, *a):
         if 'trade_date IS NULL' in sql:
             return [dict(r) for r in UNDATED]
+        # Routed on limb 6's own predicate text, so a change to it fails here rather than
+        # silently returning the closure rows.
+        if 'expiry < current_date' in sql:
+            return [dict(r) for r in UNBOOKED]
         if 'position_lot_closures' in sql:
             return [dict(r) for r in CLOSURES]
         if "= 'OPEN'" in sql:
@@ -217,6 +229,15 @@ with sync_playwright() as p:
             (e) => /By bucket/i.test(e.textContent));
         return card ? card.querySelectorAll('.pnl-row').length : -1; }""")
     check('...and draws no bucket bar while it is unavailable', bucket_rows == 0, bucket_rows)
+    # R-IV.1349(b): UNBOOKED money, in the same pattern and with the same discipline.
+    check('the expired-but-unbooked line is on the page, with its count and cost',
+          'Expired, not yet booked: 1 position, cost $14.08' in body, body[:400])
+    check('...declared outside every total', 'outside every total here' in body, body[:400])
+    check('...and names the row, so the count can be traced',
+          'IWM (Robinhood) $14.08, 3d past expiry' in body, body[:420])
+    check('...and its cost is NOT added to any figure',
+          not any('14.08' in k for k in kpis), kpis)
+
     check('the undated closures are named and declared outside every figure',
           'Date unknown: 2 closures' in body and 'every period' in body,
           [l for l in body.split('\n') if 'unknown' in l.lower()][:2])
