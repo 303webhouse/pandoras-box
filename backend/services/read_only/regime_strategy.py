@@ -192,6 +192,79 @@ def _families(inputs: Dict[str, Any]) -> list:
     return rows
 
 
+async def _report_card(conn):
+    """The Regime Report Card payload. R-IV.1321(b). Never raises.
+
+    EMPTY TODAY, AND THAT IS THE CORRECT STATE. The card scores sessions strictly AFTER the
+    v2.1 cutover and never backfills; `RULES_VERSION` is still "v2" on main and the cutover is
+    on its branch awaiting deploy, so there are no scorable rows. The panels say so rather than
+    showing zeroes -- a zero here would read as "measured, and it was nil".
+
+    THE OUTCOME PANELS NEED A SERIES THE HUB DOES NOT STORE, and that is reported rather than
+    worked around. Spec section 1.2 is explicit that "higher 20 sessions later" and "worst dip"
+    are defined on SPY FULLY ADJUSTED closes (splits and dividends), while the 200-day line and
+    the 60-session low are defined on SPLIT-adjusted, DIVIDEND-UNADJUSTED closes.
+    `regime_daily_bars` holds the second basis only. Using it for the first would make every
+    live figure incomparable with the base rate printed beside it -- which the spec names as
+    "the single likeliest implementation error, because one series would work everywhere". So
+    those panels carry `available: false` and the reason, and nothing is computed on the wrong
+    basis to fill a space.
+    """
+    try:
+        from models import regime_report_scoring as rs
+
+        rows = await conn.fetch(
+            """SELECT as_of, shown_regime
+                 FROM regime_snapshots
+                WHERE rules_version = $1 AND superseded = FALSE AND settled IS TRUE
+                ORDER BY as_of""", rs.SCORED_VERSION)
+        if not rows:
+            return rs.empty_card(
+                "no settled %s rows yet: the card scores only sessions after the cutover and "
+                "never backfills" % rs.SCORED_VERSION)
+
+        from jobs.regime_job import label_to_group
+
+        shown = [r["shown_regime"] for r in rows]
+        first, last = rows[0]["as_of"], rows[-1]["as_of"]
+        span = None
+        try:
+            span = float((last - first).days)
+        except Exception:                                           # noqa: BLE001
+            span = None
+
+        out = rs.empty_card("")
+        out["available"] = True
+        out["reason"] = ""
+        out["scope"] = {"first_session": str(first)[:10], "sessions": len(rows),
+                        "rules_version": rs.SCORED_VERSION, "backfilled": False}
+        out["flips"] = rs.flips_panel(shown, days_span=span, sessions=len(rows))
+        # P1/P2 and P9. `checked` is 0 until a session is 20 sessions old AND the fully
+        # adjusted series exists to score it against, so the counts start as total/0/total --
+        # which is the honest shape, not a placeholder.
+        out["calls"] = rs.calls_block(len(rows), 0)
+        out["v2_divergence"] = rs.divergence_block(0, 0)
+        out["ma200"] = rs.ma200_panel(0, 0, 0)
+        # The three outcome panels: STATED ABSENCE, not a figure on the wrong basis.
+        no_basis = {"available": False,
+                    "reason": ("needs %s, which the hub does not store; "
+                               "regime_daily_bars is %s"
+                               % (rs.BASIS_ADJUSTED, rs.BASIS_SPLIT_ONLY))}
+        out["by_label"] = []
+        out["by_label_unavailable"] = no_basis
+        out["warnings_held"] = dict(no_basis)
+        out["all_clears_held"] = dict(no_basis)
+        out["dip_order"] = dict(no_basis)
+        try:
+            out["groups"] = label_to_group()
+        except Exception:                                           # noqa: BLE001
+            out["groups"] = {}
+        return out
+    except Exception as exc:                                        # noqa: BLE001
+        from models import regime_report_scoring as rs
+
+        return rs.empty_card("report card unavailable: %s" % type(exc).__name__)
+
 async def _ma200_row(conn):
     """SPY against its 200-day line, as a display row. R-IV.1309(b)3. Never raises.
 
@@ -260,6 +333,8 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
             # R-IV.1309(b)3: the 200-day row, DISPLAY ONLY (#42). Read beside the others so it
             # shares the one connection rather than opening a second.
             ma200 = await _ma200_row(conn)
+            # R-IV.1321(b): the report card, display only (#42).
+            report_card = await _report_card(conn)
             # R-IV.1195(b) asks for the seed count executed at deploy. Served here so the
             # number outlives the deploy log it was first read from.
             seeded_run = await seed_run(conn)
@@ -358,6 +433,7 @@ async def get_regime_strategy(rules_version: Optional[str] = None) -> Dict[str, 
         # R-IV.1309(b)3. `display_only` rides on the row itself as well, so a later reader of
         # the payload alone cannot mistake it for an input.
         "ma200_row": ma200,
+        "regime_report_card": report_card,
         "display_only": DISPLAY_ONLY,
         "diff": got.get("diff"),
         "seed_run": seeded_run,

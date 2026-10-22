@@ -2340,7 +2340,9 @@
     rs21Dim(host, m);
     // R-IV.1318(c): the report card is APPENDED to the card body, so it shares the tile
     // rather than needing new HTML -- and renders nothing at all without ?report=1.
-    const rcHtml = rcRender(_rcMock);
+    // THE SAME RENDERER DRAWS BOTH. A fixture rendered through its own path would approve a
+    // layout the live read cannot produce, which is the one thing mock-first exists to stop.
+    const rcHtml = rcRender(REPORT_MOCK ? _rcMock : (m && m.regime_report_card));
     host.innerHTML =
       '<div class="rs-call">'
       // The headline, the state chip and the two quiet lines are each decided in one
@@ -2644,10 +2646,14 @@
   //
   // Built from C:	emp\cc-query-handoff\AGORA-MOCK-RegimeReport.dc.html, sha256 ffd15cc3...,
   // verified byte-identical before anything was written.
-  const REPORT_ON = (() => {
-    try { return new URLSearchParams(location.search).get('report') === '1'; }
-    catch (_) { return false; }
+  // ?report=1    the LIVE card, which is the EMPTY state until the v2.1 cutover deploys
+  // ?report=mock the fixture, to review the populated layout before it can exist
+  const REPORT_PARAM = (() => {
+    try { return new URLSearchParams(location.search).get('report'); }
+    catch (_) { return null; }
   })();
+  const REPORT_ON = REPORT_PARAM === '1' || REPORT_PARAM === 'mock';
+  const REPORT_MOCK = REPORT_PARAM === 'mock';
 
   const RC_CSS = [
     '.rc-wrap{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}',
@@ -2656,29 +2662,31 @@
     '.rc-h i{font-style:normal;font-size:9.5px;color:var(--text-3)}',
     '.rc-badge{font-size:9px;letter-spacing:1.1px;border-radius:999px;padding:2px 7px;border:1px solid var(--amber);color:var(--amber)}',
     '.rc-mock{font-size:9px;letter-spacing:1.2px;color:var(--amber);border:1px solid var(--amber);border-radius:999px;padding:2px 6px}',
-    '.rc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}',
-    '.rc-cell{border:1px solid var(--border);border-radius:6px;padding:7px 8px}',
-    '.rc-cell u{display:block;text-decoration:none;font-size:8.5px;letter-spacing:.9px;color:var(--text-3)}',
-    '.rc-cell b{display:block;font-size:17px;line-height:1.3;margin-top:2px}',
-    '.rc-cell s{text-decoration:none;font-size:9px;color:var(--text-3)}',
-    '.rc-cell em{display:block;font-style:normal;font-size:8.5px;color:var(--text-3);margin-top:3px;line-height:1.35}',
+    '.rc-panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:8px;margin-top:10px}',
+    '.rc-p{border:1px solid var(--border);border-radius:6px;padding:7px 9px;position:relative}',
+    '.rc-p>u{display:block;text-decoration:none;font-size:8.5px;letter-spacing:.9px;color:var(--text-3)}',
+    '.rc-pb{margin-top:3px}',
+    '.rc-pb b{font-size:18px;line-height:1.25}',
+    '.rc-pb s{display:block;text-decoration:none;font-size:8.5px;color:var(--text-3);margin-top:1px}',
+    '.rc-pb em,.rc-p>em{display:block;font-style:normal;font-size:8.5px;color:var(--text-3);margin-top:3px;line-height:1.35}',
+    '.rc-na{color:var(--text-3)}',
+    '.rc-v{display:inline-block;font-size:8px;letter-spacing:.7px;border-radius:999px;padding:1px 6px;margin-top:3px;border:1px solid currentColor}',
+    '.rc-early{color:var(--amber)}',
+    '.rc-nr{color:var(--text-3)}',
+    '.rc-ok{color:var(--up)}',
+    '.rc-dep{color:var(--down)}',
     '.rc-tt{margin-top:12px;font-size:9.5px;letter-spacing:.8px}',
-    '.rc-tt i{font-style:normal;color:var(--text-3);display:block;margin-top:1px;letter-spacing:.3px}',
-    '.rc-tbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:9.5px}',
-    '.rc-tbl th{text-align:left;font-weight:500;color:var(--text-3);font-size:8.5px;letter-spacing:.7px;padding:3px 6px;border-bottom:1px solid var(--border)}',
-    '.rc-tbl td{padding:4px 6px;border-bottom:1px solid var(--border)}',
-    '.rc-bars{position:relative;height:9px;min-width:90px}',
-    '.rc-bars s{position:absolute;top:3px;height:3px;background:var(--up);text-decoration:none}',
-    '.rc-bars u{position:absolute;top:0;width:2px;height:9px;background:var(--text-3);text-decoration:none}',
-    '.rc-ma{margin-top:10px;font-size:9.5px}',
-    '.rc-ma i{font-style:normal;color:var(--text-3)}',
+    '.rc-tt i{font-style:normal;color:var(--text-3);letter-spacing:.3px}',
+    '.rc-tbl{width:100%;border-collapse:collapse;margin-top:5px;font-size:9px}',
+    '.rc-tbl th{text-align:left;font-weight:500;color:var(--text-3);font-size:8px;letter-spacing:.6px;padding:3px 5px;border-bottom:1px solid var(--border)}',
+    '.rc-tbl td{padding:3px 5px;border-bottom:1px solid var(--border)}',
     '.rc-foot{margin-top:10px;font-size:8.5px;color:var(--text-3);line-height:1.45}',
   ].join('');
 
   let _rcMock = null;
 
   async function rcLoad() {
-    if (!REPORT_ON || _rcMock) return _rcMock;
+    if (!REPORT_ON || _rcMock) return _rcMock;   // the CSS is needed for both states
     try {
       const r = await fetch('/assets/regime/report_card_mock.v1.json', { cache: 'no-store' });
       _rcMock = await r.json();
@@ -2690,42 +2698,131 @@
     return _rcMock;
   }
 
+  function rcVerdict(v) {
+    if (!v || !v.text) return '';
+    const st = String(v.state || '');
+    const cls = st.indexOf('NOT REACHABLE') === 0 ? 'rc-nr'
+      : st.indexOf('DEPARTS') === 0 ? 'rc-dep'
+      : st.indexOf('CONSISTENT') === 0 ? 'rc-ok' : 'rc-early';
+    return '<span class=\"rc-v ' + cls + ' \" title=\"' + esc(v.reason || '') + '\">'
+      + esc(v.text) + '</span>';
+  }
+
+  // A panel with nothing to show says WHY. An empty panel reads as zero.
+  function rcPanel(title, body, note, verdict) {
+    return '<div class=\"rc-p\"><u>' + esc(title) + '</u>'
+      + (verdict ? rcVerdict(verdict) : '')
+      + '<div class=\"rc-pb\">' + body + '</div>'
+      + (note ? '<em>' + esc(note) + '</em>' : '') + '</div>';
+  }
+
+  function rcNum(v, suffix) {
+    return v == null ? '<b class=\"rc-na\">\u2014</b>'
+      : '<b>' + esc(String(v)) + (suffix || '') + '</b>';
+  }
+
+  function rcHeld(b) {
+    return rcNum(b.share, '%')
+      + '<s>' + esc((b.held == null ? '?' : b.held) + ' of '
+      + (b.checked == null ? '?' : b.checked) + ' checked \u00b7 '
+      + (b.pending == null ? '?' : b.pending) + ' pending') + '</s>';
+  }
+
   function rcRender(m) {
     if (!REPORT_ON || !m) return '';
-    const stats = (m.stats || []).map((c) =>
-      '<div class="rc-cell"><u>' + esc(c.key) + '</u><b>' + esc(c.value)
-      + (c.of ? ' <s>' + esc(c.of) + '</s>' : '') + '</b><em>' + esc(c.note || '') + '</em></div>'
-    ).join('');
-    const t = m.table || {};
-    const head = (t.columns || []).map((c) => '<th>' + esc(c) + '</th>').join('');
-    const body = (t.rows || []).map((r) => {
-      // THE LIVE BAR IS ABSENT WHEN NOTHING IS CHECKED, rather than drawn at zero. A zero-width
-      // bar beside a history tick reads as "measured, and it was nil".
-      const hist = Math.max(0, Math.min(100, Number(r.history_pct) || 0));
-      const live = r.live_pct == null ? null : Math.max(0, Math.min(100, Number(r.live_pct)));
-      return '<tr><td>' + esc(r.label) + '</td><td>' + esc(String(r.sessions))
-        + '</td><td>' + esc(String(r.checked)) + '</td>'
-        + '<div/>'.replace('<div/>', '<td><div class="rc-bars" title="'
-            + esc('history base rate ' + hist.toFixed(1) + '%') + '">'
-            + (live == null ? '' : '<s style="width:' + live.toFixed(1) + '%"></s>')
-            + '<u style="left:' + hist.toFixed(1) + '%"></u></div></td>')
-        + '<td>' + esc(r.worst_dip || '—') + '</td>'
-        + '<td>' + esc(r.verdict || '—') + '</td></tr>';
+
+    // R-IV.1321(b): THE EMPTY STATE until the cutover deploys. Each panel says what is
+    // missing and why; none shows a zero, which would read as 'measured, and it was nil'.
+    if (m.available === false) {
+      const empties = ['FLIPS PER YEAR', 'SPY vs 200-DAY', 'WORST-DIP ORDER',
+                       'WARNINGS THAT HELD', 'ALL-CLEARS THAT HELD']
+        .map(function (t) {
+          return rcPanel(t, '<b class=\"rc-na\">\u2014</b>',
+                         'nothing scored yet', null);
+        }).join('');
+      return '<div class=\"rc-wrap\">'
+        + '<div class=\"rc-h\"><b>REGIME REPORT CARD</b>'
+        +   '<span class=\"rc-badge\">NO SCORED SESSIONS YET</span>'
+        +   (m._mock ? '<span class=\"rc-mock\">MOCK</span>' : '')
+        +   '<i>' + esc(m.reason || '') + '</i></div>'
+        + '<div class=\"rc-panels\">' + empties + '</div>'
+        + '<div class=\"rc-foot\">Scores only sessions after the v2.1 cutover; '
+        +   'nothing is backfilled. Display only (#42); the scores never change the label or '
+        +   'the kill switch.</div></div>';
+    }
+
+    const f = m.flips || {}, ma = m.ma200 || {}, dip = m.dip_order || {};
+    const wh = m.warnings_held || {}, ac = m.all_clears_held || {};
+
+    // FLIPS LEADS: ~1.3 years to a verdict, and the one figure with a stated target.
+    const flipsBody = rcNum(f.per_year, '/yr')
+      + '<s>' + esc('history ' + (f.history_per_year || '') + ' \u00b7 target '
+      + String.fromCharCode(8804) + ' ' + (f.target_per_year || '')) + '</s>'
+      + (f.annualised_is_grey
+          ? '<em>annualised from under half a year, shown grey</em>' : '');
+
+    // P7: UP-CROSSES / SCORED / PENDING. Never a bare whipsaw count.
+    const maBody = '<b>' + esc(String(ma.up_crosses == null ? '\u2014' : ma.up_crosses)) + '</b>'
+      + '<s>' + esc('up-crosses \u00b7 ' + ma.scored + ' scored \u00b7 '
+      + ma.pending + ' pending') + '</s>'
+      + (ma.whipsaws == null
+          ? '<em>no whipsaw share until an up-cross finishes its 60 sessions</em>'
+          : '<em>' + esc(ma.whipsaws + ' whipsaw(s) of ' + ma.scored + ' scored'
+              + (ma.share == null ? '' : ' = ' + ma.share + '%')
+              + ' \u00b7 history ' + ma.history_2013_pct + '% since 2013') + '</em>');
+
+    // P10: added by the spec, and the only grading panel reachable this decade.
+    const dipBody = (dip.stress_dip_median == null
+        ? '<b class=\"rc-na\">\u2014</b>'
+        : '<b>' + esc(dip.stress_dip_median + '% vs ' + dip.up_dip_median + '%') + '</b>')
+      + '<s>' + esc('STRESS vs UP \u00b7 '
+      + (dip.indep_stress == null ? '?' : dip.indep_stress) + ' and '
+      + (dip.indep_up == null ? '?' : dip.indep_up) + ' independent windows') + '</s>'
+      + (dip.order_holds == null ? ''
+          : '<em>' + (dip.order_holds ? 'order holds: STRESS dips deeper'
+                                      : 'order does NOT hold') + '</em>');
+
+    const panels = rcPanel('FLIPS PER YEAR', flipsBody, f.basis, f.verdict)
+      + rcPanel('SPY vs 200-DAY', maBody, ma.caption, ma.verdict)
+      + rcPanel('WORST-DIP ORDER', dipBody, dip.question, dip.verdict)
+      + rcPanel('WARNINGS THAT HELD', rcHeld(wh),
+                'danger label to a dip of ' + (wh.threshold_pct || '3.09')
+                + '%+ within 20 sessions', wh.verdict)
+      + rcPanel('ALL-CLEARS THAT HELD', rcHeld(ac),
+                'TREND-UP, then no new 60-session low', ac.verdict);
+
+    // THE PER-LABEL TABLE IS LAST AND SMALLEST, with NO VERDICT COLUMN: a pooled verdict here
+    // is ~14.6 years away and a per-label one further still.
+    const rows = (m.by_label || []).map(function (r) {
+      const share = r.share_higher == null ? '\u2014' : (r.share_higher + '%');
+      const hist = r.history_available
+        ? (r.history_share + '% (n=' + r.history_n + ')')
+        : (r.history_note || '');
+      return '<tr><td>' + esc(r.label) + '</td>'
+        + '<td>' + esc(String(r.sessions)) + '</td>'
+        + '<td>' + esc(String(r.checked)) + '</td>'
+        + '<td>' + esc(String(r.pending)) + '</td>'
+        + '<td>' + esc(String(r.indep == null ? '\u2014' : r.indep)) + '</td>'
+        + '<td>' + esc(share) + '</td>'
+        + '<td class=\"' + (r.history_available ? '' : 'rc-na') + '\">'
+        +   esc(hist) + '</td>'
+        + '<td>' + (r.reach ? rcVerdict(r.reach) : '') + '</td></tr>';
     }).join('');
-    const ma = m.ma200 || {};
-    return '<div class="rc-wrap">'
-      + '<div class="rc-h"><b>' + esc(m.headline || '') + '</b>'
-      +   '<span class="rc-badge">' + esc(m.badge || '') + '</span>'
-      +   (m._mock ? '<span class="rc-mock">MOCK</span>' : '')
+
+    const head = ['LABEL', 'SESSIONS', 'CHECKED', 'PENDING', 'INDEP', 'HIGHER 20d',
+                  'BASE RATE', 'REACHABILITY']
+      .map(function (c) { return '<th>' + esc(c) + '</th>'; }).join('');
+
+    return '<div class=\"rc-wrap\">'
+      + '<div class=\"rc-h\"><b>' + esc(m.headline || 'REGIME REPORT CARD') + '</b>'
+      +   (m._mock ? '<span class=\"rc-mock\">MOCK</span>' : '')
       +   '<i>' + esc(m.sub || '') + '</i></div>'
-      + '<div class="rc-stats">' + stats + '</div>'
-      + '<div class="rc-tt">' + esc(t.title || '') + '<i>' + esc(t.sub || '') + '</i></div>'
-      + '<table class="rc-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + body
-      +   '</tbody></table>'
-      + '<div class="rc-ma">' + esc(ma.title || '') + ' <i>' + esc('up-crosses since start: ')
-      +   esc(String(ma.up_crosses)) + ' \u00b7 whipsaws: ' + esc(String(ma.whipsaws))
-      +   ' \u00b7 ' + esc(ma.history || '') + '</i></div>'
-      + '<div class="rc-foot">' + esc(m.footer || '') + '</div>'
+      + '<div class=\"rc-panels\">' + panels + '</div>'
+      + '<div class=\"rc-tt\">BY LABEL <i>descriptive only, no verdict: a pooled '
+      +   'verdict is about 14.6 years away (spec section 9)</i></div>'
+      + '<table class=\"rc-tbl\"><thead><tr>' + head + '</tr></thead><tbody>'
+      +   rows + '</tbody></table>'
+      + '<div class=\"rc-foot\">' + esc(m.footer || '') + '</div>'
       + '</div>';
   }
   function rsHeadline(m) {

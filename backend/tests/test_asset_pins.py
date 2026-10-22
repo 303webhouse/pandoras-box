@@ -48,10 +48,58 @@ def _live_pins():
             target = FRONTEND.joinpath(asset.lstrip("/"))
             if not target.exists():
                 continue
-            digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            # LF-NORMALISED, and the manifest records the same (R-IV.1321(c)). Raw bytes made
+            # this a test of the CHECKOUT, not of the file: with `core.autocrlf` true the same
+            # committed app.js hashes ee1c8d92 in an LF worktree and 08ed2565 in a CRLF one,
+            # so BUILD read green and ABACUS read red on one unchanged file, each correctly.
+            digest = hashlib.sha256(
+                target.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
             out.setdefault(page.name, {})[asset] = (int(pin), digest)
     return out
 
+
+def test_THE_HASH_IS_OF_THE_FILE_NOT_OF_THE_CHECKOUT():
+    """R-IV.1321(c). THE GUARD DISAGREED WITH ITSELF ACROSS TWO WORKTREES, and both lanes were
+    right about what they measured.
+
+    `core.autocrlf` is true on this machine, so one committed file is checked out LF in one
+    worktree and CRLF in another. Measured on the SAME commit:
+
+        C:/trading-hub   app.js  583,978 bytes  sha ee1c8d92...   -> test GREEN
+        C:/th-abacus     app.js  597,844 bytes  sha 08ed2565...   -> test RED
+        LF-normalised                           identical; delta 13,866 = one byte per line
+
+    So the manifest was a record of a CHECKOUT rather than of a FILE. `efaa041c` did not
+    "rewrite" app.js's hash -- the recorder ran in a CRLF worktree and stored the CRLF value;
+    `7592b592` set it back to the LF value. Those two commits are the same disagreement, and
+    without this the two lanes overwrite each other forever while the guard reads red or green
+    by accident of where it ran.
+
+    A guard whose answer depends on the machine is worse than no guard: it trains its readers
+    to discount it.
+    """
+    import hashlib
+
+    # Built with chr() rather than escapes: an escape sequence in a scripted patch has
+    # collapsed into a real newline five times in this build, which is its own small lesson.
+    CRLF = (chr(13) + chr(10)).encode()
+    LF = chr(10).encode()
+    crlf = b"a = 1;" + CRLF + b"b = 2;" + CRLF
+    lf = crlf.replace(CRLF, LF)
+    assert crlf != lf, "the two renderings differ as raw bytes"
+
+    def norm(b):
+        return hashlib.sha256(b.replace(CRLF, LF)).hexdigest()
+
+    assert norm(crlf) == norm(lf), "and must not differ once normalised"
+
+    # BOTH readers must normalise, or the manifest and the check disagree again.
+    import pathlib as _pl
+
+    needle = ".replace(b" + chr(34) + chr(92) + "r" + chr(92) + "n" + chr(34) + ", b" + chr(34) + chr(92) + "n" + chr(34) + ")"
+    for path in (_pl.Path(__file__),
+                 _pl.Path(__file__).resolve().parents[2] / "scripts" / "update_asset_pins.py"):
+        assert needle in path.read_text(encoding="utf-8"), path.name
 
 def test_the_manifest_exists():
     assert MANIFEST.exists(), (
