@@ -108,6 +108,21 @@ def forward_score(stamped_btc, stamped_eth, cont_btc, cont_eth, start_instant, f
     return res
 
 
+def forward_count(stamped_btc, stamped_eth, cont_btc, cont_eth, start_instant, fetch_instant, check_hashes=True):
+    """COUNT ONLY (outcome-free): forward signal / placebo DAYS whose 6-bar window has closed, to know when the
+    checkpoint is reached. No return column is returned or read."""
+    if check_hashes:
+        assert HL.sha256(stamped_btc) == HL.V2_BTC_SHA256 and HL.sha256(stamped_eth) == HL.V2_ETH_SHA256, "stamped files"
+    h1 = {"BTC-USD": history(stamped_btc, cont_btc, fetch_instant), "ETH-USD": history(stamped_eth, cont_eth, fetch_instant)}
+    _, fwd, bars = forward_events(h1, start_instant)
+    if not len(fwd):
+        return {"signal_days": 0, "placebo_days": 0, "signals": 0, "placebos": 0, "bars": bars}
+    done = fwd.r6.notna()                                   # existence of a closed bar 6 only; the value is not read
+    s, p = fwd[done & (fwd.kind == "signal")], fwd[done & (fwd.kind == "placebo")]
+    return {"signal_days": int(s.date.nunique()), "placebo_days": int(p.date.nunique()), "signals": int(len(s)),
+            "placebos": int(len(p)), "floors_met": bool(s.date.nunique() >= 20 and p.date.nunique() >= 20), "bars": bars}
+
+
 def selftest():
     import tempfile
     ok = fail = 0
@@ -165,6 +180,10 @@ def selftest():
     except AssertionError:
         refused = True
     check("forward_score refuses files that are not the stamped Coinbase files", refused)
+    cnt = forward_count(sp, sp, cont, cont, start, fetch, check_hashes=False)
+    check("forward_count: counts only (no return field), consistent with the scored event set",
+          set(cnt) >= {"signal_days", "placebo_days", "floors_met"} and not any(k.startswith("r") and k != "bars" for k in cnt)
+          and cnt["signals"] == r["primary_h6_24h"].get("n_signal", 0))
     print(f"{ok}/{ok + fail}")
     return fail == 0
 
