@@ -1121,6 +1121,33 @@ async def _load_book_realized(pool, first: Optional[date], last: date) -> dict:
     return out
 
 
+# R-IV.1315(c): the P&L dashboard, behind `?pnl=v1` on the page. Its own route and its own
+# module, so `/summary` is untouched -- and no entry in `main.py`, because this router is already
+# registered there and a second registration is a second place for the prefix to drift.
+@router.get("/pnl")
+async def abacus_pnl(
+    period: str = Query("month", pattern="^(week|month|year|all)$"),
+    account: str = Query("ALL"),
+    _=Depends(require_api_key),
+):
+    """The P&L dashboard's figures. DISPLAY ONLY (#42): every number is read, none is written.
+
+    Gated like every book read (R-IV.417): what it returns is the principal's book.
+    """
+    from api.abacus_pnl import load_pnl
+
+    acct = (account or "ALL").upper()
+    if acct != "ALL":
+        from models.accounts import CANONICAL_ACCOUNTS
+        if acct not in CANONICAL_ACCOUNTS:
+            # A refusal that NAMES the accepted values. An unknown account silently treated as
+            # "all" would serve the whole book under one account's heading.
+            raise HTTPException(status_code=400, detail=(
+                "account must be ALL or one of %s" % list(CANONICAL_ACCOUNTS)))
+    pool = await get_postgres_client()
+    return await load_pnl(pool, period=period, account=acct)
+
+
 @router.get("/summary")
 async def abacus_summary(
     range: str = Query("90d", pattern="^(30d|90d|ytd|all)$"),
