@@ -89,18 +89,61 @@ async def lifespan(app: FastAPI):
                 _have = await _conn.fetchval(
                     "SELECT COUNT(*) FROM regime_snapshots "
                     " WHERE superseded = FALSE AND rules_version = $1", _RV)
-                if not _have:
-                    # Old generations are marked superseded BEFORE the new rows land, so no
-                    # read ever sees two generations at once.
+                # R-IV.1303(c): A CUTOVER IS NOT A FIRST BOOT, and this block could not tell
+                # them apart. With `RULES_VERSION` flipped to v2.1 and no v2.1 rows yet,
+                # `_have` is 0, so the old code would have (1) marked ALL 304 CURRENT v2 ROWS
+                # SUPERSEDED and (2) run `run_seed`, which is an unconditional backfill of
+                # every classifiable session -- a full REPLAY of the era that registration
+                # section 1 / R-IV.1277(b) item 7 forbids outright: "no replay or re-seed of
+                # any era", and "if the job cannot start without a seeded history, STOP and
+                # ask SPINE. Do not backfill."
+                #
+                # The gate I built for this lives in `run_nightly`, which is the wrong place on
+                # its own: the startup task runs FIRST, on the deploy that carries the flip, and
+                # would have re-seeded before any nightly ran. The cutover commit is unsafe to
+                # deploy without this, which is why it is in the same commit as the flip.
+                #
+                # THE RULE: a version with a DECLARED PREDECESSOR is a cutover and never seeds.
+                # One with none keeps the old first-boot behaviour exactly, so v1 and v2 on a
+                # fresh database are untouched by this.
+                from jobs.regime_job import CUTOVER_PREDECESSOR as _PRED
+
+                if _have:
+                    logger.info("✅ Regime %s: %s current snapshot(s) stored, seed skipped",
+                                _RV, _have)
+                elif _RV in _PRED:
+                    from jobs.regime_job import cutover_state as _cut
+
+                    _cs = await _cut(_conn, _RV)
+                    if _cs.get("inherited"):
+                        # VERIFIED, NOT COPIED, and nothing is written here. The first v2.1 row
+                        # is the nightly's. The old generation is NOT superseded yet either:
+                        # until a v2.1 row exists, superseding v2 would leave every
+                        # `superseded = FALSE` read with nothing to return and the card blank.
+                        logger.info(
+                            "📌 Regime %s CUTOVER from %s verified at %s "
+                            "(shown=%s held=%s pending=%s closes=%s) — no seed, no replay",
+                            _RV, _cs.get("from_version"), _cs.get("anchor"),
+                            (_cs.get("stored") or {}).get("shown_regime"),
+                            (_cs.get("stored") or {}).get("held_sessions"),
+                            (_cs.get("stored") or {}).get("pending"),
+                            (_cs.get("stored") or {}).get("pending_closes"))
+                    else:
+                        # REFUSES rather than seeding. A disputed or unavailable predecessor
+                        # state is exactly the case the ruling says to stop on.
+                        logger.error(
+                            "⛔ Regime %s CUTOVER BLOCKED — no seed run, asking SPINE: %s",
+                            _RV, _cs.get("reason"))
+                else:
+                    # No declared predecessor: a genuine first boot for this version. Old
+                    # generations are marked superseded BEFORE the new rows land, so no read
+                    # ever sees two generations at once.
                     _s = await _sup(_conn, _RV)
                     logger.info("📌 Regime %s: superseded other versions %s", _RV, _s)
-                if _have:
-                    logger.info("✅ Regime v1: %s current snapshot(s) stored, seed skipped",
-                                _have)
-                else:
                     _out = await run_seed(_conn)
-                    logger.info("✅ Regime v1 seeded %s session(s) of %s classifiable (%s)",
-                                _out.get("written"), _out.get("sessions"), _out.get("reason"))
+                    logger.info("✅ Regime %s seeded %s session(s) of %s classifiable (%s)",
+                                _RV, _out.get("written"), _out.get("sessions"),
+                                _out.get("reason"))
                 # R-IV.1198(c) and (e): put the flip-rate gap and the INTERIM family status on
                 # the record, not only in a ruling. Both are idempotent on their action, so a
                 # redeploy does not bury the finding under its own restatements.

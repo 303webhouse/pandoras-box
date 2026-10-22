@@ -84,10 +84,18 @@ def test_nothing_in_the_DISPLAY_path_reads_the_rules_file_for_a_COST():
 
 # ── absent means absent ─────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("version", ["v2", "v2.1", "v1", "v3", "", None])
-def test_no_version_has_a_cost_line_today(version):
+@pytest.mark.parametrize("version", ["v2", "v1", "v3", "", None])
+def test_only_v21_HAS_a_cost_line(version):
+    """R-IV.1307(b) supplied v2.1's and only v2.1's. Every other version shows none -- which
+    is the property, not a gap: attributing a measurement to a version that did not produce it
+    is the fault R-IV.1280 found in the wording this replaces."""
     assert cost_lines(version) == []
     assert has_cost_line(version) is False
+
+
+def test_v21s_line_is_served():
+    assert has_cost_line("v2.1") is True
+    assert cost_lines("v2.1") == ['SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, never on 11; 200d line 38. (R-IV.1301)']
 
 
 def test_cost_statement_returns_a_LIST_so_a_caller_cannot_iterate_a_SENTENCE():
