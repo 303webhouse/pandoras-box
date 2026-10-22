@@ -12,7 +12,9 @@
       "rules_version": "v2.1",
       "held_sessions": 5,
       "blocked": "correction qualifies on the tape but is held back: range_chop has held 4 of 5 sessions",
-      "held_no_match": { "stale": false },
+      "held_no_match": {
+        "stale": false
+      },
       "data_freshness": {},
       "costs": [
         "SPY 1999-2026, 24 declines: all-clear a median 81.5 sessions after the low, never on 11; 200d line 38. (R-IV.1301)"
@@ -28,7 +30,7 @@
         "window_bounded": false,
         "display_only": true,
         "basis": "strict close vs the SMA200 including that day (the PR-6 baseline definition)",
-        "caveat": "45% of up-crosses since 1999 were followed by a new 60-session low within 60 sessions (LAB R-IV.1279)",
+        "caveat": "Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session low within 60 sessions. (LAB R-IV.1279)",
         "text": "SPY vs 200-day: ABOVE since 2026-04-08 · +5.9%"
       }
     },
@@ -70,7 +72,7 @@
         "window_bounded": false,
         "display_only": true,
         "basis": "strict close vs the SMA200 including that day (the PR-6 baseline definition)",
-        "caveat": "45% of up-crosses since 1999 were followed by a new 60-session low within 60 sessions (LAB R-IV.1279)",
+        "caveat": "Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session low within 60 sessions. (LAB R-IV.1279)",
         "text": "SPY vs 200-day: ABOVE since 2026-04-08 · +5.9%"
       }
     },
@@ -81,7 +83,9 @@
       "rules_version": "v2.1",
       "held_sessions": 5,
       "blocked": null,
-      "held_no_match": { "stale": false },
+      "held_no_match": {
+        "stale": false
+      },
       "data_freshness": {
         "stale": true,
         "last_settled": "2026-10-16",
@@ -104,7 +108,7 @@
         "window_bounded": false,
         "display_only": true,
         "basis": "strict close vs the SMA200 including that day (the PR-6 baseline definition)",
-        "caveat": "45% of up-crosses since 1999 were followed by a new 60-session low within 60 sessions (LAB R-IV.1279)",
+        "caveat": "Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session low within 60 sessions. (LAB R-IV.1279)",
         "text": "SPY vs 200-day: ABOVE since 2026-04-08 · +5.1%"
       }
     }

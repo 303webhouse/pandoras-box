@@ -42,10 +42,18 @@ ABOVE, BELOW = "ABOVE", "BELOW"
 #: definition it did not use.
 BASIS = ("strict close vs the SMA%d including that day (the PR-6 baseline definition)" % WINDOW)
 
-#: LAB's stamped caveat, R-IV.1309(b)3, verbatim. It sits under the row in small grey text.
+#: QUERY's whipsaw line, R-IV.1311(b), verbatim. Small grey text under the row.
+#:
+#: BOTH ERAS, WHICH IS THE POINT. R-IV.1310 measured 50.00% (19 of 38) since 2013 against
+#: 44.79% (43 of 96) since 1999, so the single "45% since 1999" figure this replaces
+#: UNDERSTATED the era Nick actually trades -- by five points, on the half of the record that
+#: is his. One number over a span that straddles a regime change is an average of two
+#: different things, and the reader cannot recover either from it. Conventions #37/#38: the
+#: universe and the span travel with the figure, and here there are two of each.
+#:
 #: NOT a prediction and not a gate -- it is the base rate of what followed an up-cross.
-DRIFT_CAVEAT = ("45% of up-crosses since 1999 were followed by a new 60-session low within "
-                "60 sessions (LAB R-IV.1279)")
+DRIFT_CAVEAT = ("Whipsaw: 50% of up-crosses since 2013 (45% since 1999) hit a new 60-session "
+                "low within 60 sessions. (LAB R-IV.1279)")
 
 
 def _closes(bars: Sequence[Any]) -> List[float]:
