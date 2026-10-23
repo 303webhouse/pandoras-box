@@ -213,7 +213,7 @@ Or add to the systemd service file environment:
 
 ```ini
 Environment=PANDORA_API_URL=https://pandoras-box-production.up.railway.app/api
-Environment=PIVOT_API_KEY=rLl-7i2GqGjie5in9iHIlVtqlP5zpY7D5E6-8tzlNSk
+Environment=PIVOT_API_KEY=   # set from the Railway variable; never written here
 ```
 
 Use whichever method OpenClaw's docs recommend.
