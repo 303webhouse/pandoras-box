@@ -3554,7 +3554,54 @@ async def run_mark_to_market() -> dict:
         ticker = row["ticker"]
         structure = (row.get("structure") or "").lower()
         at = (row.get("asset_type") or "").upper()
-        entry_price = float(row["entry_price"]) if row["entry_price"] else None
+        # R-IV.1381(c)2: EXPLICIT None, not falsy. `if row["entry_price"]` treats a real
+        # 0.00 entry as absent, and 0.00 is legitimate -- an assigned leg, a zero-cost roll.
+        _ep_raw = row["entry_price"]
+        entry_price = float(_ep_raw) if _ep_raw is not None else None
+
+        # R-IV.1381(c)3: WHERE THERE IS NO STORED ENTRY, DERIVE ONE FOR THE P&L ONLY.
+        #
+        # Five open rows had never been priced at all -- 988 GDXJ, 989 XLU, 990 XLE, 991 GDXJ
+        # and 998 IWM -- because the write below was gated on `unrealized is not None`, and
+        # with no entry there is no unrealized, so the row never got a MARK either. Siblings
+        # holding the same tickers were priced from the same fetch. A missing entry is a gap in
+        # the BOOK; it is not a reason to refuse to say what the position is worth.
+        #
+        # THE MULTIPLIER IS THE TRAP, and the ruling names it. `_compute_unrealized_pnl` takes
+        # a PER-UNIT price and applies x100 itself for options, so the divisor is not the same
+        # for both kinds. Measured on production against the priced rows, 2026-10-23:
+        #
+        #   EQUITY   cost_basis / quantity          reproduces entry_price EXACTLY on all 8
+        #                                           priced equity rows (PDBC 19.985, GDXJ
+        #                                           109.816 and 109.846, SHV 110.126, VTI
+        #                                           379.86, XLE 65.05, XLU 40.966)
+        #   OPTION   cost_basis / (quantity * 100)  reproduces it on the priced option rows
+        #                                           (IBIT 0.1004, BX 0.1909, TSLA 0.2409)
+        #
+        # Dividing an option by `quantity` alone would hand this function a figure 100x too
+        # large and it would multiply by 100 again. 998 IWM is the only option among the five.
+        #
+        # NEVER WRITTEN BACK INTO entry_price. Book fields belong to POSITIONS; this is a
+        # display figure for one computation, and a derived number stored in a book column
+        # would be indistinguishable from one Nick entered.
+        _entry_src = "stored"
+        entry_for_pnl = entry_price
+        if entry_for_pnl is None:
+            _cb = row.get("cost_basis")
+            _q = row.get("quantity")
+            try:
+                _cb = float(_cb) if _cb is not None else None
+                _q = float(_q) if _q is not None else None
+            except (TypeError, ValueError):
+                _cb = _q = None
+            if _cb is not None and _q:
+                _is_eq = (at == "EQUITY") or (structure in (
+                    "stock", "stock_long", "long_stock", "stock_short", "short_stock"))
+                entry_for_pnl = _cb / (_q if _is_eq else _q * 100.0)
+                _entry_src = "derived from cost_basis/%s" % ("quantity" if _is_eq
+                                                             else "(quantity x 100)")
+            else:
+                _entry_src = "no entry and no usable cost_basis"
         # R-IV.660(b)3: the size to mark is what is HELD, not what was opened. `open_remainder`
         # answers None where the lot set cannot support a figure, and the stored quantity is
         # the only size available for such a row -- substituted KNOWINGLY here (this job's
@@ -3628,7 +3675,12 @@ async def run_mark_to_market() -> dict:
                     # for a debit, the cost to close for a credit. Never folded by abs(): a set
                     # that has crossed zero reads negative, and that sign is the information.
                     mark = orientation * float(outcome["net_mark"])
-                    unreal = _compute_unrealized_pnl(entry_price, mark, quantity, structure,
+                    # R-IV.1381(c)3: the DERIVED entry here too, so a multi-leg row with no
+                    # stored entry gets a P&L. The `evaluate_mark` guard above deliberately
+                    # keeps the STORED entry: it decides whether the MARK is acceptable, and
+                    # (c) says only the P&L needs an entry -- feeding it a derived number could
+                    # change which marks are accepted, which is not what was asked for.
+                    unreal = _compute_unrealized_pnl(entry_for_pnl, mark, quantity, structure,
                                                      direction=(row.get("direction") or ""),
                                                      orientation=orientation)
                     # R-IV.783(c): `_compute_unrealized_pnl` already rounds to 2dp, and that is
@@ -3714,7 +3766,7 @@ async def run_mark_to_market() -> dict:
                                          * float(result["net_mark"]))
                         direction = (row.get("direction") or "").upper()
                         unrealized = _compute_unrealized_pnl(
-                            entry_price, current_price, quantity, structure,
+                            entry_for_pnl, current_price, quantity, structure,
                             direction=direction,
                         )
                         greeks_json = json.dumps({
@@ -3763,7 +3815,7 @@ async def run_mark_to_market() -> dict:
                         short_leg_price = result.get("short_mid")
                         direction = (row.get("direction") or "").upper()
                         unrealized = _compute_unrealized_pnl(
-                            entry_price, current_price, quantity, structure,
+                            entry_for_pnl, current_price, quantity, structure,
                             direction=direction,
                         )
 
@@ -3786,7 +3838,7 @@ async def run_mark_to_market() -> dict:
                         current_price = result["option_value"]
                         long_leg_price = result["option_value"]
                         unrealized = _compute_unrealized_pnl(
-                            entry_price, current_price, quantity, structure,
+                            entry_for_pnl, current_price, quantity, structure,
                             direction=(row.get("direction") or ""),
                         )
                         greeks_json = json.dumps({
@@ -3814,13 +3866,18 @@ async def run_mark_to_market() -> dict:
                     # so rounding there recovers the price instead of storing its noise.
                     current_price = round(float(info.last_price), 4)
                     unrealized = _compute_unrealized_pnl(
-                        entry_price, current_price, quantity, structure,
+                        entry_for_pnl, current_price, quantity, structure,
                         direction=row.get("direction", "")
                     )
             except Exception:
                 pass
 
-        if current_price is not None and unrealized is not None:
+        # R-IV.1381(c)1: THE MARK IS WRITTEN WHETHER OR NOT THERE IS AN ENTRY. Only the
+        # unrealized P&L needs one. The old condition was
+        # `current_price is not None and unrealized is not None`, so a row with no entry got
+        # no price, no mark_status and no mark_checked_at -- it read as "never attempted"
+        # rather than "priced, P&L unavailable", and it held the whole balance at a floor.
+        if current_price is not None:
             # R-IV.394 (T1) reaches the mark job (R-IV.462(d)). It was wired only into the PATCH
             # recompute, so the writer behind nearly every mark stored negative values on debit
             # spreads for weeks. A mark it rejects writes NOTHING to the price or the P&L: the
@@ -3833,7 +3890,8 @@ async def run_mark_to_market() -> dict:
                 if mark_is_writable(_verdict):
                     await conn.execute("""
                         UPDATE unified_positions SET
-                            current_price = $1, unrealized_pnl = $2,
+                            current_price = $1,
+                            unrealized_pnl = COALESCE($2, unrealized_pnl),
                             long_leg_price = $3, short_leg_price = $4,
                             mark_status = 'OK', mark_reason = NULL, mark_checked_at = NOW(),
                             price_updated_at = NOW(), updated_at = NOW()

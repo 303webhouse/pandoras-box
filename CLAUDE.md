@@ -91,7 +91,7 @@ systemctl status openclaw pivot-collector pivot2-interactions
 reference since 2026-09-30 — it was a LITERAL before, and that is why a password rotation
 that had updated every Postgres-service variable still left the app unable to start.
 **A rotation is two writes that must not be able to separate: persist the new value to disk
-first, and verify the second writer runs before performing the first.**), `DISCORD_BOT_TOKEN`, `DISCORD_WEBHOOK_SIGNALS`, `DISCORD_WEBHOOK_CB`, `POLYGON_API_KEY`, `FRED_API_KEY`, `PIVOT_API_KEY`, `COINALYZE_API_KEY`
+first, and verify the second writer runs before performing the first.**), `DISCORD_TOKEN` (NOT `DISCORD_BOT_TOKEN` — that name is the VPS's, and looking for it on Railway returned a false "not in use" during the R-IV.1373 sweep), `DISCORD_WEBHOOK_SIGNALS`, `DISCORD_WEBHOOK_CB`, `DISCORD_WEBHOOK_ALERTS`, `DISCORD_WEBHOOK_ZEUS_TA_FEED`, `POLYGON_API_KEY`, `FRED_API_KEY`, `PIVOT_API_KEY`, `COINALYZE_API_KEY`
 
 ### VPS
 Set in `/home/openclaw/.openclaw/openclaw.json` under `env`: `ANTHROPIC_API_KEY`, `DISCORD_BOT_TOKEN`, `PANDORA_API_URL`, `PIVOT_API_KEY`, `FRED_API_KEY`
