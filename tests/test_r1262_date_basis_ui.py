@@ -290,7 +290,13 @@ with sync_playwright() as p:
     b = getattr(p, ENGINE).launch()
 
     # ── (b)1 · ABACUS ───────────────────────────────────────────────────────────
-    pg, ctx, errs, assets = open_page(b, 'abacus.html')
+    # R-IV.1356 made the P&L view the DEFAULT, so `abacus.html` with no query no longer
+    # renders the summary page these checks are about. They ask for it explicitly now.
+    # THIS SUITE WENT RED AT R-IV.1356 AND I DID NOT NOTICE, because I ran the R-IV.1315
+    # suite and the backend tests that turn and not this one. A test that is not run is
+    # not a test; the lesson is to run every suite the change can reach, not the ones the
+    # change was written against.
+    pg, ctx, errs, assets = open_page(b, 'abacus.html?view=summary')
     tiles = pg.evaluate("""() => [...document.querySelectorAll('.ab-stat')].map((e) => ({
         key: e.dataset.key, basis: e.dataset.basis || null, text: e.textContent,
         chips: [...e.querySelectorAll('.ab-chip')].map((c) => c.textContent.trim()) }))""")
@@ -346,7 +352,7 @@ with sync_playwright() as p:
     # because the day BUILD's column lands, nobody should have to hunt a stale warning down.
     for d in [BASIS] + [b.get('date_basis') for b in SUMMARY['breakdowns'] if b.get('date_basis')]:
         d['trade_date_exists'] = True
-    pg, ctx, errs, assets = open_page(b, 'abacus.html')
+    pg, ctx, errs, assets = open_page(b, 'abacus.html?view=summary')
     body = pg.evaluate("() => document.body.textContent || ''")
     check('once trade_date exists the basis treatment is GONE from the page',
           'by write date' not in body and 'dated by when the row was' not in body,

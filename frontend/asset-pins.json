@@ -1,16 +1,16 @@
 {
   "abacus.html": {
     "abacus.css": {
-      "pin": 8,
-      "sha256": "c52dded270609c8309f7475c58ff27dbf06ae163d1a79ce3be3eebf0ea40b96d"
+      "pin": 9,
+      "sha256": "1a9f57cc5a0e7d94d7fbb3dab8f337ba4a87bf003b6f89236f10f21395df4f92"
     },
     "abacus.js": {
       "pin": 10,
       "sha256": "ef8e2a80406602804fa1492736f06f37241a7e49242e0fb2239bd961493e504e"
     },
     "assets/abacus-pnl.js": {
-      "pin": 3,
-      "sha256": "6800c05528166eff235d1962a665abb67701b97d627377db063df72040522101"
+      "pin": 4,
+      "sha256": "d0bab308235c73284eee1fe66d827feb56c0211bfc1de20919ae291401ea9050"
     },
     "v2.css": {
       "pin": 68,
