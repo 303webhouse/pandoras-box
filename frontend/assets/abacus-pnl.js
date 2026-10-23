@@ -14,8 +14,16 @@
 (function () {
   'use strict';
 
+  // R-IV.1356(c), Nick 20:05 MT 2026-10-22 ("Ship the previews"): THIS IS THE DEFAULT ABACUS VIEW.
+  //
+  // The old summary view is kept behind `?view=summary` for ONE WEEK and then removed:
+  //   ROLLBACK FLAG EXPIRES 2026-10-29. On that date, delete this branch, delete abacus.js's
+  //   `window.__ABACUS_PNL` guard, and retire the summary renderers.
+  // The date is written here rather than only in the lane file because the person who deletes it
+  // will be reading this line, not that one. `?pnl=v1` still works, so every link already shared
+  // keeps resolving to the same page.
   var params = new URLSearchParams(location.search);
-  if (params.get('pnl') !== 'v1') return;
+  if (params.get('view') === 'summary' && params.get('pnl') !== 'v1') return;
   window.__ABACUS_PNL = true;
 
   var state = { period: params.get('period') || 'month', account: (params.get('account') || 'ALL').toUpperCase() };
@@ -157,9 +165,18 @@
     var dk = d.date_unknown || {};
     var eu = d.expired_unbooked || {};
 
+    // R-IV.1356(b). THE UNIT IS THE POSITION, counted once per period by its realized in that
+    // period — not the closing record, which made one XLF position read as fourteen losses.
+    // The closure count stays visible as the sample the money came from, and a position that also
+    // booked in another period is named, so these read as position-PERIODS and not as completed
+    // trades.
     var winSub = d.win_rate_n
-      ? d.wins + ' of ' + d.win_rate_n + ' decided'
+      ? d.wins + ' of ' + d.win_rate_n + ' positions'
         + (d.scratches ? ' · ' + d.scratches + ' scratch' + (d.scratches === 1 ? '' : 'es') + ' excluded' : '')
+        + ' · ' + d.closes + ' closes'
+        + (d.also_booked_elsewhere
+          ? ' · ' + d.also_booked_elsewhere + ' of ' + d.positions + ' also booked in another period'
+          : '')
       : 'nothing decided in this window';
     var priorSub = d.prior
       ? esc(d.prior.label) + ' ' + (usd(d.prior.realized, true) || 'no closes')
@@ -178,10 +195,11 @@
         + (u.oldest_mark_age_hours != null ? ' · oldest mark ' + u.oldest_mark_age_hours + 'h old' : ''));
 
     host.innerHTML =
-      '<div class="pnl-banner" role="note"><b>Preview (?pnl=v1).</b> Live figures from the hub, '
+      '<div class="pnl-banner" role="note">Live figures from the hub, '
       + 'display only (#42). Realized P&amp;L counts each closed lot on its <b>trade date</b>, after '
       + 'fees. Open positions are shown separately as unrealized and never mix into the realized '
-      + 'totals.' + (dk.count ? ' <b>Date unknown: ' + dk.count + ' closure'
+      + 'totals. Wins and losses count a <b>position</b> once per period, by its realized in that '
+      + 'period; the closure count is shown beside it as the sample.' + (dk.count ? ' <b>Date unknown: ' + dk.count + ' closure'
         + (dk.count === 1 ? '' : 's') + ', ' + esc(usd(dk.total, true) || '?')
         + '</b> — outside every figure here, in every period.' : '')
       // R-IV.1349(b): the same pattern, for money the broker has moved past while the book still
