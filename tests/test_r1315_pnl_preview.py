@@ -274,7 +274,12 @@ with sync_playwright() as p:
           'realized, by trade date' in pg.evaluate("() => document.body.innerText"))
 
     # ── R-IV.1319(c) · full width at three sizes, both views ────────────────────
-    for (w, h) in ((1920, 1080), (2560, 1440), (1366, 768)):
+    # R-IV.1365(b)5: 360 and 384 JOIN THE STANDING CHECK. The three desktop widths below are the
+    # ones I shipped R-IV.1315 against, and they are why a page that fills a 2560px screen still
+    # scrolled sideways by 75px on the phone its reader actually holds. A width check that never
+    # looks at a phone is a width check with a hole in exactly the place it matters most.
+    # 360 is the Galaxy S25; 384 the S25+/Ultra class.
+    for (w, h) in ((360, 780), (384, 832), (1920, 1080), (2560, 1440), (1366, 768)):
         for path, tag in (('abacus.html?pnl=v1', 'pnl'), ('abacus.html', 'summary')):
             pp, pctx, perrs = page(b, path, w, h)
             geo = pp.evaluate("""() => {
@@ -287,6 +292,34 @@ with sync_playwright() as p:
                         padL: cs ? cs.paddingLeft : null, maxW: cs ? cs.maxWidth : null}; }""")
             check('%dx%d %s: no horizontal scroll' % (w, h, tag),
                   geo['scrollW'] <= geo['clientW'] + 1, geo)
+            # At phone widths, also pin the two faults the audit found on this page: nothing may
+            # stick past the right edge, and a tab must be thumb-sized.
+            if w <= 420 and tag == 'pnl':
+                bad = pp.evaluate("""() => {
+                    const vw = document.documentElement.clientWidth, out = [];
+                    document.querySelectorAll('#abPnl *').forEach((e) => {
+                      if (e.children.length) return;
+                      const r = e.getBoundingClientRect();
+                      if (r.width > 0 && r.right > vw + 1) {
+                        out.push((e.textContent||'').trim().slice(0,24) + ' right=' + Math.round(r.right));
+                      }
+                    });
+                    return out.slice(0, 6); }""")
+                check('%dpx: nothing on the P&L page sticks past the right edge' % w, not bad, bad)
+                small = pp.evaluate("""() => [...document.querySelectorAll('#abPnl button')]
+                    .map((b) => ({t: b.textContent.trim().slice(0,14),
+                                  h: Math.round(b.getBoundingClientRect().height)}))
+                    .filter((x) => x.h < 44)""")
+                check('%dpx: every P&L button is at least 44px tall' % w, not small, small)
+                tiny = pp.evaluate("""() => {
+                    const out = [];
+                    document.querySelectorAll('#abPnl *').forEach((e) => {
+                      if (e.children.length || !(e.textContent||'').trim()) return;
+                      const px = parseFloat(getComputedStyle(e).fontSize);
+                      if (px && px < 12) out.push((e.textContent||'').trim().slice(0,20) + ' @' + px);
+                    });
+                    return out.slice(0, 6); }""")
+                check('%dpx: no text on the P&L page under 12px' % w, not tiny, tiny)
             # NO EMPTY SIDE GUTTER: the container spans the viewport apart from its own padding.
             check('%dx%d %s: the page fills the width (no centred column)' % (w, h, tag),
                   geo['maxW'] == 'none' and geo['pageW'] is not None
