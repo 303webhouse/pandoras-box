@@ -397,16 +397,31 @@ def test_THE_STRATEGY_BUTTON_SAYS_DETAILS_AND_POINTS_LEFT():
     assert "Open" not in m.group(1)
 
 
-def test_THE_DRAWER_IS_FORCED_TO_THE_LEFT():
-    """R-IV.1209(c) A2 says left. `popSide` would otherwise pick, and the Strategy card is full
-    width -- exactly the case where popSide falls back to whatever was clicked."""
+def test_THE_DRAWER_OPENS_ON_THE_SIDE_OF_THE_TILE_THAT_OPENED_IT():
+    """SUPERSEDES R-IV.1209(c) A2's "forced to the left" (R-IV.1371(c)1). This test asserted the
+    OPPOSITE: `setSide(d, 'left')` present and `popSide` ABSENT.
+
+    Nick moved the Regime Strategy tile to the RIGHT of his grid on 2026-10-19 and the pop-out
+    kept opening on the far side of the screen from the tile he had just tapped. Every other
+    opener already asked `popSide()` -- the chart, BOOK, the river, positions -- and `popSide()`
+    has always judged the tile's centre against the viewport's. The regime drawer alone was
+    pinned.
+
+    The old test's stated worry does not apply: it reasoned that "the Strategy card is full
+    width", the case where `popSide` falls back to the clicked element. The full-width tile is
+    `regime-band`; `regime-strategy` is an ordinary grid tile with a side of its own.
+    """
     js = _js()
     i = js.index("function openRegimeDetails")
-    body = js[i:js.index("\n  }", i)]
-    assert "setSide(d, 'left')" in body
-    assert "popSide" not in body
+    # COMMENTS STRIPPED BEFORE THE NEGATIVE SCAN. The fix's own comment QUOTES
+    # `setSide(d, 'left')` to say why it was wrong, so a raw `not in` matches the
+    # explanation and fails on the very thing that documents the fix. Fifteenth time
+    # this trap has fired here; the rule is that a negative scan reads CODE, not prose.
+    body = re.sub(r"//[^\n]*", "", js[i:i + 3000])
+    assert "setSide(d, 'left')" not in body, "the hard-coded side is the bug"
+    assert "popSide(src, 'regime-strategy')" in body, "judged at tap time, from the tile"
     css = _css()
-    assert ".drawer.from-left" in css, "the left mode must exist"
+    assert ".drawer.from-left" in css, "the left mode must still exist"
 
 
 #: The drawer sections B8 has wired. Section 7, the ribbon, came first because it needed

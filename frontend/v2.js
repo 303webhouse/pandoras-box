@@ -1813,6 +1813,27 @@
   }
   // ── end b9 ──────────────────────────────────────────────────────────────────
 
+  // R-IV.1371(c)3: THE B9 GLOBAL-MARKETS PANEL LEAVES THE DEFAULT POP-OUT.
+  //
+  // Every number in it comes from `assets/b9/world_mock.v1.json`. It is a fixture sitting in
+  // the middle of a drawer whose other eight cards are live reads, with nothing on the card
+  // itself to say which it is -- the exact shape of the "mock presented as data" fault. It
+  // stays reachable at `?b9=1` so the layout can still be reviewed, and R-IV.1369(d)4's line
+  // holds its place so the section's absence is stated rather than silent.
+  //
+  // It comes back when its data is live, which is R-IV.1369(d)4's "once its live data is
+  // wired" -- not when someone remembers the flag.
+  const B9_MOCK_SHOWN = (() => {
+    try { return new URLSearchParams(location.search).get('b9') === '1'; }
+    catch (_) { return false; }
+  })();
+
+  function pvWorldSlot() {
+    if (B9_MOCK_SHOWN) return '<div class="pv-card">' + pvWorld(_b9Mock) + '</div>';
+    return '<div class="pv-card"><span style="font-size:12px;color:var(--text-3)">'
+      + 'Global markets returns here once its live data is wired.</span></div>';
+  }
+
   function renderPopV2(body) {
     const m = _rsLive || {};
     // R-IV.1357(b): THE HEADER CARRIES THE RULES VERSION THE PAYLOAD REPORTS, never a literal.
@@ -1840,7 +1861,7 @@
       + '<div class="pv-card">' + pvBreadth(S.zweig) + '</div>'
       + '<div class="pv-card">' + pvLead(S.leadership) + '</div>'
       // B9 sits HERE because the synthesis says "next to the leadership ratios".
-      + '<div class="pv-card">' + pvWorld(_b9Mock) + '</div>'
+      + pvWorldSlot()
       + '<div class="pv-card">' + pvRates(S.rates) + '</div>'
       + '<div class="pv-card">' + pvAuction(S.auction) + '</div>';
   }
@@ -1851,7 +1872,18 @@
     // series. An await here is why the sections say "loading" rather than drawing zeros.
     await loadRegimeSections();
     const d = $('drawer');
-    setSide(d, 'left');
+    // R-IV.1371(c)1: THE SIDE COMES FROM THE TILE, not from a literal.
+    //
+    // This read `setSide(d, 'left')`. Every other opener on the page already asks `popSide()`
+    // -- the chart (919), BOOK (4476), the river (7852), positions (8062) -- and `popSide()`
+    // has always judged the tile's centre against the viewport's. The regime drawer alone was
+    // pinned left, so when Nick moved Regime Strategy to the RIGHT of his grid on 10-19 its
+    // pop-out kept opening on the far side of the screen from the tile he had just tapped.
+    //
+    // `src` is the element tapped, so the side is judged AT TAP TIME and follows the tile when
+    // it is dragged. 'regime-strategy' is the fallback gs-id for the case where the drawer is
+    // opened by something other than a click inside the tile.
+    setSide(d, popSide(src, 'regime-strategy'));
     syncTopbarH();
     const title = $('drawerTitle'), body = $('drawerBody');
     title.textContent = 'REGIME STRATEGY';

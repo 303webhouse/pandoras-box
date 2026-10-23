@@ -327,9 +327,24 @@ def test_the_section_renders_beside_leadership_which_is_where_the_synthesis_puts
     would also be "in the drawer" and would not be next to anything."""
     src = _src()
     lead = src.index("pvLead(S.leadership)")
-    world = src.index("pvWorld(_b9Mock)")
+    # R-IV.1371(c)3: THE SECTION IS NOW BEHIND `?b9=1`, and the DEFAULT pop-out carries
+    # R-IV.1369(d)4's placeholder line in its place. Every number in the panel comes from
+    # a fixture, and it sat among eight live reads with nothing on its face to say so.
+    #
+    # The ORDER is still the assertion, and for the original reason: a section appended at
+    # the end would also be "in the drawer" and would not be next to anything. What is
+    # ordered is now the SLOT, which renders the panel or the placeholder in that spot.
+    # SEARCHED FROM `lead`, because `function pvWorldSlot() {` CONTAINS the string
+    # "pvWorldSlot()" and is defined ABOVE renderPopV2 -- an unanchored index finds the
+    # DEFINITION, not the call site, and the order assertion then compares the wrong
+    # two positions.
+    world = src.index("pvWorldSlot()", lead)
     rates = src.index("pvRates(S.rates)", lead)
     assert lead < world < rates, (lead, world, rates)
+    slot = src[src.index("function pvWorldSlot"):]
+    assert "B9_MOCK_SHOWN" in slot, "the panel must be behind the flag"
+    assert "pvWorld(_b9Mock)" in slot, "and still reachable through it"
+    assert "Global markets returns here once its live data is wired." in slot
 
 
 def test_the_section_carries_its_marker_even_when_the_fixture_has_not_loaded():
