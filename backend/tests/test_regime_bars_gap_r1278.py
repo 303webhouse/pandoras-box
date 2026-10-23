@@ -49,6 +49,7 @@ from stable_engine import bars_polygon as bp                        # noqa: E402
 from ._srcscan import read_source                                   # noqa: E402
 
 JOB = _BACKEND / "jobs" / "regime_job.py"
+BARS = _BACKEND / "stable_engine" / "bars_polygon.py"
 POLY = _BACKEND / "stable_engine" / "bars_polygon.py"
 CARD = _BACKEND / "services" / "read_only" / "regime_strategy.py"
 V2JS = _BACKEND.parent / "frontend" / "v2.js"
@@ -108,31 +109,90 @@ def test_a_403_is_read_for_which_403_it_is():
 
 # ── 2 · a withheld session does not cost the night ───────────────────────────
 
-def test_the_nightly_falls_back_instead_of_degrading():
+def test_the_WITHHELD_session_is_still_PENDING_and_not_a_failure():
+    """R-IV.1278(b)3's premise survives: a session the source will not serve yet must not cost
+    the night. Only the REMEDY changed."""
     src = read_source(str(JOB))
-    assert "_newest_labelable_session" in src
     assert "pending_source" in src, "the withheld session must be audited as PENDING, not failed"
-    assert "A SESSION THE SOURCE WILL NOT SERVE YET MUST NOT COST THE NIGHT" in src
+    assert "NOT A FAILURE AND NOT A FALLBACK" in src
 
 
-def test_the_fallback_requires_a_bar_AND_no_label():
-    """Both halves, for different reasons: without a bar the classifier cannot read the
-    session, and with a label already present the append-only table would only produce a
-    `conflict` row -- a quieter way of doing nothing."""
+def test_THE_BACKWARD_WALK_IS_GONE_R_IV_1357():
+    """SUPERSEDES R-IV.1278(b)3, and this test used to assert the opposite.
+
+    It read `assert "_newest_labelable_session" in src`. That helper chose "the newest settled
+    session that HAS a bar and HAS NO LABEL", which looks like catching up and is not: it
+    consulted the BAR TABLE rather than the vendor, so a session whose bar was never stored was
+    invisible to it. Measured 2026-10-23: it labelled 10-20 while Polygon was already serving
+    10-21, because 10-21 had no stored bar -- having been withheld on the night it was the
+    target, and never asked for again.
+
+    Worse, it walked BACKWARDS. Once 10-20 held a label the newest unlabelled session with a
+    bar became 10-19, then 10-16, so each night would write a row older than the night before
+    while the real lag grew. The fix is not a better fallback; it is forward-only labelling plus
+    a capture that stores every bar it fetches.
+    """
     src = read_source(str(JOB))
-    i = src.index("async def _newest_labelable_session")
+    assert "_newest_labelable_session" not in src
+    assert "THE BACKWARD WALK IS GONE" in src
+    assert "newest_labelled_session" in src and "sessions_after" in src
+
+
+def test_forward_only_means_STRICTLY_AFTER_the_newest_labelled_session():
+    """The whole of "forward only" is one comparison, so it is asserted directly: `>`, never
+    `>=`. With `>=` the newest labelled session would be revisited every night."""
+    src = read_source(str(JOB))
+    i = src.index("async def sessions_after(")
     block = src[i:src.index("async def latest_with_diff", i)]
-    assert "FROM regime_daily_bars" in block
-    assert "NOT EXISTS" in block and "regime_snapshots" in block
-    assert "superseded = FALSE" in block
+    assert "b.date > $1::date" in block, "strictly after -- never >="
+    assert "b.date >= $1" not in block
+    assert "ORDER BY b.date ASC" in block, "oldest first: the hysteresis is carried forward"
     assert "ticker = 'SPY'" in block, "SPY is the shortest series and decides classifiability"
-    assert "b.date < $2" in block, "strictly before the withheld session"
+    assert "b.date <= $2::date" in block, "bounded at the target, so nothing is labelled early"
 
 
-def test_it_still_degrades_when_there_is_nothing_to_fall_back_to():
-    """A fallback that invented a target would be worse than the failure it replaced."""
+def test_the_newest_labelled_session_spans_EVERY_rules_version():
+    """R-IV.1357(a)2 says "any rules version". Per-version maxima would let a new version
+    re-label history one night at a time -- the backward walk wearing a different hat."""
     src = read_source(str(JOB))
-    assert "no earlier settled session is" in src and "nothing to fall back to" in src
+    i = src.index("async def newest_labelled_session(")
+    block = src[i:src.index("async def sessions_after", i)]
+    assert "MAX(as_of)" in block
+    assert "rules_version" not in block.split("SELECT MAX(as_of)")[1][:160], (
+        "the floor must not be scoped to one version")
+    assert "superseded = FALSE" in block, (
+        "a superseded row is a WITHDRAWN label; it must not freeze the job")
+
+
+def test_the_capture_STORES_the_range_rather_than_discarding_it():
+    """R-IV.1357(a)1. The range was always fetched; only the target's bar was kept."""
+    src = read_source(str(BARS))
+    assert "EVERY VERIFIED BAR IN THE RANGE" in src
+    assert "sessions_with_stored_bars" in src
+    i = src.index("async def capture_session(")
+    block = src[i:]
+    assert "backfilled" in block
+    assert "for d in candidates:" in block, "every candidate session, not just the target"
+
+
+def test_a_session_is_still_written_ALL_OR_NOTHING_across_tickers():
+    """The invariant the restructure could most easily have lost. One session present for SPY
+    and absent for IWM is a hole that reads as data."""
+    src = read_source(str(BARS))
+    i = src.index("async def capture_session(")
+    block = src[i:]
+    assert "ALL-OR-NOTHING IS PER SESSION" in block
+    assert "if trouble or len(staged) != len(tick):" in block
+
+
+def test_an_unreadable_bar_table_does_not_SILENTLY_stop_the_backfill():
+    """The third answer. None is not an empty set, and the run says which it got."""
+    src = read_source(str(BARS))
+    assert "NONE IS A THIRD ANSWER" in src
+    assert "backfill_blind" in src
+    assert "backfill_blind" in read_source(str(JOB)), "and the job audits it"
+
+
 
 
 # ── 3 · the freshness headline ───────────────────────────────────────────────
