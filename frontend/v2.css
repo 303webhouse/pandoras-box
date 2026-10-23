@@ -306,10 +306,18 @@ body {
 .drawer.from-left { left: 0; right: auto; border-left: 0; border-right: 1px solid var(--border-strong); transform: translateX(-100%); }
 .drawer.from-left.open { transform: translateX(0); }
 .drawer.no-anim, .rp-panel.no-anim { transition: none !important; }
-.drawer-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+/* R-IV.1364(a): THE DRAWER SCROLLS INSIDE ITSELF, at every width.
+   `.drawer` is `position: fixed; height: 100%` and a flex column. A flex CHILD will not
+   scroll on `overflow: auto` alone -- its default `min-height: auto` lets it grow to its
+   content instead, so the body grew past the viewport and the overflow never engaged.
+   `min-height: 0` is what makes the cap real. The head is pinned so the close control
+   cannot be pushed out of reach by a long body. */
+.drawer-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
 .drawer-head h3 { margin: 0; font-size: 14px; font-family: var(--mono); letter-spacing: 1px; color: var(--teal); }
-.drawer-head .x { margin-left: auto; cursor: pointer; color: var(--text-3); font-size: 18px; }
-.drawer-body { padding: 16px; overflow: auto; }
+/* A 44px tap target (R-IV.1364(a)): an 18px glyph is a ~20px box, which is under
+   every phone guideline and was effectively unhittable beside the title. */
+.drawer-head .x { margin-left: auto; cursor: pointer; color: var(--text-3); font-size: 20px; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: flex-end; }
+.drawer-body { padding: 16px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 .kv { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .kv .k { color: var(--text-2); } .kv .v { font-family: var(--mono); }
 
@@ -782,7 +790,16 @@ body.is-mobile-grid .tile-grip { display: none !important; }
   /* R-IV.651(b)1: `.pos-modal .body` is NOT in this list. The others are inside the page's own
      scroll; the modal is a FIXED overlay with a height cap, so making its body overflow:visible
      clipped every field past the cap with no way to scroll to them. */
-  .book-positions, .drawer-body, .member-popup .body { overflow: visible !important; }
+    /* R-IV.1364(a): `.drawer-body` IS NO LONGER IN THIS LIST, for exactly the reason the note
+     above gives for `.pos-modal .body`. The drawer is a FIXED overlay with a height cap, not
+     content inside the page's own scroll -- so `overflow: visible` here clipped everything
+     past the viewport with no way to reach it. MEASURED by ABACUS at 360x649: the body held
+     2,209px of content, the pop-out covered the screen, could not be scrolled, and left
+     almost no backdrop to tap -- and the bond yields Nick watches all day live inside it.
+     The rule that excluded the modal was right; the drawer belonged with it. */
+  .book-positions, .member-popup .body { overflow: visible !important; }
+  /* Belt and braces at phone width, where the bug was reported. */
+  .drawer-body { overflow-y: auto !important; min-height: 0 !important; }
   .tile-header { flex-wrap: wrap; row-gap: 4px; padding: 10px 12px; }
 
   /* Movers: at 390px the marquee text runs under the staleness pill, and the
