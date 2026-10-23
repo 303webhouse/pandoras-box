@@ -1264,9 +1264,14 @@
   // THE TEXT IS BEHIND ⓘ (R-IV.1252(d)). Nothing on the face of the drawer runs longer than one
   // line, which is the whole complaint the redesign answers: the v1 drawer explained itself in
   // paragraphs and the reader had to find the number inside the prose.
+  // R-IV.1354(a): SHIPPED AS THE DEFAULT (Nick, 20:05 MT 2026-10-22, "Ship the previews").
+  // This read `=== 'v2'` and defaulted to FALSE. It now defaults to TRUE, and the v1 drawer
+  // stays reachable at `?pop=v1` for ONE WEEK -- REMOVE THE ROLLBACK ON OR AFTER 2026-10-30,
+  // along with the v1 branch in the opener below. The date is written down because "for one
+  // week" in a ruling becomes "forever" in a codebase that does not record when the week ends.
   const POP_V2 = (() => {
-    try { return new URLSearchParams(location.search).get('pop') === 'v2'; }
-    catch (_) { return false; }
+    try { return new URLSearchParams(location.search).get('pop') !== 'v1'; }
+    catch (_) { return true; }
   })();
 
   // The ⓘ affordance. `title` carries it on desktop AND on phone, where a long-press shows it:
@@ -1796,6 +1801,14 @@
 
   function renderPopV2(body) {
     const m = _rsLive || {};
+    // R-IV.1357(b): THE HEADER CARRIES THE RULES VERSION THE PAYLOAD REPORTS, never a literal.
+    // With no payload yet it carries NO version rather than a guessed one: an absent suffix
+    // says "not read yet", and a wrong suffix says something false about which rules are live.
+    const _ttl = $('drawerTitle');
+    if (_ttl) {
+      _ttl.textContent = 'REGIME STRATEGY'
+        + (m.rules_version ? ' ' + String(m.rules_version) : '');
+    }
     const ft = m.flip_triggers;
     const pending = !!(ft && ft.candidate_differs);
     const S = _rsSections || {};
@@ -1833,7 +1846,11 @@
     // here rather than replacing the function keeps the default on the code Nick is
     // using all week, so the preview cannot regress what it is compared against.
     if (POP_V2) {
-      title.textContent = 'REGIME STRATEGY v2';
+      // R-IV.1357(b): the version is NOT written here any more. It was the literal string
+      // 'REGIME STRATEGY v2' while the payload's `rules_version` had been v2.1 since the
+      // 2026-10-22 cutover -- a header disagreeing with the card beneath it about which rules
+      // produced the label. `renderPopV2` sets it from the payload, and sets it again on its
+      // own repaint, so it cannot be left stale by whichever paint happens first.
       d.classList.add('pv-wide');
       renderPopV2(body);
       $('drawerBackdrop').classList.add('open');
@@ -2514,9 +2531,16 @@
   // path would approve a layout the live read cannot produce -- which is the one thing
   // mock-first is for. The fixture carries the LIVE payload field names and
   // backend/services/regime_card_v21.py lints that from the suite.
+  // R-IV.1354(a): SHIPPED AS THE DEFAULT. Was `=== 'v21'`, default FALSE. The pre-v2.1 card
+  // stays reachable at `?card=v1` for ONE WEEK -- REMOVE THE ROLLBACK ON OR AFTER 2026-10-30.
+  //
+  // `?card=v21` KEEPS WORKING and is not a second spelling of the default: `?state=` is only
+  // honoured when the flag resolves true, and every screenshot, relay and lane file written
+  // during the preview cites `?card=v21`. A link in a ruling that silently stopped working
+  // would be worse than a redundant parameter.
   const CARD_V21 = (() => {
-    try { return new URLSearchParams(location.search).get('card') === 'v21'; }
-    catch (_) { return false; }
+    try { return new URLSearchParams(location.search).get('card') !== 'v1'; }
+    catch (_) { return true; }
   })();
   const CARD_STATE = (() => {
     try {
@@ -6117,11 +6141,21 @@
   // ONE RENDERER, TWO SOURCES. The live payload's cards are mapped into the SAME shapes the
   // fixture uses, rather than given renderers of their own: two renderers for one card would
   // drift, and the one that drifted would be the live one — the only one anybody acts on.
+  // R-IV.1354(a): SHIPPED AS THE DEFAULT. This returned null -- the cards OFF -- unless
+  // `?notables=1` was given. It now defaults to 'live', with the cards hidden at
+  // `?notables=off` for ONE WEEK -- REMOVE THE ROLLBACK ON OR AFTER 2026-10-30.
+  //
+  // THREE STATES, NOT TWO, AND 'mock' SURVIVES THE CHANGE. `?notables=mock` renders the
+  // approved fixture in place and is how the card was signed off; it is also the only way to
+  // see the layout when the live read is empty. Folding it into the default would have removed
+  // the one view that can be compared against the approval.
   const NOTABLES_SOURCE = (() => {
     try {
       const v = new URLSearchParams(location.search).get('notables');
-      return v === '1' ? 'live' : (v === 'mock' ? 'mock' : null);
-    } catch (_) { return null; }
+      if (v === 'mock') return 'mock';
+      if (v === 'off') return null;
+      return 'live';
+    } catch (_) { return 'live'; }
   })();
 
   let _nbLiveData = null;
