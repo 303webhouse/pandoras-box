@@ -2085,9 +2085,16 @@ body.is-mobile-grid .tile-grip { display: none !important; }
    PHONE-FIRST, which is this file's rule and which my first version inverted: the base was the
    1/3 width with a max-width override for phones, so the narrow case was the exception. The
    base IS the phone now, and the wide case is the override. */
-.rp-panel.pv-wide { width: 100vw; max-width: 100vw; }
+/* R-IV.1371(c)2 / R-IV.1367(c): `.drawer` IS IN THESE SELECTORS NOW.
+   The rule only ever named `.rp-panel`, but v2.js puts `pv-wide` on `#drawer`,
+   whose class is `drawer` -- so the width has never applied to the regime pop-out.
+   It sat at the base `.drawer` width of 380px / 92vw instead of Nick's 10-19 ask,
+   "up to 1/3 of the screen". The VALUES below were already right; only the
+   selector was wrong, which is why nobody saw a broken layout -- just a narrow one.
+   Phone-first is unchanged: full width is the base, the third is the override. */
+.rp-panel.pv-wide, .drawer.pv-wide { width: 100vw; max-width: 100vw; }
 @media (min-width: 769px) {
-    .rp-panel.pv-wide { width: min(33.333vw, 640px); max-width: 640px; }
+    .rp-panel.pv-wide, .drawer.pv-wide { width: min(33.333vw, 640px); max-width: 640px; }
 }
 
 .pv-card {
