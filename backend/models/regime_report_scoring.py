@@ -44,11 +44,52 @@ asserts that nothing imports this module.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import math
 from typing import Any, Dict, List, Optional, Sequence
 
 #: Spec §1.1. The only version that may be scored, read from the rows rather than configured.
 SCORED_VERSION = "v2.1"
+
+
+#: R-IV.1354(b)2 / QUERY's P11, §1.1.1. The zone and hour a session CLOSES at. A session is in
+#: scope iff its close is strictly after the cutover instant.
+CLOSE_ZONE = "America/New_York"
+CLOSE_HOUR = 16
+
+
+def session_close(session) -> _dt.datetime:
+    """The instant a session closed: 16:00 America/New_York on that date, DST-correct.
+
+    THE ZONE IS RESOLVED FOR THAT DATE, which is the whole reason this is a function and not
+    `date + "T20:00:00Z"`. The exchange closes at 16:00 LOCAL: 20:00Z under EDT and 21:00Z
+    under EST, and the changeover falls in the first week of November -- inside the span this
+    card will be scoring within two weeks. A fixed UTC offset would put every November session
+    an hour early and, for a session closing in the hour either side of a cutover, on the wrong
+    side of the boundary.
+
+    COMPARED STRICTLY (`>`), per the spec: a session whose close EQUALS the instant did not
+    close after it.
+    """
+    from zoneinfo import ZoneInfo
+
+    d = session
+    if not isinstance(d, _dt.date) or isinstance(d, _dt.datetime):
+        d = _dt.date.fromisoformat(str(session)[:10])
+    return _dt.datetime(d.year, d.month, d.day, CLOSE_HOUR, 0, tzinfo=ZoneInfo(CLOSE_ZONE))
+
+
+def in_scope(session, cutover_instant) -> bool:
+    """Whether `session` is scored. One predicate, so no caller can write its own.
+
+    A row that is NOT in scope is neither deleted nor wrong -- it is a correct label of a
+    session this card does not score, and `excluded_pre_cutover` is how the card says so out
+    loud instead of silently dropping it.
+    """
+    if cutover_instant is None:
+        return False          # unknown boundary scores NOTHING, never everything
+    return session_close(session) > cutover_instant
+
 
 #: R7. 20-session windows overlap, so about n/20 are independent. Every n is reported with its
 #: independent count beside it, and no percentage is shown below one independent window.

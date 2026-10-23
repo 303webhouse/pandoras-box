@@ -518,6 +518,120 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
                 backfilled=capture.get("backfilled") or [])
 
 
+#: R-IV.1354(b)1. The audit action that records when a rules version went live.
+VERSION_LIVE = "version_live"
+
+#: THE INSTANT IS STATED, NOT DERIVED, and that is the whole point of the field.
+#:
+#: v2.1 went live with the deploy whose process started at 19:03:00.396505Z on 2026-10-22.
+#: QUERY read that from /health at the time. **It cannot be recovered now**: the hub has
+#: restarted since (05:29:43Z on 10-23 at the latest), so `process_started_at` reports the
+#: CURRENT process and re-deriving the cutover from it would silently walk the boundary forward
+#: on every deploy -- which would quietly pull already-scored sessions back out of scope. The
+#: ruling supplies the value for exactly this reason, and this module must never re-read it.
+#:
+#: A FUTURE VERSION IS DIFFERENT and needs no entry here: its marker is written at ITS first
+#: startup, from that process's own start time, because the first boot under a new version IS
+#: the moment it went live. Only v2.1 needs a stated value, because its moment has passed.
+STATED_VERSION_LIVE = {"v2.1": "2026-10-22T19:03:00.396505+00:00"}
+
+
+async def ensure_version_live(conn, version: Optional[str],
+                              process_started_at: Optional[str] = None) -> Dict[str, Any]:
+    """Record when `version` went live, exactly once. R-IV.1354(b)1.
+
+    IDEMPOTENT PER VERSION IN ONE STATEMENT. `INSERT ... SELECT ... WHERE NOT EXISTS` rather
+    than a read followed by a write: two processes booting together would both pass a
+    SELECT-then-INSERT and write two markers with different instants, and the scope rule would
+    then depend on which one a later reader happened to pick. There is no unique index on
+    (action, rules_version) to lean on -- `regime_audit` is deliberately an append-only log
+    where repeated actions are normal -- so the guard lives in the statement.
+
+    A RESTART WRITES NOTHING, which is the behaviour the ruling names.
+    """
+    out: Dict[str, Any] = {"version": version, "written": False}
+    if not version:
+        return dict(out, skipped="no rules version")
+
+    stated = STATED_VERSION_LIVE.get(str(version))
+    instant = stated or process_started_at
+    if not instant:
+        # NOT GUESSED. Without a stated instant and without this process's start time there is
+        # nothing to record, and a marker holding "now" would be a fabricated boundary.
+        logger.error("[regime_job] %s: no instant for the %s marker; nothing written",
+                     version, VERSION_LIVE)
+        return dict(out, skipped="no instant available")
+
+    detail = "process_started_at = %s" % instant
+    try:
+        row = await conn.fetchrow(
+            """INSERT INTO regime_audit (as_of, rules_version, action, detail, rows_written)
+               SELECT NULL, $1, $2, $3, 0
+                WHERE NOT EXISTS (SELECT 1 FROM regime_audit
+                                   WHERE action = $2 AND rules_version = $1)
+            RETURNING id""", str(version), VERSION_LIVE, detail[:2000])
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("[regime_job] could not write the %s marker for %s (%s)",
+                     VERSION_LIVE, version, type(exc).__name__)
+        return dict(out, error=type(exc).__name__)
+
+    if row is None:
+        return dict(out, already_present=True, source="stated" if stated else "process")
+    logger.info("[regime_job] %s marker written for %s: %s", VERSION_LIVE, version, detail)
+    return dict(out, written=True, instant=instant,
+                source="stated" if stated else "process")
+
+
+async def version_live_instant(conn, version: Optional[str]):
+    """`(instant, source)` for `version`, or `(None, reason)` when no marker exists.
+
+    READ FROM THE RECORDED FACT, never from a constant and never from /health. The marker is
+    the only thing that may answer this: a hardcoded date in a reader would drift from the
+    marker the moment either changed, and /health answers about the CURRENT process.
+
+    The instant is parsed out of the detail rather than stored in its own column, because
+    `regime_audit` has no column for it and adding one to a shared append-only log for a
+    display-only feature is a migration this does not need. The format is fixed by
+    R-IV.1354(b)1 -- `process_started_at = <iso>` -- and a detail that does not match it is
+    reported as unreadable rather than guessed at.
+    """
+    import re as _re
+
+    if not version:
+        return None, "no rules version"
+    try:
+        row = await conn.fetchrow(
+            """SELECT detail, created_at FROM regime_audit
+                WHERE action = $1 AND rules_version = $2
+                ORDER BY created_at ASC LIMIT 1""", VERSION_LIVE, str(version))
+    except Exception as exc:                                        # noqa: BLE001
+        return None, "regime_audit unreadable (%s)" % type(exc).__name__
+    if row is None:
+        return None, "no %s marker for %s" % (VERSION_LIVE, version)
+
+    # THE OLDEST MARKER WINS, not the newest. If a second one ever appeared -- a bug, a manual
+    # insert -- the FIRST is the one that matches the sessions already scored under it, and
+    # preferring the newest would move the boundary and silently change which rows are in scope.
+    detail = str(row["detail"] or "")
+    m = _re.search(r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:\d{2}|Z)?)",
+                   detail)
+    if not m:
+        return None, "the %s marker for %s does not carry a readable instant" % (
+            VERSION_LIVE, version)
+    raw = m.group(1).replace(" ", "T")
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        inst = _datetime.fromisoformat(raw)
+    except ValueError:
+        return None, "the %s marker's instant is not a valid timestamp" % VERSION_LIVE
+    if inst.tzinfo is None:
+        inst = inst.replace(tzinfo=_timezone.utc)
+    source = ("regime_audit action=%s rules_version=%s, detail %r"
+              % (VERSION_LIVE, version, detail[:120]))
+    return inst, source
+
+
 async def newest_labelled_session(conn):
     """The newest session that holds a CURRENT label, in ANY rules version. R-IV.1357(a)2.
 

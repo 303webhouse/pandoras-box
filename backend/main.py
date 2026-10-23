@@ -86,6 +86,30 @@ async def lifespan(app: FastAPI):
                 from models.regime_classifier import RULES_VERSION as _RV
                 from jobs.regime_job import supersede_other_versions as _sup
 
+                # R-IV.1354(b)1: THE version_live MARKER, BEFORE ANY BRANCH BELOW.
+                #
+                # It records WHEN this rules version went live, which is what the report
+                # card scopes on -- so it must be written on every path, not only on the
+                # cutover one. A version that seeded, a version that inherited and a version
+                # that found rows already present all went live at the same moment, and the
+                # card has no business caring which branch ran.
+                #
+                # IDEMPOTENT PER VERSION, so this costs one guarded INSERT per boot and
+                # writes nothing after the first. The instant for v2.1 is the STATED fact
+                # from R-IV.1354(b)1 and is never re-derived from /health; a FUTURE version
+                # records this process's own start time, because its first boot IS the
+                # moment it went live.
+                try:
+                    from build_identity import PROCESS_STARTED_AT as _PSA
+                    from jobs.regime_job import ensure_version_live as _evl
+                    _vl = await _evl(_conn, _RV, _PSA.isoformat())
+                    logger.info("📌 Regime %s version_live marker: %s", _RV, _vl)
+                except Exception as _vle:                       # noqa: BLE001
+                    # A missing marker makes the report card say so and show nothing; it must
+                    # not take startup down with it.
+                    logger.error("⚠ Regime %s version_live marker failed: %s", _RV,
+                                 type(_vle).__name__)
+
                 _have = await _conn.fetchval(
                     "SELECT COUNT(*) FROM regime_snapshots "
                     " WHERE superseded = FALSE AND rules_version = $1", _RV)

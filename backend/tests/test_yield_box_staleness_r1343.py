@@ -289,8 +289,14 @@ def test_the_audit_lookup_is_still_UNFILTERED_and_the_comment_says_so():
     query. That it spans every version and every date is the reason the row can be old at all,
     so it is written down next to the code rather than left to be rediscovered."""
     src = read_source(str(_BACKEND / "jobs" / "regime_job.py"))
-    i = src.index("FROM regime_audit")
-    block = src[max(0, i - 2000):i + 400]
+    # ANCHORED ON THE FUNCTION, not on the first textual match. This read
+    # `src.index("FROM regime_audit")`, and P11 (R-IV.1354(b)) added
+    # `version_live_instant` ABOVE this one -- whose lookup is deliberately filtered by
+    # rules_version. The locator then pointed at the wrong query and this test failed
+    # while the thing it checks was untouched. Same class as the 9000-character window.
+    f = src.index("async def latest_with_diff(")
+    i = src.index("FROM regime_audit", f)
+    block = src[f:i + 400]
     assert "ORDER BY created_at DESC" in block
     assert "rules_version" not in block.split("FROM regime_audit")[1][:200]
 
