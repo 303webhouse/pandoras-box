@@ -159,22 +159,49 @@ def resolve_period(key: str, today: date, first: Optional[date]) -> dict:
     }
 
 
-def _agg(rows: List[dict]) -> dict:
-    """Wins, losses and SCRATCHES, each counted as its own thing.
+def _agg(rows: List[dict], elsewhere: Optional[set] = None) -> dict:
+    """Wins, losses and SCRATCHES -- counted PER POSITION PER PERIOD (R-IV.1356(b)).
 
-    The win rate's denominator is wins + losses. A scratch is excluded from it and reported beside
-    it: folding scratches into the denominator quietly lowers the rate for trades that neither won
-    nor lost, and folding them into either side is worse.
+    THE UNIT IS THE TRADE, NOT THE CLOSING RECORD. Counting closure rows made one XLF position
+    read as FOURTEEN losses in October, because a multi-leg position is relieved lot by lot, and
+    an eight-lot expiry scored as eight. Measured on the same window and the same money: 36.7% by
+    closure against 48.9% by position, a 12.2-point gap over an identical -540.52.
+
+    A POSITION IS COUNTED IN EVERY PERIOD IT CLOSED IN, BY ITS REALIZED IN THAT PERIOD. The
+    alternative -- count it once, in the period of its last closure, with its whole realized --
+    would put September's money into October's counts, which is the same class of error as the
+    `created_at` window this lane spent four rulings removing. The headline here is a PERIOD
+    figure, so the win rate must describe the SAME MONEY the realized tile shows, and it does:
+    these counts and that total are the same closures grouped two ways.
+
+    THE CLOSURE COUNT SURVIVES as `closes`, beside the position count. It is the sample the money
+    was drawn from, and dropping it would hide that a 47-position month moved 99 times.
+
+    AVG WIN, AVG LOSS, PAYOFF AND PROFIT FACTOR MOVE TO THE SAME UNIT, and that goes one step past
+    the literal words of (b). They are drawn from the same wins and losses: leaving them per
+    closure would mean "average win" counted a winning LEG of a losing trade, and the page would
+    carry two different definitions of a win three inches apart. Flagged in the report rather than
+    done quietly; it is one argument to `_agg` to change back.
+
+    `elsewhere` is the set of position_ids that ALSO booked outside this window, so the page can
+    say how many of its counted positions are partial here.
     """
-    wins = [r["realized"] for r in rows if r["realized"] > 0]
-    losses = [r["realized"] for r in rows if r["realized"] < 0]
-    scratches = [r for r in rows if r["realized"] == 0]
+    by: Dict[str, Decimal] = {}
+    for r in rows:
+        by[r["position_id"]] = by.get(r["position_id"], Decimal("0")) + r["realized"]
+    wins = [v for v in by.values() if v > 0]
+    losses = [v for v in by.values() if v < 0]
+    scratches = [v for v in by.values() if v == 0]
     decided = len(wins) + len(losses)
     gross_w = sum(wins, Decimal("0"))
     gross_l = sum(losses, Decimal("0"))
+    partial = sorted(p for p in by if elsewhere and p in elsewhere)
     return {
         "realized": _money(sum((r["realized"] for r in rows), Decimal("0"))) if rows else None,
+        # The two counts, both named, because they answer different questions.
+        "positions": len(by),
         "closes": len(rows),
+        "unit": "position per period; `closes` is the closure count the money was drawn from",
         "wins": len(wins), "losses": len(losses), "scratches": len(scratches),
         # NULL, never 0: "nothing was decided" is not "everything lost".
         "win_rate": (round(len(wins) / decided, 4) if decided else None),
@@ -189,7 +216,12 @@ def _agg(rows: List[dict]) -> dict:
         "gross_losses": _money(gross_l) if losses else None,
         "profit_factor": (round(float(gross_w / -gross_l), 3) if losses and gross_l != 0 else None),
         "profit_factor_note": (None if losses else
-                               "no losing close in this window, so there is no ratio to divide by"),
+                               "no losing trade in this window, so there is no ratio to divide by"),
+        # R-IV.1356(b): a position counted here that ALSO booked in another period is counted
+        # there too. Said on the page, so the reader knows these are position-PERIODS rather than
+        # completed trades.
+        "also_booked_elsewhere": len(partial),
+        "also_booked_elsewhere_rows": partial,
     }
 
 
@@ -281,13 +313,18 @@ async def load_pnl(pool, period: str = "month", account: str = "ALL") -> dict:
 
     f, t = date.fromisoformat(win["from"]), date.fromisoformat(win["to"])
     cur = [r for r in rows if in_scope(r) and f <= r["trade_date"] <= t]
+    # R-IV.1356(b): which of the counted positions ALSO booked outside this window. Computed from
+    # the whole ledger, not from the window -- the point is precisely what lies outside it.
+    in_window = {r["position_id"] for r in cur}
+    elsewhere = {r["position_id"] for r in rows
+                 if r["position_id"] in in_window and not (f <= r["trade_date"] <= t)}
     out = {"period": win, "account": acct,
            "accounts": [{"key": "ALL", "label": "All accounts"}]
                        + [{"key": a, "label": display_name(a) or a} for a in CANONICAL_ACCOUNTS],
            "realized_basis": ("position_lot_closures.realized, windowed on trade_date, "
                               "DUPLICATE_OF excluded. Already NET OF FEES: fees are inside "
                               "cost_per_unit and proceeds_per_unit."),
-           **_agg(cur)}
+           **_agg(cur, elsewhere)}
 
     if win["prior"]:
         pf, pt = date.fromisoformat(win["prior"]["from"]), date.fromisoformat(win["prior"]["to"])
@@ -300,8 +337,9 @@ async def load_pnl(pool, period: str = "month", account: str = "ALL") -> dict:
 
     out["by_account"] = [
         {"account": a, "account_display": display_name(a) or a,
-         **{k: v for k, v in _agg([r for r in cur if (r["account"] or "") == a]).items()
-            if k in ("realized", "closes", "wins", "losses", "scratches", "win_rate", "win_rate_n")}}
+         **{k: v for k, v in _agg([r for r in cur if (r["account"] or "") == a], elsewhere).items()
+            if k in ("realized", "positions", "closes", "wins", "losses", "scratches",
+                     "win_rate", "win_rate_n")}}
         for a in CANONICAL_ACCOUNTS]
 
     # BY BUCKET: served as its own fill rate and a refusal, never as a chart of 9 rows out of 66.
@@ -386,5 +424,9 @@ async def load_pnl(pool, period: str = "month", account: str = "ALL") -> dict:
                  "and October read $485.03 better than it was (R-IV.1346)"),
     }
     out["computed_at"] = now.isoformat().replace("+00:00", "Z")
-    out["preview"] = "pnl=v1"
+    # R-IV.1356(c): shipped as the default. The rollback flag and its expiry are on the
+    # payload so an operator can find them without reading this file.
+    out["view"] = "pnl"
+    out["rollback"] = {"flag": "?view=summary", "expires": "2026-10-29",
+                       "note": "the old summary view, kept for one week then removed"}
     return out

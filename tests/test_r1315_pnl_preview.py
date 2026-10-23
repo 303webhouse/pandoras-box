@@ -194,9 +194,12 @@ with sync_playwright() as p:
     b = getattr(p, ENGINE).launch()
 
     # ── the preview's content ───────────────────────────────────────────────────
-    pg, ctx, errs = page(b, 'abacus.html?pnl=v1', 1920, 1080)
+    # R-IV.1356(c): the P&L view is THE DEFAULT now -- opened with no query string at all.
+    pg, ctx, errs = page(b, 'abacus.html', 1920, 1080)
     body = pg.evaluate("() => document.body.innerText")
-    check('the preview took the page', 'P&L' in body and 'Preview (?pnl=v1)' in body, body[:160])
+    check('the P&L view is the DEFAULT, with no query string',
+          'P&L' in body and 'realized, by trade date' in body, body[:160])
+    check('...and no longer calls itself a preview', 'Preview (?pnl=v1)' not in body, body[:200])
     check('the summary view did NOT also paint',
           pg.evaluate("() => !!document.getElementById('abPnl') && [...document.getElementById('abPage').children]"
                       ".filter(e => e.id !== 'abPnl').every(e => e.hidden)"))
@@ -205,7 +208,15 @@ with sync_playwright() as p:
     blob = '\n'.join(kpis)
     check('realized carries its prior period', 'REALIZED' in blob and 'realized, by trade date' in body, blob[:140])
     check('the SCRATCH is excluded from the win rate and said so',
-          'scratch' in blob and 'decided' in blob, blob[:200])
+          'scratch' in blob and 'excluded' in blob, blob[:200])
+    # R-IV.1356(b): THE UNIT IS THE POSITION. The stub's SQQQ position holds TWO closures
+    # (+40.00 and +24.00); counted by closure that is two wins, by position it is one.
+    check('wins and losses count POSITIONS, not closing records',
+          'of 4 positions' in blob, blob[:280])
+    check('...and the closure count stays visible as the sample',
+          '6 closes' in blob, blob[:280])
+    check('...and the banner states the unit on the page itself',
+          'count a position once per period' in body.replace('\n', ' '), body[:420])
     # NOT a floor. A floor marker claims the true figure is at least this, which is a statement
     # about order, and an unpriced row can move a SIGNED total either way. The tile states its
     # COVERAGE instead, which is the claim that actually holds.
@@ -245,6 +256,22 @@ with sync_playwright() as p:
     check('a multi-lot close whose lots differ shows a RANGE, not one number',
           any('–' in r and 'SQQQ' in r for r in rows), [r for r in rows if 'SQQQ' in r])
     check('no console or page errors', not errs, errs)
+    ctx.close()
+
+    # THE ROLLBACK FLAG (R-IV.1356(c)), which expires 2026-10-29. Tested because a flag nobody
+    # exercises is a flag that has already broken by the time someone needs it.
+    pg, ctx, errs = page(b, 'abacus.html?view=summary', 1920, 1080)
+    check('?view=summary still reaches the OLD summary view',
+          pg.evaluate("() => !document.getElementById('abPnl')"))
+    check('...and the summary sections are not hidden',
+          pg.evaluate("() => [...document.getElementById('abPage').children].some(e => !e.hidden)"))
+    check('rollback path: no errors', not errs, errs)
+    ctx.close()
+
+    # And the old address keeps working, so links already shared do not break.
+    pg, ctx, errs = page(b, 'abacus.html?pnl=v1', 1920, 1080)
+    check('?pnl=v1 still resolves to the P&L view',
+          'realized, by trade date' in pg.evaluate("() => document.body.innerText"))
 
     # ── R-IV.1319(c) · full width at three sizes, both views ────────────────────
     for (w, h) in ((1920, 1080), (2560, 1440), (1366, 768)):
