@@ -106,15 +106,19 @@
     }).join('');
     var line = c.points.map(function (p, i) { return x(i).toFixed(1) + ',' + y(Number(p.cumulative)).toFixed(1); }).join(' ');
     var last = c.points[c.points.length - 1];
+    // R-IV.1365(b)3: THE AXIS LABELS ARE HTML, NOT SVG TEXT. They were <text font-size="9">, and
+    // raising that to 12 would have been a FALSE FIX: text inside a 560-wide viewBox scaled into
+    // a ~332px container paints at about 59% of its attribute, so "12" would still have rendered
+    // near 7px while a computed-style check read 12 and passed. Outside the SVG, 12px is 12px.
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Cumulative realized, year to date">'
       + '<line x1="0" y1="' + zero.toFixed(1) + '" x2="' + W + '" y2="' + zero.toFixed(1) + '" stroke="var(--border-strong)" stroke-dasharray="3 3"></line>'
-      + '<text x="2" y="' + (zero - 4).toFixed(1) + '" fill="var(--text-2)" font-size="9" font-family="monospace">$0</text>'
       + bars
       + '<polyline points="' + line + '" fill="none" stroke="var(--text)" stroke-width="1.8"></polyline>'
       + '<circle cx="' + x(c.points.length - 1).toFixed(1) + '" cy="' + y(Number(last.cumulative)).toFixed(1) + '" r="3.5" fill="' + (Number(last.cumulative) < 0 ? 'var(--down)' : 'var(--up)') + '"></circle>'
-      + '<text x="2" y="' + (H - 4) + '" fill="var(--text-2)" font-size="9" font-family="monospace">' + esc(c.points[0].week) + '</text>'
-      + '<text x="' + (W - 60) + '" y="' + (H - 4) + '" fill="var(--text-2)" font-size="9" font-family="monospace">' + esc(last.week) + '</text>'
-      + '</svg>';
+      + '</svg>'
+      + '<div class="pnl-axis pnl-sub"><span>' + esc(c.points[0].week) + '</span>'
+      + '<span>the dashed line is $0</span>'
+      + '<span>' + esc(last.week) + '</span></div>';
   }
 
   function acctRows(list) {
