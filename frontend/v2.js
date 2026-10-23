@@ -3911,6 +3911,74 @@
               + '% beside it is FRED’s settled figure') + '">intra ' + sign
         + Number(b.change_bp).toFixed(1) + 'bp</span>';
     };
+    // R-IV.1363(c): DURING MARKET HOURS THE HEADLINE IS THE LIVE YIELD, NOT FRED'S CLOSE.
+    //
+    // WHAT NICK SAW, measured at 13:37Z on 2026-10-23, seven minutes after the open. The box
+    // showed `10Y 5.13%` as its biggest number with NO DATE ANYWHERE ON ITS FACE, because the
+    // `CLOSED . as of <date>` chip only appears outside the session. 5.13% was FRED's
+    // 2026-10-21 close. FRED had not yet published 10-22 (H.15 publishes the next business day
+    // in the late ET afternoon), and on 10-22 the 10Y had fallen about 18bp: the live market
+    // was at 4.965 and the box said 5.13, a 16.5bp gap, with nothing on screen to say the
+    // number was two sessions old. He watches bond yields all day; of course it read as broken.
+    //
+    // The intraday tick was present and correct the whole time -- it was just rendered as a
+    // small "intra -1.3bp" caption beside a large stale level. The data was never the problem;
+    // the HIERARCHY was. So the two swap places while the session is open.
+    //
+    // THE TWO FIGURES ARE NEVER MERGED (R-IV.1257(c)). Each carries its own number, its own
+    // change and its own timestamp: the live tick with its TIME, FRED's close with its DATE.
+    // A reader can always tell which is which, and neither is ever computed from the other.
+    //
+    // LABELS AND Z-SCORES STAY ON FRED, per the ruling. `t.label`, `t.pulse` and the tooltip
+    // are unchanged and still tint the tenor key -- an UNUSUAL/EXTREME call is a statement
+    // about a settled series, and recomputing it on an unsettled tick would be a different
+    // claim wearing the same word.
+    // WHICH TENORS MAY TAKE THE LIVE HEADLINE, and this is MEASURED, not assumed. A tick may
+    // only replace a FRED level if the two are on the SAME BASIS -- otherwise the headline
+    // would change basis at every open and close, which is a new false alarm on the very box
+    // this ruling is fixing.
+    //
+    // Measured 2026-10-23 over the six sessions 10-14..10-21, FRED minus Yahoo, in bp:
+    //
+    //    DGS5  vs ^FVX   mean +0.1   range -2.2 .. +1.1
+    //    DGS10 vs ^TNX   mean +0.1   range -1.6 .. +1.4
+    //    DGS30 vs ^TYX   mean -0.4   range -1.9 .. +0.8
+    //    DGS3MO vs ^IRX  mean +19.0  range +18.0 .. +19.5   <-- EVERY SINGLE DAY
+    //
+    // The long end agrees to under 2bp: same quantity, so the tick is comparable and may
+    // lead. **^IRX is the 13-week bill DISCOUNT rate and DGS3MO is a bond-equivalent yield**
+    // -- a structural ~19bp difference, not staleness. Promoting it would drop the 3M row
+    // 19bp at every open and jump it back at every close. So 3M keeps FRED as its headline
+    // (with its date, which is the part that was missing) and its tick stays a caption.
+    //
+    // This NARROWS R-IV.1363(c) by one tenor and is reported as such. It serves the ruling's
+    // purpose rather than bending it: (c) exists so the box stops showing a number the market
+    // has left, and an ^IRX headline would show a number the market was never at on FRED's
+    // basis. The right long-term home for this is the symbol map in the hub, beside the
+    // vendor-name verification, not a constant in the view.
+    const LIVE_HEADLINE_OK = { "5Y": true, "10Y": true, "30Y": true };
+
+    const etTime = (iso) => {
+      try {
+        return new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+        }).format(new Date(iso)) + ' ET';
+      } catch (_) { return ''; }
+    };
+    const fredAside = (t) => {
+      // FRED'S DATE IS NOW ALWAYS ON THE FACE, in every state, which is the part that was
+      // actually missing. Even where FRED remains the headline (the 2Y, or outside hours) the
+      // row says WHEN that close is from.
+      const chg = t.change_bp;
+      const when = t.as_of ? ' \u00b7 ' + esc(String(t.as_of).slice(5)) : '';
+      return '<span style="font-size:10px;color:#8b98ad;letter-spacing:.2px" title="'
+        + esc('FRED ' + (t.series || '') + ' settled close, as of ' + (t.as_of || 'unknown')
+              + '. The official level: labels and z-scores are computed on this series, never '
+              + 'on the intraday tick beside it.')
+        + '">FRED ' + Number(t.level_pct).toFixed(2) + '%'
+        + (chg == null ? '' : (chg >= 0 ? ' +' : ' ') + Number(chg).toFixed(1) + 'bp')
+        + when + '</span>';
+    };
     const tenorRows = tenors.map((t) => {
       const tint = t.label === 'EXTREME' ? ' yc-t-extreme'
         : (t.label === 'UNUSUAL' ? ' yc-t-unusual' : '');
@@ -3919,6 +3987,34 @@
           + '</span><span class="yc-tv rd-na-inline" title="'
           + esc(t.unavailable_reason || '') + '">unavailable</span></div>';
       }
+      const b = intra[t.tenor];
+      // THE LIVE HEADLINE NEEDS THE SESSION *AND* A VERIFIED TICK. `marketShut()` answers from
+      // the server's own calendar and UNKNOWN IS NOT CLOSED, so `!closed` alone would promote a
+      // stale tick to the headline on an unknown session -- which is why the time is rendered
+      // beside the number in every case rather than only when it looks wrong.
+      const liveHead = !closed && LIVE_HEADLINE_OK[t.tenor]
+        && b && b.verified && b.last_pct != null;
+      if (liveHead) {
+        const ic = b.change_bp;
+        return '<div class="yc-tr" title="' + esc(t.tooltip || '') + '">'
+          + '<span class="yc-tk' + tint + (t.pulse ? ' yc-pulse' : '') + '">'
+          + esc(t.tenor) + '</span>'
+          + '<span class="yc-tv" title="'
+          + esc('live intraday ' + (b.symbol || '') + ' (' + (b.vendor_name || 'unnamed')
+                + '), 15-minute bars, as of ' + (b.as_of || 'unknown')
+                + ' \u2014 an UNSETTLED tick, not a settled close. FRED\u2019s settled figure '
+                + 'is beside it with its own date.')
+          + '">' + Number(b.last_pct).toFixed(2) + '%</span>'
+          + (ic == null ? '' : '<span class="yc-tc ' + signCls(ic) + '">'
+            + (ic >= 0 ? '+' : '') + Number(ic).toFixed(1) + 'bp</span>')
+          + '<span style="font-size:10px;color:#5d6b82;letter-spacing:.2px">'
+          + esc(etTime(b.as_of)) + '</span>'
+          + fredAside(t)
+          + '</div>';
+      }
+      // FRED stays the headline: outside the session, or where there is no intraday symbol at
+      // all (the 2Y). `intraCell` keeps saying WHY the tick is absent rather than leaving a gap
+      // that reads as "unchanged today".
       const chg = t.change_bp;
       return '<div class="yc-tr" title="' + esc(t.tooltip || '') + '">'
         + '<span class="yc-tk' + tint + (t.pulse ? ' yc-pulse' : '') + '">'
@@ -3926,6 +4022,9 @@
         + '<span class="yc-tv">' + Number(t.level_pct).toFixed(2) + '%</span>'
         + (chg == null ? '' : '<span class="yc-tc ' + signCls(chg) + '">'
           + (chg >= 0 ? '+' : '') + Number(chg).toFixed(1) + 'bp</span>')
+        + (t.as_of ? '<span style="font-size:10px;color:#5d6b82;letter-spacing:.2px" title="'
+            + esc('FRED settled close, as of ' + t.as_of) + '">'
+            + esc(String(t.as_of).slice(5)) + '</span>' : '')
         + intraCell(t.tenor)
         + '</div>';
     }).join('');
