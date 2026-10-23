@@ -140,8 +140,14 @@ def test_EXTREME_IS_EITHER_TAIL_AND_THE_MIDDLE_IS_NOT():
 def test_A_MOCK_ROW_NEVER_VOTES_IN_THE_HEADLINE():
     """A headline partly drawn from a fixture is a claim about the market made from a fixture.
     The mock row is on the tile and out of the count."""
-    live_extreme = {"pct": 95, "extreme": True, "extreme_end": "high", "mock": False}
-    mock_extreme = {"pct": 95, "extreme": True, "extreme_end": "high", "mock": True}
+    # R-IV.1369(f)6 gave each row its OWN direction, so a row must now name itself to
+    # vote. These fixtures omitted `key` because it did not matter before. The test is
+    # about the MOCK row being excluded, not about direction, so they gain a key and
+    # the assertion stands: PUT/CALL high is bears crowded.
+    live_extreme = {"key": "PUT/CALL", "pct": 95, "extreme": True,
+                    "extreme_end": "high", "mock": False}
+    mock_extreme = {"key": "PUT/CALL", "pct": 95, "extreme": True,
+                    "extreme_end": "high", "mock": True}
     word, lean, basis = cb.headline([live_extreme, mock_extreme])
     assert word == "BEARS CROWDED"
     assert "1 of 1 live rows" in basis, basis
@@ -162,3 +168,58 @@ def test_A_ROW_WITH_NO_PERCENTILE_DOES_NOT_COUNT_AS_AGREEMENT():
     """An unrankable row is not a vote for "mixed" -- it is not a vote."""
     live_na = {"pct": None, "extreme": False, "mock": False}
     assert cb.headline([live_na])[0] is None
+
+
+# ── R-IV.1369(f)6: each row's high end means its own thing ──────────────────
+
+def _ex(key, end="high"):
+    """An extreme live row for `key`. `pct` is only there to make the row live."""
+    return {"key": key, "pct": 95 if end == "high" else 5, "extreme": True,
+            "extreme_end": end, "mock": False}
+
+
+def test_FUTURES_at_95_is_BULLS_CROWDED():
+    """THE DEFECT, named. A high leveraged-money net is the crowd positioned LONG. The old
+    headline counted every "high" extreme as BEARS CROWDED, so a week with funds at a
+    95th-percentile net long published the exact opposite of what the data said -- on the tile
+    whose whole point is which side is already full."""
+    word, lean, basis = cb.headline([_ex("FUTURES")])
+    assert word == "BULLS CROWDED", basis
+    assert lean == "notable"
+
+
+def test_PUT_CALL_at_95_is_BEARS_CROWDED():
+    """The case the old code got right, kept as a control: a high ratio is a lot of puts."""
+    word, lean, basis = cb.headline([_ex("PUT/CALL")])
+    assert word == "BEARS CROWDED", basis
+    assert lean == "notable"
+
+
+def test_ONE_OF_EACH_is_CROWD_MIXED():
+    """Both sides crowded is a real, readable state. Picking the larger count would turn a
+    one-row margin into a confident call."""
+    word, lean, basis = cb.headline([_ex("FUTURES"), _ex("PUT/CALL")])
+    assert word == "CROWD MIXED", basis
+    assert "extremes disagree" in basis
+
+
+def test_the_LOW_end_flips_each_row_too():
+    """The map names the HIGH end; the low end is its opposite, per row."""
+    assert cb.headline([_ex("FUTURES", "low")])[0] == "BEARS CROWDED"
+    assert cb.headline([_ex("PUT/CALL", "low")])[0] == "BULLS CROWDED"
+
+
+def test_a_row_with_NO_DECLARED_SIDE_does_not_vote():
+    """SHORT INT has no percentile and no side -- "shown, not counted". Guessing a direction
+    for an undeclared row would be the same error in a new place."""
+    word, _lean, basis = cb.headline([_ex("SHORT INT")])
+    assert word == "CROWD MIXED"
+    assert "declares a side" in basis
+
+
+def test_BOTH_crowded_headlines_are_NOTABLE_not_bear_or_bull():
+    """R-IV.1369(f)7. A crowded side is contrarian fuel: painting "BEARS CROWDED" in the bear
+    colour invites the wrong read, since a crowded short side is what a squeeze runs on."""
+    assert cb.headline([_ex("FUTURES")])[1] == "notable"
+    assert cb.headline([_ex("PUT/CALL")])[1] == "notable"
+    assert cb.HEADLINE_LEAN_CROWDED == "notable"

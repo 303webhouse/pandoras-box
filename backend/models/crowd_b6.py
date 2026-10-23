@@ -40,6 +40,23 @@ CROWDED_SHORT_DTC = 5.0
 EXTREME_LOW, EXTREME_HIGH = 10, 90
 
 
+#: R-IV.1369(f)6. Which side is CROWDED when a row sits at its HIGH end. Each row's high means
+#: something different, and reading them as one number was the defect above.
+#:
+#:   FUTURES   high net long  -> leveraged money is crowded LONG  -> bulls
+#:   PUT/CALL  high ratio     -> a lot of puts bought             -> bears
+#:
+#: A row absent from this map does not vote. SHORT INT is deliberately absent: it has no
+#: percentile at all and is "shown, not counted".
+CROWDED_SIDE_AT_HIGH = {"FUTURES": "bulls", "PUT/CALL": "bears"}
+
+#: R-IV.1369(f)7. BOTH crowded headlines are 'notable' (teal), NOT 'bear'/'bull'.
+#: A crowded side is contrarian fuel: painting "BEARS CROWDED" in the bear colour invites
+#: exactly the wrong read, since a crowded short side is what a squeeze runs on. Display only.
+HEADLINE_LEAN_CROWDED = "notable"
+HEADLINE_LEAN_NEUTRAL = "neutral"
+
+
 def percentile(value: Optional[float], history: Sequence[Optional[float]]) -> Optional[int]:
     """Rank of `value` within `history`, 0-100. None when there is nothing to rank against.
 
@@ -248,9 +265,43 @@ def headline(rows: Sequence[Dict[str, Any]]) -> Tuple[Optional[str], Optional[st
     extremes = [r for r in live if r.get("extreme")]
     n = "%d of %d live rows" % (len(extremes), len(live))
     if not extremes:
-        return "CROWD MIXED", "neutral", "no live row at an extreme, %s" % n
-    highs = [r for r in extremes if r.get("extreme_end") == "high"]
-    lows = [r for r in extremes if r.get("extreme_end") == "low"]
-    if len(highs) >= len(lows):
-        return "BEARS CROWDED", "bear", "%s at a high extreme, %s" % (len(highs), n)
-    return "BULLS CROWDED", "bull", "%s at a low extreme, %s" % (len(lows), n)
+        return "CROWD MIXED", HEADLINE_LEAN_NEUTRAL, "no live row at an extreme, %s" % n
+
+    # R-IV.1369(f)6: EACH ROW DECIDES WHAT ITS OWN HIGH END MEANS.
+    #
+    # THE DEFECT THIS REPLACES counted every "high" extreme as BEARS CROWDED:
+    #
+    #     highs = [r for r in extremes if r.get("extreme_end") == "high"]
+    #     if len(highs) >= len(lows): return "BEARS CROWDED", ...
+    #
+    # True for PUT/CALL -- a high ratio is a lot of puts, so bears are crowded. **FALSE for
+    # FUTURES**, where a high leveraged-money net is the crowd positioned LONG. A week with
+    # leveraged funds at a 95th-percentile net long would have been published as "BEARS
+    # CROWDED", which is the opposite of what the data says, on the tile whose whole point is
+    # which side is already full.
+    sides = []
+    for r in extremes:
+        at_high = CROWDED_SIDE_AT_HIGH.get(str(r.get("key") or "").strip().upper())
+        if at_high is None:
+            # A row with no declared direction DOES NOT VOTE. Guessing one would be the same
+            # error in a new place: SHORT INT has no percentile and no side, and a future row
+            # must declare itself before it can move the headline.
+            continue
+        at_low = "bears" if at_high == "bulls" else "bulls"
+        sides.append(at_high if r.get("extreme_end") == "high" else at_low)
+
+    bulls = sides.count("bulls")
+    bears = sides.count("bears")
+    if not sides:
+        return "CROWD MIXED", HEADLINE_LEAN_NEUTRAL, (
+            "no live row at an extreme declares a side, %s" % n)
+    if bulls and bears:
+        # DISAGREEMENT IS NOT A MAJORITY VOTE. Two sides both crowded is a real and readable
+        # state; picking the larger count would turn 2-versus-1 into a confident call built on
+        # one row's margin.
+        return "CROWD MIXED", HEADLINE_LEAN_NEUTRAL, "extremes disagree, %s" % n
+    if bulls:
+        return "BULLS CROWDED", HEADLINE_LEAN_CROWDED, (
+            "%d at a bulls-crowded extreme, %s" % (bulls, n))
+    return "BEARS CROWDED", HEADLINE_LEAN_CROWDED, (
+        "%d at a bears-crowded extreme, %s" % (bears, n))
