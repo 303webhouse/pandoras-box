@@ -3621,8 +3621,23 @@ async def run_mark_to_market() -> dict:
             long_strike, short_strike, structure
         )
 
-        if entry_price is None:
-            continue
+        # R-IV.1381(c)1: THIS SKIP IS GONE, and it was the one that mattered.
+        #
+        # `if entry_price is None: continue` sat here, BEFORE any pricing -- so a row with no
+        # stored entry was dropped out of the loop entirely: no vendor lookup, no price, no
+        # mark_status, no mark_checked_at. It read as "never attempted" while its siblings were
+        # priced from the same fetch in the same cycle, and because an unpriced row holds its
+        # account balance at a floor, this one line put the >= markers on the balances and
+        # UNAVAILABLE on Day P&L.
+        #
+        # Nothing below needs a stored entry. The mark comes from the vendor; only the P&L
+        # needs an entry, and `entry_for_pnl` supplies a derived one (cost_basis over quantity,
+        # or over quantity x 100 for options) when none is stored. A row that has neither keeps
+        # its mark and reports no P&L, which is the honest pair.
+        #
+        # I REMOVED THE WRITE GATE FIRST AND THAT WAS NOT ENOUGH: the job ran clean, 16 rows
+        # updated, 0 errors, and all five target rows were untouched -- because they never got
+        # past this line. Only checking production found it.
 
         current_price = None
         unrealized = None

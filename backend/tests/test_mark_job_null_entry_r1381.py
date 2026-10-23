@@ -147,3 +147,37 @@ def test_the_multiplier_rule_is_written_down_with_its_measurement():
     back to cost_basis / quantity."""
     assert "THE MULTIPLIER IS THE TRAP" in SRC
     assert "reproduces entry_price EXACTLY" in SRC
+
+
+def test_THE_EARLY_SKIP_IS_GONE():
+    """The gate that actually mattered, and the one my first pass missed.
+
+    `if entry_price is None: continue` sat BEFORE any pricing, so a row with no stored entry
+    left the loop entirely -- no vendor lookup, no price, no mark_status, no mark_checked_at.
+    Removing the WRITE gate alone changed nothing: the job ran clean (16 updated, 0 errors) and
+    all five target rows were untouched, because they never reached it. Only a production read
+    found that.
+
+    COMMENTS STRIPPED. The fix's own comment quotes the removed line to explain it, so a raw
+    `not in` matches the explanation and fails on the thing that documents the fix -- the
+    sixteenth time that trap has fired in this session.
+    """
+    import re
+
+    i = SRC.index("async def run_mark_to_market(")
+    j = SRC.index("async def ", i + 10)
+    code = re.sub(r"#[^\n]*", "", SRC[i:j])
+    assert "if entry_price is None:" not in code, "the early skip is back"
+    assert "continue" in code, "the loop's other, legitimate skips must survive"
+
+
+def test_the_OTHER_skips_in_the_loop_survive():
+    """Three skips remain and each guards a different wrong price: a multi-leg structure with
+    no legs, legs that were attempted and failed, and the UNAVAILABLE write. Removing the
+    entry-price skip must not have taken them with it."""
+    i = SRC.index("async def run_mark_to_market(")
+    j = SRC.index("async def ", i + 10)
+    job = SRC[i:j]
+    assert "requires legs JSONB but none found" in job
+    assert "if current_price is None and jsonb_attempted:" in job
+    assert "'UNAVAILABLE'" in job or '"UNAVAILABLE"' in job
