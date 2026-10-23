@@ -1023,7 +1023,7 @@
         kv('As of (close)', r.metrics_date || '—') +
         '<div style="margin-top:10px;font-size:11px;color:var(--text-3);line-height:1.45">The two lenses share no inputs. Market mix blends 20 market-wide factors (volatility, breadth, credit, trend, macro) and recomputes every 15 minutes. Theme breadth is one nightly number: the share of your themed watchlist above its 50-day average.</div>';
     }
-    $('drawerBackdrop').classList.add('open');
+    $('drawerBackdrop').classList.add('open'); openedDrawerHistory();
     $('drawer').classList.add('open');
     placeChartSoon();
   }
@@ -1867,7 +1867,7 @@
       // own repaint, so it cannot be left stale by whichever paint happens first.
       d.classList.add('pv-wide');
       renderPopV2(body);
-      $('drawerBackdrop').classList.add('open');
+      $('drawerBackdrop').classList.add('open'); openedDrawerHistory();
       d.classList.add('open');
       const b2 = $('rsOpen');
       if (b2) b2.setAttribute('aria-expanded', 'true');
@@ -1914,15 +1914,44 @@
       // now be the stale caption this one replaced.
       + '';
 
-    $('drawerBackdrop').classList.add('open');
+    $('drawerBackdrop').classList.add('open'); openedDrawerHistory();
     d.classList.add('open');
     const btn = $('rsOpen');
     if (btn) btn.setAttribute('aria-expanded', 'true');
   }
-  function closeDrawer() {
+  // R-IV.1364(a): ANDROID'S BACK GESTURE CLOSES THE POP-OUT.
+  //
+  // On a phone the back gesture is how you leave anything that covers the screen, and the
+  // drawer had no history entry -- so back left Agora entirely instead of closing the drawer.
+  // Opening pushes one state; closing pops it only if it is still ours, so a close by the X or
+  // by the backdrop does not eat a real navigation the user made in between.
+  let _drawerHist = false;
+
+  function openedDrawerHistory() {
+    if (_drawerHist) return;
+    try { history.pushState({ pandoraDrawer: true }, ''); _drawerHist = true; } catch (_) {}
+  }
+
+  function closeDrawer(fromPopstate) {
     $('drawerBackdrop').classList.remove('open'); $('drawer').classList.remove('open'); placeChartSoon();
     if (_divOpen) { _divOpen = false; if (_charts.divChart) { _charts.divChart.destroy(); delete _charts.divChart; } }
+    if (_drawerHist) {
+      _drawerHist = false;
+      // NOT when the popstate IS the back gesture -- the entry is already gone, and calling
+      // back() again would navigate off the page, which is the bug this fixes, inverted.
+      if (!fromPopstate) { try { history.back(); } catch (_) {} }
+    }
   }
+
+  window.addEventListener('popstate', () => {
+    if ($('drawer') && $('drawer').classList.contains('open')) closeDrawer(true);
+  });
+
+  // Escape closes it too. Free on desktop and costs nothing on a phone.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if ($('drawer') && $('drawer').classList.contains('open')) closeDrawer();
+  });
 
   // ── Pop-out sides ─────────────────────────────────────────────────────────
   // A pop-out opens on the side of the screen its source tile sits on, and follows the tile
@@ -4445,7 +4474,7 @@
          <button type="button" class="btn-secondary" id="posChartBtn">Chart</button>
        </div>`;
     closePopup(); setSide($('drawer'), popSide(null, 'book')); syncTopbarH();
-    $('drawerBackdrop').classList.add('open'); $('drawer').classList.add('open'); placeChartSoon();
+    $('drawerBackdrop').classList.add('open'); openedDrawerHistory(); $('drawer').classList.add('open'); placeChartSoon();
     $('posCloseBtn').addEventListener('click', () => openCloseForm(p));
     $('posChartBtn').addEventListener('click', (e) => openChart(p.ticker, e.target));
     // R-IV.1178(b): bound only when the button was drawn. Querying an element that a
