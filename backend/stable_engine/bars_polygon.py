@@ -271,6 +271,32 @@ async def backfill(conn, tickers, years: int = 2) -> Dict[str, Any]:
     return report
 
 
+async def sessions_with_stored_bars(conn, tickers, since):
+    """Dates that already hold a bar for EVERY ticker, or None when the table cannot be read.
+
+    EVERY TICKER, because `capture_session` writes a session all-or-nothing: a date holding SPY
+    but not IWM was never written by this path, and treating it as present would leave a hole
+    the classifier reads as data.
+
+    NONE IS A THIRD ANSWER, not an empty set. Empty means "nothing stored, consider the whole
+    range"; None means "I could not find out", and the caller then processes its target only AND
+    SAYS SO in its result. Collapsing the two would make an unreadable table look like an empty
+    one and send the UW verifier across the entire range every night.
+    """
+    try:
+        rows = await conn.fetch(
+            """SELECT date, COUNT(DISTINCT ticker) AS n
+                 FROM regime_daily_bars
+                WHERE date >= $1 AND ticker = ANY($2::text[])
+                GROUP BY date""", since, list(tickers))
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("[bars_polygon] cannot read stored bar dates (%s); only the target "
+                     "session will be considered", type(exc).__name__)
+        return None
+    need = len(set(tickers))
+    return set(r["date"] for r in rows if (r["n"] or 0) >= need)
+
+
 async def capture_session(conn, session: _dt.date, tickers) -> Dict[str, Any]:
     """The nightly read: settled sessions only, and verified before anything is written.
 
@@ -290,10 +316,27 @@ async def capture_session(conn, session: _dt.date, tickers) -> Dict[str, Any]:
                 "reason": "not settled: %s (is_session_settled=%r)"
                           % (settlement_reason(session), settled)}
 
-    staged: Dict[str, Dict[str, Any]] = {}
-    problems: List[str] = []
+    # -- R-IV.1357(a)1: EVERY VERIFIED BAR IN THE RANGE, not only the target's ----------
+    #
+    # WHAT THIS FIXES, measured rather than reasoned about. The range was ALREADY being fetched
+    # (RANGE_LOOKBACK_DAYS = 7) and every bar but the target's was thrown away. Asked directly
+    # on 2026-10-23 at 02:08:40Z, Polygon served SPY/QQQ/IWM for 10-15, 10-16, 10-19, 10-20 and
+    # 10-21 and withheld 10-22. The night of 10-21 had asked for 10-21 at +5.6h after its close
+    # and been refused. So 10-21's bar sat in every later response and was discarded each time,
+    # and nothing ever asked for that session again: this function is the ONLY writer of
+    # `regime_daily_bars` and it is called once a night with that night's own target. The bar
+    # was unreachable forever, and the lag could only grow.
+    #
+    # ALL-OR-NOTHING IS PER SESSION, AND STAYS THAT WAY. A session is written only if EVERY
+    # ticker verified for it. One session present for SPY and absent for IWM is a hole that
+    # reads as data, and the classifier slices all three by the same session date -- so staging
+    # below is per session, and a session with any problem is dropped WHOLE while its
+    # neighbours still go in. That is the one behaviour this restructure must not lose.
+    fetched: Dict[str, List[Dict[str, Any]]] = {}
+    fetch_problems: List[str] = []
+    tick = [str(t) for t in tickers]
     first = True
-    for t in tickers:
+    for t in tick:
         if not first:
             await asyncio.sleep(CALL_GAP_S)
         first = False
@@ -307,43 +350,86 @@ async def capture_session(conn, session: _dt.date, tickers) -> Dict[str, Any]:
             #
             # On this plan a session that is still current is withheld, and a request for ONLY
             # that session is refused outright -- so a withheld session arrived as a hard
-            # vendor error instead of as an absence, and `capture_session` reported DEGRADED
-            # with "HTTP 403" for all three tickers. A range that merely includes it answers
+            # vendor error instead of as an absence. A range that merely includes it answers
             # 200 and leaves the bar out, which is the same fact in a form the caller can read.
-            #
-            # The window starts a few sessions back so a holiday or a weekend cannot make the
-            # range empty; only the bar FOR THIS SESSION is ever used.
-            bars = await fetch_daily(t, session - _dt.timedelta(days=RANGE_LOOKBACK_DAYS),
-                                     session)
+            fetched[t] = await fetch_daily(
+                t, session - _dt.timedelta(days=RANGE_LOOKBACK_DAYS), session)
         except PolygonUnavailable as exc:
-            problems.append(str(exc))
-            continue
-        bar = next((b for b in bars if b["date"] == session), None)
-        if bar is None:
-            # NOT YET RELEASED is a different fact from NOT A TRADING DAY and from a vendor
-            # outage, and the caller (and the audit row) must be able to tell them apart.
-            problems.append(
-                "%s: polygon has no bar for %s yet -- this plan withholds a session that is "
-                "still current, and the newest it served in this range is %s"
-                % (t, session, bars[-1]["date"].isoformat() if bars else "none"))
-            continue
-        ok, why = await verify_close(t, session, bar["c"])
-        if not ok:
-            problems.append(why)
-            continue
-        staged[t] = bar
+            fetch_problems.append(str(exc))
 
-    if problems:
-        # NOTHING IS WRITTEN. Not even the tickers that passed: a series with one session
-        # present for SPY and absent for IWM is a hole that reads as data, and the classifier
-        # slices all three by the same session date.
-        logger.error("[bars_polygon] %s DEGRADED, nothing written: %s",
-                     session, "; ".join(problems))
-        return {"degraded": True, "written": 0, "problems": problems,
-                "reason": "; ".join(problems)}
+    start = session - _dt.timedelta(days=RANGE_LOOKBACK_DAYS)
+    stored = await sessions_with_stored_bars(conn, tick, start)
+    backfill_blind = stored is None            # reported, never silent -- see the helper
+
+    # Sessions EVERY ticker served. An intersection, because a session one ticker is missing
+    # cannot be written under the rule above, and treating it as a candidate would only produce
+    # the same problem row for it every night.
+    common = set()
+    if tick and len(fetched) == len(tick):
+        common = set.intersection(*[set(b["date"] for b in fetched[t]) for t in tick])
+
+    candidates = []
+    for d in sorted(common):
+        if d != session and (backfill_blind or d in (stored or set())):
+            continue                           # already stored, or we cannot tell
+        if is_session_settled(d) is not True:
+            continue                           # UNKNOWN is not YES (R-IV.1176)
+        candidates.append(d)
 
     written = 0
-    for t, bar in staged.items():
-        written += await store(conn, t, [bar], verified=True)
-    return {"degraded": False, "written": written,
-            "reason": "verified against the UW chart close for all %d ticker(s)" % len(staged)}
+    backfilled = []
+    problems: List[str] = list(fetch_problems)
+    target_problems: List[str] = list(fetch_problems)
+    target_written = False
+
+    for d in candidates:                       # OLDEST FIRST: a partial run leaves a prefix,
+        staged: Dict[str, Dict[str, Any]] = {}  # never a gap in the middle of the series.
+        trouble: List[str] = []
+        for t in tick:
+            bar = next((b for b in fetched[t] if b["date"] == d), None)
+            if bar is None:
+                # NOT YET RELEASED is a different fact from NOT A TRADING DAY and from a vendor
+                # outage, and the caller (and the audit row) must be able to tell them apart.
+                served = fetched[t][-1]["date"].isoformat() if fetched[t] else "none"
+                trouble.append(
+                    "%s: polygon has no bar for %s yet -- this plan withholds a session that "
+                    "is still current, and the newest it served in this range is %s"
+                    % (t, d, served))
+                continue
+            ok, why = await verify_close(t, d, bar["c"])
+            if not ok:
+                trouble.append(why)
+                continue
+            staged[t] = bar
+
+        if trouble or len(staged) != len(tick):
+            problems.extend(trouble)
+            if d == session:
+                target_problems.extend(trouble)
+            logger.error("[bars_polygon] %s DEGRADED, nothing written for it: %s",
+                         d, "; ".join(trouble))
+            continue
+
+        for t, bar in staged.items():
+            written += await store(conn, t, [bar], verified=True)
+        if d == session:
+            target_written = True
+        else:
+            backfilled.append(d.isoformat())
+            logger.info("[bars_polygon] backfilled %s for %d ticker(s): it had no stored bar",
+                        d, len(staged))
+
+    out: Dict[str, Any] = {"written": written, "backfilled": backfilled,
+                           "candidates": [d.isoformat() for d in candidates]}
+    if backfill_blind:
+        # NOT SILENT. A run that cannot read the bar table still captures its target, but it
+        # cannot know which earlier sessions are missing -- and a backfill that quietly stopped
+        # happening is the fault this change exists to end.
+        out["backfill_blind"] = ("the stored-bar dates could not be read, so only the target "
+                                 "session was considered")
+    if target_written:
+        return dict(out, degraded=False,
+                    reason="verified against the UW chart close for %d ticker(s)" % len(tick))
+    return dict(out, degraded=True, problems=problems,
+                reason=("; ".join(target_problems)
+                        or "polygon served no bar for %s in the range" % session))

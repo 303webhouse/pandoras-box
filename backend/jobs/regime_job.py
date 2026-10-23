@@ -329,43 +329,56 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
         capture = {"degraded": True, "written": 0,
                    "reason": "capture raised: %s: %s" % (type(exc).__name__, exc)}
 
-    # R-IV.1278(b)3: A SESSION THE SOURCE WILL NOT SERVE YET MUST NOT COST THE NIGHT.
+    # R-IV.1357(a)2: THE BACKWARD WALK IS GONE. The run no longer falls back.
     #
-    # MEASURED: the nightly ran on both 2026-10-19 (01:31:09Z) and 2026-10-20 (01:33:33Z),
-    # asked Polygon for that day's bar at ~21:31 ET, and was refused on all three tickers. On
-    # this plan a session is withheld while it is still current -- 5.5 hours after the close is
-    # not late enough -- so the target the CALENDAR calls settled is a session the SOURCE does
-    # not have. Two nights of audit rows read "DEGRADED, no label written: SPY: HTTP 403" and
-    # the card went on showing 10-16 with nothing said.
+    # R-IV.1278(b)3'S MEASURED RECORD, KEPT WITH THE FIX because its PREMISE still holds and
+    # the `pending_source` branch below exists for it: a session the source will not serve yet
+    # must not cost the night. The nightly ran on both 2026-10-19 (01:31:09Z) and 2026-10-20
+    # (01:33:33Z), asked Polygon for that day's bar at ~21:31 ET, and was refused on all three
+    # tickers -- two audit rows reading "DEGRADED, no label written: SPY: HTTP 403" while the
+    # card went on showing 10-16 with nothing said. On this plan a session is withheld while it
+    # is STILL CURRENT; 5.5 hours after the close is not late enough. Measured again
+    # 2026-10-23 02:08:40Z: 10-21 served, 10-22 withheld at +6.1h.
     #
-    # So when the target's bar is unavailable, the run FALLS BACK to the newest settled session
-    # that HAS a bar and HAS NO LABEL, and writes that instead. The withheld session is
-    # reported as PENDING, not as a failure: it will be served tomorrow, and tomorrow's run
-    # will label it. A one-session lag is this plan's entitlement edge and is a fact about the
-    # data, not a fault -- which is exactly what (b)4's freshness rule exists to say out loud.
+    # WHAT THE FALLBACK DID, and why removing it is the fix rather than a regression. Under
+    # R-IV.1278(b)3 a withheld target sent the run to "the newest settled session that HAS a
+    # bar and HAS NO LABEL". That reads as catching up and is the opposite: it consults the BAR
+    # TABLE, not the vendor, so a session whose bar was never stored is invisible to it. On
+    # 2026-10-23 it labelled 10-20 while Polygon was already serving 10-21 -- because 10-21 had
+    # no stored bar, having been withheld on the night it was the target.
+    #
+    # AND IT WALKED BACKWARDS. Once 10-20 held a label, the newest unlabelled session with a
+    # bar became 10-19, then 10-16: each night would write a row OLDER than the night before
+    # while the lag to the real last settled session grew. A pipeline that reports progress by
+    # moving backwards through history is worse than one that stops, because it looks alive.
+    #
+    # The capture above now stores every verified bar in its range (R-IV.1357(a)1), so the gap
+    # closes at the source. Labelling only ever moves FORWARD from the newest labelled session.
     if capture.get("degraded"):
-        pending = target
-        fallback = await _newest_labelable_session(conn, version, before=target)
-        if fallback is None:
-            detail = ("DEGRADED, no label written: %s (and no earlier settled session is "
-                      "unlabelled, so there was nothing to fall back to)"
-                      % capture.get("reason"))
-            await _audit(conn, action="degraded", detail=detail, as_of=target,
-                         rules_version=version)
-            logger.error("[regime_job] nightly %s", detail)
-            return {"written": 0, "degraded": True, "reason": capture.get("reason"),
-                    "as_of": target.isoformat(), "pending": pending.isoformat()}
-        detail = ("%s is not served yet (%s); falling back to %s, which has a bar and no label"
-                  % (pending.isoformat(), capture.get("reason"), fallback.isoformat()))
-        await _audit(conn, action="pending_source", detail=detail, as_of=pending,
+        # NOT A FAILURE AND NOT A FALLBACK. The withheld session is recorded as pending and the
+        # run continues to the label step, which will label whatever the capture DID store --
+        # including sessions it backfilled on this very run.
+        detail = ("%s is not served yet (%s); labelling forward from the newest labelled "
+                  "session instead" % (target.isoformat(), capture.get("reason")))
+        await _audit(conn, action="pending_source", detail=detail, as_of=target,
                      rules_version=version)
         logger.warning("[regime_job] nightly %s", detail)
-        target = fallback
-        capture = {"degraded": False, "written": 0, "skipped": True,
-                   "reason": "bar already stored for %s" % fallback.isoformat()}
+    if capture.get("backfilled"):
+        detail = ("backfilled %d session(s) that had no stored bar: %s"
+                  % (len(capture["backfilled"]), ", ".join(capture["backfilled"])))
+        await _audit(conn, action="backfill", detail=detail, as_of=target,
+                     rows_written=capture.get("written") or 0, rules_version=version)
+        logger.info("[regime_job] nightly %s", detail)
+    if capture.get("backfill_blind"):
+        await _audit(conn, action="backfill_blind", detail=capture["backfill_blind"],
+                     as_of=target, rules_version=version)
+        logger.error("[regime_job] nightly %s", capture["backfill_blind"])
 
+    # The TARGET's settlement still decides whether IT could be labelled, but it no
+    # longer ends the run: sessions BEFORE it may have been backfilled above and are
+    # labellable now. A refusal here would throw those away.
     settled = is_session_settled(target)
-    if settled is not True:
+    if settled is not True and not capture.get("backfilled"):
         # None means "not a trading day, or past the horizon" -- NOT "yes". R-IV.1176.
         detail = ("refused: %s (is_session_settled=%r)"
                   % (settlement_reason(target), settled))
@@ -405,8 +418,22 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
     # pair was passed -- 95 of 304 sessions take a different label on that basis, and a cutover
     # that "inherits v2's state and runs nightly from there" would have inherited a state built
     # one way and continued it another.
+    # R-IV.1357(a)2: WHAT TO LABEL IS DECIDED BEFORE THE BUILD, because the build's
+    # `settled_through` must reach the NEWEST session being labelled -- not the target, which
+    # may have no bar at all tonight.
+    newest_labelled = await newest_labelled_session(conn)
+    label_targets = await sessions_after(conn, newest_labelled, through=target)
+    if not label_targets:
+        detail = ("nothing to label: no stored bar for any settled session after %s"
+                  % (newest_labelled.isoformat() if newest_labelled else "the start of the series"))
+        await _audit(conn, action="noop", detail=detail, as_of=target, rules_version=version)
+        logger.info("[regime_job] nightly %s", detail)
+        return {"written": 0, "labelled": [], "noop": detail,
+                "as_of": newest_labelled.isoformat() if newest_labelled else None,
+                "backfilled": capture.get("backfilled") or []}
+
     sessions, build = await build_sessions(conn, series, rules=rules,
-                                           settled_through=target.isoformat())
+                                           settled_through=label_targets[-1].isoformat())
     if not sessions:
         detail = ("no classifiable session: SPY holds %d bar(s), %d needed"
                   % (len(spy), MIN_BARS))
@@ -414,71 +441,127 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
         return {"written": 0, "refused": detail, "as_of": target.isoformat()}
 
     out = replay(sessions, rules)
-    # Only the target session is written. The earlier ones were replayed to rebuild the
-    # hysteresis state and are already stored (or will be, by the seed).
-    row = next((r for r in out["shown"] if r.get("as_of") == target.isoformat()), None)
-    if row is None:
-        detail = "replay produced no row for %s" % target.isoformat()
-        await _audit(conn, action="refused", detail=detail, as_of=target, rules_version=version)
-        return {"written": 0, "refused": detail, "as_of": target.isoformat()}
 
+    # R-IV.1357(a)2: EVERY SESSION AFTER THE NEWEST LABELLED ONE, OLDEST FIRST.
+    #
+    # The old code wrote exactly one row -- the target's -- and its comment said "the earlier
+    # ones were replayed to rebuild the hysteresis state and are already stored (or will be, by
+    # the seed)". That premise failed the moment a session could be backfilled: those sessions
+    # are replayed, classifiable, and stored by NOBODY.
+    #
+    # OLDEST FIRST IS LOAD-BEARING. `held_sessions` and the pending-label counters are carried
+    # session to session by the replay, and the `change` text on a row describes a transition
+    # from the row before it. Writing newest-first would store each row's state correctly but
+    # in an order where a reader following `created_at` sees the series run backwards.
+    to_label = [d for d in label_targets if d.isoformat() in
+                {r.get("as_of") for r in out["shown"]}]
+    missing = [d.isoformat() for d in label_targets if d not in to_label]
+
+    # Imported here, as the old single-row write did: `regime_seed` imports from this
+    # module, so a module-level import would be circular.
     from jobs.regime_seed import _write_snapshot
-    r = await _write_snapshot(conn, row, seeded=False, close_source=CLOSE_SOURCE)
-    if r is None:
-        detail = ("%s already has a %s row; append-only, so nothing was rewritten "
-                  "(this run would have said: %s)"
-                  % (target.isoformat(), version, row.get("shown_regime")))
-        await _audit(conn, action="conflict", detail=detail, as_of=target, rules_version=version)
+
+    written_rows = []
+    conflicts = []
+    for d in to_label:
+        row = next(r for r in out["shown"] if r.get("as_of") == d.isoformat())
+        r = await _write_snapshot(conn, row, seeded=False, close_source=CLOSE_SOURCE)
+        if r is None:
+            # Append-only: a session that already holds a row for this version is left alone
+            # and the disagreement is recorded rather than resolved.
+            conflicts.append(d.isoformat())
+            await _audit(conn, action="conflict",
+                         detail=("%s already has a %s row; append-only, so nothing was "
+                                 "rewritten (this run would have said: %s)"
+                                 % (d.isoformat(), version, row.get("shown_regime"))),
+                         as_of=d, rules_version=version)
+            continue
+        # THE BASIS GOES ON THE RECORD WITH THE LABEL. Whether the v2 inputs were built,
+        # and how many VIX dates were paired, decide which rows were evaluable -- so a
+        # later reader of this row can tell what it was computed from instead of
+        # assuming. One audit row per session labelled, not one per run.
+        detail = ("%s -> %s (raw %s)%s%s [v2_inputs=%s vix=%s]"
+                  % (d.isoformat(), row.get("shown_regime"), row.get("regime"),
+                     "; " + row["change"] if row.get("change") else "",
+                     "; " + row["blocked"] if row.get("blocked") else "",
+                     build.get("v2_inputs"),
+                     (build.get("vix") or {}).get("paired_dates",
+                                                  (build.get("vix") or {}).get("error", "n/a"))))
+        await _audit(conn, action="nightly", detail=detail, as_of=d, rows_written=1,
+                     rules_version=version)
         logger.info("[regime_job] nightly %s", detail)
-        return {"written": 0, "conflict": detail, "as_of": target.isoformat(),
-                "shown_regime": row.get("shown_regime")}
+        written_rows.append({"as_of": d.isoformat(), "shown_regime": row.get("shown_regime"),
+                             "regime": row.get("regime"), "label": row.get("label"),
+                             "tags": row.get("tags"), "basis": row.get("basis"),
+                             "change": row.get("change"), "blocked": row.get("blocked")})
 
-    # THE BASIS GOES ON THE RECORD WITH THE LABEL. Whether the v2 inputs were built, and how
-    # many VIX dates were paired, decide which rows were evaluable -- so a later reader of this
-    # row can tell what it was computed from instead of assuming.
-    detail = ("%s -> %s (raw %s)%s%s [v2_inputs=%s vix=%s]"
-              % (target.isoformat(), row.get("shown_regime"), row.get("regime"),
-                 "; " + row["change"] if row.get("change") else "",
-                 "; " + row["blocked"] if row.get("blocked") else "",
-                 build.get("v2_inputs"),
-                 (build.get("vix") or {}).get("paired_dates",
-                                              (build.get("vix") or {}).get("error", "n/a"))))
-    await _audit(conn, action="nightly", detail=detail, as_of=target, rows_written=1,
-                 rules_version=version)
-    logger.info("[regime_job] nightly %s", detail)
-    return {"written": 1, "as_of": target.isoformat(), "shown_regime": row.get("shown_regime"),
-            "regime": row.get("regime"), "label": row.get("label"),
-            "tags": row.get("tags"), "basis": row.get("basis"),
-            "change": row.get("change"), "blocked": row.get("blocked")}
+    if missing:
+        await _audit(conn, action="refused",
+                     detail=("the replay produced no row for %s, which has a stored bar"
+                             % ", ".join(missing)),
+                     as_of=target, rules_version=version)
+
+    if not written_rows:
+        detail = ("nothing new to label: %d session(s) after the newest labelled one had a "
+                  "stored bar, %d conflicted, %d had no replay row"
+                  % (len(label_targets), len(conflicts), len(missing)))
+        await _audit(conn, action="noop", detail=detail, as_of=target, rules_version=version)
+        logger.info("[regime_job] nightly %s", detail)
+        return {"written": 0, "labelled": [], "conflicts": conflicts, "noop": detail,
+                "as_of": newest_labelled.isoformat() if newest_labelled else None,
+                "backfilled": capture.get("backfilled") or []}
+
+    newest_row = written_rows[-1]
+    return dict(newest_row, written=len(written_rows),
+                labelled=[r["as_of"] for r in written_rows],
+                conflicts=conflicts,
+                backfilled=capture.get("backfilled") or [])
 
 
-async def _newest_labelable_session(conn, version: Optional[str], *,
-                                    before) -> Optional[Any]:
-    """The newest session that HAS a designated bar and NO label, strictly before `before`.
+async def newest_labelled_session(conn):
+    """The newest session that holds a CURRENT label, in ANY rules version. R-IV.1357(a)2.
 
-    R-IV.1278(b)3's fallback. Both halves are required and for different reasons:
-      * a bar must exist, or the classifier would be asked to label a session it cannot read;
-      * a label must NOT exist, because `regime_snapshots` is append-only -- targeting a
-        session that already has one would only produce a `conflict` audit row, which is a
-        quieter way of doing nothing.
+    ANY VERSION, as the ruling says: the question is "has this session been labelled", and a v2
+    row is as much a label as a v2.1 one. Taking the max per version instead would let a new
+    version re-label history one night at a time, which is the backward walk wearing a
+    different hat.
 
-    SPY's series decides, because SPY is the shortest and the 200dma warm-up is measured on it;
-    a session QQQ has and SPY does not is not classifiable.
+    CURRENT ROWS ONLY -- `superseded = FALSE`. That is not a choice made here; it is how the
+    rest of this system already defines a row of record. `_write_snapshot`'s conflict target is
+    `(as_of, rules_version, close_source) WHERE superseded = FALSE`, and the seed counts with
+    the same predicate (R-IV.1203(b)2). A superseded row is a WITHDRAWN label, and treating one
+    as a floor would freeze the job behind a generation that has been retired.
+
+    None means nothing is labelled at all, and the caller then labels every session it can.
     """
-    row = await conn.fetchrow(
-        """SELECT b.date
+    return await conn.fetchval(
+        """SELECT MAX(as_of) FROM regime_snapshots WHERE superseded = FALSE""")
+
+
+async def sessions_after(conn, newest_labelled, *, through):
+    """Settled sessions with a stored SPY bar, strictly after `newest_labelled`, oldest first.
+
+    STRICTLY AFTER. This is the whole of "label forward only": the comparison is `>`, never
+    `>=`, so the newest labelled session is never revisited and nothing older than it can ever
+    be chosen. The backward walk is not disabled by a flag here -- it is unreachable.
+
+    SPY DECIDES, because SPY is the shortest series and the 200dma warm-up is measured on it: a
+    session QQQ has and SPY does not is not classifiable. `capture_session` writes a session for
+    every ticker or for none, so in practice SPY's dates are the session dates.
+
+    `through` bounds the far end at the target, so a bar stored for a session the calendar does
+    not yet call settled cannot be labelled early.
+    """
+    from stable_engine.market_calendar import is_session_settled
+
+    rows = await conn.fetch(
+        """SELECT DISTINCT b.date
              FROM regime_daily_bars b
             WHERE b.ticker = 'SPY'
-              AND b.close_source = $1
-              AND b.date < $2
-              AND NOT EXISTS (
-                    SELECT 1 FROM regime_snapshots s
-                     WHERE s.as_of = b.date
-                       AND s.rules_version = $3
-                       AND s.superseded = FALSE)
-            ORDER BY b.date DESC
-            LIMIT 1""", CLOSE_SOURCE, before, version)
-    return row["date"] if row else None
+              AND ($1::date IS NULL OR b.date > $1::date)
+              AND b.date <= $2::date
+            ORDER BY b.date ASC""", newest_labelled, through)
+    return [r["date"] for r in rows if is_session_settled(r["date"]) is True]
 
 
 async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:

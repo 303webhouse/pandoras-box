@@ -196,11 +196,19 @@ def test_nothing_is_written_and_no_era_is_replayed_onto_disk():
     assert "INSERT" not in block.upper()
 
 
+NL_ = chr(10)
+
+
 def test_the_gate_runs_before_any_label_is_computed():
     """A run that cannot legitimately start must not write a label first and ask afterwards."""
     src = read_source(str(JOB))
     i = src.index("async def run_nightly")
-    block = src[i:i + 9000]
+    # BOUNDED BY THE FUNCTION, not by a character count. This read `src[i:i + 9000]`,
+    # and R-IV.1357(a)2 made `run_nightly` longer, so `build_sessions` fell outside the
+    # window and the test failed while the ORDER IT CHECKS still held. A fixed-width
+    # window is a locator that breaks when its neighbours change.
+    j = src.find(NL_ + "async def ", i + 10)
+    block = src[i:j if j > 0 else len(src)]
     assert block.index("cutover_state(conn") < block.index("build_sessions(conn")
     assert "cutover_blocked" in block
 
