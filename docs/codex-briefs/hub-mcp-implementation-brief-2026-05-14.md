@@ -323,7 +323,7 @@ From a terminal (CC runs these):
 
 1. **Auth verification — bad token should be rejected:**
    ```
-   curl -X POST https://pandoras-box-production.up.railway.app/mcp/v1/tools/mcp_ping \
+   curl -X POST https:***REMOVED-SECRET*** \
      -H "Authorization: Bearer WRONG_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{}'
@@ -332,7 +332,7 @@ From a terminal (CC runs these):
 
 2. **Auth verification — correct token should work:**
    ```
-   curl -X POST https://pandoras-box-production.up.railway.app/mcp/v1/tools/mcp_ping \
+   curl -X POST https:***REMOVED-SECRET*** \
      -H "Authorization: Bearer <THE_REAL_TOKEN>" \
      -H "Content-Type: application/json" \
      -d '{}'

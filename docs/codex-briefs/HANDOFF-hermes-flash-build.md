@@ -12,7 +12,7 @@ The app connects via env vars:
 - `DB_PORT=5432`
 - `DB_NAME=railway`
 - `DB_USER=postgres`
-- `DB_PASSWORD=sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty`
+- `DB_PASSWORD=***REMOVED-SECRET***`
 
 The Supabase project on Nick's account is INACTIVE and unused. All references to "Supabase" in Brief 1 and Brief 2 should be read as "Railway Postgres." Specifically:
 

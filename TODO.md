@@ -236,7 +236,7 @@ WHERE created_at > NOW() - INTERVAL '2 hours';
 
 ```bash
 curl -H "X-API-Key: $PIVOT_API_KEY" \
-  "https://pandoras-box-production.up.railway.app/api/dev/shadow-3-10?limit=10&since_hours=24"
+  "https:***REMOVED-SECRET***?limit=10&since_hours=24"
 ```
 
 **Expected:** JSON response with `signals`, `count`, `since_hours`. If `count=0` early on, that's fine — it means no `gate_type='3-10'` signals have fired yet. Route is working if it returns the shape correctly.
@@ -244,10 +244,10 @@ curl -H "X-API-Key: $PIVOT_API_KEY" \
 **Also test auth enforcement:**
 ```bash
 # Missing header — expect 401
-curl "https://pandoras-box-production.up.railway.app/api/dev/shadow-3-10"
+curl "https:***REMOVED-SECRET***"
 
 # Wrong key — expect 401
-curl -H "X-API-Key: wrong-key" "https://pandoras-box-production.up.railway.app/api/dev/shadow-3-10"
+curl -H "X-API-Key: wrong-key" "https:***REMOVED-SECRET***"
 ```
 
 ### Test 5 — Dev view HTML page renders

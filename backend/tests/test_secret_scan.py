@@ -27,7 +27,7 @@ import secret_scan as ss  # noqa: E402
     ('h = "https://discord.com/api/webhooks/123456789012345678/'
      'abcdefghijklmnopqrstuvwxyz0123456789"', "Discord webhook"),
     ('curl -H "X-API-Key: abcdefghijklmnopqrstuvwxyz0123456789ABC"', "a curl header"),
-    ('    "password": "sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty",', "a QUOTED key"),
+    ('    "password": "Qk7sV2pLmN9rT4xW8yZ3bC6dF1gH5jK0",', "a QUOTED key"),
     ('API_KEY = "abcdefghijklmnopqrstuvwxyz0123456789ABC"', "a bare assignment"),
     ('key = "AKIAZZ7TQ4MNBVCXQWER"', "an AWS id"),
     ('t = "ghp_abcdefghijklmnopqrstuvwxyz01"', "a GitHub token"),
@@ -42,7 +42,7 @@ def test_the_quoted_key_gap_that_hid_ten_scripts(self=None):
     """`"password": "value"` has a quote BETWEEN the name and the colon, so a pattern requiring
     `name\\s*[:=]` never matched it. Ten migration scripts went unreported on the first run
     because of exactly that, and were only found by hashing against known-dead values."""
-    assert ss.scan_text('    "password": "sioMAUjhdgNYWwZMZbkbcSyaAcwdJMty",')
+    assert ss.scan_text('    "password": "Qk7sV2pLmN9rT4xW8yZ3bC6dF1gH5jK0",')
     assert ss.scan_text("  'api_key': 'abcdefghijklmnopqrstuvwxyz0123456789',")
 
 

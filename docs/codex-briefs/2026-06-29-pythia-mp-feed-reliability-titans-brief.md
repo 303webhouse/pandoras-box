@@ -26,7 +26,7 @@ The PYTHIA Market-Profile feed (TradingView Pine v2.4 → `/webhook/tradingview`
 
 ## Titans review requested
 - **ATLAS** (feed reliability / data integrity — the monitor design + the root-cause mitigation tradeoffs; is hub-side MP computation worth scoping?).
-- **AEGIS** (alarm hygiene, no-secrets, debounce/latch correctness).
+- **AEGIS** (alarm hygiene, no-secrets, ***REMOVED-SECRET*** correctness).
 - **HELIOS** abstain (no Agora surface).
 
 ## Out of scope (explicitly)

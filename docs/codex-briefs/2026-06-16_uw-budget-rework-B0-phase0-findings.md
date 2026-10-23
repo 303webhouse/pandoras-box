@@ -10,7 +10,7 @@
 ## 1. Chokepoint (CONFIRMED)
 `backend/integrations/uw_api.py`:
 - `_uw_request(path, params, caller=...)` (line 130) is the sole HTTP path. Order: circuit-breaker check → `await _consume_token()` (line 148) → `await increment_daily_counter(caller)` (line 149) → httpx GET → on 429: `increment_429_counter(caller)` + return None (no retry, no breaker trip).
-- Token bucket: `_bucket_max=120`, `_bucket_refill_rate=2.0/sec` (=120/min sustained), `_bucket_tokens` drained 1/call, refilled by elapsed×rate. **The bucket caps sustained rate but NOT instantaneous burst** — a 66-call sector tick finds ~120 tokens available and fires all 66 at once. That is the burst-429 mechanism. B1 (max→30) caps the burst.
+- Token bucket: `_bucket_max=120`, `***REMOVED-SECRET***` (=120/min sustained), `_bucket_tokens` drained 1/call, refilled by elapsed×rate. **The bucket caps sustained rate but NOT instantaneous burst** — a 66-call sector tick finds ~120 tokens available and fires all 66 at once. That is the burst-429 mechanism. B1 (max→30) caps the burst.
 - Every wrapper passes a fixed `caller=` tag, so the per-caller counter = per-endpoint attribution.
 
 ## 2. Caller → consumer → tier inventory
