@@ -12,7 +12,10 @@
 .ab-page {
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
   --r-1: 4px; --r-2: 6px; --r-3: 10px;
-  --fs-1: 11px; --fs-2: 12px; --fs-3: 14px; --fs-4: 16px; --fs-5: 20px; --fs-6: 28px;
+  /* R-IV.1365(b)3: --fs-1 was 11px, which is where 112 of this page's sub-12px instances came
+     from. Raised at the TOKEN rather than patched per rule, because every one of them reads
+     `var(--fs-1)` and chasing them individually would leave the next one at 11px. */
+  --fs-1: 12px; --fs-2: 12px; --fs-3: 14px; --fs-4: 16px; --fs-5: 20px; --fs-6: 28px;
 
   /* R-IV.1319(b): FULL WIDTH, like the rest of the hub. This was `max-width: 1180px` with
      `margin: 0 auto`, which is the mockup's page size rather than a ruling -- (d) asked whether
@@ -88,9 +91,9 @@
 .ab-eq { width: 100%; height: auto; display: block; }
 .ab-eq-grid { stroke: var(--border); stroke-width: 1; }
 .ab-eq-grid.mid { stroke-dasharray: 3 6; }
-.ab-eq-axis { fill: var(--text-2); font: 11px var(--mono); }
+.ab-eq-axis { fill: var(--text-2); font: 12px var(--mono); }
 .ab-eq-dd { fill: var(--down); fill-opacity: .10; }
-.ab-eq-ddl { fill: var(--down); font: 11px var(--mono); }
+.ab-eq-ddl { fill: var(--down); font: 12px var(--mono); }
 .ab-eq-line { fill: none; stroke: var(--up); stroke-width: 2; }
 
 /* R-IV.705(c): one curve per account, stacked, each with its own span on its head. Tokens only. */
@@ -206,21 +209,21 @@
    name, and teal marks only the one being filtered to, exactly as on Agora. Rows for the other
    accounts stay visible and dimmed, so "All accounts" can be read against its parts. */
 .ab-acct-ctl { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
-.ab-acct-ctl button { font-family: var(--mono); font-size: 11px; text-transform: none;
+.ab-acct-ctl button { font-family: var(--mono); font-size: 12px; text-transform: none;
   background: transparent; color: var(--text-2); border: 1px solid var(--border-strong);
   border-radius: 7px; padding: 6px 10px; min-height: 36px; cursor: pointer; }
 .ab-acct-ctl button[aria-pressed="true"] { color: var(--teal); border-color: var(--teal); }
 .ab-acct-table table { width: 100%; border-collapse: collapse; }
 .ab-acct-table th, .ab-acct-table td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--border);
   font-family: var(--mono); font-size: 12px; }
-.ab-acct-table th { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-3);
+.ab-acct-table th { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-3);
   font-weight: 400; border-top: 0; }
 .ab-acct-table .ab-num { text-align: right; }
-.ab-acct-table .ab-n { display: block; font-size: 9px; color: var(--text-3); }
+.ab-acct-table .ab-n { display: block; font-size: 12px; color: var(--text-3); }
 .ab-acct-table tr.ab-total td { border-top: 1px solid var(--border-strong); color: var(--text); }
 /* Dimmed, not hidden — and the figures stay legible, so this is not an opacity veil over data. */
 .ab-acct-table tr.ab-dim td { color: var(--text-3); }
-.ab-acct-note { font-size: 11px; color: var(--text-3); line-height: 1.5; margin: 8px 0 0; }
+.ab-acct-note { font-size: 12px; color: var(--text-3); line-height: 1.5; margin: 8px 0 0; }
 @media (max-width: 820px) { .ab-acct-table { overflow-x: auto; } .ab-acct-ctl button { min-height: 44px; } }
 
 /* ── R-IV.1315 · THE P&L PREVIEW (?pnl=v1) ───────────────────────────────────────────────────
@@ -232,10 +235,12 @@
 .pnl-title { font-size: var(--fs-6); letter-spacing: 2px; }
 .pnl-sub { font-family: var(--mono); font-size: var(--fs-1); color: var(--text-2); }
 .pnl-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+/* R-IV.1365(b)2: 44px, the size a thumb actually hits. These were 32px tall -- comfortably
+   tappable with a mouse, which is what they were measured with. */
 .pnl-tabs button {
   font-family: var(--mono); font-size: var(--fs-1); letter-spacing: 1px; text-transform: uppercase;
-  padding: 4px 11px; border-radius: var(--r-2); border: 1px solid var(--border);
-  background: transparent; color: var(--text-2); min-height: 32px;
+  padding: 4px 13px; border-radius: var(--r-2); border: 1px solid var(--border);
+  background: transparent; color: var(--text-2); min-height: 44px;
 }
 .pnl-tabs button[aria-pressed="true"] { border-color: var(--teal); color: var(--teal); }
 .pnl-kpis { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
@@ -246,7 +251,10 @@
 /* FULL HEIGHT as well as full width (R-IV.1319(b)): the preview is a column that fills the
    viewport, and the main grid takes the slack so the panels grow instead of leaving 400px of
    empty page under them on a 1080-tall screen -- which is what the first screenshot showed. */
-#abPnl { min-height: calc(100vh - 110px); }
+/* R-IV.1365(b)4: `dvh` after `vh`, not instead of it -- a browser that does not know `dvh`
+   keeps the `vh` line, and one that does overrides it with the height that accounts for a
+   browser bar. In the installed app the two agree; in a tab they do not. */
+#abPnl { min-height: calc(100vh - 110px); min-height: calc(100dvh - 110px); }
 .pnl-main { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   align-items: stretch; flex: 1; min-height: 0; }
 .pnl-main > .ab-card, .pnl-main > div { min-height: 0; }
@@ -265,6 +273,47 @@
   gap: var(--sp-2); align-items: center; font-family: var(--mono); font-size: var(--fs-1);
   padding: 5px 0; border-top: 1px solid var(--border); }
 .pnl-closes .r, .pnl-row .r { text-align: right; }
+/* ── R-IV.1365(b)1 · THE PHONE LAYOUT ────────────────────────────────────────────────────────
+   Both rows were fixed five-column grids with a ~408px MINIMUM -- 112+60+92+56+56 and
+   74+66+80+92+64, plus four 8px gaps -- against a 332px content box at 360. That is where the
+   75px of sideways scroll came from, and no amount of shrinking the columns fixes a minimum that
+   large: below 420px they stop being grids and become WRAPPING LINES, which cannot overflow
+   because wrapping is what they do instead.
+
+   I shipped those grids at R-IV.1315 with width checks at 1920, 2560 and 1366. None of them was
+   a phone, which is why a page that fills a 2560px screen could still not fit the one screen its
+   reader actually holds. (b)5 adds 360 and 384 to that standing check. */
+/* R-IV.1365(b)3, the last of the sub-12px text: v2.css shrinks `.v2-legacy-link` to 11px inside
+   its own phone query, and that topbar sits OUTSIDE `.ab-page`, so the token above cannot reach
+   it. Corrected HERE rather than in v2.css because this stylesheet loads only on the Abacus page
+   -- Agora's own topbar is BUILD's call to make, and changing it from this lane would be deciding
+   someone else's layout on the way past. */
+@media (max-width: 768px) {
+  .v2-topbar .v2-legacy-link { font-size: 12px; }
+  .v2-topbar .v2-sub { font-size: 12px; }
+}
+
+@media (max-width: 420px) {
+  .pnl-row, .pnl-closes {
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    column-gap: 10px; row-gap: 2px;
+  }
+  /* Right-alignment is a column idea. In a wrapping line it pushes a number away from the label
+     it belongs to, so it goes. */
+  .pnl-row .r, .pnl-closes .r { text-align: left; }
+  /* The bar is the one part that still wants a full line of its own. */
+  .pnl-row .ab-bar { flex: 1 1 100%; order: 10; min-width: 0; }
+  /* The closes header names five columns that no longer exist. Hidden rather than left to wrap
+     into five words sitting above values they no longer line up with -- a header that does not
+     align with its data is worse than none. */
+  .pnl-closes.pnl-sub { display: none; }
+  .pnl-closes { padding: 7px 0; }
+  .pnl-kpis { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The curve's axis labels, as HTML so 12px means 12px (see the note in abacus-pnl.js). */
+.pnl-axis { display: flex; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+
 .pnl-up { color: var(--up); }
 .pnl-dn { color: var(--down); }
 .pnl-flat { color: var(--text-2); }
