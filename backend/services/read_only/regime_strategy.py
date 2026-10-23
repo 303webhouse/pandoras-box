@@ -223,8 +223,52 @@ async def _report_card(conn):
                 "no settled %s rows yet: the card scores only sessions after the cutover and "
                 "never backfills" % rs.SCORED_VERSION)
 
-        from jobs.regime_job import label_to_group
+        from jobs.regime_job import label_to_group, version_live_instant
 
+        # ── P11 (R-IV.1354(b)2): A SESSION IS IN SCOPE IFF ITS CLOSE IS AFTER THE CUTOVER ──
+        #
+        # THE BREACH THIS EXISTS FOR, measured. Friday's fallback labelled session 2026-10-20
+        # as v2.1 (row 930) -- a CORRECT label, reproducing v2's own 10-20 reading exactly --
+        # and the card then served `first_session: 2026-10-20` with `backfilled: false`. But
+        # 10-20 closed at 2026-10-20T16:00-04:00, which is BEFORE the cutover instant of
+        # 2026-10-22T19:03:00.396505Z. The card was a scoring card with a BACKDATED START,
+        # claiming to measure the new rules on a session that predates them. The scope was
+        # wrong, not the classifier.
+        #
+        # THE INSTANT COMES FROM THE RECORDED FACT, never a hardcoded date here and never
+        # /health: the hub has restarted since the cutover, so /health reports the CURRENT
+        # process and re-deriving the boundary from it would walk it forward on every deploy,
+        # quietly pulling already-scored sessions back out of scope.
+        cutover_instant, cutover_source = await version_live_instant(conn, rs.SCORED_VERSION)
+        if cutover_instant is None:
+            # NO MARKER MEANS SCORE NOTHING, not score everything. An unknown boundary cannot
+            # be treated as "no boundary" -- that is precisely the backdated card again.
+            out = rs.empty_card(
+                "the cutover instant is not recorded, so no session can be shown to fall after "
+                "it: %s" % cutover_source)
+            out["scope"] = dict(out["scope"], cutover_instant=None,
+                                cutover_source=cutover_source, excluded_pre_cutover=[])
+            return out
+
+        scoped = [r for r in rows if rs.in_scope(r["as_of"], cutover_instant)]
+        excluded = [str(r["as_of"])[:10] for r in rows
+                    if not rs.in_scope(r["as_of"], cutover_instant)]
+
+        if not scoped:
+            # E1, NOT A SCORING CARD. R-IV.1354(b)3: row 930 STAYS -- it is not deleted and not
+            # wrong -- and it appears here by name. A card that dropped it silently would leave
+            # a reader unable to tell "nothing has been scored yet" from "nothing exists".
+            out = rs.empty_card(
+                "every %s row so far closed before the cutover instant, so there is nothing in "
+                "scope yet: the card scores only sessions whose close is after %s and never "
+                "backfills" % (rs.SCORED_VERSION, cutover_instant.isoformat()))
+            out["scope"] = dict(out["scope"],
+                                cutover_instant=cutover_instant.isoformat(),
+                                cutover_source=cutover_source,
+                                excluded_pre_cutover=excluded)
+            return out
+
+        rows = scoped
         shown = [r["shown_regime"] for r in rows]
         first, last = rows[0]["as_of"], rows[-1]["as_of"]
         span = None
@@ -236,8 +280,19 @@ async def _report_card(conn):
         out = rs.empty_card("")
         out["available"] = True
         out["reason"] = ""
+        # `backfilled` IS ASSERTED, NOT DEFAULTED (QUERY's §1.1.2). It read `False` as a literal
+        # with nothing having checked anything -- a claim the payload had not earned. It is now
+        # the RESULT of the scope test: false because every row in `rows` was shown to close
+        # after the instant, with the instant, its source and the excluded rows all on the
+        # payload so a reader can repeat the check instead of trusting it.
+        earliest_close = rs.session_close(first)
+        backfilled = not (earliest_close > cutover_instant)
         out["scope"] = {"first_session": str(first)[:10], "sessions": len(rows),
-                        "rules_version": rs.SCORED_VERSION, "backfilled": False}
+                        "rules_version": rs.SCORED_VERSION, "backfilled": backfilled,
+                        "cutover_instant": cutover_instant.isoformat(),
+                        "cutover_source": cutover_source,
+                        "first_session_close": earliest_close.isoformat(),
+                        "excluded_pre_cutover": excluded}
         out["flips"] = rs.flips_panel(shown, days_span=span, sessions=len(rows))
         # P1/P2 and P9. `checked` is 0 until a session is 20 sessions old AND the fully
         # adjusted series exists to score it against, so the counts start as total/0/total --
