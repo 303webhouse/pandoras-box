@@ -1274,6 +1274,20 @@
     catch (_) { return true; }
   })();
 
+  // R-IV.1354(a), AND A REGRESSION THIS CAUGHT BEFORE ANYONE SAW IT. `POP_V2` now defaults
+  // TRUE, and `boot()` had `if (POP_V2) { ...openRegimeDetails() }` -- so making the v2 drawer
+  // the default would also have made the drawer OPEN ITSELF over the dashboard on every single
+  // page load. That auto-open was never part of the view: it exists so Nick can preview the
+  // drawer from the URL alone and so the headless gate can assert nine rendered sections
+  // without driving a click. "Ship the previews" means the v2 drawer is what you get WHEN YOU
+  // OPEN IT, not that it opens unbidden.
+  //
+  // So the auto-open reads the parameter EXPLICITLY and is unaffected by the default.
+  const POP_V2_EXPLICIT = (() => {
+    try { return new URLSearchParams(location.search).get('pop') === 'v2'; }
+    catch (_) { return false; }
+  })();
+
   // The ⓘ affordance. `title` carries it on desktop AND on phone, where a long-press shows it:
   // one mechanism, so there is no second code path that can disagree about what the note says.
   function pvInfo(note) {
@@ -6581,7 +6595,7 @@
     // asserts nine rendered sections without driving a click. It awaits the band and the
     // sections first, so what opens is the live payload rather than an empty shell that
     // fills a second later -- the race that blanked the yield box.
-    if (POP_V2) {
+    if (POP_V2_EXPLICIT) {
       (async () => {
         await loadRegimeBand();
         await loadRegimeSections();
