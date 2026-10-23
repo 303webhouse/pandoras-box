@@ -104,7 +104,11 @@ class TestTheWritePathsUseIt:
         """This is the path that produced the 47 stored unrealized tails."""
         src = self._src("api/unified_positions.py")
         assert "mark, unreal = _mdb(mark), _mdb(unreal)" in src
-        i = src.index("_compute_unrealized_pnl(entry_price, mark, quantity, structure")
+        # R-IV.1381(c)3 renamed this argument to `entry_for_pnl` (the mark job now
+        # derives an entry from cost_basis when none is stored). The ORDER this test
+        # checks -- quantize after the computation, before the write -- is untouched;
+        # only the locator string moved.
+        i = src.index("_compute_unrealized_pnl(entry_for_pnl, mark, quantity, structure")
         j = src.index("mark, unreal = _mdb(mark), _mdb(unreal)")
         assert i < j, "the quantize must come after the computation and before the write"
 
