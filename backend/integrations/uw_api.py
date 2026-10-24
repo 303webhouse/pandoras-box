@@ -177,17 +177,43 @@ RATE_LIMIT_EVIDENCE_TTL_S = 7200
 REDIS_KEY_UW_QUOTA = "uw:quota_headers"
 
 
+#: R-IV.1412(d): has this process already said which headers UW sends? Once is enough -- the
+#: answer does not change within a process, and at ~14,000 calls a day a per-call line would
+#: bury the log it is meant to inform.
+_QUOTA_HEADER_NAMES_LOGGED = False
+
+
 async def _capture_quota_headers(resp) -> None:
     """Record UW's own count/limit, and a refusal as its own fact.
 
     Never raises; never touches the body.
     """
+    global _QUOTA_HEADER_NAMES_LOGGED
     try:
         used = resp.headers.get("x-uw-daily-req-count")
         limit = resp.headers.get("x-uw-token-req-limit")
         if used is None and limit is None:
             if resp.status_code == 429:
                 await _record_429()
+            # R-IV.1412(d): SAY WHAT ARRIVED INSTEAD. Measured 2026-10-24: neither header had
+            # appeared for 36+ hours across thousands of calls, so the account shed was failing
+            # open continuously and `open:no_header` was the only trace -- a state nobody was
+            # reading. Whether UW renamed the counter or stopped sending it is the one question
+            # that decides the fix, and the header NAMES answer it.
+            #
+            # NAMES ONLY, NEVER VALUES. A response's headers can carry things that have no
+            # business in a log, and the names alone are sufficient here.
+            if not _QUOTA_HEADER_NAMES_LOGGED:
+                _QUOTA_HEADER_NAMES_LOGGED = True
+                try:
+                    names = sorted(set(resp.headers.keys()))
+                except Exception:                                   # noqa: BLE001
+                    names = []
+                logger.warning(
+                    "UW sent NEITHER x-uw-daily-req-count NOR x-uw-token-req-limit "
+                    "(status %s). The account shed cannot arm without one of them and is "
+                    "failing OPEN. Headers present on this response (NAMES ONLY, %d): %s",
+                    resp.status_code, len(names), ",".join(names))
             return
         from database.redis_client import get_redis_client
         client = await get_redis_client()

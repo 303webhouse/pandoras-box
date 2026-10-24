@@ -4,6 +4,12 @@ FUNDED AND LIVE under R-IV.1408(b)1: 250 calls a night from the reserve. The uni
 CENSUS's eight names, which R-IV.1408(b)3 settled -- not Tier-1's sixteen, despite the earlier
 ruling's wording, and `census_names()` is named for what it is.
 
+AND IT CATCHES UP, under R-IV.1412(b): the session that just closed is walked first and
+unconditionally, then whatever budget remains goes to the OLDEST unwritten session. Built
+because the first version could never have collected 2026-10-23 -- `target_session` returns
+only the session of the instant it is called at, so the one session the census's lapse actually
+cost was in no future target. See `catchup_sessions`.
+
 WHY THIS IS A SEPARATE INSTRUMENT AND NOT A DATE EDIT
     `darkpool_backfill.py` already walks a session per night, floored at 04:00 ET, and writes
     `darkpool_backfill_pages`. It stopped because of one line:
@@ -63,7 +69,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger("darkpool_forward")
@@ -89,6 +95,15 @@ def census_names() -> Tuple[str, ...]:
     from jobs.darkpool_backfill import CORE_NAMES
     return CORE_NAMES
 
+
+#: R-IV.1412(b): how far back the catch-up will look for an unwritten session.
+#:
+#: BOUNDED, because "the oldest unwritten session" over an unbounded history walks toward the
+#: census's 2026-08-28 origin -- which is far outside the vendor's retention, so the night's
+#: remainder would be spent on sessions that cannot be fetched at all. Ten trading sessions is
+#: two weeks of market days: wide enough for any gap this job could realistically open (it
+#: collects one session a night) and narrow enough that it stays inside what the vendor holds.
+CATCHUP_LOOKBACK_SESSIONS = 10
 
 #: Fraction of the registered quota one night may spend. Derived from the RULED quota rather
 #: than written as a literal, so the two cannot drift -- the fault `_budget_from_governor`
@@ -169,6 +184,26 @@ def target_session(now_et: datetime) -> Optional[date]:
     return d if trading_sessions(d, d) else None
 
 
+def catchup_sessions(session: date, done: set, names) -> List[date]:
+    """Unwritten trading sessions before `session`, OLDEST FIRST, inside the lookback.
+
+    "Unwritten" means at least one census name is missing from `done`, and `done` is
+    `DONE_SQL`'s set -- `exhausted AND reached_floor AND prints_received > 0`. So a
+    ticker-session that was walked but never reached its floor still counts as unwritten and
+    will be resumed, which is what makes the catch-up converge instead of declaring victory on
+    a partial walk.
+
+    `session` itself is excluded: it is walked first and unconditionally by the caller, and
+    including it here would let the remainder be spent on it twice.
+    """
+    from jobs.darkpool_backfill import trading_sessions
+
+    span = trading_sessions(session - timedelta(days=CATCHUP_LOOKBACK_SESSIONS * 3), session)
+    span = [d for d in span if d < session][-CATCHUP_LOOKBACK_SESSIONS:]
+    out = [d for d in span if any((t, d) not in done for t in names)]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # one night
 # ---------------------------------------------------------------------------
@@ -212,11 +247,20 @@ async def walk_night(now: Optional[datetime] = None,
 
     summary = {"session": session.isoformat(), "run_id": run_id, "names": list(names),
                "ceiling": ceiling, "collected": 0, "already_done": 0, "pages": 0,
-               "prints": 0, "exhausted": 0, "floored": 0, "calls_spent": 0}
+               "prints": 0, "exhausted": 0, "floored": 0, "calls_spent": 0,
+               # R-IV.1412(b): reported separately from the current session's figures, so
+               # "the live session was collected" and "the backlog moved" are never one number.
+               "catchup_sessions": [], "catchup_collected": 0, "catchup_pending": []}
 
     await budget.check_account()
     results: List[dict] = []
+    catchup: List[dict] = []
     try:
+        # ── 1. THE SESSION THAT JUST CLOSED, first and unconditionally (R-IV.1412(b)).
+        # Nothing else will ever target it again: `target_session` only returns the session of
+        # the instant it is called at, so a session missed here is missed for good. That is
+        # exactly how 2026-10-23 was lost, and it is why the backlog gets the REMAINDER rather
+        # than the priority.
         for ticker in names:
             if budget.stopped or budget.remaining <= 0:
                 break
@@ -227,6 +271,25 @@ async def walk_night(now: Optional[datetime] = None,
                 summary["already_done"] += 1
                 continue
             results.append(await collect_one(pool, ticker, session, budget, CALLER_TAG))
+
+        # ── 2. THE REMAINDER goes to the OLDEST unwritten session.
+        # Oldest first because the vendor drops its oldest dark-pool session every trading
+        # day, so of two unwritten sessions the older one has less time left.
+        pending = catchup_sessions(session, done, names)
+        summary["catchup_pending"] = [d.isoformat() for d in pending]
+        for older in pending:
+            if budget.stopped or budget.remaining <= 0:
+                break
+            touched = False
+            for ticker in names:
+                if budget.stopped or budget.remaining <= 0:
+                    break
+                if (ticker, older) in done:
+                    continue
+                catchup.append(await collect_one(pool, ticker, older, budget, CALLER_TAG))
+                touched = True
+            if touched:
+                summary["catchup_sessions"].append(older.isoformat())
     except asyncio.CancelledError:
         # A deploy cancels this task mid-walk. CancelledError derives from BaseException, so
         # an `except Exception` would be blind to it -- which is how the census job left run 7
@@ -235,9 +298,14 @@ async def walk_night(now: Optional[datetime] = None,
         raise
 
     summary["collected"] = len(results)
-    summary["pages"] = sum(r["pages"] for r in results)
-    summary["prints"] = sum(r["prints"] for r in results)
+    summary["catchup_collected"] = len(catchup)
+    # Pages and prints cover BOTH, because they describe what landed in the archive; the
+    # ticker-session counts stay split, because those answer "did the live session get done".
+    both = results + catchup
+    summary["pages"] = sum(r["pages"] for r in both)
+    summary["prints"] = sum(r["prints"] for r in both)
     summary["exhausted"] = sum(1 for r in results if r["exhausted"])
+    summary["catchup_exhausted"] = sum(1 for r in catchup if r["exhausted"])
     summary["floored"] = sum(1 for r in results if r.get("reached_floor"))
     summary["calls_spent"] = budget.calls
 
@@ -254,10 +322,12 @@ async def walk_night(now: Optional[datetime] = None,
     _last_result.clear()
     _last_result.update(summary)
     logger.info("[dp-forward] run %s session %s: %d walked, %d already done, %d pages, "
-                "%d prints, %d floored, %d/%d calls",
+                "%d prints, %d floored, %d/%d calls; catch-up %d ticker-sessions over %s "
+                "(pending %s)",
                 run_id, session, summary["collected"], summary["already_done"],
                 summary["pages"], summary["prints"], summary["floored"],
-                budget.calls, ceiling)
+                budget.calls, ceiling, summary["catchup_collected"],
+                summary["catchup_sessions"] or "-", summary["catchup_pending"] or "-")
     return summary
 
 
