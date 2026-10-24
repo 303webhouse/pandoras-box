@@ -410,13 +410,23 @@ with sync_playwright() as p:
     check('BOOK: the header Positions button gives way to the footer link', bk['panelBtnHidden'] is True
           and 'Positions' in bk['foot'] and 'updated' in bk['foot'], bk['foot'])
     check('BOOK: the book-stress mock stays off the tile (e)7', bk['stressHidden'] is True)
-    check('BOOK: the live positions list FOLDS (Close lives in its rows) and is closed by default',
-          'Open positions' in bk['fold'] and bk['listHidden'] is True, bk['fold'])
-    pg.click('#bookFoldBtn'); pg.wait_for_timeout(200)
-    check('BOOK: the fold opens the list', pg.evaluate("() => document.getElementById('bookPositions').hidden") is False)
+    # R-IV.1382 put CLOSE in the Positions panel, so the live list LEAVES the tile (R-IV.1369(e)8)
+    # instead of folding. The fold comes back only under ?pos=v1, whose panel has no Close.
+    check('BOOK: the live positions list has left the tile for Positions -- no fold by default',
+          not bk['fold'] and bk['listHidden'] is True, bk['fold'])
+    _v1, _v1ctx, _v1errs = page(b, 1920, 1080, '?pos=v1')
+    check('BOOK ?pos=v1: the old panel has no Close, so the list folds on the tile again',
+          'Open positions' in _v1.evaluate("() => (document.getElementById('bookFoldBtn') || {}).innerText || ''"))
+    _v1.click('#bookFoldBtn'); _v1.wait_for_timeout(200)
+    check('BOOK ?pos=v1: the fold opens the list', _v1.evaluate("() => document.getElementById('bookPositions').hidden") is False)
+    _v1ctx.close()
     pg.click('.bk-acct[data-bk-acct="ACCT_C"]'); pg.wait_for_timeout(500)
-    opened = pg.evaluate("() => ({ open: !!document.querySelector('.pp-panel.open'), acct: window.__ppAcct })")
-    check('BOOK: an account row opens Positions, carrying its account', opened['open'] and opened['acct'] == 'ACCT_C', opened)
+    # The panel CONSUMES the hand-off (R-IV.1382), so assert what the reader sees: Positions open,
+    # filtered to the account whose row was tapped.
+    opened = pg.evaluate("() => ({ open: !!document.querySelector('.pp-panel.open'), "
+                         "acct: (document.querySelector('[data-pq-acct][aria-pressed=\"true\"]') || {}).dataset ? "
+                         "document.querySelector('[data-pq-acct][aria-pressed=\"true\"]').dataset.pqAcct : null })")
+    check('BOOK: an account row opens Positions filtered to its account', opened['open'] and opened['acct'] == 'ACCT_C', opened)
     check('BOOK partial 1920: no errors', not errs, errs)
     ctx.close()
 

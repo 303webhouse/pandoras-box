@@ -60,13 +60,17 @@
       "pin": 3,
       "sha256": "5e78b18e68442d288e703d40c33ec2ab01b89464aa0b2889ba0cfd35b64b0441"
     },
+    "assets/positions-clean.css": {
+      "pin": 1,
+      "sha256": "398c062f301a627b8beeebeeec941cc65ef85e86025abb7d4438614379fc7a66"
+    },
     "v2.css": {
       "pin": 75,
       "sha256": "f9d82de6281c3b171ef308abc1b381f79275d6efc96ec8f5e75f0f20eb55ca88"
     },
     "v2.js": {
-      "pin": 111,
-      "sha256": "f01256a874f4c63ceb641b8cf9de9fb87c30cd95e1090449a10feb395c4d17ee"
+      "pin": 112,
+      "sha256": "c395062a575274e081ebd41ed45d5b641ed1151ada251dea3ae40aeea7ad0674"
     }
   }
 }
