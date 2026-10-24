@@ -23,7 +23,7 @@ from read_pdf_fields import (  # noqa: E402
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 PAGES = ["""
-    BROKERAGE STATEMENT                     Prepared for NICK HERTZOG
+    BROKERAGE STATEMENT                     Prepared for QUINN SAMPLEFORD
     Account 123-456789          SSN ***-**-1234        Advisor: Jane Rivera (555) 010-9988
     Total Account Value      $12,217.86
     Cash Available to Trade  $1,043.05
@@ -54,7 +54,7 @@ def test_every_whitelisted_figure_is_reproduced_in_document_order():
 def test_nothing_that_was_not_asked_for_comes_back(capsys):
     rows = extract_fields(PAGES, FIELDS)
     blob = json.dumps(rows)
-    for secret in ("NICK", "HERTZOG", "123-456789", "1234", "Jane", "Rivera", "555",
+    for secret in ("QUINN", "SAMPLEFORD", "123-456789", "1234", "Jane", "Rivera", "555",
                    "correspondence", "SSN", "Advisor"):
         assert secret not in blob, f"{secret!r} reached the output"
 
@@ -64,7 +64,7 @@ def test_the_printed_form_carries_the_same_discipline(capsys):
     _emit(extract_fields(PAGES, FIELDS), as_json=False)
     printed = capsys.readouterr().out
     assert "$12,217.86" in printed and "26259-MCQGWD" in printed
-    for secret in ("NICK", "HERTZOG", "123-456789", "Jane", "Advisor", "correspondence"):
+    for secret in ("QUINN", "SAMPLEFORD", "123-456789", "Jane", "Advisor", "correspondence"):
         assert secret not in printed
 
 
@@ -128,7 +128,7 @@ def test_it_runs_as_a_script_end_to_end(tmp_path):
 
 # --- the trade-line shape (R-IV.470(c)) -------------------------------------------------------
 CONFIRM = ["""
-    ACTIVITY   Prepared for NICK HERTZOG   Account 123-456789   Advisor Jane Rivera (555) 010-9988
+    ACTIVITY   Prepared for QUINN SAMPLEFORD   Account 123-456789   Advisor Jane Rivera (555) 010-9988
     YOU BOUGHT  3 HYG 11/20/2026 $73 P  @ $0.4067   REF 26259-MCQGWD
     Sold 2 IBIT 6/12/2026 $62 C at $0.16   Conf# 31007-KKQPLX
     Dividend received 12.40 on core position
@@ -150,7 +150,7 @@ def test_a_row_that_is_not_a_fill_is_never_emitted():
     rows = extract_trade_lines(CONFIRM)
     assert len(rows) == 3, "the dividend, the header and the message are not fills"
     blob = json.dumps(rows)
-    for secret in ("NICK", "HERTZOG", "123-456789", "Jane", "Rivera", "555", "advisor",
+    for secret in ("QUINN", "SAMPLEFORD", "123-456789", "Jane", "Rivera", "555", "advisor",
                    "Dividend", "12.40"):
         assert secret not in blob
 
@@ -166,7 +166,7 @@ def test_the_printed_trade_line_carries_only_those_fields(capsys):
     printed = capsys.readouterr().out
     assert "trade p1: action=BUY quantity=3 price=$0.4067 symbol=HYG reference=26259-MCQGWD" in printed
     assert "ABSENT: reference" in printed
-    for secret in ("NICK", "HERTZOG", "123-456789", "Jane", "advisor", "Dividend"):
+    for secret in ("QUINN", "SAMPLEFORD", "123-456789", "Jane", "advisor", "Dividend"):
         assert secret not in printed
 
 

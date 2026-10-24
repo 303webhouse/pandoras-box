@@ -89,14 +89,19 @@ def harness(monkeypatch):
     """The target is WITHHELD and two earlier sessions have bars but no label."""
     written, audits = [], []
 
+    # DATED bars, not placeholders: R-IV.1423(h)2 builds each label from the series TRUNCATED to
+    # its own session (`series_through`), which reads every bar's date and refuses an undated one.
+    from models.regime_inputs import Bar
+    _bars = [Bar(d) for d in sorted(TRADING)]
     monkeypatch.setattr(regime_job, "load_designated_series",
-                        _async(lambda conn: {"SPY": [object()] * 300,
-                                             "QQQ": [object()] * 300,
-                                             "IWM": [object()] * 300}))
+                        _async(lambda conn: {"SPY": list(_bars), "QQQ": list(_bars),
+                                             "IWM": list(_bars)}))
+    # No FRED in a unit test: run_nightly loads the VIX pair once per run (R-IV.1423(h)2).
+    monkeypatch.setattr(regime_job, "load_vix_pair", lambda rules: ({}, {"paired_dates": 0}))
     monkeypatch.setattr(regime_job, "cutover_state",
                         _async(lambda conn, v, rules=None: {"ok": True, "inherited": False}))
     monkeypatch.setattr(regime_job, "build_sessions",
-                        _async(lambda conn, series, rules=None, settled_through=None:
+                        _async(lambda conn, series, rules=None, settled_through=None, vix=None:
                                ([object()] * len(TRADING),
                                  {"v2_inputs": True, "vix": {"paired_dates": 300}})))
     monkeypatch.setattr(regime_job, "replay", lambda sessions, rules: {"shown": [

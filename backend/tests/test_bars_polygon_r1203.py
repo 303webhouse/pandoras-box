@@ -105,10 +105,10 @@ async def test_A_CLOSE_MISMATCH_WRITES_NOTHING_AND_REPORTS_DEGRADED():
         return [{"date": session, "o": 1.0, "h": 2.0, "l": 0.5, "c": 763.25, "v": 1}]
 
     async def _uw(t):
-        return session, 999.99          # disagrees
+        return {session: 999.99}        # disagrees
 
-    orig = (bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S)
-    bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S = _fetch, _uw, 0.0
+    orig = (bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S)
+    bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S = _fetch, _uw, 0.0
     try:
         import stable_engine.market_calendar as mc
         orig_settled = mc.is_session_settled
@@ -118,7 +118,7 @@ async def test_A_CLOSE_MISMATCH_WRITES_NOTHING_AND_REPORTS_DEGRADED():
         finally:
             mc.is_session_settled = orig_settled
     finally:
-        bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S = orig
+        bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S = orig
 
     assert out["degraded"] is True
     assert out["written"] == 0
@@ -143,10 +143,10 @@ async def test_POSITIVE_CONTROL_an_agreeing_close_IS_written_and_marked_verified
         return [{"date": session, "o": 1.0, "h": 2.0, "l": 0.5, "c": 763.25, "v": 1}]
 
     async def _uw(t):
-        return session, 763.25
+        return {session: 763.25}
 
-    orig = (bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S)
-    bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S = _fetch, _uw, 0.0
+    orig = (bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S)
+    bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S = _fetch, _uw, 0.0
     try:
         import stable_engine.market_calendar as mc
         orig_settled = mc.is_session_settled
@@ -156,7 +156,7 @@ async def test_POSITIVE_CONTROL_an_agreeing_close_IS_written_and_marked_verified
         finally:
             mc.is_session_settled = orig_settled
     finally:
-        bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S = orig
+        bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S = orig
 
     assert out["degraded"] is False
     assert out["written"] == 1
@@ -184,10 +184,10 @@ async def test_ONE_BAD_TICKER_BLOCKS_THE_WHOLE_SESSION():
         return [{"date": session, "o": 1.0, "h": 2.0, "l": 0.5, "c": closes[t], "v": 1}]
 
     async def _uw(t):
-        return (session, closes[t] if t != "IWM" else 111.11)   # IWM disagrees
+        return {session: closes[t] if t != "IWM" else 111.11}   # IWM disagrees
 
-    orig = (bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S)
-    bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S = _fetch, _uw, 0.0
+    orig = (bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S)
+    bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S = _fetch, _uw, 0.0
     try:
         import stable_engine.market_calendar as mc
         orig_settled = mc.is_session_settled
@@ -197,7 +197,7 @@ async def test_ONE_BAD_TICKER_BLOCKS_THE_WHOLE_SESSION():
         finally:
             mc.is_session_settled = orig_settled
     finally:
-        bp.fetch_daily, bp.uw_chart_close, bp.CALL_GAP_S = orig
+        bp.fetch_daily, bp.uw_dated_closes, bp.CALL_GAP_S = orig
 
     assert out["degraded"] is True
     assert writes == [], "SPY and QQQ verified, but nothing is written"
@@ -211,21 +211,22 @@ async def test_AN_UNVERIFIABLE_SESSION_IS_NOT_A_VERIFIED_ONE():
     session = dt.date(2026, 10, 16)
 
     async def _uw_blank(t):
-        return None, None
+        return None                     # UW could not answer at all
 
     async def _uw_other_day(t):
-        return dt.date(2026, 10, 15), 763.25
+        # R-IV.1423(h)2: a dated series that holds OTHER sessions but not this one.
+        return {dt.date(2026, 10, 15): 763.25}
 
-    orig = bp.uw_chart_close
+    orig = bp.uw_dated_closes
     try:
-        bp.uw_chart_close = _uw_blank
+        bp.uw_dated_closes = _uw_blank
         ok, why = await bp.verify_close("SPY", session, 763.25)
         assert ok is False and "could not be verified" in why
-        bp.uw_chart_close = _uw_other_day
+        bp.uw_dated_closes = _uw_other_day
         ok2, why2 = await bp.verify_close("SPY", session, 763.25)
-        assert ok2 is False and "not the session being written" in why2
+        assert ok2 is False and "has no regular-session row" in why2 and "could not be verified" in why2
     finally:
-        bp.uw_chart_close = orig
+        bp.uw_dated_closes = orig
 
 
 @pytest.mark.asyncio

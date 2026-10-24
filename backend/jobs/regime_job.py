@@ -307,11 +307,18 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
     # stored bar's date, and that breaks the moment the capture below exists: on a nightly run
     # the newest STORED bar is yesterday's, because today's is what this run is about to fetch.
     # The job would have targeted yesterday every single night and never captured a session.
+    #
+    # R-IV.1423(h)2, §2 FORM (b): ONE SESSION BACK. The slot stays at 21:3x ET, and the run on
+    # night N targets session N-1. Measured envelope: Polygon withholds a session for more than
+    # 6.1h after its close and serves it within 30h, so at ~5.5h tonight's own session is
+    # withheld EVERY night (F1) -- while N-1 is ~29.5h old and served. The card is therefore
+    # one session behind by design, a statable property, instead of behind by accident.
     target = session_date
     if target is None:
-        from stable_engine.market_calendar import CalendarHorizonError, last_settled_session
+        from stable_engine.market_calendar import (CalendarHorizonError, last_settled_session,
+                                                   previous_trading_day)
         try:
-            target = last_settled_session()
+            target = previous_trading_day(last_settled_session())
         except CalendarHorizonError as exc:
             detail = "cannot establish the last settled session (%s)" % exc
             await _audit(conn, action="refused", detail=detail, rules_version=version)
@@ -422,7 +429,17 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
     # `settled_through` must reach the NEWEST session being labelled -- not the target, which
     # may have no bar at all tonight.
     newest_labelled = await newest_labelled_session(conn)
-    label_targets = await sessions_after(conn, newest_labelled, through=target)
+    walk: Dict[str, Any] = {}
+    label_targets = await sessions_after(conn, newest_labelled, through=target, report=walk)
+
+    # R-IV.1423(h)2, §3.1: A STOP IS A ROW. The labeller halts at the first settled session with
+    # no stored bar instead of labelling across it, and the halt is recorded every night it
+    # holds -- "the card is N sessions behind" must be visible, or STOP is just a quieter stall.
+    if (walk.get("stopped") or {}).get("kind") == "gap":
+        await _audit(conn, action="stopped_at_gap", detail=walk["stopped"]["detail"],
+                     as_of=walk["stopped"]["session"], rules_version=version)
+        logger.warning("[regime_job] nightly %s", walk["stopped"]["detail"])
+
     if not label_targets:
         detail = ("nothing to label: no stored bar for any settled session after %s"
                   % (newest_labelled.isoformat() if newest_labelled else "the start of the series"))
@@ -430,41 +447,51 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
         logger.info("[regime_job] nightly %s", detail)
         return {"written": 0, "labelled": [], "noop": detail,
                 "as_of": newest_labelled.isoformat() if newest_labelled else None,
-                "backfilled": capture.get("backfilled") or []}
-
-    sessions, build = await build_sessions(conn, series, rules=rules,
-                                           settled_through=label_targets[-1].isoformat())
-    if not sessions:
-        detail = ("no classifiable session: SPY holds %d bar(s), %d needed"
-                  % (len(spy), MIN_BARS))
-        await _audit(conn, action="refused", detail=detail, as_of=target, rules_version=version)
-        return {"written": 0, "refused": detail, "as_of": target.isoformat()}
-
-    out = replay(sessions, rules)
+                "backfilled": capture.get("backfilled") or [],
+                "stopped": walk.get("stopped")}
 
     # R-IV.1357(a)2: EVERY SESSION AFTER THE NEWEST LABELLED ONE, OLDEST FIRST.
-    #
-    # The old code wrote exactly one row -- the target's -- and its comment said "the earlier
-    # ones were replayed to rebuild the hysteresis state and are already stored (or will be, by
-    # the seed)". That premise failed the moment a session could be backfilled: those sessions
-    # are replayed, classifiable, and stored by NOBODY.
     #
     # OLDEST FIRST IS LOAD-BEARING. `held_sessions` and the pending-label counters are carried
     # session to session by the replay, and the `change` text on a row describes a transition
     # from the row before it. Writing newest-first would store each row's state correctly but
     # in an order where a reader following `created_at` sees the series run backwards.
-    to_label = [d for d in label_targets if d.isoformat() in
-                {r.get("as_of") for r in out["shown"]}]
-    missing = [d.isoformat() for d in label_targets if d not in to_label]
+    #
+    # R-IV.1423(h)2, §5: EACH LABEL IS COMPUTED AS OF ITS OWN SESSION. One build per session,
+    # from the series TRUNCATED to that session, so a back-filled 10-21 is computed from bars
+    # (and, through the replay, prior labels) up to 10-21 only -- exactly what the night of
+    # 10-21 would have computed had its bar been there. `settled_through` alone does not
+    # promise that: it marks later sessions unsettled but leaves them in the build.
+    computed: List[tuple] = []          # (session, row, build) for each session with a row
+    missing: List[str] = []
+    vix_pair = load_vix_pair(rules)     # ONCE per run, shared by every session's build
+    for d in label_targets:
+        sessions_d, build_d = await build_sessions(conn, series_through(series, d), rules=rules,
+                                                   settled_through=d.isoformat(), vix=vix_pair)
+        if not sessions_d:
+            if not computed and d == label_targets[0]:
+                detail = ("no classifiable session: SPY holds %d bar(s), %d needed"
+                          % (len(spy), MIN_BARS))
+                await _audit(conn, action="refused", detail=detail, as_of=target,
+                             rules_version=version)
+                return {"written": 0, "refused": detail, "as_of": target.isoformat()}
+            missing.append(d.isoformat())
+            continue
+        out_d = replay(sessions_d, rules)
+        row = next((r for r in out_d["shown"] if r.get("as_of") == d.isoformat()), None)
+        if row is None:
+            missing.append(d.isoformat())
+            continue
+        computed.append((d, row, build_d))
 
     # Imported here, as the old single-row write did: `regime_seed` imports from this
     # module, so a module-level import would be circular.
     from jobs.regime_seed import _write_snapshot
 
+    run_day = today_et()
     written_rows = []
     conflicts = []
-    for d in to_label:
-        row = next(r for r in out["shown"] if r.get("as_of") == d.isoformat())
+    for d, row, build in computed:
         r = await _write_snapshot(conn, row, seeded=False, close_source=CLOSE_SOURCE)
         if r is None:
             # Append-only: a session that already holds a row for this version is left alone
@@ -487,13 +514,18 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
                      build.get("v2_inputs"),
                      (build.get("vix") or {}).get("paired_dates",
                                                   (build.get("vix") or {}).get("error", "n/a"))))
+        # R-IV.1423(h)2, §5: A LABEL WRITTEN AFTER ITS OWN NIGHT SAYS SO, in the same row.
+        late = lateness(d, run_day)
+        if late:
+            detail = "%s -- %s" % (late, detail)
         await _audit(conn, action="nightly", detail=detail, as_of=d, rows_written=1,
                      rules_version=version)
         logger.info("[regime_job] nightly %s", detail)
         written_rows.append({"as_of": d.isoformat(), "shown_regime": row.get("shown_regime"),
                              "regime": row.get("regime"), "label": row.get("label"),
                              "tags": row.get("tags"), "basis": row.get("basis"),
-                             "change": row.get("change"), "blocked": row.get("blocked")})
+                             "change": row.get("change"), "blocked": row.get("blocked"),
+                             "late": late or None})
 
     if missing:
         await _audit(conn, action="refused",
@@ -514,8 +546,10 @@ async def run_nightly(conn, session_date: Optional[_date] = None,
     newest_row = written_rows[-1]
     return dict(newest_row, written=len(written_rows),
                 labelled=[r["as_of"] for r in written_rows],
+                late=[r["as_of"] for r in written_rows if r.get("late")],
                 conflicts=conflicts,
-                backfilled=capture.get("backfilled") or [])
+                backfilled=capture.get("backfilled") or [],
+                stopped=walk.get("stopped"))
 
 
 #: R-IV.1354(b)1. The audit action that records when a rules version went live.
@@ -652,8 +686,17 @@ async def newest_labelled_session(conn):
         """SELECT MAX(as_of) FROM regime_snapshots WHERE superseded = FALSE""")
 
 
-async def sessions_after(conn, newest_labelled, *, through):
-    """Settled sessions with a stored SPY bar, strictly after `newest_labelled`, oldest first.
+async def sessions_after(conn, newest_labelled, *, through, report=None):
+    """The CONTIGUOUS run of settled sessions with a stored SPY bar, strictly after
+    `newest_labelled`, oldest first -- STOPPING at the first settled session with no bar.
+
+    R-IV.1423(h)2, §3.1: STOP, NEVER SKIP. This used to return every stored date after the
+    newest label, so a gap was indistinguishable from adjacency: with only 10-23 stored after
+    10-20 it returned [10-23], and 10-23 was labelled with 10-20 as its previous session --
+    three calendar days treated as one step, wrong on its inputs and a hole that could never
+    close. Now the stored dates are walked against THE MARKET CALENDAR (`contiguous_run`), so a
+    weekend or a holiday is crossed because it has no session at all, and a missing TRADING
+    session halts the run. `report["stopped"]` says where and why.
 
     STRICTLY AFTER. This is the whole of "label forward only": the comparison is `>`, never
     `>=`, so the newest labelled session is never revisited and nothing older than it can ever
@@ -675,7 +718,113 @@ async def sessions_after(conn, newest_labelled, *, through):
               AND ($1::date IS NULL OR b.date > $1::date)
               AND b.date <= $2::date
             ORDER BY b.date ASC""", newest_labelled, through)
-    return [r["date"] for r in rows if is_session_settled(r["date"]) is True]
+    run, stopped = contiguous_run(newest_labelled, [r["date"] for r in rows], through,
+                                  settled=is_session_settled)
+    if report is not None:
+        report["stopped"] = stopped
+    return run
+
+
+#: R-IV.1423(h)2 §2 form (b): the label runs this many sessions behind the last settled
+#: session BY DESIGN. One constant, read by the target derivation's reasoning and by `health`.
+DESIGNED_LAG_SESSIONS = 1
+
+
+def _prev_session_or(d):
+    from stable_engine.market_calendar import previous_trading_day
+    try:
+        return previous_trading_day(d).isoformat()
+    except Exception:                                               # noqa: BLE001
+        return "the previous session"
+
+
+def contiguous_run(newest_labelled, stored_dates, through, *, settled=None):
+    """The sessions to label: CONTIGUOUS, walked on the market calendar. R-IV.1423(h)2 §3.1.
+
+    Starts at the trading session after `newest_labelled` (or at the first stored date when
+    nothing is labelled) and steps with `next_trading_day`, so weekends and holidays are never
+    visited: they have no session, and a stop there would halt the labeller at the first
+    Saturday -- the inverse of the bug this replaces (proposal §3.1's condition).
+
+    STOPS, and says why, at the first of:
+      * a settled trading session with NO stored bar  -> kind "gap" (the case that matters);
+      * a session that is not settled, or cannot be answered for -> kind "unsettled";
+      * the calendar's horizon                                 -> kind "horizon".
+    Reaching `through` is not a stop. Returns (run, stopped-or-None).
+
+    Forward-only survives: the walk begins strictly after `newest_labelled` and only removes
+    sessions from the old answer, never adds an older one.
+    """
+    from stable_engine.market_calendar import (CalendarHorizonError, is_session_settled,
+                                               next_trading_day)
+    settled = settled or is_session_settled
+    stored = {as_date(d) for d in stored_dates}
+    through = as_date(through)
+    run: List[_date] = []
+    try:
+        if newest_labelled is None:
+            if not stored:
+                return run, None
+            cur = min(stored)
+        else:
+            cur = next_trading_day(as_date(newest_labelled))
+        while cur <= through:
+            s = settled(cur)
+            if s is not True:
+                return run, {"kind": "unsettled", "session": cur,
+                             "detail": "STOPPED before %s: not settled (is_session_settled=%r)"
+                                       % (cur.isoformat(), s)}
+            if cur not in stored:
+                return run, {"kind": "gap", "session": cur,
+                             "detail": ("STOPPED at %s: a settled session with no stored bar. "
+                                        "Nothing after it is labelled until its bar is stored "
+                                        "-- labelling across it would compute the next session "
+                                        "against the wrong previous one (R-IV.1423 §3.1). "
+                                        "Labelled this run: %s"
+                                        % (cur.isoformat(),
+                                           ", ".join(d.isoformat() for d in run) or "none"))}
+            run.append(cur)
+            cur = next_trading_day(cur)
+    except CalendarHorizonError as exc:
+        return run, {"kind": "horizon", "session": None,
+                     "detail": "STOPPED: the market calendar cannot answer (%s)" % exc}
+    return run, None
+
+
+def series_through(series, d):
+    """Every ticker's bars with a date ON OR BEFORE `d` -- the series as of that session.
+
+    STRICT: a bar whose date cannot be read raises rather than being kept, because keeping it
+    would be the one way a later bar could reach a back-filled label.
+    """
+    cut = as_date(d)
+    return {t: [b for b in bars if as_date(b.date) <= cut] for t, bars in series.items()}
+
+
+def today_et():
+    """The ET calendar date now -- the night a label is being written on."""
+    from stable_engine.market_calendar import _now_et
+    return _now_et().date()
+
+
+def lateness(session, run_day) -> Optional[str]:
+    """None when `session` is labelled on its own night, else the LATE marker for its audit row.
+
+    Under form (b) a session's own night is the evening of the NEXT trading session: the 21:3x ET
+    run on night N labels N-1. A label written on any later night is late, by the number of
+    scheduled nights that passed without it.
+    """
+    from stable_engine.market_calendar import next_trading_day, trading_days_between
+    try:
+        own_night = next_trading_day(as_date(session))
+        missed = trading_days_between(own_night, as_date(run_day))
+    except Exception:                                               # noqa: BLE001
+        return None
+    if missed <= 0:
+        return None
+    return ("LATE by %d session(s): written %s for %s, whose own night was %s"
+            % (missed, as_date(run_day).isoformat(), as_date(session).isoformat(),
+               own_night.isoformat()))
 
 
 async def latest_with_diff(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
@@ -1005,12 +1154,24 @@ async def health(conn, rules_version: Optional[str] = None) -> Dict[str, Any]:
     except Exception:
         lag = max(0, (newest_settled - as_of_d).days)
 
+    # R-IV.1423(h)2, §2 form (b): ONE SESSION BEHIND IS THE DESIGN, not a fault. The run on
+    # night N labels N-1, so a label one session behind the last settled session is what a
+    # healthy system shows all day. The thresholds move by exactly DESIGNED_LAG_SESSIONS: two
+    # behind means tonight's run has not labelled yet (the window between a close and 21:3x
+    # ET), three or more means it has missed.
     if as_of_d >= newest_settled:
         state, reason = "current", ("labelled through the last settled session (%s)"
                                     % newest_settled.isoformat())
-    elif lag <= 1:
-        state, reason = "stale", ("1 session behind the last settled session (%s); the nightly "
-                                  "job has not run for it yet" % newest_settled.isoformat())
+    elif lag <= DESIGNED_LAG_SESSIONS:
+        state, reason = "current", ("labelled through %s, one session behind the last settled "
+                                    "session (%s) by design: the nightly labels the session "
+                                    "before its own (R-IV.1423 form (b))"
+                                    % (as_of_d.isoformat(), newest_settled.isoformat()))
+    elif lag <= DESIGNED_LAG_SESSIONS + 1:
+        state, reason = "stale", ("%d sessions behind the last settled session (%s); tonight's "
+                                  "nightly has not labelled %s yet"
+                                  % (lag, newest_settled.isoformat(),
+                                     _prev_session_or(newest_settled)))
     else:
         state, reason = "dead", ("%d session(s) behind the last settled session (%s)"
                                  % (lag, newest_settled.isoformat()))
@@ -1029,7 +1190,22 @@ def uses_v2_inputs(version: Optional[str]) -> bool:
     return str(version or "") in V2_INPUT_VERSIONS
 
 
-async def build_sessions(conn, series, *, rules, settled_through: str):
+def load_vix_pair(rules):
+    """`(vix_by_date, vix_report)` for one run, loaded ONCE -- the same read `build_sessions`
+    makes. R-IV.1423(h)2: a catch-up builds once per session, and two FRED calls per build would
+    both multiply the spend and let two sessions of one run see different VIX data."""
+    version = rules.get("version")
+    if not uses_v2_inputs(version):
+        return {}, {"skipped": "rules %s does not read the VIX pair" % version}
+    try:
+        from models.regime_vix import by_date as _vix_by_date
+
+        return _vix_by_date()
+    except Exception as exc:                                        # noqa: BLE001
+        return {}, {"error": type(exc).__name__}
+
+
+async def build_sessions(conn, series, *, rules, settled_through: str, vix=None):
     """The sessions list, built THE SAME WAY for the seed, the nightly and the repair.
 
     THE SEED AND THE NIGHTLY DISAGREED, and the card has been living with it since the v2
@@ -1052,7 +1228,9 @@ async def build_sessions(conn, series, *, rules, settled_through: str):
     version = rules.get("version")
     vix_by_date: Dict[str, Any] = {}
     vix_report: Dict[str, Any] = {"skipped": "rules %s does not read the VIX pair" % version}
-    if uses_v2_inputs(version):
+    if vix is not None:
+        vix_by_date, vix_report = vix          # a pair this run already loaded (load_vix_pair)
+    elif uses_v2_inputs(version):
         try:
             from models.regime_vix import by_date as _vix_by_date
 

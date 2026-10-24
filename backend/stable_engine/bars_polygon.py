@@ -148,56 +148,66 @@ async def fetch_daily(ticker: str, start: _dt.date, end: _dt.date) -> List[Dict[
     return await asyncio.to_thread(_fetch_sync, ticker, start.isoformat(), end.isoformat())
 
 
-async def uw_chart_close(ticker: str) -> Tuple[Optional[_dt.date], Optional[float]]:
-    """The UW chart's newest daily close and the session it belongs to.
+async def uw_dated_closes(ticker: str) -> Optional[Dict[_dt.date, float]]:
+    """UW's REGULAR-session close for every session its daily series holds, by date.
 
-    This is the number Polygon agreed with on 2026-10-16, so it is what the nightly checks
-    against. Returns (None, None) when the chart read is unavailable -- which the caller must
-    treat as "could not verify", never as "verified".
+    R-IV.1423(h)2, §1.1. This replaces a reader of the chart's NEWEST close, which took no
+    session argument -- so every session but the newest failed verification by construction and
+    the R-IV.1357(a)1 backfill could never write (proposal §0, F2). The dated series was already
+    being fetched for the chart and thrown away; this reads it.
+
+    THE SAME QUANTITY AS BEFORE. The chart's `spot` is `closes[-1]` of exactly these 'r' bars,
+    and that is the number Polygon agreed with on 2026-10-16. Looking up an OLDER session in
+    the same series compares the same quantity, one session further back.
+
+    None when UW cannot answer -- which the caller must treat as "could not verify", never as
+    "verified". A row whose date or close cannot be read is DROPPED, not defaulted.
     """
     try:
-        from services.read_only.chart_indicators import get_chart_indicators
-        got = await get_chart_indicators(ticker, "daily")
+        from services.read_only.chart_indicators import uw_regular_daily
+        daily, why = await uw_regular_daily(ticker)
     except Exception as exc:                                     # noqa: BLE001
-        logger.warning("[bars_polygon] UW chart read failed for %s: %s",
+        logger.warning("[bars_polygon] UW daily series read failed for %s: %s",
                        ticker, type(exc).__name__)
-        return None, None
-    data = (got or {}).get("data") or got or {}
-    spot = data.get("spot")
-    as_of = data.get("as_of")
-    day = None
-    if as_of:
+        return None
+    if daily is None:
+        logger.warning("[bars_polygon] UW daily series unavailable for %s: %s", ticker, why)
+        return None
+    out: Dict[_dt.date, float] = {}
+    for key, bar in daily.items():
         try:
-            day = _dt.date.fromisoformat(str(as_of)[:10])
-        except ValueError:
-            day = None
-    try:
-        spot = float(spot) if spot is not None else None
-    except (TypeError, ValueError):
-        spot = None
-    return day, spot
+            out[_dt.date.fromisoformat(str(key)[:10])] = float(bar.get("close"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return out
 
 
 async def verify_close(ticker: str, session: _dt.date, close: float) -> Tuple[bool, str]:
-    """Does the UW chart agree with this Polygon close for this session?
+    """Does UW's regular-session close FOR THIS SESSION agree with this Polygon close?
 
-    THREE OUTCOMES, NOT TWO. Agreement, disagreement, and "the chart could not answer for this
+    THREE OUTCOMES, NOT TWO. Agreement, disagreement, and "UW's series could not answer for this
     session" -- and the third is not agreement. R-IV.1203(b)1 says a mismatch writes nothing and
     raises health to DEGRADED; an unverifiable session is treated the same way, because writing
     an unchecked close would make the check decorative.
+
+    FAILS CLOSED WHEN UW HAS NO ROW FOR THE SESSION (R-IV.1423(h)2). The series is bounded by a
+    row limit, not by a date range, so a session inside its apparent span may still be absent.
     """
-    day, spot = await uw_chart_close(ticker)
-    if day is None or spot is None:
-        return False, ("UW chart unavailable for %s, so the close could not be verified"
+    series = await uw_dated_closes(ticker)
+    if series is None:
+        return False, ("UW daily series unavailable for %s, so the close could not be verified"
                        % ticker)
-    if day != session:
-        return False, ("UW chart is at %s, not the session being written (%s), so the close "
-                       "could not be verified" % (day, session))
-    if abs(spot - close) > CLOSE_TOLERANCE:
-        return False, ("close MISMATCH for %s on %s: polygon %.4f vs UW chart %.4f"
-                       % (ticker, session, close, spot))
-    return True, ("polygon %.2f == UW chart %.2f for %s on %s"
-                  % (close, spot, ticker, session))
+    uw = series.get(session)
+    if uw is None:
+        newest = max(series).isoformat() if series else "none"
+        return False, ("UW's dated series has no regular-session row for %s on %s (it holds "
+                       "%d session(s), newest %s), so the close could not be verified"
+                       % (ticker, session, len(series), newest))
+    if abs(uw - close) > CLOSE_TOLERANCE:
+        return False, ("close MISMATCH for %s on %s: polygon %.4f vs UW %.4f"
+                       % (ticker, session, close, uw))
+    return True, ("polygon %.2f == UW %.2f for %s on %s"
+                  % (close, uw, ticker, session))
 
 
 async def store(conn, ticker: str, bars: List[Dict[str, Any]], *, verified: bool) -> int:
@@ -244,9 +254,10 @@ async def load_series(conn, tickers, limit: int = 600) -> Dict[str, List[Any]]:
 async def backfill(conn, tickers, years: int = 2) -> Dict[str, Any]:
     """Fetch and store the full available history. One range call per ticker.
 
-    No UW cross-check on the backfill: the chart route serves only the NEWEST reading, so there
-    is nothing to check a two-year history against. The rows are stored with uw_verified FALSE,
-    which is the honest record -- they were not checked, and a TRUE there would be a claim.
+    No UW cross-check on the backfill: UW's dated series reaches ~167 sessions (it is bounded by
+    a row limit), so most of a two-year history has nothing to check against. The rows are
+    stored with uw_verified FALSE, which is the honest record -- they were not checked,
+    and a TRUE there would be a claim.
     """
     today = _dt.date.today()
     start = today - _dt.timedelta(days=int(years * 366))

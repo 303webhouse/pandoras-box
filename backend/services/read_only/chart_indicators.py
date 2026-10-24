@@ -189,28 +189,33 @@ def market_state(adx_value, stack_state, price_vs=None) -> Dict[str, Any]:
     return out
 
 
-async def get_chart_indicators(ticker: str, timeframe: str = "daily") -> Dict[str, Any]:
-    """Return the chart-indicators envelope payload {status, data, staleness_seconds}."""
-    tkr = (ticker or "").upper()
+async def uw_regular_daily(ticker: str):
+    """UW's REGULAR-session daily bars for `ticker`, keyed by session date (`YYYY-MM-DD`).
 
-    if timeframe != "daily":
-        shell = _unavailable(tkr, timeframe, "intraday timeframe pending v1.1")
-        return shell
+    Returns `(daily, None)`, or `(None, reason)` when UW cannot answer -- the reasons are the
+    envelope's own strings. ONE fetch: the same call, caller tag and cache key the indicators
+    have always used, so R-IV.1423(h)2's dated close verifier, which reads this, costs no call
+    the card does not already make.
 
+    BOUNDED BY ROWS, NOT BY DATE. `/ohlc/1d` is newest-first and ignores `date_from`, so the
+    span is whatever the row limit reaches (measured 2026-10-24: 500 rows -> 167 dated
+    sessions). A date inside the span is NOT therefore present; a reader must look it up.
+    """
     from integrations.uw_api import get_ohlc
     from integrations.uw_governor import is_unavailable
 
+    tkr = (ticker or "").upper()
     try:
         bars = await get_ohlc(tkr, candle_size="1d", lookback_days=LOOKBACK_DAYS,
                               caller="chart_indicators")
     except Exception as exc:
         logger.warning("chart_indicators(%s) bar fetch raised: %s", tkr, type(exc).__name__)
-        return _unavailable(tkr, "daily", "bar fetch error")
+        return None, "bar fetch error"
 
     if is_unavailable(bars):  # governor/circuit/rate-limit sentinel — NOT no-data
-        return _unavailable(tkr, "daily", "UW unavailable (quota/circuit/rate-limit)")
+        return None, "UW unavailable (quota/circuit/rate-limit)"
     if not bars or not isinstance(bars, list):
-        return _unavailable(tkr, "daily", "no bars returned")
+        return None, "no bars returned"
 
     # UW's /ohlc/1d returns SESSION-SPLIT rows per date (market_time pr/r/po).
     # Keep the REGULAR-session ('r') bar only, one per date — otherwise the
@@ -222,6 +227,20 @@ async def get_chart_indicators(ticker: str, timeframe: str = "daily") -> Dict[st
         d = b.get("start_time") or b.get("date")
         if d:
             daily[str(d)[:10]] = b  # one 'r' bar per date (last wins)
+    return daily, None
+
+
+async def get_chart_indicators(ticker: str, timeframe: str = "daily") -> Dict[str, Any]:
+    """Return the chart-indicators envelope payload {status, data, staleness_seconds}."""
+    tkr = (ticker or "").upper()
+
+    if timeframe != "daily":
+        shell = _unavailable(tkr, timeframe, "intraday timeframe pending v1.1")
+        return shell
+
+    daily, why = await uw_regular_daily(tkr)
+    if daily is None:
+        return _unavailable(tkr, "daily", why)
 
     highs: List[float] = []
     lows: List[float] = []
