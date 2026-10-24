@@ -2751,7 +2751,18 @@
     try { return new URLSearchParams(location.search).get('report'); }
     catch (_) { return null; }
   })();
-  const REPORT_ON = REPORT_PARAM === '1' || REPORT_PARAM === 'mock';
+  // R-IV.1392(a) / R-IV.1354(a): THE REPORT CARD IS THE DEFAULT NOW. QUERY's checker
+  // PASSED on the live payload (989f19f4 against spec 81a47dc1, 0 findings).
+  //
+  // `?report=off` restores the hidden state; `?report=mock` still renders the fixture,
+  // which is how the populated layout was reviewed before one could exist and is the
+  // only way to see it while the live card is empty.
+  //
+  // THE QUALIFICATION THAT TRAVELS WITH IT: the live card is E1 (`available: false`), so
+  // no P11 scope clause has fired yet. The rule is proved against QUERY's controls, not
+  // against a card that has actually scored a session. QUERY re-checks the first card
+  // serving `available: true`.
+  const REPORT_ON = REPORT_PARAM !== 'off';
   const REPORT_MOCK = REPORT_PARAM === 'mock';
 
   const RC_CSS = [

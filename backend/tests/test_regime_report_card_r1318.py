@@ -164,16 +164,28 @@ def test_NOTHING_imports_it_the_same_rule_as_regime_ma200():
 
 # ── the renderer ────────────────────────────────────────────────────────────
 
-def test_the_card_is_GATED_and_takes_TWO_values():
-    """`?report=1` renders the LIVE card (empty until the cutover deploys) and
-    `?report=mock` forces the fixture. Both go through the same renderer."""
+def test_the_card_is_ON_BY_DEFAULT_and_still_has_a_gate_and_a_mock():
+    """SUPERSEDED R-IV.1318(c)'s two-value gate (R-IV.1392(a) / R-IV.1354(a)).
+
+    This asserted `'1'` and `'mock'` were the two values, because the card was hidden unless
+    asked for. QUERY's checker then PASSED on the live payload (989f19f4 against spec
+    81a47dc1, 0 findings), which is the condition R-IV.1354 set for shipping it as the default.
+
+    What the test still has to protect, and does:
+      * a GATE still exists, so the card can be turned off (`?report=off`);
+      * `?report=mock` still forces the fixture -- the only way to see the populated layout
+        while the live card is empty;
+      * the renderer is still the single path both states go through.
+    """
     js = read_source(V2JS)
     i = js.index("function rcRender(")
     assert "if (!REPORT_ON || !m) return" in js[i:i + 200]
     j = js.index("const REPORT_PARAM")
-    block = js[j:j + 420]
+    block = js[j:js.index("const RC_CSS")]
     assert "get(" in block and "report" in block
-    assert "'1'" in block and "'mock'" in block
+    assert "'off'" in block, "the rollback value must exist"
+    assert "'mock'" in block, "the fixture must stay reachable"
+    assert "REPORT_PARAM !== 'off'" in block, "default ON"
 
 def test_an_unmeasured_share_prints_a_DASH_not_a_zero():
     """The old layout drew a live BAR; the new one prints the share as text. The property
