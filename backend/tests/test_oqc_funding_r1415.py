@@ -229,10 +229,17 @@ def test_the_bars_run_logs_ONE_line_with_the_held_RANGE_and_what_it_wrote():
     silently widened or slipped would look identical to one working correctly. One line,
     because this log is read by scrolling to the end of a file."""
     code = _fn(BARS_JOB, "main")
-    assert "held_range" in code and "wrote_range" in code
     assert "HELD" in code and "WROTE" in code
-    # The range comes from real dates, not from the window bounds.
-    assert "held_dates" in code
+    assert "held_span" in code, "the held range is no longer reported"
+    assert "held_dates" in code, "the range must come from real dates, not the window bounds"
+    # THE WRITTEN SESSIONS ARE NAMED, NOT A RANGE (R-IV.1417(d)). A range let the reader infer
+    # a count, and that inferred count is what made a fabricated line read as plausible.
+    assert "wrote_range" not in code, (
+        "the written sessions are back to a range, which is the form that hid a fabrication")
+    assert "','.join(sessions)" in code.replace('"', "'"), (
+        "the sessions are not named in the line")
+    # And the two statements of the same fact are cross-checked rather than trusted.
+    assert "INTERNAL INCONSISTENCY" in code
 
 
 def test_the_export_keeps_the_held_DATES_not_just_a_count():
