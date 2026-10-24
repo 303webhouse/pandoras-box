@@ -2432,6 +2432,7 @@ from api.market_data import router as market_data_router
 from api.confluence import router as confluence_router
 from api.macro import router as macro_router
 from api.macro_strip import router as macro_strip_router
+from api.b9 import router as b9_router  # R-IV.1431: B9 global markets, live
 from api.trip_wires import router as trip_wires_router
 from api.sectors import router as sectors_router
 from api.flow_summary import router as flow_summary_router
@@ -2494,6 +2495,7 @@ app.include_router(market_data_router, prefix="/api", tags=["market-data"])
 app.include_router(confluence_router, prefix="/api", tags=["confluence"])
 app.include_router(macro_router, prefix="/api/macro", tags=["macro"])
 app.include_router(macro_strip_router, prefix="/api", tags=["macro-strip"])
+app.include_router(b9_router, prefix="/api", tags=["b9"])
 app.include_router(trip_wires_router, prefix="/api", tags=["trip-wires"])
 app.include_router(sectors_router, prefix="/api", tags=["sectors"])
 app.include_router(flow_summary_router, prefix="/api", tags=["flow-summary"])
