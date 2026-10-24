@@ -2121,9 +2121,11 @@
     const real = rrow('real_10y'), be = rrow('breakeven_10y');
     rows.push({ k: 'rates', name: 'Rates',
       number: real.available ? Number(real.pct).toFixed(2) + '%' : null,
+      // MOVE's absence is stated INSIDE the opened row (pvRates names it with its reason), not on
+      // this one collapsed line: the line is the headline figure, and a third clause about a
+      // missing series pushed it past one line on a phone.
       detail: rr.available
         ? '10y real yield' + (be.available ? ' · breakeven ' + Number(be.pct).toFixed(2) + '%' : '')
-          + ((rr.move && rr.move.available === false) ? ' · MOVE unavailable' : '')
         : (rr.reason || 'not read yet'),
       body: pvRates(S.rates) });
     const vc = volCurveView(_lastRegime.composite);
