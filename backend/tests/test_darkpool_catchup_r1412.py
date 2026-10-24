@@ -315,8 +315,10 @@ def test_the_probe_does_NOT_change_the_gates_behaviour():
     i = src.index("_QUOTA_HEADER_NAMES_LOGGED = True")
     j = src.index("return", i)
     branch = src[i:j]
-    assert "setex" not in branch, (
-        "the probe writes a reading it does not have: %s" % branch[-200:])
+    assert "REDIS_KEY_UW_QUOTA" not in branch, (
+        "the probe writes a QUOTA READING it does not have: %s" % branch[-200:])
+    # Its own key is fine and is the point: that one carries header NAMES, not a figure.
+    assert "REDIS_KEY_UW_HEADER_PROBE" in branch
     # And the branch still ENDS in a return, so an absent reading never falls through into the
     # write path below it.
     assert src[j:j + 6] == "return"
@@ -334,3 +336,71 @@ def test_a_429_still_records_itself_even_with_no_headers():
     assert i < j, "the probe now precedes the no-headers check"
     assert "_record_429()" in src[i:j], (
         "the 429 record now sits after the probe, or has been lost")
+
+
+# ── 4. (d) the probe has to be READABLE, not merely logged ──────────────────
+#
+# MY OWN DESIGN ERROR, measured. The probe logs ONCE per process, so its line is among the
+# first that process emits -- and `railway logs` serves a TAIL. Checked 397 seconds after the
+# deploy, with ours_attributed risen 464 -> 468 so calls had certainly happened: 500 log lines
+# captured, ZERO probe matches. The line had already scrolled out.
+#
+# A diagnostic nobody can page back to is the same fault as `open:no_header` itself: a state
+# technically recorded and practically unreadable.
+
+def test_the_probe_writes_its_finding_where_the_QUESTION_is_asked():
+    """`/health.uw_quota` is where "can we see the account" is asked, so it is where "and here
+    is what UW sent instead" belongs."""
+    from integrations import uw_api as u
+    src = _uw_capture_src()
+    assert "REDIS_KEY_UW_HEADER_PROBE" in src
+    assert u.REDIS_KEY_UW_HEADER_PROBE == "uw:quota_header_probe"
+    assert u.REDIS_KEY_UW_HEADER_PROBE != u.REDIS_KEY_UW_QUOTA, (
+        "the probe must not overwrite the quota reading it is reporting the absence of")
+
+
+def test_the_probe_surface_carries_NAMES_ONLY():
+    src = _uw_capture_src()
+    i = src.index("REDIS_KEY_UW_HEADER_PROBE")
+    block = src[i:i + 700]
+    assert "header_names" in block
+    for leak in (".values()", ".items()", "dict(resp.headers)"):
+        assert leak not in block, leak
+
+
+def test_the_probe_write_cannot_fail_the_call_or_delay_the_early_return():
+    """Telemetry must never fail the call it observes, and must never postpone the return that
+    keeps an unmeasured account failing OPEN."""
+    src = _uw_capture_src()
+    i = src.index("REDIS_KEY_UW_HEADER_PROBE")
+    j = src.index("return", i)
+    block = src[i:j]
+    assert "except Exception" in block, "the probe write is not guarded"
+    # The write sits BEFORE the return, and the return is still there.
+    assert src[j:j + 6] == "return"
+
+
+def test_the_probe_reading_survives_a_deploy():
+    """36 hours, matching the quota key. A probe that died with the process would be erased by
+    exactly the deploy whose logs someone was about to read."""
+    src = _uw_capture_src()
+    i = src.index("REDIS_KEY_UW_HEADER_PROBE")
+    assert "36 * 3600" in src[i:i + 400]
+
+
+def test_the_surface_reads_the_probe_back_only_when_there_is_NO_reading():
+    """It explains an ABSENCE. Attaching it beside a real reading would be noise, and worse,
+    would suggest the account is unmeasured when it is not."""
+    path = os.path.join(BACKEND, "integrations", "uw_api.py")
+    with open(path, encoding="utf-8-sig") as fh:
+        tree = ast.parse(fh.read())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and n.name == "account_quota")
+    src = ast.unparse(fn)
+    i = src.index("no UW quota header seen yet this process")
+    j = src.index("REDIS_KEY_UW_HEADER_PROBE")
+    assert i < j, "the probe is read before the no-reading branch is established"
+    # And it is inside that branch, not after it: the gate_state read follows both.
+    k = src.index("gate_state")
+    assert j < k, "the probe read escaped the no-reading branch"
