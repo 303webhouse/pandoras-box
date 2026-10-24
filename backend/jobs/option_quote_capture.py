@@ -116,9 +116,37 @@ SLOT_GRACE_MINUTES = 25
 SLOT_GRACE_OVERRIDE_MINUTES = {time(15, 59): 2}
 UW_CONTRACT_CAP = 500      # the documented per-call ceiling (uw_api.py)
 
-#: Under the 300/day grant with headroom, and divisible by the 12 slots so the per-slot
-#: allowance is a whole number on the first slot of the day.
-SESSION_CALL_CEILING = 288
+#: Fraction of the RULED quota this job will spend in a session. R-IV.1415(c)2: its own
+#: fail-closed ceiling, like the grid's.
+#:
+#: THE OLD FORM WAS THE LITERAL 288, which is exactly 0.96 x 300 -- the fraction was already
+#: there, frozen into a number. Two faults followed from that. A quota raise did not move the
+#: ceiling, so R-IV.1415(c)'s +20 would have funded nothing; and an UNREGISTERED tag would
+#: still have spent 288, on the governor's DEFAULT_QUOTA of 500, which is the
+#: `outcome_resolver` fault this register already carries. Derived, it is 0 when the tag is
+#: absent and follows the table when it is present.
+SESSION_CEILING_FRACTION = 0.96
+
+
+def tag_is_registered() -> bool:
+    """Is CALLER_TAG in the governor's quota table? An unreadable table is not a licence."""
+    try:
+        from integrations.uw_governor import FOREIGN_RESERVE_QUOTAS, QUOTAS
+        return CALLER_TAG in QUOTAS or CALLER_TAG in FOREIGN_RESERVE_QUOTAS
+    except Exception:                                               # noqa: BLE001
+        return False
+
+
+def session_ceiling() -> int:
+    """Calls this job may spend in a session, from the RULED quota. 0 when unregistered."""
+    if not tag_is_registered():
+        return 0
+    try:
+        from integrations.uw_governor import quota_for
+        quota, _tier = quota_for(CALLER_TAG)
+    except Exception:                                               # noqa: BLE001
+        return 0
+    return int(quota * SESSION_CEILING_FRACTION)
 
 #: How close a call's delta must be to 0.50 before it is trusted as the ATM marker. Beyond
 #: this the chain is too sparse or deltas are missing, and the parity fallback is used.
@@ -198,7 +226,7 @@ def plan_pairs(session: date, tickers: Sequence[str] = TICKERS) -> List[Tuple[st
 
 
 def slot_allowance(calls_used: int, slots_remaining: int,
-                   ceiling: int = SESSION_CALL_CEILING) -> int:
+                   ceiling: Optional[int] = None) -> int:
     """How many calls this slot may make.
 
     `remaining // slots_remaining` is the whole guarantee: every later slot, including the
@@ -207,6 +235,8 @@ def slot_allowance(calls_used: int, slots_remaining: int,
     """
     if slots_remaining <= 0:
         return 0
+    if ceiling is None:
+        ceiling = session_ceiling()
     remaining = max(0, ceiling - calls_used)
     return max(0, remaining // slots_remaining)
 
@@ -403,8 +433,18 @@ async def capture_slot(now: Optional[datetime] = None,
         return {"slot": slot_key, "reason": "already captured", "captured": 0}
 
     session = et.date()
+    # R-IV.1415(c)3: the run opens HERE, past both early returns -- "no slot due" and "already
+    # captured" are not runs, and recording them would write ~1,440 rows a day.
+    _run_id = None
+    try:
+        from jobs.job_runs import JOB_OPTION_QUOTE_CAPTURE, start_run
+        _run_id = await start_run(JOB_OPTION_QUOTE_CAPTURE, session)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[oqc] could not open a job_runs record: %s", type(exc).__name__)
+
     remaining_slots = sum(1 for s in SLOT_TIMES_ET if s >= slot)
-    allowance = slot_allowance(_calls_used, remaining_slots)
+    ceiling = session_ceiling()
+    allowance = slot_allowance(_calls_used, remaining_slots, ceiling)
 
     pairs = plan_pairs(session)
     summary = {
@@ -467,14 +507,45 @@ async def capture_slot(now: Optional[datetime] = None,
     if used_here:
         _slots_done.add(slot_key)
     summary["calls_used_session"] = _calls_used
-    summary["ceiling"] = SESSION_CALL_CEILING
+    summary["ceiling"] = ceiling
+    await _finish(_run_id, summary, pool)
     _last_result.clear()
     _last_result.update(summary)
     logger.info("[oqc] slot %s: %d pairs captured, %d rows, %d absent, %d unavailable, "
                 "%d shed, %d/%d calls this session",
                 slot_key, summary["captured"], summary["rows"], summary["absent"],
-                summary["unavailable"], summary["shed"], _calls_used, SESSION_CALL_CEILING)
+                summary["unavailable"], summary["shed"], _calls_used, ceiling)
     return summary
+
+
+async def _finish(run_id, summary: dict, pool) -> None:
+    """Close the slot's job_runs row. Never raises.
+
+    ZERO ROWS IS A FAULT, NOT A SUCCESS -- and under the collector law it is a permanent one:
+    the slot it describes cannot be captured again. `completed_defective` is the existing
+    vocabulary for "ran to the end and its own output check failed" (R-IV.426(b)), and a
+    missing pool is an `error` because the slot is LOST rather than empty.
+    """
+    if run_id is None:
+        return
+    try:
+        from jobs.job_runs import (STATUS_COMPLETED_DEFECTIVE, STATUS_ERROR, STATUS_OK,
+                                   finish_run)
+        rows = int(summary.get("rows") or 0)
+        if pool is None:
+            await finish_run(run_id, STATUS_ERROR, rows_touched=rows,
+                             error="no database pool: slot %s is LOST and cannot be recaptured"
+                                   % summary.get("slot"))
+        elif rows > 0:
+            await finish_run(run_id, STATUS_OK, rows_touched=rows)
+        else:
+            await finish_run(
+                run_id, STATUS_COMPLETED_DEFECTIVE, rows_touched=0,
+                error="stored no rows (%d absent, %d unavailable, %d shed of %d planned)"
+                      % (summary.get("absent") or 0, summary.get("unavailable") or 0,
+                         summary.get("shed") or 0, summary.get("planned") or 0))
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[oqc] could not close the job_runs record: %s", type(exc).__name__)
 
 
 async def _store(pool, session: date, slot_key: str, captured_at: datetime,
@@ -603,6 +674,7 @@ async def capture_status() -> dict:
         #: trust `slots_missed` instead of assuming it is the session's truth.
         "coverage_source": source,
         "calls_used_session": _calls_used,
-        "ceiling": SESSION_CALL_CEILING,
+        "ceiling": session_ceiling(),
+        "tag_registered": tag_is_registered(),
         "last_slot": dict(_last_result) if _last_result else None,
     }

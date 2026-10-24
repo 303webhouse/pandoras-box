@@ -126,10 +126,18 @@ def test_no_slot_on_a_weekend():
 
 def test_the_per_slot_allowance_reserves_a_share_for_every_later_slot():
     """The guarantee, stated as arithmetic: a greedy early slot cannot consume the close's
-    budget, because the allowance is always `remaining // slots_remaining`."""
-    assert oqc.slot_allowance(0, 12) == 24
-    assert oqc.slot_allowance(oqc.SESSION_CALL_CEILING - 24, 1) == 24
-    assert oqc.slot_allowance(oqc.SESSION_CALL_CEILING, 1) == 0
+    budget, because the allowance is always `remaining // slots_remaining`.
+
+    DERIVED FROM THE CEILING SINCE R-IV.1415(c)2, which made the ceiling follow the ruled
+    quota instead of being the literal 288. The guarantee is the DIVISION, not any of the
+    numbers it was once written with -- and the numbers moved twice (24 -> 22 when the 15:59
+    slot landed, 22 -> 23 when the quota rose), breaking a test that was never about them.
+    """
+    c = oqc.session_ceiling()
+    assert oqc.slot_allowance(0, 12) == c // 12
+    assert oqc.slot_allowance(c - 24, 1) == 24
+    assert oqc.slot_allowance(c, 1) == 0
+    assert oqc.slot_allowance(c + 100, 1) == 0, "an overspent session must not go negative"
 
 
 def test_walking_a_whole_session_never_exceeds_the_ceiling_and_the_last_slot_still_runs():
@@ -146,16 +154,23 @@ def test_walking_a_whole_session_never_exceeds_the_ceiling_and_the_last_slot_sti
         a = oqc.slot_allowance(used, n - i)
         per_slot.append(a)
         used += a
-    assert used <= oqc.SESSION_CALL_CEILING, used
+    assert used <= oqc.session_ceiling(), used
     assert per_slot[-1] > 0, "the final slot was starved: %r" % per_slot
     assert min(per_slot) > 0, per_slot
 
 
 def test_the_ceiling_sits_under_the_granted_quota():
+    """The claim is the RELATION, which is what protects the job from spending its tag out --
+    not the particular pair of numbers. R-IV.1415(c) raised the grant 300 -> 320 and made the
+    ceiling derive from it, so the old form (`granted == 300`) asserted a figure the ruling had
+    moved while the relation it cared about never changed."""
     from integrations.uw_governor import quota_for
     granted, _tier = quota_for(oqc.CALLER_TAG)
-    assert granted == 300
-    assert oqc.SESSION_CALL_CEILING <= granted
+    assert oqc.session_ceiling() <= granted
+    assert oqc.session_ceiling() > 0, "a funded tag must have something to spend"
+    # And the haircut is a real one: the ceiling leaves room for a retry and the governor's
+    # own accounting rather than sitting exactly on the grant.
+    assert oqc.session_ceiling() < granted
 
 
 def test_pairs_are_ordered_so_the_FARTHEST_expiry_is_shed_first():
@@ -325,11 +340,14 @@ async def test_shed_and_unavailable_are_counted_SEPARATELY():
     # 288 // 13 = 22, so the first slot now attempts 22 and sheds 10 rather than attempting
     # 24 and shedding 8. Derived here, because a literal would have to be edited by whoever
     # adds the next slot and silently passes if they do not.
-    expected_allowance = oqc.SESSION_CALL_CEILING // len(oqc.SLOT_TIMES_ET)
+    expected_allowance = oqc.session_ceiling() // len(oqc.SLOT_TIMES_ET)
     assert out["planned"] == 32
-    assert out["allowance"] == expected_allowance == 22
+    # 307 // 13 = 23 since R-IV.1415(c)'s raise; it was 288 // 13 = 22, and 288 // 12 = 24
+    # before the 15:59 slot. Derived AND stated, so a future change fails on the figure rather
+    # than on an opaque off-by-one.
+    assert out["allowance"] == expected_allowance == 23
     assert out["unavailable"] == expected_allowance
-    assert out["shed"] == out["planned"] - expected_allowance == 10
+    assert out["shed"] == out["planned"] - expected_allowance == 9
     assert out["captured"] == 0
     assert calls["n"] == expected_allowance, "the allowance must cap the calls actually made"
 
@@ -359,9 +377,17 @@ def test_the_carve_is_budget_neutral():
 
 
 def test_the_new_tag_was_funded_from_flow_per_expiry():
+    """R-IV.1082(b)'s funding was budget-neutral: 300 carved out of `flow_per_expiry`, which
+    went 2000 -> 1700. That history is what this pins, and it still holds.
+
+    The tag's own quota has since moved -- R-IV.1415(c) raised it 300 -> 320 from the buffer --
+    so asserting 300 here was asserting a later ruling's business. What must not change is
+    where the ORIGINAL grant came from, and that `flow_per_expiry` was not given it back.
+    """
     from integrations.uw_governor import quota_for
-    assert quota_for("option_quote_capture")[0] == 300
     assert quota_for("flow_per_expiry")[0] == 1700      # was 2000
+    assert quota_for("option_quote_capture")[0] >= 300, (
+        "the original R-IV.1082(b) grant was reduced; that needs its own ruling")
 
 
 @pytest.mark.parametrize("tag,expected", [

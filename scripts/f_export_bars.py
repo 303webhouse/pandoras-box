@@ -170,13 +170,20 @@ def main() -> int:
     sessions = summary.get("sessions_written") or []
     empty = summary.get("tickers_empty") or []
 
-    _say("bars1m window %s..%s: %d session files written across %d sessions, %d skipped by "
-         "the R-IV.1378(c) hold%s"
-         % (summary.get("window_start"), summary.get("window_end"), written, len(sessions),
-            held, (", %d tickers returned nothing: %s" % (len(empty), ",".join(empty)))
-            if empty else ""))
-    if sessions:
-        _say("newest session written: %s" % sessions[-1])
+    # R-IV.1415(b)1: ONE LINE, carrying the held sessions it skipped -- COUNT AND RANGE -- and
+    # the sessions it wrote. One line because this log is read by scrolling to the end of a
+    # file, and a verdict spread over three lines is a verdict that gets half-read.
+    #
+    # The RANGE is what makes it checkable: a bare count cannot be compared against
+    # R-IV.1378(c)'s 09-25..10-15, so a hold that silently widened or slipped would look
+    # identical to one working correctly.
+    held_dates = summary.get("held_dates") or []
+    held_range = ("%s..%s" % (held_dates[0], held_dates[-1])) if held_dates else "none"
+    wrote_range = ("%s..%s" % (sessions[0], sessions[-1])) if sessions else "none"
+    _say("HELD %d (%s) | WROTE %d files across %d sessions (%s) | window %s..%s%s"
+         % (held, held_range, written, len(sessions), wrote_range,
+            summary.get("window_start"), summary.get("window_end"),
+            (" | %d tickers empty: %s" % (len(empty), ",".join(empty))) if empty else ""))
 
     # ZERO FILES IS A FAULT, NOT A SUCCESS, and saying so is the whole reason this record
     # exists. `completed_defective` is the existing vocabulary for it (R-IV.426(b)): the pass

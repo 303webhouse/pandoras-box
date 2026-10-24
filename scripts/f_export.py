@@ -133,7 +133,10 @@ def export_bars1m() -> dict:
     print("=== bars1m: %s .. %s (yfinance window) ===" % (start, today))
     summary = {"window_start": start.isoformat(), "window_end": today.isoformat(),
                "files_written": 0, "sessions_held": 0, "tickers_empty": [],
-               "sessions_written": set()}
+               # R-IV.1415(b)1 wants the held RANGE, not just a count, so the dates are kept
+               # as a set rather than tallied away. A count alone cannot be checked against
+               # the ruling's 09-25..10-15.
+               "sessions_written": set(), "held_dates": set()}
     for ticker in CENSUS:
         frames = []
         chunk_start = start
@@ -180,6 +183,7 @@ def export_bars1m() -> dict:
             if session_is_held(d):
                 held += 1
                 summary["sessions_held"] += 1
+                summary["held_dates"].add(d.isoformat())
                 continue
             sub = all_df.loc[[ts for ts, _ in rows]]
             path = os.path.join(ROOT, "bars1m", d.isoformat(), "%s.parquet" % ticker)
@@ -193,6 +197,7 @@ def export_bars1m() -> dict:
               % (ticker, len(all_df), written,
                  (", %d HELD by R-IV.1378(c)" % held) if held else ""))
     summary["sessions_written"] = sorted(summary["sessions_written"])
+    summary["held_dates"] = sorted(summary["held_dates"])
     return summary
 
 

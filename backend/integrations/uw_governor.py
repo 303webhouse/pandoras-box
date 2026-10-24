@@ -243,7 +243,11 @@ def describe_block(sentinel) -> str:
 # The arithmetic is asserted by `test_hub_quota_table_fits_inside_the_hub_budget`, never by
 # this comment -- the line this replaced carried arithmetic that outlived two edits to the
 # numbers it described, which is why that test exists.
-QUOTA_SAFETY_BUFFER = 1310  # headroom under the HUB budget, not the account limit
+# R-IV.1415(c): 1,310 -> 1,290, the +20 that restores `option_quote_capture`'s 1.2x sizing
+# margin. Asked for under R-IV.1408, not ruled then, ruled now. Same route as the 640 above and
+# for the same reason: the table sums to exactly DAILY_BUDGET - buffer, so the buffer is the
+# only source that costs no caller its measured demand.
+QUOTA_SAFETY_BUFFER = 1290  # headroom under the HUB budget, not the account limit
 
 # ── RETUNED 2026-09-14 AGAINST MEASURED DEMAND (R-IV.379(c)) ────────────
 # The previous table called itself "STARTING VALUES to tune against the first
@@ -384,7 +388,11 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     # and 15:30 slots. NO off-hours entry below: its window is 10:00-15:30 ET, entirely RTH,
     # so the STANDARD haircut never applies to it and an exemption would be a licence it has
     # no use for.
-    "option_quote_capture": (300, TIER_STANDARD),
+    # R-IV.1415(c): 300 -> 320. Measured peak 244, whose safe ceiling under this table's own
+    # 1.2x rule is 250 -- so at 300 the tag was already AT its sizing limit before the 15:59
+    # close slot (b1b75134) added ~14-20 calls a day. 320/1.2 = 266 restores the margin.
+    # Funded from QUOTA_SAFETY_BUFFER above, so no caller gives up measured demand.
+    "option_quote_capture": (320, TIER_STANDARD),
     # R-IV.1408(b)2: the 5-minute ATM-vertical grid, TRITON-R2 Stage A. 640/day, funded from
     # QUOTA_SAFETY_BUFFER above (1,950 -> 1,310), so no caller gives up measured demand.
     #
