@@ -45,6 +45,10 @@ JOB_F_EXPORT = "f_export"
 # bars were gated on a dark-pool run counter, and when that counter stopped moving the bars
 # stopped with it, reporting exit 0 the whole time.
 JOB_F_EXPORT_BARS = "f_export_bars"
+# R-IV.1415(c)3. The forward option bid/ask capture, recorded per SLOT ATTEMPT -- thirteen a
+# session, not one a minute. Under the collector law a slot it fails to store is permanently
+# absent, so "stored nothing" has to be a recorded fault rather than a log line.
+JOB_OPTION_QUOTE_CAPTURE = "option_quote_capture"
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"

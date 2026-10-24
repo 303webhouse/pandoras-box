@@ -114,7 +114,7 @@ def test_the_close_is_the_LAST_slot_so_the_budget_reserves_it():
     """`remaining // slots_remaining` guarantees a share to every later slot. That guarantee
     only protects the close if the close is last in the list the arithmetic walks."""
     assert oqc.SLOT_TIMES_ET[-1] == time(15, 59)
-    assert oqc.slot_allowance(oqc.SESSION_CALL_CEILING - 5, 1) == 5
+    assert oqc.slot_allowance(oqc.session_ceiling() - 5, 1) == 5
 
 
 # ── 2. the grid cannot spend before the ruling funds it ─────────────────────

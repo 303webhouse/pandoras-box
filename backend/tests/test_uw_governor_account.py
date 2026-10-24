@@ -420,7 +420,9 @@ def test_the_two_R_IV_1408_registrations_are_the_RULED_figures():
 
     assert g.QUOTAS["option_quote_grid"] == (640, g.TIER_STANDARD)
     assert g.FOREIGN_RESERVE_QUOTAS["darkpool_forward"] == (250, g.TIER_STANDARD)
-    assert g.QUOTA_SAFETY_BUFFER == 1310
+    # 1,310 at R-IV.1408; 1,290 since R-IV.1415(c) took a further 20 for
+    # option_quote_capture. Both carves came from here for the same reason.
+    assert g.QUOTA_SAFETY_BUFFER == 1290
 
     # The hub table lands EXACTLY on its ceiling, which is the whole point of taking the 640
     # from the buffer rather than from a caller.
@@ -429,10 +431,11 @@ def test_the_two_R_IV_1408_registrations_are_the_RULED_figures():
     # And the reserve still has room: 12,000 against 5,415 claimed.
     assert sum(q for q, _ in g.FOREIGN_RESERVE_QUOTAS.values()) <= UW_FOREIGN_RESERVE
 
-    # NOT RULED and therefore NOT TAKEN: the +20 I asked for to restore
-    # option_quote_capture's 1.2x sizing margin. It stays at 300 against a measured peak of
-    # 244, whose safe ceiling under the table's own rule is 250.
-    assert g.QUOTAS["option_quote_capture"] == (300, g.TIER_STANDARD)
+    # RULED AND TAKEN at R-IV.1415(c): the +20 that restores option_quote_capture's 1.2x
+    # sizing margin. It was asked for under R-IV.1408, not ruled then, ruled now --
+    # 320/1.2 = 266.7 against a measured peak of 244, where 300/1.2 = 250 had already been
+    # reached before the 15:59 slot added its ~14-20 calls a day.
+    assert g.QUOTAS["option_quote_capture"] == (320, g.TIER_STANDARD)
 
 
 def test_both_new_tags_are_STANDARD_so_the_binding_shed_line_is_seventy_five_percent():
