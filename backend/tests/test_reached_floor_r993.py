@@ -76,7 +76,11 @@ def _page(stamps):
 def _walk(monkeypatch, pages):
     calls = {"n": 0}
 
-    async def fake_fetch(ticker, session, cursor, budget):
+    async def fake_fetch(ticker, session, cursor, budget, caller=None):
+        # The census path must still hand over ITS OWN tag. Asserted rather than ignored:
+        # the default is the only thing keeping the census spend separable from the forward
+        # walk's, and a drifted default would charge one to the other invisibly.
+        assert caller == dp.CALLER, caller
         i = calls["n"]
         calls["n"] += 1
         budget.spend()
