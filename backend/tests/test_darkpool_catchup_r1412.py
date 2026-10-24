@@ -398,9 +398,11 @@ def test_the_surface_reads_the_probe_back_only_when_there_is_NO_reading():
               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
               and n.name == "account_quota")
     src = ast.unparse(fn)
-    i = src.index("no UW quota header seen yet this process")
+    i = src.index("account_shed")
     j = src.index("REDIS_KEY_UW_HEADER_PROBE")
     assert i < j, "the probe is read before the no-reading branch is established"
     # And it is inside that branch, not after it: the gate_state read follows both.
     k = src.index("gate_state")
     assert j < k, "the probe read escaped the no-reading branch"
+    # The branch it sits in is the SETTLED one, not a pending one (R-IV.1417(a)1).
+    assert "INACTIVE" in src[i:j]

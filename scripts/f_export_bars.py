@@ -178,10 +178,24 @@ def main() -> int:
     # R-IV.1378(c)'s 09-25..10-15, so a hold that silently widened or slipped would look
     # identical to one working correctly.
     held_dates = summary.get("held_dates") or []
-    held_range = ("%s..%s" % (held_dates[0], held_dates[-1])) if held_dates else "none"
-    wrote_range = ("%s..%s" % (sessions[0], sessions[-1])) if sessions else "none"
-    _say("HELD %d (%s) | WROTE %d files across %d sessions (%s) | window %s..%s%s"
-         % (held, held_range, written, len(sessions), wrote_range,
+
+    # R-IV.1417(d): NAME THE SESSIONS, never a RANGE. A range is what let a fabricated line
+    # pass my own reading: "WROTE 56 files across 3 sessions (2026-10-16..2026-10-23)" is
+    # self-contradictory -- that range spans six sessions -- and I quoted it as a run's output
+    # when it came from a format-rendering snippet with hand-written numbers. A range invites
+    # the reader to infer a count; a list cannot disagree with itself.
+    #
+    # The counts come from what was actually written: `files_written` is incremented per
+    # write_parquet call and `sessions_written` is the set of sessions those writes landed in.
+    if held != len(held_dates):
+        # The count and the list are the SAME FACT from two places. If they ever disagree the
+        # line must say so rather than print the prettier of the two.
+        _say("INTERNAL INCONSISTENCY: held count %d but %d held dates recorded -- reporting "
+             "both, trust neither" % (held, len(held_dates)))
+    held_span = ("%s..%s" % (held_dates[0], held_dates[-1])) if held_dates else "none"
+    _say("HELD %d (%s) | WROTE %d files across %d sessions: %s | window %s..%s%s"
+         % (len(held_dates), held_span, written, len(sessions),
+            ",".join(sessions) if sessions else "NONE",
             summary.get("window_start"), summary.get("window_end"),
             (" | %d tickers empty: %s" % (len(empty), ",".join(empty))) if empty else ""))
 

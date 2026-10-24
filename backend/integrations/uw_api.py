@@ -168,6 +168,45 @@ async def _consume_token():
 # backs off on it for a bounded window. Time-bounded, because an evidence-free shed that
 # suppresses its own evidence is the latch this whole line of work exists to remove.
 REDIS_KEY_UW_429 = "uw:last_429"
+
+#: R-IV.1417(a)3: the day's 429s, SPLIT BY KIND, per UW day (20:00 ET to 20:00 ET).
+#:
+#: The two mean opposite things. A per-minute/burst 429 is routine -- the rate limiter nearly
+#: prevents them and one costs a single call. A `daily_request_limit_hit` means the ACCOUNT has
+#: nothing left until 20:00 ET, every caller stops, and it is the single fact that would reopen
+#: the question of whether anything besides this hub spends on the key. The existing
+#: `uw:daily_429s_by_caller` hash tallies both under one number per caller, so one daily refusal
+#: looks like one burst throttle on a busy poller.
+#:
+#: Keyed on the UW day and not the calendar day: the vendor's budget resets at 20:00 ET, and a
+#: calendar count would split one budget across two rows.
+REDIS_KEY_UW_429_DAILY_LIMIT = "uw:429_daily_limit"
+REDIS_KEY_UW_429_PER_MINUTE = "uw:429_per_minute"
+REDIS_429_TTL_S = 72 * 3600
+
+
+def _uw_day_str() -> str:
+    """The UW day this instant belongs to, as YYYY-MM-DD. Falls back to the UTC date."""
+    try:
+        from integrations.uw_spend_ledger import uw_day
+        return uw_day().isoformat()
+    except Exception:                                               # noqa: BLE001
+        from datetime import datetime as _d, timezone as _tz
+        return _d.now(_tz.utc).date().isoformat()
+
+
+async def _count_429(kind_key: str) -> None:
+    """Increment one of the two split 429 counters. Never raises."""
+    try:
+        from database.redis_client import get_redis_client
+        client = await get_redis_client()
+        if not client:
+            return
+        key = "%s:%s" % (kind_key, _uw_day_str())
+        await client.incr(key)
+        await client.expire(key, REDIS_429_TTL_S)
+    except Exception:                                               # noqa: BLE001
+        pass
 RATE_LIMIT_EVIDENCE_TTL_S = 7200
 #
 # This is what lets the governor govern the ACCOUNT rather than one process —
@@ -308,7 +347,24 @@ async def account_quota() -> dict:
             out["remaining"] = l - u
             out["pct_used"] = round(100.0 * u / l, 1)
         if "used" not in out:
-            out["note"] = "no UW quota header seen yet this process"
+            # R-IV.1417(a)1: a SETTLED statement, not a pending one. The old wording was "no
+            # UW quota header seen yet this process", which reads as a transient about to
+            # clear -- and that is what it meant when a header was still expected. It is not
+            # what is true now.
+            out["account_shed"] = "INACTIVE"
+            out["note"] = (
+                "The account-wide shed is INACTIVE and will stay inactive: UW no longer "
+                "publishes a daily request counter. Measured 2026-10-24 -- a 200 carries only "
+                "x-uw-req-per-minute-remaining and x-uw-req-per-minute-reset, from which a "
+                "daily used/limit cannot be formed at any sampling rate. This is not a fault "
+                "awaiting a fix. The protection in force is the PER-TAG quota table plus the "
+                "12,000 foreign reserve; see `429_today` for the count that would reopen it.")
+            #: The last reading the record actually carries, so nobody has to guess how long
+            #: this has been true. 2026-09-11 is the account figure uw_api_cache.py:48 cites
+            #: (23,417 of 40,000); the probe's first dated observation of the headers' ABSENCE
+            #: is the second date.
+            out["last_real_account_reading"] = "2026-09-11"
+            out["headers_absent_since_observed"] = "2026-10-24T05:52:14Z"
             # WHY there is no reading, where the question is asked. Without this the surface
             # says only that it cannot see the account, and the one fact that would fix it --
             # what UW sends instead -- lives in a log line that has already scrolled away.
@@ -320,6 +376,25 @@ async def account_quota() -> dict:
                         out["header_probe"] = _pj.loads(_probe)
             except Exception:                                       # noqa: BLE001
                 pass
+        # R-IV.1417(a)3: the day's 429s, split by kind. This is the count that would reopen
+        # the account question, so it sits beside the statement that the shed is inactive
+        # rather than in a log.
+        try:
+            if client:
+                day = _uw_day_str()
+                dl = await client.get("%s:%s" % (REDIS_KEY_UW_429_DAILY_LIMIT, day))
+                pm = await client.get("%s:%s" % (REDIS_KEY_UW_429_PER_MINUTE, day))
+                out["429_today"] = {
+                    "uw_day": day,
+                    "uw_day_basis": "20:00 ET to 20:00 ET, the vendor's own reset",
+                    "daily_limit_hit": int(dl) if dl else 0,
+                    "per_minute": int(pm) if pm else 0,
+                    "note": ("daily_limit_hit > 0 means the ACCOUNT was spent before 20:00 ET "
+                             "and is the trigger to reopen R-IV.1412(c); per_minute is routine "
+                             "burst throttling and costs one call each"),
+                }
+        except Exception:                                           # noqa: BLE001
+            out["429_today"] = {"error": "unreadable"}
         # R-IV.380(a): the gate's OWN condition. "not shedding" and "cannot see
         # the account" must not read the same from outside.
         try:
@@ -396,6 +471,13 @@ async def _uw_request(path: str, params: dict = None, caller: str = "untagged") 
                         _body = (resp.text or "")[:500]
                     except Exception:                               # noqa: BLE001
                         _body = ""
+                    # R-IV.1417(a)3: counted where the kind is already known. Splitting it
+                    # anywhere else would mean re-reading the body, and the body is the only
+                    # thing that distinguishes them.
+                    if _GOV_LIMIT_MARKER in _body:
+                        await _count_429(REDIS_KEY_UW_429_DAILY_LIMIT)
+                    else:
+                        await _count_429(REDIS_KEY_UW_429_PER_MINUTE)
                     if _GOV_LIMIT_MARKER in _body:
                         _gov_trip_breaker(_body)
                         logger.error("UW API %s: 429 with %s — the ACCOUNT is at its daily "
