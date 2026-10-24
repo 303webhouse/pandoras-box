@@ -41,8 +41,8 @@ sys.path.insert(0, HERE)
 import triton_census as C  # noqa: E402
 import triton_r as R  # noqa: E402
 
-REGISTRATION = "DRAFT-TRITON-R2-v2-R-IV.1396.md (draft; sha256 relayed with the draft)"
-RATIFIED_STAMP_SHA256 = None            # set ONLY by the ratifying commit (R-IV.1396(c)-(d))
+REGISTRATION = "TRITON-R2-STAMPED-R-IV.1400.md 5c6ad6400c3a4c98ed02a82ec7f50d8a3fcf20ee7296cdc2857b17025d85b1fc"
+RATIFIED_STAMP_SHA256 = "5c6ad6400c3a4c98ed02a82ec7f50d8a3fcf20ee7296cdc2857b17025d85b1fc"  # R-IV.1406(b)
 FROZEN_LF = {"triton_census.py": "0bc4181a9ce0e7b2c4f0a8ba2acfbc37e43c63971c4ba9b937a2cbc6bb4a0d32",
              "triton_r.py": "6735aba708a03bbeff06ff658dfaf9502305e014966b94f9a9fdc40483cd5087"}
 
