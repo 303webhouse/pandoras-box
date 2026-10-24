@@ -848,16 +848,30 @@ def _reading_tests(ck):
 
 
 def _guard_tests(ck):
-    try:
-        run_stage_a(date(2026, 10, 22), *(["x"] * 7), out_dir="x")
-        ck["REFUSES: stage-a before ratification"] = False
-    except SystemExit as e_:
-        ck["REFUSES: stage-a before ratification"] = "NOT RATIFIED" in str(e_)
-    try:
-        run_stage_b(1, date(2026, 10, 27), date(2027, 1, 5), None, *(["x"] * 7), out_dir="x")
-        ck["REFUSES: stage-b before ratification"] = False
-    except SystemExit as e_:
-        ck["REFUSES: stage-b before ratification"] = "NOT RATIFIED" in str(e_)
+    global RATIFIED_STAMP_SHA256
+    marker = RATIFIED_STAMP_SHA256
+    try:                                                      # the refusal, tested with the marker unset
+        RATIFIED_STAMP_SHA256 = None
+        for name, call in (("stage-a", lambda: run_stage_a(date(2026, 10, 22), *(["x"] * 7), out_dir="x")),
+                           ("stage-b", lambda: run_stage_b(1, date(2026, 10, 27), date(2027, 1, 5), None,
+                                                           *(["x"] * 7), out_dir="x"))):
+            try:
+                call()
+                ck[f"REFUSES: {name} with no ratification marker"] = False
+            except SystemExit as e_:
+                ck[f"REFUSES: {name} with no ratification marker"] = "NOT RATIFIED" in str(e_)
+    finally:
+        RATIFIED_STAMP_SHA256 = marker
+    if marker is not None:                                    # the ratified state (R-IV.1406(b))
+        ok = isinstance(marker, str) and len(marker) == 64 and all(c in "0123456789abcdef" for c in marker) \
+            and REGISTRATION.startswith("TRITON-R2-STAMPED-R-IV.1400.md ") and REGISTRATION.endswith(marker)
+        try:
+            run_stage_a(date(2026, 10, 22), *(["x"] * 7), out_dir="x")
+            passed_gate = False
+        except SystemExit as e_:
+            passed_gate = "NOT RATIFIED" not in str(e_) and "no files match" in str(e_)
+        ck["RATIFIED: the marker is the stamp's sha256 in REGISTRATION, and stage-a passes the gate "
+           "(stopping at the absent test data)"] = ok and passed_gate
     try:
         assert_dates({date(2026, 9, 24)}, set(stage_a_dates(date(2026, 10, 23))), "x")
         ck["DATE CEILING: a calibration date refuses"] = False
