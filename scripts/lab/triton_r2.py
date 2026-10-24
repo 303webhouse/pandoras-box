@@ -612,14 +612,16 @@ def load_stage(dates, prints_glob, complete_csv, bars_glob, polygon_glob, iv_csv
         runs.setdefault((r.ticker, r.session), []).append(float(r.t))
     pop = cell[(cell.d5 == True) & cell.d6.isin(["BUYER", "SELLER"])] if len(cell) else cell  # noqa: E712
     assert_open(ohlcv)
-    iv, iv_dte_bad, n_dte_bad = read_iv(iv_csv, {prev_session(d) for d in dates})
+    iv, iv_dte_bad, n_dte_bad, iv_dte_null, n_dte_null = read_iv(iv_csv, {prev_session(d) for d in dates})
 
     def sigma_of(tk, d):
         v = iv.get((tk, prev_session(d)))
         return v if v is not None and np.isfinite(v) and v > 0 else None
 
     def sigma_why(tk, d):
-        return "iv_near_dte_below_1" if (tk, prev_session(d)) in iv_dte_bad else "iv_prior_session"
+        k = (tk, prev_session(d))
+        return "iv_near_dte_missing" if k in iv_dte_null else "iv_near_dte_below_1" if k in iv_dte_bad \
+            else "iv_prior_session"
     td = pd.read_csv(tide_csv)
     td = td[[pd.Timestamp(x).date() in allowed for x in td.session_date]]
     tide = {}
@@ -633,7 +635,7 @@ def load_stage(dates, prints_glob, complete_csv, bars_glob, polygon_glob, iv_csv
     funnel = {"d1_d4_kept_runs": int(len(cell)), "d5_pass": int((cell.d5 == True).sum()) if len(cell) else 0,  # noqa: E712
               "d6_pass": int(len(pop)), "duplicate_tracking_ids_dropped": int(n_dup),
               "tickers_reached": int(pop.ticker.nunique()) if len(pop) else 0,
-              "iv_rows_rejected_near_dte_below_1": int(n_dte_bad)}
+              "iv_rows_rejected_near_dte_below_1": int(n_dte_bad), "iv_rows_near_dte_missing": int(n_dte_null)}
     return {"pop": pop, "ohlcv": ohlcv, "sigma_of": sigma_of, "sigma_why": sigma_why, "runs": runs,
             "census_set": census_set, "tide": tide, "macro": macro, "funnel": funnel, "capture": cap[WINDOW]}
 
@@ -650,7 +652,8 @@ IV_COLUMNS = ("ticker", "session_date", "iv_near", "near_expiry", "near_dte")
 
 def read_iv(iv_csv, need):
     """sigma = iv_near of the prior session, only where its nearest expiry has dte >= 1 (sec. 3.2).
-    R-IV.1397(b)3 / R-IV.1400(b)3: near_expiry and near_dte must be staged; without them this REFUSES."""
+    R-IV.1397(b)3 / R-IV.1400(b)3: near_expiry and near_dte must be staged; without them this REFUSES.
+    R-IV.1406(c)1: a NULL near_dte or near_expiry on a needed row costs that event only (iv_near_dte_missing)."""
     ivd = pd.read_csv(iv_csv)
     miss = [c for c in IV_COLUMNS if c not in ivd.columns]
     if miss:
@@ -658,13 +661,13 @@ def read_iv(iv_csv, need):
                          f"(R-IV.1397 GAP Z-1). Refusing.")
     ivd = ivd[[pd.Timestamp(x).date() in need for x in ivd.session_date]]
     dte = pd.to_numeric(ivd.near_dte, errors="coerce")
-    if dte.isna().any() or pd.to_datetime(ivd.near_expiry, errors="coerce").isna().any():
-        raise SystemExit("iv_csv: near_dte / near_expiry blank or unparseable on a needed row; refusing")
-    good = ivd[dte >= 1]
-    bad = ivd[dte < 1]
+    null = dte.isna() | pd.to_datetime(ivd.near_expiry, errors="coerce").isna()   # R-IV.1406(c)1: one event, not the run
+    good = ivd[~null & (dte >= 1)]
+    bad = ivd[~null & (dte < 1)]
+    keys = (lambda f: {(r.ticker, pd.Timestamp(r.session_date).date()) for r in f.itertuples()})
     iv = {(r.ticker, pd.Timestamp(r.session_date).date()): float(r.iv_near) for r in good.itertuples()
           if pd.notna(r.iv_near)}
-    return iv, {(r.ticker, pd.Timestamp(r.session_date).date()) for r in bad.itertuples()}, int(len(bad))
+    return iv, keys(bad), int(len(bad)), keys(ivd[null]), int(null.sum())
 
 
 def weeks_up_from_spy(ohlcv, dates):
@@ -952,10 +955,21 @@ def _e2e(ck):
                 ck["IV: a staged iv_conf without near_expiry / near_dte REFUSES (fails loudly)"] = False
             except SystemExit as e_:
                 ck["IV: a staged iv_conf without near_expiry / near_dte REFUSES (fails loudly)"] = "GAP Z-1" in str(e_)
-            iv_, bad_, nb_ = read_iv(os.path.join(td, "iv_dte0.csv"), {date(2026, 9, 1), date(2026, 9, 2)})
+            iv_, bad_, nb_, null_, nn_ = read_iv(os.path.join(td, "iv_dte0.csv"), {date(2026, 9, 1), date(2026, 9, 2)})
             ck["IV: a near_dte < 1 row gives no sigma and is named"] = \
                 ("SPY", date(2026, 9, 2)) not in iv_ and ("SPY", date(2026, 9, 2)) in bad_ and nb_ == 1 and \
-                ("NVDA", date(2026, 9, 2)) in iv_
+                ("NVDA", date(2026, 9, 2)) in iv_ and nn_ == 0
+            ivnull = pd.DataFrame(ivrows)
+            ivnull["near_dte"] = ivnull["near_dte"].astype(object)
+            ivnull.loc[(ivnull.ticker == "SPY") & (ivnull.session_date == "2026-09-02"), "near_dte"] = None
+            ivnull.loc[(ivnull.ticker == "QQQ") & (ivnull.session_date == "2026-09-02"), "near_expiry"] = None
+            ivnull.to_csv(os.path.join(td, "iv_null.csv"), index=False)
+            ivn, badn, nbn, nulln, nnn = read_iv(os.path.join(td, "iv_null.csv"), {date(2026, 9, 1), date(2026, 9, 2)})
+            ck["IV (R-IV.1406(c)1): a NULL near_dte or near_expiry costs that row only -- no sigma, named, counted; "
+               "no SystemExit"] = \
+                ("SPY", date(2026, 9, 2)) not in ivn and ("QQQ", date(2026, 9, 2)) not in ivn and \
+                {("SPY", date(2026, 9, 2)), ("QQQ", date(2026, 9, 2))} == nulln and nnn == 2 and nbn == 0 and \
+                ("NVDA", date(2026, 9, 2)) in ivn
             rows = []
             for d in ("2026-09-02", "2026-09-03"):
                 for k in range(81):
@@ -991,11 +1005,23 @@ def _e2e(ck):
                 len([r for r in r0 if r["ticker"] == "SPY" and r["session"] == dates[1]]) > 0 and \
                 all(r["missing"] == "iv_near_dte_below_1" for r in r0 if r["ticker"] == "SPY" and r["session"] == dates[1]) \
                 and L0["funnel"]["iv_rows_rejected_near_dte_below_1"] == 1
+            Ln = load_stage(dates, os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "complete.csv"),
+                            os.path.join(td, "bars1m", "*", "*.parquet"), os.path.join(td, "poly", "*.parquet"),
+                            os.path.join(td, "iv_null.csv"), os.path.join(td, "tide.csv"), os.path.join(td, "macro.csv"),
+                            n_shuffles=40)
+            rn = evaluate(Ln["pop"], dates, Ln["ohlcv"], Ln["sigma_of"], Ln["runs"], Ln["census_set"], Ln["tide"],
+                          Ln["macro"], Ln["sigma_why"])
+            spy3 = [r for r in rn if r["ticker"] == "SPY" and r["session"] == dates[1]]
+            ck["E2E (R-IV.1406(c)1): with SPY's 09-02 near_dte NULL the run completes; SPY's 09-03 events are "
+               "UNEVALUABLE(iv_near_dte_missing), and the null rows are counted"] = \
+                len(spy3) > 0 and all(r["missing"] == "iv_near_dte_missing" for r in spy3) and \
+                Ln["funnel"]["iv_rows_near_dte_missing"] == 2 and \
+                unevaluable(rn).get("primary:iv_near_dte_missing", 0) == len(spy3)
             ck["E2E: duplicate tracking_ids are dropped by the frozen reader"] = L["funnel"]["duplicate_tracking_ids_dropped"] > 0
             ck["E2E: the population is D6 BUYER/SELLER events of T1000/FRUN (the fixture's random-run events)"] = \
                 L["funnel"]["d6_pass"] > 0 and set(L["pop"].d6) <= {"BUYER", "SELLER"} and set(L["pop"].ticker) <= set(C.CORE8)
             ck["E2E: every event is evaluable or carries a named missing code"] = len(recs) == L["funnel"]["d6_pass"] and \
-                all(r["missing"] in (None, "bars", "horizon", "iv_prior_session", "iv_near_dte_below_1", "no_placebo") for r in recs)
+                all(r["missing"] in (None, "bars", "horizon", "iv_prior_session", "iv_near_dte_below_1", "iv_near_dte_missing", "no_placebo") for r in recs)
             ok = [r for r in recs if r["missing"] is None]
             ck["E2E: sigma is read for the PRIOR session (09-01 for 09-02, 09-02 for 09-03)"] = \
                 L["sigma_of"]("NVDA", dates[0]) == 0.2 and L["sigma_of"]("NVDA", dates[1]) == 0.2 and \
