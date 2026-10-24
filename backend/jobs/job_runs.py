@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 JOB_TRITON_GRADER = "triton_grader"   # the string R-IV.295(a) rules
 JOB_NIGHTLY = "stable_nightly"      # the string R-IV.360(1) rules
 JOB_REGIME = "regime_v1"            # the v1 regime classifier (R-IV.1195(b))
+# R-IV.1398(b)4. The F: archive export, which runs from a LOCAL scheduled task rather than in
+# the hub -- F:/MANDARAX is a drive on Nick's machine and the hub can write neither it nor
+# QUERY's complete.csv. `scripts/f_export_gate.py` imports this name so the two cannot drift;
+# a test asserts its literal fallback matches.
+JOB_F_EXPORT = "f_export"
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"

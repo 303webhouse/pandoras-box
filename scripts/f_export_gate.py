@@ -17,6 +17,22 @@ other is a person plugging something in.
 
 4 IS NOT 0 ON PURPOSE. A gate that cannot reach the database does not know whether a run is
 active, and "I could not check" must never be allowed to read as "nothing is running".
+
+AND AS OF R-IV.1398(b)4, EVERY TICK WRITES A `job_runs` ROW. The five exits above were
+distinguishable to a PERSON reading the log and to nothing else: the scheduler keeps no
+history, so six ticks on 2026-10-23 that each returned 0 for ALREADY_DONE looked exactly like
+six successful exports, and the bars for that session were never written. The record makes the
+three states the ruling names separable by query:
+
+    ran and did nothing   status `skipped`, with the verdict in `skip_reason`
+    late / never fired    NO ROW for the session -- absence is the signal
+    failed                status `error` (the gate could not decide) or
+                          `completed_defective` (it exported, and the match report disagreed)
+
+ONE LIMIT, STATED RATHER THAN HIDDEN: a GATE_ERROR caused by an unreachable database cannot
+be recorded, because recording needs that database. Such a tick leaves no row and is therefore
+indistinguishable from a tick that never fired. The log still carries it. Fixing that would
+need a second, independent store, which is a bigger change than this ruling asked for.
 """
 from __future__ import annotations
 
@@ -26,7 +42,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -36,6 +52,20 @@ F_ROOT = r"F:\pandora-data"
 STATE = r"C:\lane-state\f_export_last_run.json"
 
 EXIT_OK, EXIT_RUN_IN_PROGRESS, EXIT_F_NOT_MOUNTED, EXIT_GATE_ERROR = 0, 2, 3, 4
+
+#: The `job_runs.job_name` this gate records under. Imported from the one module that owns the
+#: job-name vocabulary so the two cannot drift, with a literal fallback because this script
+#: runs from a scheduler on a machine where an import failure must not stop the export. A test
+#: asserts the fallback equals the constant -- a silent fallback to a DIFFERENT name would
+#: write rows nobody queries, which is the fault this record exists to fix, one level up.
+try:
+    sys.path.insert(0, os.path.join(REPO, "backend"))
+    from jobs.job_runs import (JOB_F_EXPORT, STATUS_COMPLETED_DEFECTIVE, STATUS_ERROR,
+                               STATUS_OK, STATUS_SKIPPED)
+except Exception:                                                   # noqa: BLE001
+    JOB_F_EXPORT = "f_export"
+    STATUS_OK, STATUS_ERROR, STATUS_SKIPPED = "ok", "error", "skipped"
+    STATUS_COMPLETED_DEFECTIVE = "completed_defective"
 
 
 def _say(msg: str) -> None:
@@ -81,6 +111,53 @@ async def _active_run():
         await conn.close()
 
 
+def session_date_for(now_local: datetime) -> "date":
+    """Which trading session a tick belongs to.
+
+    The scheduler fires every 30 minutes from 19:00 to 05:00 MT, so a single night's ticks
+    straddle midnight and a naive `date.today()` would file the 01:00 tick under tomorrow --
+    splitting one night across two session dates and making "no row for this session" fire
+    every night at midnight. Everything before 06:00 local belongs to the previous session.
+
+    06:00, not midnight, because the boundary only has to sit between the last tick of a night
+    (05:00) and the first of the next (19:00); anywhere in that gap is correct, and a boundary
+    in the middle of it cannot be tripped by a tick running a few minutes late.
+    """
+    d = now_local.date()
+    return d - timedelta(days=1) if now_local.hour < 6 else d
+
+
+def _record_job_run(status: str, skip_reason=None, error=None, rows_touched=None) -> None:
+    """Write one job_runs row for this tick. NEVER raises, never changes the exit code.
+
+    Bookkeeping must not break the job it records -- the same posture `jobs/job_runs.py`
+    argues for, and for the same reason: a recorder that can fail the run it watches is a
+    worse outage than the blindness it was added to cure.
+    """
+    try:
+        import asyncio as _asyncio
+        import asyncpg as _asyncpg
+
+        async def _go():
+            conn = await _asyncpg.connect(_pg_dsn())
+            try:
+                await conn.execute(
+                    "INSERT INTO job_runs (job_name, session_date, started_at, finished_at,"
+                    " status, rows_touched, skip_reason, error)"
+                    " VALUES ($1, $2, NOW(), NOW(), $3, $4, $5, $6)",
+                    JOB_F_EXPORT, session_date_for(datetime.now().astimezone()),
+                    status, rows_touched, skip_reason, error)
+            finally:
+                await conn.close()
+
+        _asyncio.run(_go())
+    except Exception as exc:                                        # noqa: BLE001
+        # Named in the log rather than swallowed in silence: "the gate did not record" and
+        # "the gate did not run" are different facts, and only the log can tell them apart.
+        _say("job_runs record FAILED (%s) -- the verdict above is the only trace of this tick"
+             % type(exc).__name__)
+
+
 def _last_exported():
     """(run_id, eligible_count) last exported, or (None, None)."""
     try:
@@ -120,10 +197,16 @@ def main() -> int:
     # cannot be written either way, and an unplugged drive is the likeliest of the three.
     if not os.path.isdir("F:\\"):
         _say("F_NOT_MOUNTED: F: is not present. MANDARAX is a backup drive; plug it in.")
+        # SKIPPED, not error: the gate ran and declined correctly, and an unplugged backup
+        # drive is the most ordinary state this gate meets. `error` here would cry wolf most
+        # nights and the real alarm would stop being read. The reason carries the verdict.
+        _record_job_run(STATUS_SKIPPED, skip_reason="F_NOT_MOUNTED: F: is not present")
         return EXIT_F_NOT_MOUNTED
     if not os.path.isdir(F_ROOT):
         _say("F_NOT_MOUNTED: F: is mounted but %s is absent -- refusing to create the "
              "archive root on what may be the wrong drive." % F_ROOT)
+        _record_job_run(STATUS_SKIPPED,
+                        skip_reason="F_NOT_MOUNTED: %s absent on a mounted F:" % F_ROOT)
         return EXIT_F_NOT_MOUNTED
 
     try:
@@ -131,22 +214,39 @@ def main() -> int:
     except Exception as exc:                                        # noqa: BLE001
         _say("GATE_ERROR: could not read the run ledger (%s: %s). NOT treating this as "
              "'nothing is running'." % (type(exc).__name__, exc))
+        # This is the one tick that may leave NO ROW: the record needs the database that just
+        # refused to answer. Attempted anyway -- the failure may have been in the query rather
+        # than the connection -- and the header states the limit.
+        _record_job_run(STATUS_ERROR,
+                        error="GATE_ERROR: run ledger unreadable (%s)" % type(exc).__name__)
         return EXIT_GATE_ERROR
 
     if active:
         _say("RUN_IN_PROGRESS: run %s started %s has no ended_at. Not exporting a partial "
              "night; the scheduler will retry." % (active["id"], active["started_at"]))
+        _record_job_run(STATUS_SKIPPED,
+                        skip_reason="RUN_IN_PROGRESS: run %s has no ended_at" % active["id"])
         return EXIT_RUN_IN_PROGRESS
 
     if latest_ended is None:
         _say("GATE_ERROR: no completed backfill run exists at all. Refusing to export "
              "against a ledger with nothing in it.")
+        _record_job_run(STATUS_ERROR,
+                        error="GATE_ERROR: no completed backfill run exists")
         return EXIT_GATE_ERROR
 
     was_run, was_eligible = _last_exported()
     if was_run == latest_ended and was_eligible == eligible:
         _say("ALREADY_DONE: the archive is current for run %s (%d eligible ticker-sessions)."
              % (latest_ended, eligible))
+        # THE STATE THAT WAS INVISIBLE, and the reason this ruling exists. Six ticks returned
+        # this on 2026-10-23 with exit 0, which any monitor reads as success, while the bars
+        # for that session were never written -- `export_bars1m` runs inside `f_export.py`,
+        # behind this gate, so the yfinance bars are gated on a DARK-POOL run counter that had
+        # not moved. `skipped` with the verdict in `skip_reason` is now queryable.
+        _record_job_run(STATUS_SKIPPED, rows_touched=0,
+                        skip_reason="ALREADY_DONE: archive current for run %s (%d eligible)"
+                                    % (latest_ended, eligible))
         return EXIT_OK
 
     if was_run == latest_ended:
@@ -161,9 +261,14 @@ def main() -> int:
     _record(latest_ended, eligible, proc.returncode)
     if proc.returncode == 0:
         _say("EXPORTED: run %s, and the match report agrees." % latest_ended)
+        _record_job_run(STATUS_OK, rows_touched=eligible)
         return EXIT_OK
     _say("EXPORTED run %s but the match report did NOT agree (exit %d) -- see the log."
          % (latest_ended, proc.returncode))
+    # `completed_defective` is the existing vocabulary for exactly this (R-IV.426(b)): the
+    # pass ran to the end and its OWN output check failed. No new label (R-IV.925(b)).
+    _record_job_run(STATUS_COMPLETED_DEFECTIVE, rows_touched=eligible,
+                    error="match report disagreed (f_export exit %d)" % proc.returncode)
     return proc.returncode
 
 
