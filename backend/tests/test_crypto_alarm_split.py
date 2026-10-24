@@ -176,9 +176,27 @@ def test_the_split_now_covers_all_three_conditional_crypto_producers():
 
     Still asserted as an EXACT set, not a superset: the membership changes what age source and
     which job row a class is judged on, so a class drifting into it unnoticed is its own defect.
+    That is why `cta_scanner` joining under R-IV.1297(f)2 had to be written in HERE rather than
+    passing silently -- and it brought a real consequence with it, below.
     """
     assert JOB_ALIVE_CLASSES == frozenset({"crypto_scanner", "crypto_engine",
-                                           "crypto_cvd_engine"})
+                                           "crypto_cvd_engine",
+                                           # R-IV.1297(f)2, cleared by R-IV.1398(a).
+                                           "cta_scanner"})
+
+
+def test_the_rth_only_member_forced_the_age_bound_to_learn_the_gate():
+    """THE CONSEQUENCE of the membership above, which is why the exact set matters.
+
+    Every earlier member trades round the clock, so `_job_alive_status` could check
+    `age > SLO` unconditionally -- `RTH_ONLY_CLASSES` was consulted only by `_class_status`.
+    `cta_scanner` is the FIRST RTH-only member, and on a 60-minute bound the ungated check
+    reads flatline from the close until the next open, every night and all weekend, on a
+    REGISTERED class. A class joining this set must be checked against that.
+    """
+    from stable_engine import signals_freshness as sf
+    assert sf.JOB_ALIVE_CLASSES & sf.RTH_ONLY_CLASSES == {"cta_scanner"}, (
+        "a new RTH-only alive class appeared: confirm the age bound's session gate covers it")
 
 
 # ─────────── it must read a row that can be a FAILURE (R-IV.617(b), second pass)

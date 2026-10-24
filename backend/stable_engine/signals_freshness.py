@@ -138,6 +138,17 @@ AGE_SOURCES: dict[str, str] = {
     # renders `no_data` and silently disarms the sentinel.
     "lab_registered": AGE_SOURCE_JOB_RUNS,
     "wrr_scanner": AGE_SOURCE_JOB_RUNS,
+    # R-IV.1297(f)2, cleared by R-IV.1398(a). The CTA scanner emits only when an asset leaves
+    # a no-signal zone, so signal age answered the wrong question: a session where nothing
+    # qualified read exactly like a scanner that had stopped.
+    #
+    # THE ORDER, which this file has now insisted on three times: the producer was given its
+    # `start_run("cta_scanner", ...)` write FIRST (c7261e90, deployed 2026-10-22 17:27:14Z),
+    # and only then is the class re-pointed -- because a class pointed at job_runs it does not
+    # write renders `no_data`, which does not degrade, and the sentinel is silently disarmed.
+    # The evidence that the write works is measured, not assumed: 2026-10-23 carried 26 rows,
+    # all `ok`, the first in-RTH row 1.2 minutes after the open.
+    "cta_scanner": AGE_SOURCE_JOB_RUNS,
 }
 # job_runs name per class, where it differs from the class. Both CIRCE source values are
 # written by ONE pass.
@@ -169,7 +180,15 @@ AGE_SOURCE_JOB_NAME: dict[str, str] = {
 # return None for an errored job -- rendering `no_data` instead of the flatline it is. For a
 # class whose whole question is "is it alive", that is exactly backwards.
 JOB_ALIVE_CLASSES: frozenset[str] = frozenset({"crypto_scanner", "crypto_engine",
-                                               "crypto_cvd_engine"})
+                                               "crypto_cvd_engine",
+                                               # R-IV.1297(f)2: "is the scanner firing" IS the
+                                               # alive question, and `last_completed` is blind
+                                               # to a failed run -- an errored scan would come
+                                               # back None and render `no_data` instead of the
+                                               # flatline it is. It is also the FIRST member of
+                                               # this set that is RTH-only, which is why the
+                                               # age bound below had to learn the gate.
+                                               "cta_scanner"})
 
 # Classes whose work is expected once per TRADING SESSION rather than continuously.
 # Their SLO is only evaluated when a pass was actually due -- see _pass_overdue().
@@ -189,7 +208,15 @@ DEFAULT_SLO_SECONDS = 4 * 3600
 SLO_SECONDS: dict[str, int] = {
     "tradingview": 4 * 3600,
     "server_scanner": 4 * 3600,
-    "cta_scanner": 4 * 3600,
+    # R-IV.1297(f)2: 4h -> 60 MINUTES, which the move to job_runs is what makes safe. On
+    # signal age a 60-minute bound would have been a false-flatline machine, because the
+    # scanner is silent whenever nothing leaves a no-signal zone. On RUN age it is a 4x
+    # envelope over measured behaviour: 26 runs across 2026-10-23's ~6.5-hour session is one
+    # roughly every 15 minutes.
+    #
+    # Evaluated ONLY inside RTH and only once 60 minutes of session have elapsed -- see
+    # `_job_alive_status`. Without both, this bound is two guaranteed false reds a day.
+    "cta_scanner": 60 * 60,
     # R-IV.1089(c): 6h -> 96h. MEASURED over 60 days (211 signals): median gap 0.75h, but
     # p90 19.0h, p95 23.5h and a maximum of 91.0h -- and **40 of 210 gaps (19.0%) breached the
     # 6h bound**. It was a false-flatline generator, the identical shape this file already
@@ -331,7 +358,76 @@ def _class_status(cls: str, age: float | None, rejected: int,
     return "ok"
 
 
-def _job_alive_status(cls: str, age: float | None, run: dict | None):
+def rth_elapsed_seconds(dt_et: datetime | None = None) -> float | None:
+    """Seconds of regular trading session elapsed, or None outside it.
+
+    Exists so an SLO cannot be breached by a session younger than the SLO itself. `dt_et` is a
+    clock seam for tests: a case built from the wall clock means a different thing depending on
+    the hour it runs at, which is how a scenario meant to sit inside market hours starts
+    landing outside them.
+    """
+    dt = dt_et or datetime.now(ZoneInfo("America/New_York"))
+    if not is_market_hours(dt):
+        return None
+    open_mins = 9 * 60 + 30
+    mins = dt.hour * 60 + dt.minute
+    return max(0.0, (mins - open_mins) * 60.0 + dt.second)
+
+
+def _status_running() -> str:
+    """`jobs.job_runs.STATUS_RUNNING`, asked for rather than retyped (R-IV.925(b): do not
+    invent labels). Falls back to the literal only if the import fails, and a test asserts
+    the two agree -- a fallback to a different string would make this branch dead code and
+    every in-flight scan would read as an error again."""
+    try:
+        from jobs.job_runs import STATUS_RUNNING
+        return STATUS_RUNNING
+    except Exception:                                               # noqa: BLE001
+        return "running"
+
+
+def _seconds_since(ts) -> float | None:
+    """Seconds from an aware-or-naive UTC timestamp to now, or None if it cannot be read.
+
+    Naive values are treated as UTC, which is what the rest of this module does with
+    `job_runs` timestamps -- the column is TIMESTAMPTZ but asyncpg has handed back naive
+    values through other paths before.
+    """
+    if ts is None:
+        return None
+    try:
+        if getattr(ts, "tzinfo", None) is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts).total_seconds()
+    except Exception:                                               # noqa: BLE001
+        return None
+
+
+def _slo_gate(cls: str, dt_et: datetime | None = None) -> str | None:
+    """None when this class's SLO may be applied right now, else the reason it may not.
+
+    ONE AUTHOR for both time bounds below -- "it has not run" and "it started and never
+    finished" -- because a gate written twice is a gate that will disagree with itself, and
+    whichever copy is looser decides.
+
+    A 24/7 producer is always judged. An RTH-only producer is judged only inside the session,
+    and only once the session is older than the bound itself: a 60-minute SLO cannot honestly
+    be breached by a twenty-minute-old session, and at 09:31 the newest run may still be
+    yesterday's close.
+    """
+    if cls not in RTH_ONLY_CLASSES:
+        return None
+    rth = rth_elapsed_seconds(dt_et)
+    if rth is None:
+        return "outside RTH"
+    slo = SLO_SECONDS.get(cls, DEFAULT_SLO_SECONDS)
+    if rth < slo:
+        return "only %d minutes into the session" % (rth // 60)
+    return None
+
+
+def _job_alive_status(cls: str, age: float | None, run: dict | None,
+                      dt_et: datetime | None = None):
     """`(status, note)` for a class judged on whether its JOB ran. R-IV.617(b).
 
     The question is not "did rows arrive" but "did the scan run and finish cleanly". A scanner
@@ -351,13 +447,40 @@ def _job_alive_status(cls: str, age: float | None, run: dict | None):
         return ("no_data", "no run record: the scan has not reported since this check began")
 
     status = (run.get("status") or "").lower()
+
+    # A SCAN IN FLIGHT IS NOT A FAILED SCAN, and this branch has to come first because
+    # `last_run` returns the newest row WHATEVER its status -- including a `running` one. Every
+    # /health read landing mid-pass used to report `flatline -- the scan errored: running`,
+    # which is false and whose message sends a reader hunting an exception that never happened.
+    #
+    # It cannot simply be called healthy either: `age` is derived from `finished_at`, which
+    # stays NULL while a run is in flight, so a scan that HANGS would leave the newest row
+    # `running`, the age None, and no bound able to catch it -- a sentinel that cannot fire.
+    # The discriminator is how long it has been running.
+    if status == _status_running():
+        held = _seconds_since(run.get("started_at"))
+        gate = _slo_gate(cls, dt_et)
+        if (held is not None and gate is None
+                and held > SLO_SECONDS.get(cls, DEFAULT_SLO_SECONDS)):
+            return ("flatline", "the scan started %d minutes ago and has not finished"
+                    % (held // 60))
+        return ("ok", "a scan is in flight")
+
     if status and status not in ("ok", "success", "completed", "skipped"):
         err = (run.get("error") or "").strip()
         return ("flatline", "the scan errored: %s" % (err[:160] or status))
 
+    # THE AGE BOUND IS THE ONLY THING GATED ON SESSION TIME, and the two branches above are
+    # deliberately NOT: an errored run is an error whenever it happened, and an absent record
+    # is unknown at 03:00 just as much as at noon. What the clock changes is only whether "it
+    # has not run recently" means anything.
     if age is not None and age > SLO_SECONDS.get(cls, DEFAULT_SLO_SECONDS):
-        return ("flatline",
-                "the scan has not run for %d minutes; the scheduler is not firing" % (age // 60))
+        gate = _slo_gate(cls, dt_et)
+        if gate is None:
+            return ("flatline",
+                    "the scan has not run for %d minutes; the scheduler is not firing"
+                    % (age // 60))
+        return ("ok", "last run %d minutes ago, not judged: %s" % (age // 60, gate))
 
     # It ran and it finished. Whether it emitted anything is the other signal.
     note = run.get("skip_reason") or None

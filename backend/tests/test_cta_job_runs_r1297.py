@@ -201,28 +201,46 @@ def test_the_suppression_still_SUPPRESSES():
 
 # ── the order the earlier rulings require ──────────────────────────────────
 
-def test_STEP_2_HAS_NOT_HAPPENED_YET_and_this_is_deliberate():
-    """R-IV.1297(f)2 waits for step 1 to be LIVE, and Railway's builds are paused.
+def test_STEP_2_HAS_NOW_HAPPENED_and_step_1_is_still_underneath_it():
+    """FIRED AS DESIGNED. The previous form asserted `"cta_scanner" not in AGE_SOURCES` and
+    said in its own docstring that it was MEANT to go red in the step-2 commit -- that is what
+    made the flip deliberate rather than incidental. This is that commit.
 
-    THIS TEST IS MEANT TO GO RED in the commit that does step 2 -- that is what makes the flip
-    deliberate rather than incidental, and it is the same device as
-    `test_RULES_VERSION_IS_NOW_v21_BECAUSE_THIS_IS_THE_CUTOVER` (which has since fired and flipped). Until then it pins the ordering
-    that R-IV.617(b), R-IV.800(b) and R-IV.1059(b) all insisted on: a class re-pointed at
-    `job_runs` before anything writes the row renders `no_data`, which does not degrade, so the
-    sentinel switches off while /health goes green.
+    The ordering it was protecting is now asserted from the other side, which is the part that
+    still has to hold: step 1 must remain UNDERNEATH step 2. If someone later removes the
+    producer's `start_run` write while the class stays pointed at `job_runs`, the class renders
+    `no_data` -- which does not degrade -- and the sentinel switches off while /health goes
+    green. That is the fault R-IV.617(b), R-IV.800(b) and R-IV.1059(b) each insisted on, and it
+    is reversible by deleting four lines somewhere else.
     """
-    from stable_engine.signals_freshness import AGE_SOURCE_JOB_RUNS, AGE_SOURCES, SLO_SECONDS
-    assert "cta_scanner" not in AGE_SOURCES, (
-        "if this is intentional, this is the step-2 commit: set the 60-minute RTH SLO "
-        "R-IV.1297(f)2 specifies and update this test in the same commit")
+    from stable_engine.signals_freshness import (
+        AGE_SOURCE_JOB_RUNS, AGE_SOURCES, JOB_ALIVE_CLASSES, SLO_SECONDS,
+    )
+    assert AGE_SOURCES.get("cta_scanner") == AGE_SOURCE_JOB_RUNS
+    assert SLO_SECONDS["cta_scanner"] == 60 * 60, "R-IV.1297(f)2's 60-minute RTH SLO"
+    assert "cta_scanner" in JOB_ALIVE_CLASSES
     assert AGE_SOURCES.get("crypto_scanner") == AGE_SOURCE_JOB_RUNS, (
         "the precedent this ordering comes from must still be in place")
-    assert SLO_SECONDS["cta_scanner"] == 4 * 3600, "the threshold is unchanged until step 2"
 
-
-def test_the_live_verification_step_is_written_down():
-    """(f)1 says "Deploy it and verify the rows appear." Railway's builds are paused, so the
-    verification cannot run in this commit -- and an unrecorded owed step is one nobody does."""
+    # STEP 1 IS STILL THERE. The whole surface depends on it and nothing else checks it from
+    # this file.
     block = _cta_scan_block()
-    assert "STEP 1 OF TWO" in block
-    assert "verified live" in block
+    assert "start_run" in block, (
+        "the class is judged on job_runs but the producer no longer writes the row: the "
+        "sentinel is disarmed, and /health will report ok because `no_data` does not degrade")
+
+
+def test_the_verification_that_UNBLOCKED_step_2_is_written_down():
+    """(f)1 said "Deploy it and verify the rows appear", and the owed step is now DISCHARGED:
+    R-IV.1398(a) cleared it on 2026-10-23's measurement -- 26 rows, all ok, the first in-RTH
+    row 1.2 minutes after the open.
+
+    The comment used to say "STEP 1 OF TWO ... the AGE_SOURCE move is step 2", which was true
+    and is now stale, and a stale ordering note is worse than none: the next reader would think
+    the re-point still had to be done. It records the measurement instead, because the ORDER is
+    what a future edit can break -- the row must keep coming first.
+    """
+    block = _cta_scan_block()
+    assert "R-IV.1398(a)" in block, "the clearing measurement is not recorded beside the write"
+    assert "26 rows" in block, "the evidence that unblocked step 2 is not stated"
+    assert "step 2" in block.lower()
