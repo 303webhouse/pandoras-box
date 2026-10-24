@@ -75,6 +75,60 @@ def thin(history: Sequence[Optional[float]], full: int = THIN_HISTORY) -> bool:
     return len([v for v in history if v is not None]) < full
 
 
+def history_n(history: Sequence[Optional[float]]) -> int:
+    """How many readings a percentile was actually ranked against. R-IV.1369(f)3/(f)4.
+
+    SERVED, not left for the page to infer. The tile says "more puts than 82% of the last N
+    sessions" and "SHORT HISTORY · n OF 52"; `percentile` already counted N and threw it away,
+    so a page wanting it would have had to assume the full window -- which is the claim the
+    thin flag exists to stop.
+    """
+    return len([v for v in history if v is not None])
+
+
+def expected_cftc_as_of(today: _dt.date) -> _dt.date:
+    """The newest TFF as-of date that should be public on `today`. R-IV.1369(f)4.
+
+    CFTC publishes on FRIDAY the positions as of that week's TUESDAY. So the newest as-of that
+    must be out is the Tuesday three days before the latest Friday STRICTLY before today.
+
+    Strictly: on a Friday itself the release lands mid-afternoon, and this module has no clock
+    time. Counting that Friday would call the week's figure missed for most of the day it is
+    due. The cost of the strict reading is the other direction -- a figure missed on Friday is
+    not flagged until Saturday -- and a day late is the safer of the two errors for a flag.
+    """
+    days_since_friday = (today.weekday() - 4) % 7
+    if days_since_friday == 0:
+        days_since_friday = 7
+    return today - _dt.timedelta(days=days_since_friday + 3)
+
+
+def release_missed(as_of: Optional[_dt.date], today: Optional[_dt.date]) -> Optional[bool]:
+    """True when the row is older than the newest release that should be out. None if unknown.
+
+    A HOLIDAY WEEK READS AS MISSED, deliberately. When a federal holiday pushes CFTC's release
+    to the following Monday, this says "missed" over that weekend. That is the "cannot confirm"
+    the amber exists for: the figure on screen IS a week older than a normal week's would be,
+    whatever the reason, and the row's as-of says exactly how old.
+    """
+    if as_of is None or today is None:
+        return None
+    return as_of < expected_cftc_as_of(today)
+
+
+def _et_today() -> Optional[_dt.date]:
+    """Today's date in New York, the calendar CFTC publishes on. None if the zone is unreadable.
+
+    None rather than the machine's local date: a server in UTC would roll over at 20:00 ET and
+    flag Thursday evening's figure as a missed Friday release.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return _dt.datetime.now(ZoneInfo("America/New_York")).date()
+    except Exception:
+        return None
+
+
 def label(pct: Optional[int]) -> Tuple[bool, Optional[str]]:
     """(extreme, which end). A percentile at either tail is extreme; the middle is not."""
     if pct is None:
@@ -94,7 +148,7 @@ def cftc_net(long_: Optional[float], short_: Optional[float]) -> Optional[float]
 
 
 def cftc_row(nets: Dict[str, Optional[float]], history: Sequence[Optional[float]],
-             as_of: Optional[_dt.date]) -> Dict[str, Any]:
+             as_of: Optional[_dt.date], today: Optional[_dt.date] = None) -> Dict[str, Any]:
     """The futures row: ES + NQ leveraged-money net, its percentile, and its OWN as-of.
 
     THE AS-OF IS PART OF THE READING. The TFF report is published Friday for the prior
@@ -107,6 +161,9 @@ def cftc_row(nets: Dict[str, Optional[float]], history: Sequence[Optional[float]
     pct = percentile(total, history)
     is_extreme, end = label(pct)
     missing = [k for k, v in nets.items() if v is None]
+    # R-IV.1369(f)4: `today` is a parameter so a test can pin the calendar; the route passes
+    # nothing and gets New York's date.
+    day = today if today is not None else _et_today()
     return {
         "key": "FUTURES",
         "sub": "CFTC · " + "+".join(CFTC_CONTRACTS),
@@ -125,6 +182,12 @@ def cftc_row(nets: Dict[str, Optional[float]], history: Sequence[Optional[float]
             "CFTC publishes the TFF report on Friday as of the prior Tuesday, so this reading "
             "is at least three days old when it is correct"),
         "missing": missing or None,
+        # R-IV.1369(f)4: the as-of is ALWAYS shown; it turns amber only on these.
+        "release_missed": release_missed(as_of, day),
+        "expected_as_of": expected_cftc_as_of(day).isoformat() if day else None,
+        # R-IV.1369(f)3: the window this row was ranked against, as counted.
+        "history_n": history_n(history),
+        "history_full": FULL_WINDOW,
         "source": "CFTC Traders in Financial Futures, futures only (public domain)",
         "mock": False,
     }
@@ -157,6 +220,9 @@ def put_call_row(ratio: Optional[float], history: Sequence[Optional[float]], *,
         "extreme_end": end,
         "thin": thin(history),
         "as_of": as_of,
+        # R-IV.1369(f)4: "the sessions actually ranked", as counted rather than assumed.
+        "history_n": history_n(history),
+        "history_full": FULL_WINDOW,
         "source": ("UW flow_events, which the hub already pulls, summed over the flow "
                    "poller's universe. NOT the CBOE market-wide equity put/call: a narrower "
                    "sample and therefore a different quantity (R-IV.1239(d)2)"),
