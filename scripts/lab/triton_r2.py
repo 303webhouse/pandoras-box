@@ -104,7 +104,16 @@ def stage_a_dates(last):
     return nyse_sessions(STAGE_A_FIRST, last)
 
 
+STAGE_B_FIRSTS = (date(2026, 10, 27), date(2026, 11, 3))    # R-IV.1400(b)4: 10-27 iff BUILD's 15:59 ET and
+#   5-minute option capture is live by Mon 2026-10-26 18:00 MT, else 11-03; the ratification record fixes which
+MONEY_GATE_A = ("money gate: NOT EVALUABLE in Stage A (it needs BUILD's 15:59 ET and 5-minute option capture, "
+                "which no Stage A session has; R-IV.1397(b)4, R-IV.1400(b)5)")
+
+
 def stage_b_dates(first, as_of):
+    if first not in STAGE_B_FIRSTS:
+        raise SystemExit(f"Stage B starts on {STAGE_B_FIRSTS[0]} or {STAGE_B_FIRSTS[1]} only (R-IV.1400(b)4), "
+                         f"not {first}; refusing")
     if first <= STAGE_A_LASTS[-1] or as_of > STAGE_B_DEADLINE or as_of < first:
         raise SystemExit(f"Stage B runs from a session after the stamp (> {STAGE_A_LASTS[-1]}) to at most "
                          f"{STAGE_B_DEADLINE}; got {first} .. {as_of}. Refusing.")
@@ -349,8 +358,9 @@ def tide_aligned(ticks, entry_ts, side):
     return bool(sl > 0) if side == "BUYER" else bool(sl < 0)
 
 
-def evaluate(pop, stage_dates, ohlcv, sigma_of, runs, census_set, tide=None, macro=frozenset()):
-    """Every population event -> an internal record (never written). pop: DataFrame[ticker, session, t, d6]."""
+def evaluate(pop, stage_dates, ohlcv, sigma_of, runs, census_set, tide=None, macro=frozenset(), sigma_why=None):
+    """Every population event -> an internal record (never written). pop: DataFrame[ticker, session, t, d6].
+    S0 is the OPEN of a load_ohlcv bar (the census's BAR_COLUMNS carry no open; R-IV.1397(b)3)."""
     rng = np.random.default_rng(SEED)
     rng_ps = np.random.default_rng(SEED + 1)
     tide = tide or {}
@@ -373,7 +383,7 @@ def evaluate(pop, stage_dates, ohlcv, sigma_of, runs, census_set, tide=None, mac
         ets, S0 = e
         sig = sigma_of(tk, s)
         if sig is None:
-            rec["missing"] = "iv_prior_session"
+            rec["missing"] = sigma_why(tk, s) if sigma_why else "iv_prior_session"
             continue
         z = z_at(b1, s, ets, S0, side, sig)
         if z is None:
@@ -601,15 +611,15 @@ def load_stage(dates, prints_glob, complete_csv, bars_glob, polygon_glob, iv_csv
     for r in cell.itertuples():
         runs.setdefault((r.ticker, r.session), []).append(float(r.t))
     pop = cell[(cell.d5 == True) & cell.d6.isin(["BUYER", "SELLER"])] if len(cell) else cell  # noqa: E712
-    ivd = pd.read_csv(iv_csv)
-    need = {prev_session(d) for d in dates}
-    ivd = ivd[[pd.Timestamp(x).date() in need for x in ivd.session_date]]
-    iv = {(r.ticker, pd.Timestamp(r.session_date).date()): float(r.iv_near) for r in ivd.itertuples()
-          if pd.notna(r.iv_near)}
+    assert_open(ohlcv)
+    iv, iv_dte_bad, n_dte_bad = read_iv(iv_csv, {prev_session(d) for d in dates})
 
     def sigma_of(tk, d):
         v = iv.get((tk, prev_session(d)))
         return v if v is not None and np.isfinite(v) and v > 0 else None
+
+    def sigma_why(tk, d):
+        return "iv_near_dte_below_1" if (tk, prev_session(d)) in iv_dte_bad else "iv_prior_session"
     td = pd.read_csv(tide_csv)
     td = td[[pd.Timestamp(x).date() in allowed for x in td.session_date]]
     tide = {}
@@ -622,9 +632,39 @@ def load_stage(dates, prints_glob, complete_csv, bars_glob, polygon_glob, iv_csv
     macro = set(pd.read_csv(macro_csv, parse_dates=["date"]).date.dt.date)
     funnel = {"d1_d4_kept_runs": int(len(cell)), "d5_pass": int((cell.d5 == True).sum()) if len(cell) else 0,  # noqa: E712
               "d6_pass": int(len(pop)), "duplicate_tracking_ids_dropped": int(n_dup),
-              "tickers_reached": int(pop.ticker.nunique()) if len(pop) else 0}
-    return {"pop": pop, "ohlcv": ohlcv, "sigma_of": sigma_of, "runs": runs, "census_set": census_set,
-            "tide": tide, "macro": macro, "funnel": funnel, "capture": cap[WINDOW]}
+              "tickers_reached": int(pop.ticker.nunique()) if len(pop) else 0,
+              "iv_rows_rejected_near_dte_below_1": int(n_dte_bad)}
+    return {"pop": pop, "ohlcv": ohlcv, "sigma_of": sigma_of, "sigma_why": sigma_why, "runs": runs,
+            "census_set": census_set, "tide": tide, "macro": macro, "funnel": funnel, "capture": cap[WINDOW]}
+
+
+def assert_open(ohlcv):
+    """R-IV.1397(b)3: S0 comes ONLY from load_ohlcv's OPEN (the census's BAR_COLUMNS carry none)."""
+    bad = [k for k, b in ohlcv.items() if "open" not in b.columns or b.open.isna().any()]
+    if bad:
+        raise SystemExit(f"S0: 1-min bars without a usable open for {len(bad)} ticker-session(s), e.g. {bad[:3]}; refusing")
+
+
+IV_COLUMNS = ("ticker", "session_date", "iv_near", "near_expiry", "near_dte")
+
+
+def read_iv(iv_csv, need):
+    """sigma = iv_near of the prior session, only where its nearest expiry has dte >= 1 (sec. 3.2).
+    R-IV.1397(b)3 / R-IV.1400(b)3: near_expiry and near_dte must be staged; without them this REFUSES."""
+    ivd = pd.read_csv(iv_csv)
+    miss = [c for c in IV_COLUMNS if c not in ivd.columns]
+    if miss:
+        raise SystemExit(f"iv_csv lacks {miss}: the dte >= 1 condition cannot be checked, only asserted "
+                         f"(R-IV.1397 GAP Z-1). Refusing.")
+    ivd = ivd[[pd.Timestamp(x).date() in need for x in ivd.session_date]]
+    dte = pd.to_numeric(ivd.near_dte, errors="coerce")
+    if dte.isna().any() or pd.to_datetime(ivd.near_expiry, errors="coerce").isna().any():
+        raise SystemExit("iv_csv: near_dte / near_expiry blank or unparseable on a needed row; refusing")
+    good = ivd[dte >= 1]
+    bad = ivd[dte < 1]
+    iv = {(r.ticker, pd.Timestamp(r.session_date).date()): float(r.iv_near) for r in good.itertuples()
+          if pd.notna(r.iv_near)}
+    return iv, {(r.ticker, pd.Timestamp(r.session_date).date()) for r in bad.itertuples()}, int(len(bad))
 
 
 def weeks_up_from_spy(ohlcv, dates):
@@ -649,9 +689,10 @@ def run_stage_a(last, *inputs, out_dir, n_shuffles=None):
     _require_ratified()
     dates = stage_a_dates(last)
     L = load_stage(dates, *inputs, n_shuffles=n_shuffles)
-    recs = evaluate(L["pop"], dates, L["ohlcv"], L["sigma_of"], L["runs"], L["census_set"], L["tide"], L["macro"])
+    recs = evaluate(L["pop"], dates, L["ohlcv"], L["sigma_of"], L["runs"], L["census_set"], L["tide"], L["macro"],
+                    L["sigma_why"])
     out = {"registration": REGISTRATION, "stamp": RATIFIED_STAMP_SHA256, "stage": "A", "sessions": [str(dates[0]), str(dates[-1])],
-           "cell": f"{WINDOW}/{FLOOR}", "funnel": L["funnel"], "reading": read_stage_a(recs),
+           "cell": f"{WINDOW}/{FLOOR}", "money_gate": MONEY_GATE_A, "funnel": L["funnel"], "reading": read_stage_a(recs),
            "unevaluable": unevaluable(recs), "secondaries": secondaries(recs, weeks_up_from_spy(L["ohlcv"], dates))}
     return _write(out, out_dir)
 
@@ -662,12 +703,14 @@ def run_stage_b(look, first, as_of, k1_realized, *inputs, out_dir, n_shuffles=No
     if look == 2 and as_of != STAGE_B_DEADLINE:
         raise SystemExit(f"look 2 is the {STAGE_B_DEADLINE} session; refusing")
     L = load_stage(dates, *inputs, n_shuffles=n_shuffles)
-    recs = evaluate(L["pop"], dates, L["ohlcv"], L["sigma_of"], L["runs"], L["census_set"], L["tide"], L["macro"])
+    recs = evaluate(L["pop"], dates, L["ohlcv"], L["sigma_of"], L["runs"], L["census_set"], L["tide"], L["macro"],
+                    L["sigma_why"])
     k2 = len(planned_weeks(first, STAGE_B_DEADLINE))
     cw = len(planned_weeks(first, as_of))
     out = {"registration": REGISTRATION, "stamp": RATIFIED_STAMP_SHA256, "stage": "B", "look": look,
            "sessions": [str(dates[0]), str(dates[-1])], "cell": f"{WINDOW}/{FLOOR}", "funnel": L["funnel"],
            "K2_planned": k2, "calendar_weeks": cw,
+           "money_gate": "money gate: NOT CODED in this instrument version; it gates promotion, not the verdict (sec. 8)",
            "reading": read_stage_b(recs, look, k2, cw, k1_realized), "unevaluable": unevaluable(recs),
            "secondaries": secondaries(recs, weeks_up_from_spy(L["ohlcv"], dates))}
     return _write(out, out_dir)
@@ -835,6 +878,12 @@ def _guard_tests(ck):
         ck["Stage B cannot start inside Stage A"] = False
     except SystemExit:
         ck["Stage B cannot start inside Stage A"] = True
+    try:
+        stage_b_dates(date(2026, 10, 28), date(2027, 1, 5))
+        ck["Stage B starts only on 10-27 or 11-03 (R-IV.1400(b)4)"] = False
+    except SystemExit as e_:
+        ck["Stage B starts only on 10-27 or 11-03 (R-IV.1400(b)4)"] = "10-27" in str(e_) and \
+            len(stage_b_dates(date(2026, 11, 3), date(2027, 1, 12))) > 0
     A = stage_a_dates(date(2026, 10, 23))
     ck["Stage A = 21 sessions, 12 Tue-Thu, 9 Mon/Fri, 4 Tue-Thu weeks"] = \
         (len(A), sum(arm_of(d) == "primary" for d in A), sum(arm_of(d) == "comparison" for d in A),
@@ -877,8 +926,22 @@ def _e2e(ck):
             bpairs = {(t, pd.Timestamp(s).date()) for t, s in zip(raw.ticker, raw.session_date)}
             pd.DataFrame([{"ticker": t, "session": e.isoformat(), "complete": (t, e) in bpairs}
                           for t in C.CORE8 for e in dates]).to_csv(os.path.join(td, "complete.csv"), index=False)
-            pd.DataFrame([{"ticker": t, "session_date": d, "iv_near": 0.2} for t in C.CORE8
-                          for d in ("2026-09-01", "2026-09-02", "2026-08-31")]).to_csv(os.path.join(td, "iv.csv"), index=False)
+            ivrows = [{"ticker": t, "session_date": d, "iv_near": 0.2, "near_expiry": "2026-09-04", "near_dte": 2}
+                      for t in C.CORE8 for d in ("2026-09-01", "2026-09-02", "2026-08-31")]
+            pd.DataFrame(ivrows).to_csv(os.path.join(td, "iv.csv"), index=False)
+            pd.DataFrame(ivrows).drop(columns=["near_expiry", "near_dte"]).to_csv(os.path.join(td, "iv_old.csv"), index=False)
+            ivbad = pd.DataFrame(ivrows)
+            ivbad.loc[(ivbad.ticker == "SPY") & (ivbad.session_date == "2026-09-02"), "near_dte"] = 0
+            ivbad.to_csv(os.path.join(td, "iv_dte0.csv"), index=False)
+            try:
+                read_iv(os.path.join(td, "iv_old.csv"), {date(2026, 9, 1)})
+                ck["IV: a staged iv_conf without near_expiry / near_dte REFUSES (fails loudly)"] = False
+            except SystemExit as e_:
+                ck["IV: a staged iv_conf without near_expiry / near_dte REFUSES (fails loudly)"] = "GAP Z-1" in str(e_)
+            iv_, bad_, nb_ = read_iv(os.path.join(td, "iv_dte0.csv"), {date(2026, 9, 1), date(2026, 9, 2)})
+            ck["IV: a near_dte < 1 row gives no sigma and is named"] = \
+                ("SPY", date(2026, 9, 2)) not in iv_ and ("SPY", date(2026, 9, 2)) in bad_ and nb_ == 1 and \
+                ("NVDA", date(2026, 9, 2)) in iv_
             rows = []
             for d in ("2026-09-02", "2026-09-03"):
                 for k in range(81):
@@ -892,13 +955,33 @@ def _e2e(ck):
                            os.path.join(td, "bars1m", "*", "*.parquet"), os.path.join(td, "poly", "*.parquet"),
                            os.path.join(td, "iv.csv"), os.path.join(td, "tide.csv"), os.path.join(td, "macro.csv"),
                            n_shuffles=40)
-            recs = evaluate(L["pop"], dates, L["ohlcv"], L["sigma_of"], L["runs"], L["census_set"], L["tide"], L["macro"])
+            recs = evaluate(L["pop"], dates, L["ohlcv"], L["sigma_of"], L["runs"], L["census_set"], L["tide"], L["macro"],
+                            L["sigma_why"])
             ck["E2E: the frozen census capture equals its own counts in the R2 cell"] = L["capture"]["match"]
+            ck["E2E: S0's source -- the census bar frame has no open; every load_ohlcv frame has one"] = \
+                "open" not in C.BAR_COLUMNS and all("open" in b.columns and b.open.notna().all() for b in L["ohlcv"].values())
+            k0 = next(iter(L["ohlcv"]))
+            broken = {k0: L["ohlcv"][k0].assign(open=np.nan)}
+            try:
+                assert_open(broken)
+                ck["S0: bars without a usable open REFUSE"] = False
+            except SystemExit as e_:
+                ck["S0: bars without a usable open REFUSE"] = str(e_).startswith("S0:")
+            L0 = load_stage(dates, os.path.join(td, "dp", "*", "*.parquet"), os.path.join(td, "complete.csv"),
+                            os.path.join(td, "bars1m", "*", "*.parquet"), os.path.join(td, "poly", "*.parquet"),
+                            os.path.join(td, "iv_dte0.csv"), os.path.join(td, "tide.csv"), os.path.join(td, "macro.csv"),
+                            n_shuffles=40)
+            r0 = evaluate(L0["pop"], dates, L0["ohlcv"], L0["sigma_of"], L0["runs"], L0["census_set"], L0["tide"],
+                          L0["macro"], L0["sigma_why"])
+            ck["E2E: with SPY's 09-02 nearest expiry at dte 0, SPY's 09-03 events are UNEVALUABLE(iv_near_dte_below_1)"] = \
+                len([r for r in r0 if r["ticker"] == "SPY" and r["session"] == dates[1]]) > 0 and \
+                all(r["missing"] == "iv_near_dte_below_1" for r in r0 if r["ticker"] == "SPY" and r["session"] == dates[1]) \
+                and L0["funnel"]["iv_rows_rejected_near_dte_below_1"] == 1
             ck["E2E: duplicate tracking_ids are dropped by the frozen reader"] = L["funnel"]["duplicate_tracking_ids_dropped"] > 0
             ck["E2E: the population is D6 BUYER/SELLER events of T1000/FRUN (the fixture's random-run events)"] = \
                 L["funnel"]["d6_pass"] > 0 and set(L["pop"].d6) <= {"BUYER", "SELLER"} and set(L["pop"].ticker) <= set(C.CORE8)
             ck["E2E: every event is evaluable or carries a named missing code"] = len(recs) == L["funnel"]["d6_pass"] and \
-                all(r["missing"] in (None, "bars", "horizon", "iv_prior_session", "no_placebo") for r in recs)
+                all(r["missing"] in (None, "bars", "horizon", "iv_prior_session", "iv_near_dte_below_1", "no_placebo") for r in recs)
             ok = [r for r in recs if r["missing"] is None]
             ck["E2E: sigma is read for the PRIOR session (09-01 for 09-02, 09-02 for 09-03)"] = \
                 L["sigma_of"]("NVDA", dates[0]) == 0.2 and L["sigma_of"]("NVDA", dates[1]) == 0.2 and \
