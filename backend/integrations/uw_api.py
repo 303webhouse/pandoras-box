@@ -176,6 +176,12 @@ RATE_LIMIT_EVIDENCE_TTL_S = 7200
 # under-report on exactly the days with the most restarts.
 REDIS_KEY_UW_QUOTA = "uw:quota_headers"
 
+#: R-IV.1412(d): what UW sent when it sent NEITHER counter header. Written beside the quota key
+#: and surfaced on /health, because the WARNING line it accompanies is among the first a process
+#: emits and `railway logs` only serves a tail -- measured tonight, the line was already gone
+#: 397 seconds after the deploy. Same 36-hour TTL, so it outlives a deploy.
+REDIS_KEY_UW_HEADER_PROBE = "uw:quota_header_probe"
+
 
 #: R-IV.1412(d): has this process already said which headers UW sends? Once is enough -- the
 #: answer does not change within a process, and at ~14,000 calls a day a per-call line would
@@ -214,6 +220,24 @@ async def _capture_quota_headers(resp) -> None:
                     "(status %s). The account shed cannot arm without one of them and is "
                     "failing OPEN. Headers present on this response (NAMES ONLY, %d): %s",
                     resp.status_code, len(names), ",".join(names))
+                # AND ON THE SURFACE, not only in the log. Best-effort and last: a telemetry
+                # write must never fail the call it observes, and must never delay the early
+                # return that keeps an unmeasured account failing OPEN.
+                try:
+                    from database.redis_client import get_redis_client as _grc
+                    import json as _pj
+                    from datetime import datetime as _pdt, timezone as _ptz
+                    _c = await _grc()
+                    if _c:
+                        await _c.setex(REDIS_KEY_UW_HEADER_PROBE, 36 * 3600, _pj.dumps({
+                            "header_names": names,
+                            "status": resp.status_code,
+                            "at": _pdt.now(_ptz.utc).isoformat(),
+                            "note": ("UW sent neither x-uw-daily-req-count nor "
+                                     "x-uw-token-req-limit; the account shed cannot arm"),
+                        }))
+                except Exception:                                   # noqa: BLE001
+                    pass
             return
         from database.redis_client import get_redis_client
         client = await get_redis_client()
@@ -285,6 +309,17 @@ async def account_quota() -> dict:
             out["pct_used"] = round(100.0 * u / l, 1)
         if "used" not in out:
             out["note"] = "no UW quota header seen yet this process"
+            # WHY there is no reading, where the question is asked. Without this the surface
+            # says only that it cannot see the account, and the one fact that would fix it --
+            # what UW sends instead -- lives in a log line that has already scrolled away.
+            try:
+                if client:
+                    import json as _pj
+                    _probe = await client.get(REDIS_KEY_UW_HEADER_PROBE)
+                    if _probe:
+                        out["header_probe"] = _pj.loads(_probe)
+            except Exception:                                       # noqa: BLE001
+                pass
         # R-IV.380(a): the gate's OWN condition. "not shedding" and "cannot see
         # the account" must not read the same from outside.
         try:
