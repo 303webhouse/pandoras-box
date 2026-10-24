@@ -1321,6 +1321,30 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("❌ dark-pool backfill nightly did NOT start: %s", e, exc_info=True)
 
+    # R-IV.1398(b)3: the FORWARD dark-pool walk, a separate instrument from the census
+    # above.
+    #
+    # The census loop RETURNS once `today > ALLOWANCE_THROUGH` (2026-10-23), which passed
+    # at 00:00 UTC on 2026-10-24 -- so it is permanently quiet, correctly, its 312 of 312
+    # ticker-sessions done. That allowance was written for a census of PAST sessions; a
+    # forward collection has no end date to write, so this one carries no expiry and has
+    # its own tag and quota.
+    #
+    # Started unconditionally and gated INSIDE, like the quote grid, so
+    # /health.darkpool_forward.blocked carries the reason it is not collecting and "the
+    # funding ruling has not landed" stays distinguishable from "it failed to start".
+    try:
+        from jobs import darkpool_forward as _dpf
+        asyncio.create_task(_dpf.run_forever())
+        _dpf_block = _dpf.preflight()
+        if _dpf_block:
+            logger.info("darkpool_forward: loop armed but NOT collecting - %s", _dpf_block)
+        else:
+            logger.info("✅ darkpool_forward collecting (tag=%s, %d names, ceiling=%d/night)",
+                        _dpf.CALLER_TAG, len(_dpf.tier_1_names()), _dpf.night_ceiling())
+    except Exception as e:
+        logger.error("❌ darkpool_forward did NOT start: %s", e)
+
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
     # strip (yfinance, zero UW).
     try:
@@ -2166,6 +2190,13 @@ async def health_check():
     except Exception as _oqge:
         oqg_block = {"state": "ERROR", "reason": str(_oqge)}
 
+    dpf_block: dict = {}
+    try:
+        from jobs.darkpool_forward import status as _dpf_status
+        dpf_block = await _dpf_status()
+    except Exception as _dpfe:
+        dpf_block = {"state": "ERROR", "reason": str(_dpfe)}
+
     return _sanitise_health({
         # Derived, never assigned: see degraded_by above.
         "status": "degraded" if degraded_by else "healthy",
@@ -2174,6 +2205,7 @@ async def health_check():
         "option_chain_snapshot": s8_block,
         "option_quote_capture": oqc_block,
         "option_quote_grid": oqg_block,
+        "darkpool_forward": dpf_block,
         "uw_quota": uw_quota_block,
         "outcome_resolver": resolver_block,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),

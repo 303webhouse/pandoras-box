@@ -449,8 +449,15 @@ class Budget:
 
 
 async def fetch_page(ticker: str, session: date, cursor: Optional[str],
-                     budget: Budget) -> Tuple[Optional[dict], Optional[str]]:
-    """One vendor page. Returns (response, error). Spends exactly one call."""
+                     budget: Budget, caller: str = CALLER
+                     ) -> Tuple[Optional[dict], Optional[str]]:
+    """One vendor page. Returns (response, error). Spends exactly one call.
+
+    `caller` defaults to this module's CALLER so the census path is unchanged. R-IV.1398(b)3's
+    forward walk passes its own tag instead, so the two spends stay separable -- the quota
+    table already records two faults (`flow_per_expiry`, `hermes_session_poll`) that were
+    exactly a shared tag hiding one caller's spend inside another's.
+    """
     from integrations.uw_api import _uw_request
 
     params: Dict[str, Any] = {"date": session.isoformat(), "limit": PAGE_LIMIT}
@@ -458,7 +465,7 @@ async def fetch_page(ticker: str, session: date, cursor: Optional[str],
         params["older_than"] = cursor
     budget.spend()
     try:
-        resp = await _uw_request("/api/darkpool/%s" % ticker, params=params, caller=CALLER)
+        resp = await _uw_request("/api/darkpool/%s" % ticker, params=params, caller=caller)
     except Exception as exc:                                        # noqa: BLE001
         msg = "%s: %s" % (type(exc).__name__, exc)
         if "429" in msg or "rate" in msg.lower():
@@ -580,14 +587,20 @@ async def refresh_completeness(pool) -> dict:
     return out
 
 
-async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
-    """Every page of one ticker-session, oldest-cursor-walked. Stores raw, derives nothing."""
+async def collect_one(pool, ticker: str, session: date, budget: Budget,
+                      caller: str = CALLER) -> dict:
+    """Every page of one ticker-session, oldest-cursor-walked. Stores raw, derives nothing.
+
+    `caller` is threaded to `fetch_page` AND into `walk_id`, so a page can be traced to the
+    instrument that fetched it and not merely to the walk. Defaults to CALLER: the census
+    path is byte-for-byte what it was.
+    """
     quarantined = session in QUARANTINED_SESSIONS
     floor_utc = session_start_utc(session)      # R-IV.988(b): the walk's floor
     # R-IV.1017(f): ONE id per invocation of this function, which is what "a walk" means. It
     # carries the run, the instrument and the instant, so a page can be traced to the walk
     # that fetched it without clustering fetch times.
-    walk_id = "%s|%s|%s|%s" % (CALLER, ticker, session.isoformat(),
+    walk_id = "%s|%s|%s|%s" % (caller, ticker, session.isoformat(),
                                datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ"))
     cursor: Optional[str] = None
     pages = prints = spent_here = 0
@@ -621,7 +634,7 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget) -> dict:
             stop = "call budget exhausted"
             break
         before = budget.calls
-        resp, err = await fetch_page(ticker, session, cursor, budget)
+        resp, err = await fetch_page(ticker, session, cursor, budget, caller)
         spent_here += budget.calls - before
         if err:
             stop = "error: %s" % err
