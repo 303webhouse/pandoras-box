@@ -138,4 +138,24 @@
   }
 
   window.PandoraB9 = { mount: mount, render: render };
+
+  // R-IV.1432(d): ABACUS's Regime pop-out renders `<div id="b9-mount">` holding a placeholder
+  // line, and B9 REPLACES ITS CONTENT -- the element, its id and its place stay. The drawer is
+  // re-rendered with innerHTML, so a fresh #b9-mount appears on every open; this watches for one
+  // that has not been filled and fills it. No edit to the pop-out's own code is needed.
+  function fillMounts() {
+    var el = document.getElementById('b9-mount');
+    if (el && !el.getAttribute('data-b9-live')) {
+      el.setAttribute('data-b9-live', '1');
+      mount(el);
+    }
+  }
+  function watch() {
+    fillMounts();
+    if (window.MutationObserver && document.body) {
+      new MutationObserver(fillMounts).observe(document.body, { childList: true, subtree: true });
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch);
+  else watch();
 })();
