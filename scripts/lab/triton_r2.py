@@ -249,7 +249,10 @@ def planned_weeks(first, through):
 
 
 def planned_table(first):
-    """The registration's planned two-look table for a Stage B starting at `first`."""
+    """The registration's planned two-look table for a Stage B starting at `first`. R-IV.1406(c)2: it refuses
+    every first session that stage_b_dates refuses (only 10-27 or 11-03), so no table exists for a start the
+    instrument would never run."""
+    stage_b_dates(first, STAGE_B_DEADLINE)
     tt = [d for d in nyse_sessions(first, STAGE_B_DEADLINE) if d.weekday() in PRIMARY_DAYS]
     if len(tt) < MIN_B["sessions"]:
         return {"first": str(first), "note": "the look-1 minimum cannot be met before the deadline"}
@@ -901,6 +904,21 @@ def _guard_tests(ck):
     except SystemExit as e_:
         ck["Stage B starts only on 10-27 or 11-03 (R-IV.1400(b)4)"] = "10-27" in str(e_) and \
             len(stage_b_dates(date(2026, 11, 3), date(2027, 1, 12))) > 0
+    refused = []
+    for bad_first in (date(2026, 10, 28), date(2026, 10, 26), date(2026, 11, 10)):
+        try:
+            planned_table(bad_first)
+            refused.append(False)
+        except SystemExit as e_:
+            refused.append("10-27" in str(e_) and "11-03" in str(e_))
+        try:
+            main(["bounds", bad_first.isoformat()])
+            refused.append(False)
+        except SystemExit:
+            refused.append(True)
+    ck["bounds (R-IV.1406(c)2): refuses every first session stage_b_dates refuses (10-28, 10-26, 11-10), "
+       "in the function and in the CLI mode; 10-27 and 11-03 still print"] = all(refused) and \
+        planned_table(date(2026, 10, 27))["K1"] == 11 and planned_table(date(2026, 11, 3))["K1"] == 11
     A = stage_a_dates(date(2026, 10, 23))
     ck["Stage A = 21 sessions, 12 Tue-Thu, 9 Mon/Fri, 4 Tue-Thu weeks"] = \
         (len(A), sum(arm_of(d) == "primary" for d in A), sum(arm_of(d) == "comparison" for d in A),
