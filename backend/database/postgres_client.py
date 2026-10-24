@@ -2373,6 +2373,61 @@ async def init_database():
                 ON option_quote_capture (ticker, expiry, contract_type, strike, session_date)
         """)
 
+        # R-IV.1398(b)1: the 5-minute ATM-vertical grid. A SEPARATE TABLE from
+        # option_quote_capture above, and not a widening of it, for two reasons:
+        #
+        #   * its identity is (session, slot, ticker, expiry, LEG ROLE), not (..., type,
+        #     strike). The grid stores four named legs of a vertical, and the role is what
+        #     a reader selects on -- "the short call at 11:25" -- while the strike is the
+        #     OUTCOME of the move calculation and varies slot to slot for the same leg.
+        #   * mixing a 5-minute series into a 30-minute table would break the other
+        #     table's own coverage arithmetic: `option_quote_capture.capture_status`
+        #     counts DISTINCT slot_et against its thirteen expected slots, and 75 grid
+        #     slots in the same rows would read as a flood of unexpected captures.
+        #
+        # implied_move and implied_move_method travel together, always: a move of 3.20
+        # means nothing without knowing whether it came from the straddle (a price) or
+        # from the vendor's IV field (a model, plan-gated and seen absent). The same
+        # contract as atm_method beside it.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS option_quote_grid (
+                id                   BIGSERIAL PRIMARY KEY,
+                captured_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                session_date         DATE        NOT NULL,
+                slot_et              TEXT        NOT NULL,
+                ticker               TEXT        NOT NULL,
+                expiry               DATE        NOT NULL,
+                dte                  INTEGER     NOT NULL,
+                leg_role             TEXT        NOT NULL,
+                contract_type        TEXT        NOT NULL,
+                strike               NUMERIC(12,4) NOT NULL,
+                bid                  NUMERIC(12,4),
+                ask                  NUMERIC(12,4),
+                mid                  NUMERIC(12,4),
+                iv                   NUMERIC(10,6),
+                delta                NUMERIC(10,6),
+                volume               BIGINT,
+                open_interest        BIGINT,
+                atm_strike           NUMERIC(12,4),
+                atm_method           TEXT,
+                implied_move         NUMERIC(12,4),
+                implied_move_method  TEXT,
+                short_leg_degenerate BOOLEAN     NOT NULL DEFAULT FALSE,
+                raw_contract_count   INTEGER,
+                truncated            BOOLEAN     NOT NULL DEFAULT FALSE,
+                caller_tag           TEXT        NOT NULL DEFAULT 'option_quote_grid',
+                UNIQUE (session_date, slot_et, ticker, expiry, leg_role)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oqg_session_slot
+                ON option_quote_grid (session_date DESC, slot_et, ticker)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oqg_leg
+                ON option_quote_grid (ticker, leg_role, session_date DESC, slot_et)
+        """)
+
         # Migration 032 (R-IV.394, T1): the mark guard's verdict column. On any
         # non-OK value unrealized_pnl was NOT written -- never zeroed, because a
         # zero P&L is a CLAIM that the position is flat.

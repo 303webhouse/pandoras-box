@@ -1367,6 +1367,30 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("❌ option_quote_capture did NOT start: %s", e)
 
+    # R-IV.1398(b)1: the 5-minute ATM-vertical grid. 8 names, nearest expiry, 75 slots
+    # 09:45-15:55 ET.
+    #
+    # STARTED UNCONDITIONALLY AND GATED INSIDE, which is the opposite of the pattern
+    # above and deliberate. `option_quote_capture` is gated HERE by an env var, so when it
+    # is off there is no task at all and /health reports whatever a cold module says. The
+    # grid instead always runs its loop and the loop refuses on `preflight()` -- so
+    # /health.option_quote_grid.blocked carries the REASON it is not collecting, and the
+    # two reasons (the funding ruling has not landed; the operator has not switched it on)
+    # are distinguishable from outside. A job that is deliberately off and a job that
+    # failed to start must not look the same -- and this one is deliberately off until
+    # R-IV.1398(b)1's calls/day report is ruled on.
+    try:
+        from jobs import option_quote_grid as _oqg
+        asyncio.create_task(_oqg.run_forever())
+        _oqg_block = _oqg.preflight()
+        if _oqg_block:
+            logger.info("option_quote_grid: loop armed but NOT collecting - %s", _oqg_block)
+        else:
+            logger.info("✅ option_quote_grid collecting (tag=%s, %d slots, ceiling=%d)",
+                        _oqg.CALLER_TAG, len(_oqg.SLOT_TIMES_ET), _oqg.session_ceiling())
+    except Exception as e:
+        logger.error("❌ option_quote_grid did NOT start: %s", e)
+
     # Triton Step-0: whale-flow shadow poller (RTH 09:30-16:00 ET, 120s cadence).
     # SHADOW-ONLY — writes triton_flow_shadow; nothing reads it for scoring.
     async def triton_shadow_poller_loop():
@@ -2135,6 +2159,13 @@ async def health_check():
     except Exception as _oqce:
         oqc_block = {"state": "ERROR", "reason": str(_oqce)}
 
+    oqg_block: dict = {}
+    try:
+        from jobs.option_quote_grid import capture_status as _oqg_status
+        oqg_block = await _oqg_status()
+    except Exception as _oqge:
+        oqg_block = {"state": "ERROR", "reason": str(_oqge)}
+
     return _sanitise_health({
         # Derived, never assigned: see degraded_by above.
         "status": "degraded" if degraded_by else "healthy",
@@ -2142,6 +2173,7 @@ async def health_check():
         "build": build_block,
         "option_chain_snapshot": s8_block,
         "option_quote_capture": oqc_block,
+        "option_quote_grid": oqg_block,
         "uw_quota": uw_quota_block,
         "outcome_resolver": resolver_block,
         "server_time_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),

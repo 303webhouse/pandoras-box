@@ -8,7 +8,9 @@ rather than letting the governor do it.
 WHAT IT CAPTURES
     SPY QQQ IWM SMH NVDA AAPL MSFT TSLA, every expiry 0-3 DTE, +/-5 strikes around ATM, both
     types: strike, expiry, bid, ask, IV, delta, volume, open interest -- as published AT THE
-    SLOT. Twelve slots, 10:00 to 15:30 ET every 30 minutes.
+    SLOT. THIRTEEN slots: 10:00 to 15:30 ET every 30 minutes, plus 15:59 (R-IV.1398(b)1), the
+    last minute the book is unambiguously live. The 15:59 slot carries its own, much shorter
+    grace; see SLOT_GRACE_OVERRIDE_MINUTES for why the default would have fabricated a close.
 
 ONE CALL PER (TICKER, EXPIRY, SLOT), and it is NOT the shared chain helper
     `integrations.uw_api.get_options_snapshot` would have been the obvious reuse and is wrong
@@ -29,9 +31,9 @@ HOW IT STAYS INSIDE ~300/day WITHOUT LOSING THE CLOSE
     204), but 384 on Mon and Tue if all eight turn out to have daily expiries. The second case
     overflows a 300 grant by 84.
 
-    THE GOVERNOR SHEDS THE CALLS THAT ARRIVE LAST, which are the 15:00 and 15:30 slots. Losing
-    the close is the one loss that cannot be made good, and it would be invisible in the stored
-    rows. So the job budgets itself instead:
+    THE GOVERNOR SHEDS THE CALLS THAT ARRIVE LAST, which are the 15:00, 15:30 and 15:59 slots.
+    Losing the close is the one loss that cannot be made good, and it would be invisible in the
+    stored rows. So the job budgets itself instead:
 
       per-slot allowance = remaining session budget // remaining slots
 
@@ -74,10 +76,15 @@ CALLER_TAG = "option_quote_capture"
 
 TICKERS: Tuple[str, ...] = ("SPY", "QQQ", "IWM", "SMH", "NVDA", "AAPL", "MSFT", "TSLA")
 
-#: 10:00 -> 15:30 ET, every 30 minutes. Twelve, per the ruling.
+#: 10:00 -> 15:30 ET every 30 minutes (R-IV.1082(b)), PLUS 15:59 (R-IV.1398(b)1). Thirteen.
+#:
+#: WHY 15:59 AND NOT 16:00. The spread a trade actually pays is the one on the book while the
+#: book is still live. 16:00 is the close itself, and a call issued at 16:00:00 is answered
+#: after it -- the first quote outside the session, which is the one quote this series must
+#: never contain. 15:59 is the last minute that is unambiguously inside.
 SLOT_TIMES_ET: Tuple[time, ...] = tuple(
     time(10 + (30 * i) // 60, (30 * i) % 60) for i in range(12)
-)
+) + (time(15, 59),)
 
 DTE_MAX = 3
 STRIKE_WINDOW = 5          # +/-5 strikes around ATM
@@ -85,6 +92,28 @@ STRIKE_WINDOW = 5          # +/-5 strikes around ATM
 #: How long after its time a slot may still be captured. Under the 30-minute spacing so two
 #: slots never contend, and short enough that a capture is always about its own slot.
 SLOT_GRACE_MINUTES = 25
+
+#: PER-SLOT OVERRIDE, and the 15:59 slot is the reason it exists.
+#:
+#: The 25-minute default was written for 30-minute spacing and is SAFE THERE: the last slot was
+#: 15:30, so its grace expired at 15:55, inside the session. Applied unchanged to a 15:59 slot
+#: it would keep that slot "due" until 16:24 -- and a loop that woke at 16:20, or a Railway
+#: deploy that restarted the process at 16:15, would fetch the post-close book, store it, and
+#: stamp it `15:59`. Wide, untradeable quotes wearing the label of the closing minute. That is
+#: EXACTLY the fabrication the `due_slot` docstring below was written to forbid, and the
+#: default would have walked straight into it: the comment naming the hazard is three lines
+#: from the constant that would have caused it.
+#:
+#: TWO MINUTES, not one. The loop wakes every POLL_SECONDS (60), so its wake-ups land at an
+#: arbitrary phase within the minute: a one-minute grace is missed outright whenever the phase
+#: puts a wake-up at :59:05 and the next at 16:00:05, which is a coin flip on the one slot
+#: that cannot be recovered. Two minutes guarantees at least one wake-up inside the window
+#: while reaching no further than 16:01 -- where the closing book is still the closing book.
+#:
+#: And `captured_at` on every row is the real instant regardless. The slot label is the
+#: intent; `captured_at` is the measurement, and a reader who cares can always tell a
+#: 15:59:12 capture from a 16:00:58 one.
+SLOT_GRACE_OVERRIDE_MINUTES = {time(15, 59): 2}
 UW_CONTRACT_CAP = 500      # the documented per-call ceiling (uw_api.py)
 
 #: Under the 300/day grant with headroom, and divisible by the 12 slots so the per-slot
@@ -207,7 +236,7 @@ def due_slot(now_et: datetime) -> Optional[time]:
         return None
     age = (datetime.combine(now_et.date(), t)
            - datetime.combine(now_et.date(), due)).total_seconds() / 60.0
-    if age > SLOT_GRACE_MINUTES:
+    if age > SLOT_GRACE_OVERRIDE_MINUTES.get(due, SLOT_GRACE_MINUTES):
         return None
     return due
 

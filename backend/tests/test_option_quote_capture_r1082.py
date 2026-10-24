@@ -74,14 +74,23 @@ def test_the_expiry_filter_is_native_so_the_500_cap_cannot_bind():
 
 # ── 2. the slot grid ────────────────────────────────────────────────────────
 
-def test_twelve_slots_from_1000_to_1530_every_thirty_minutes():
-    assert len(oqc.SLOT_TIMES_ET) == 12
+def test_thirteen_slots_the_thirty_minute_grid_PLUS_the_1559_close():
+    """SUPERSEDED R-IV.1082(b)'s twelve (R-IV.1398(b)1 adds the 15:59 close).
+
+    The old form asserted `len == 12` and a single 1800-second gap, which was the right shape
+    for a uniform grid and is the wrong shape now. What still has to hold is that the
+    thirty-minute grid is INTACT and the close is appended to it -- not that a 15:59 slot
+    exists somewhere, which an edit that replaced 15:30 would also satisfy.
+    """
+    assert len(oqc.SLOT_TIMES_ET) == 13
     assert oqc.SLOT_TIMES_ET[0] == time(10, 0)
-    assert oqc.SLOT_TIMES_ET[-1] == time(15, 30)
+    assert oqc.SLOT_TIMES_ET[-1] == time(15, 59)
+    assert oqc.SLOT_TIMES_ET[-2] == time(15, 30), "the 15:30 slot was REPLACED, not kept"
+    grid = oqc.SLOT_TIMES_ET[:-1]
     gaps = {(datetime.combine(date(2026, 1, 1), b) -
              datetime.combine(date(2026, 1, 1), a)).total_seconds()
-            for a, b in zip(oqc.SLOT_TIMES_ET, oqc.SLOT_TIMES_ET[1:])}
-    assert gaps == {1800.0}
+            for a, b in zip(grid, grid[1:])}
+    assert gaps == {1800.0}, "the 30-minute grid under the close is no longer uniform"
 
 
 @pytest.mark.parametrize("hh,mm,expect", [
@@ -127,14 +136,18 @@ def test_walking_a_whole_session_never_exceeds_the_ceiling_and_the_last_slot_sti
     """POSITIVE CONTROL (Convention #30). Simulate twelve slots each spending its full
     allowance; the last slot must still get a positive allowance and the total must not pass
     the ceiling."""
+    # Driven by the SLOT LIST, not by a literal 12. The literal was correct when it was
+    # written and silently stopped simulating a whole session the moment a slot was added --
+    # the walk would have passed while never reaching the real last slot.
+    n = len(oqc.SLOT_TIMES_ET)
     used = 0
     per_slot = []
-    for i in range(12):
-        a = oqc.slot_allowance(used, 12 - i)
+    for i in range(n):
+        a = oqc.slot_allowance(used, n - i)
         per_slot.append(a)
         used += a
     assert used <= oqc.SESSION_CALL_CEILING, used
-    assert per_slot[-1] > 0, "the 15:30 slot was starved: %r" % per_slot
+    assert per_slot[-1] > 0, "the final slot was starved: %r" % per_slot
     assert min(per_slot) > 0, per_slot
 
 
@@ -307,13 +320,18 @@ async def test_shed_and_unavailable_are_counted_SEPARATELY():
         oqc.fetch_expiry = real_fetch
 
     assert "shed" in out and "unavailable" in out
-    # 32 pairs planned on a Tuesday, allowance 24 -> 24 attempted (all unavailable), 8 shed.
+    # 32 pairs planned on a Tuesday. The allowance is the ceiling over the SLOT COUNT, and
+    # that is the one figure R-IV.1398(b)1's 15:59 slot moved: 288 // 12 = 24 became
+    # 288 // 13 = 22, so the first slot now attempts 22 and sheds 10 rather than attempting
+    # 24 and shedding 8. Derived here, because a literal would have to be edited by whoever
+    # adds the next slot and silently passes if they do not.
+    expected_allowance = oqc.SESSION_CALL_CEILING // len(oqc.SLOT_TIMES_ET)
     assert out["planned"] == 32
-    assert out["allowance"] == 24
-    assert out["unavailable"] == 24
-    assert out["shed"] == 8
+    assert out["allowance"] == expected_allowance == 22
+    assert out["unavailable"] == expected_allowance
+    assert out["shed"] == out["planned"] - expected_allowance == 10
     assert out["captured"] == 0
-    assert calls["n"] == 24, "the allowance must cap the calls actually made"
+    assert calls["n"] == expected_allowance, "the allowance must cap the calls actually made"
 
 
 def test_status_reports_missed_slots_not_just_the_last_one():
@@ -431,9 +449,13 @@ async def test_slots_missed_is_still_populated_AFTER_the_close():
     finally:
         m.datetime = real
 
-    assert st["slots_expected_so_far"] == 12, st
-    assert len(st["slots_missed"]) == 12, st["slots_missed"]
+    # THIRTEEN since R-IV.1398(b)1: the frozen instant is 16:30 ET, past every slot
+    # including the 15:59 close. Derived from the slot list as well as asserted as a number,
+    # so a future slot change fails on the COUNT rather than on an opaque off-by-one.
+    assert st["slots_expected_so_far"] == len(oqc.SLOT_TIMES_ET) == 13, st
+    assert len(st["slots_missed"]) == 13, st["slots_missed"]
     assert "15:30" in st["slots_missed"]
+    assert "15:59" in st["slots_missed"], "the close is not counted as expected"
 
 
 @pytest.mark.asyncio

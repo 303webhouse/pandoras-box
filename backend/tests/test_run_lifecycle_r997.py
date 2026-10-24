@@ -121,8 +121,16 @@ def test_a_gate_that_cannot_check_does_NOT_report_clear():
     assert "EXIT_GATE_ERROR" in src
     assert "GATE_ERROR, EXIT_OK" not in src
     # The DB-failure branch must return GATE_ERROR, not OK.
+    #
+    # BOUNDED BY THE NEXT `return`, NOT BY A CHARACTER COUNT. This read `src[i:i + 400]` and
+    # broke under R-IV.1398(b)4, which added three comment lines between the message and the
+    # return -- the behaviour was correct and the locator was not. That is the same
+    # fixed-window locator class this session has now hit four times, so the window is gone:
+    # the claim is "this branch returns GATE_ERROR", and the branch ends at its return.
     i = src.index("could not read the run ledger")
-    assert "EXIT_GATE_ERROR" in src[i:i + 400], src[i:i + 400]
+    branch = src[i:src.index("return ", i) + len("return EXIT_GATE_ERROR")]
+    assert "EXIT_GATE_ERROR" in branch, branch
+    assert "EXIT_OK" not in branch, branch
 
 
 def test_both_scripts_treat_a_superseded_null_run_as_orphaned_not_active():
