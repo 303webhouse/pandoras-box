@@ -1,4 +1,4 @@
-﻿"""
+"""
 Automated Bias Scheduler
 
 Handles automatic refresh of all bias indicators:
@@ -3499,11 +3499,16 @@ async def run_cta_scan_scheduled():
     # and on 2026-10-21 it raised a flatline while the scanner was running on cadence: 19 scans,
     # 43 setups found, 36 of them suppressed by the 24h per-ticker cooldown.
     #
-    # THIS IS STEP 1 OF TWO, IN THIS ORDER ON PURPOSE (R-IV.617(b), R-IV.800(b), R-IV.1059(b)
-    # all insist on it). Re-pointing the class at `job_runs` before anything writes the row
-    # renders it `no_data`, which does NOT degrade -- /health would go green while the sentinel
-    # became incapable of ever firing, and the approval's own check would pass vacuously. So
-    # the row comes first and is verified live; the AGE_SOURCE move is step 2.
+    # THIS WRITE IS THE SENTINEL'S ONLY INPUT, and it must keep coming FIRST (R-IV.617(b),
+    # R-IV.800(b), R-IV.1059(b) all insist on the order). `signals_freshness` judges
+    # `cta_scanner` on job_runs since R-IV.1297(f)2, so if this write is ever removed while
+    # that mapping stays, the class renders `no_data` -- which does NOT degrade -- and /health
+    # goes green while the sentinel becomes incapable of ever firing.
+    #
+    # Step 2 was blocked on live evidence that the row actually appears, and R-IV.1398(a)
+    # cleared it: 2026-10-23 carried 26 rows, all `ok`, the first in-RTH row 1.2 minutes after
+    # the open. (2026-10-22's four-hour gap was this instrument shipping mid-session --
+    # c7261e90 deployed 17:27:14Z against a 13:30Z open -- not a late scan.)
     _run_id = None
     try:
         from datetime import date as _date
