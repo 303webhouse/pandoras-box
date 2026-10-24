@@ -395,8 +395,11 @@ with sync_playwright() as p:
     check('BOOK: a partial account keeps its \u2265 marker', rows['Account A']['v'].startswith('\u2265'), rows['Account A']['v'])
     check('BOOK: cash is part of the total and matches brokers as of the OLDEST anchor (09-22)',
           'Part of the total' in bk['cash'] and 'matches brokers 09-22' in bk['cash'], bk['cash'])
-    # The fraction is the greeks route's OWN (4 of 6), labelled as such, until BUILD's leg-count
-    # job moves that route onto position_legs (R-IV.1387(a)). The 99-leg row above must not move it.
+    # The fraction is the greeks route's own (4 of 6) -- and the route counts legs from
+    # position_legs since BUILD's c94742bc. The 99-leg row above must not move it.
+    tag_title = pg.evaluate("() => (document.querySelector('.bk-ptag') || {}).title || ''")
+    check('BOOK: the greeks tag says its legs are read from position_legs, and never "not yet"',
+          'from position_legs' in tag_title and 'not yet' not in tag_title, tag_title)
     check('BOOK partial: the greeks keep their floors and their own "partial - 4 of 6 legs"',
           '\u2265' in bk['greeks'] and 'partial \u00b7 4 of 6 legs' in bk['greeks'] and 'Theta \u2265\u2212$39/day' in bk['greeks'],
           bk['greeks'])

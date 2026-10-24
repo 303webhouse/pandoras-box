@@ -5025,14 +5025,18 @@
       const partial = !!(o.gCov && o.gCov.legs_expected && !o.gCov.complete);
       // (e)5 as amended: the greeks keep THEIR OWN fraction, "N of M legs", in legs.
       //
-      // IT IS THE GREEKS ROUTE'S OWN COUNT, AND SAYS SO. The amendment asks for M from
-      // position_legs, and no route serves a book-wide position_legs count. The tempting
-      // substitute -- each row's `legs` field -- is the trap R-IV.697(c)1 names: that jsonb is
-      // NOT the table, and on the live book (2026-10-24) it is null or a string on all 15 option
-      // rows, so counting it prints 0 and falls back silently to this same figure. Showing the
-      // route's fraction under its own name is the honest version; it becomes the position_legs
-      // count with no change here when BUILD's leg-count job (R-IV.1387(a)) moves the route onto
-      // the table. tests/test_r1369_agora_clean.py pins that the row field is never read.
+      // THE GREEKS ROUTE'S OWN COUNT, WHICH IS READ FROM position_legs. The amendment asks for M
+      // from position_legs, and that is where the route counts legs since BUILD's c94742bc ("count
+      // real legs"): one read of the table for every open row, falling back to the strike pair
+      // only for a position with no rows there. So this page takes the route's fraction and does
+      // no counting of its own. The tempting page-side substitute -- each row's `legs` field -- is
+      // the trap R-IV.697(c)1 names: that jsonb is NOT the table, and on the live book
+      // (2026-10-24) it is null or a string on every option row. tests/test_r1369_agora_clean.py
+      // pins that the row field is never read.
+      //
+      // (This comment and the tag's title said, at first, that the route did NOT yet read the
+      // table. c94742bc was already in the base this was built on; the claim came from a relay
+      // naming the leg count as "BUILD's next job", and the code was not re-read. Corrected.)
       const legsPriced = o.gCov ? Number(o.gCov.legs_priced) || 0 : 0;
       const legsExpected = o.gCov ? Number(o.gCov.legs_expected) || 0 : 0;
       const parts = [d != null ? 'Delta ' + d : null,
@@ -5043,9 +5047,9 @@
       greeksHtml = '<div class="bk-greeks' + (partial ? ' bk-dim' : '') + '">'
         + '<span>' + (parts.length ? parts.map((x) => '<span class="bk-nw">' + esc(x) + '</span>').join(' · ')
           : 'Greeks —') + '</span>'
-        + (partial ? '<span class="bk-ptag" title="' + esc('The greeks route’s own count: ' + legsPriced + ' of the '
-          + legsExpected + ' legs it found are priced. It is not yet read from position_legs (BUILD’s leg-count job, '
-          + 'R-IV.1387(a)), and until then it can undercount a three-leg structure as two.') + '">partial · '
+        + (partial ? '<span class="bk-ptag" title="' + esc(legsPriced + ' of the ' + legsExpected
+          + ' legs the book holds are priced, as the greeks route counts them from position_legs. A position '
+          + 'with no rows there is counted by its strike pair.') + '">partial · '
           + legsPriced + ' of ' + legsExpected + ' legs</span>' : '')
         + '</div>';
     }
