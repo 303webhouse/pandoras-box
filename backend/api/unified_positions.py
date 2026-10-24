@@ -1999,10 +1999,28 @@ async def portfolio_greeks():
         return {"status": "error", "tickers": {}, "totals": _zeros}
 
 
-async def _portfolio_greeks_inner():
-    # Check Redis cache first (60s TTL)
+async def _portfolio_greeks_inner(force: bool = False):
+    """R-IV.1381(d)1: THE 24-HOUR COPY IS A FALLBACK, NOT A SHORT CIRCUIT.
+
+    It used to be read BEFORE any recompute and returned unconditionally:
+
+        stale = await redis.get("portfolio:greeks:stale")   # 24h TTL
+        if stale: return stale_data
+
+    So the moment that key existed, every request for the next 24 hours got it. The BOOK tile's
+    "N of M legs" fraction could not move for a day, and nothing said why -- the payload carried
+    `stale: True` and no date, so a reader could not tell a figure from this morning from one
+    from yesterday afternoon.
+
+    Now: the 60-second cache answers if warm, otherwise the greeks are RECOMPUTED. The 24-hour
+    copy is returned only when that recompute fails, and it carries its own as-of so its age is
+    visible rather than implied.
+
+    `force` skips the 60-second cache. The 15-minute loop passes it, which is what keeps this
+    fresh without putting a recompute on the request path -- see main.py.
+    """
     redis = await get_redis_client()
-    if redis:
+    if redis and not force:
         try:
             cached = await redis.get("portfolio:greeks:cache")
             if cached:
@@ -2010,16 +2028,25 @@ async def _portfolio_greeks_inner():
         except Exception:
             pass
 
-    # Also check stale cache (24h TTL) for after-hours display
-    if redis:
+    async def _stale_fallback(reason: str):
+        """The last good greeks, LABELLED WITH THEIR OWN AS-OF. Never silently fresh."""
+        if not redis:
+            return None
         try:
-            stale = await redis.get("portfolio:greeks:stale")
-            if stale:
-                stale_data = json.loads(stale)
-                stale_data["stale"] = True
-                return stale_data
+            raw = await redis.get("portfolio:greeks:stale")
         except Exception:
-            pass
+            return None
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return None
+        data["stale"] = True
+        data["stale_reason"] = reason
+        data.setdefault("computed_at", None)
+        data["as_of"] = data.get("computed_at")
+        return data
 
     # UW API only — Polygon is deprecated
     try:
@@ -2037,6 +2064,9 @@ async def _portfolio_greeks_inner():
             )
     except Exception as e:
         logger.error("Greeks: DB query failed: %s", e)
+        _fb = await _stale_fallback('db_error')
+        if _fb is not None:
+            return _fb
         return _greeks_unknown("db_error")
 
     if not rows:
@@ -2044,6 +2074,38 @@ async def _portfolio_greeks_inner():
 
     try:
         positions = [_row_to_dict(r) for r in rows]
+
+        # R-IV.1381(d)2: REAL LEGS, from the table they live in.
+        #
+        # The summariser built a position's legs out of `long_strike` and `short_strike` -- two
+        # columns, so at most two legs, and one option type inferred from the STRUCTURE NAME.
+        # NVDA 415 is a put_debit_spread plus a long_put: three legs, counted as two. The
+        # portfolio's "N of M legs priced" was wrong in the direction that matters, reporting
+        # better coverage than it had.
+        #
+        # This is the same read the mark job does (R-IV.458(a)/460(b)) -- one query for every
+        # open row, no vendor call. A position with no rows in `position_legs` keeps the old
+        # strike-pair behaviour, so nothing that works today stops working.
+        try:
+            async with pool.acquire() as conn:
+                _leg_rows = await conn.fetch(
+                    "SELECT position_id, leg_seq, option_type, side, strike, expiry, qty "
+                    "FROM position_legs WHERE position_id = ANY($1::text[]) "
+                    "ORDER BY position_id, leg_seq",
+                    [r["position_id"] for r in rows])
+            _legs_by_pos = {}
+            for _lr in _leg_rows:
+                _legs_by_pos.setdefault(_lr["position_id"], []).append(dict(_lr))
+            for _p in positions:
+                _lg = _legs_by_pos.get(_p.get("position_id"))
+                if _lg:
+                    _p["legs"] = _lg
+        except Exception as _le:
+            # The strike-pair path still works; it just undercounts multi-leg rows. Said out
+            # loud rather than silently reverting to a number that reads as complete.
+            logger.warning("Greeks: position_legs unreadable (%s); leg counts fall back to the "
+                           "strike pair and may UNDERSTATE the expected legs",
+                           type(_le).__name__)
 
         # Group positions by ticker
         by_ticker: Dict[str, list] = {}
@@ -2123,10 +2185,18 @@ async def _portfolio_greeks_inner():
             "totals": totals,
             "coverage": coverage,
             "portfolio": {f"net_{n}": totals[n] for n in _GREEK_NAMES},
+            # R-IV.1381(d)1: a figure that can be served tomorrow must carry WHEN it was
+            # computed. `stale: True` on its own says "old" without saying how old.
+            "computed_at": datetime.now(timezone.utc).isoformat(),
+            "stale": False,
         }
+        result["as_of"] = result["computed_at"]
 
     except Exception as e:
         logger.error("Greeks computation failed: %s", e)
+        _fb = await _stale_fallback('computation_error')
+        if _fb is not None:
+            return _fb
         return _greeks_unknown("computation_error", error=str(e))
 
     # Cache for 60 seconds + stale cache for 24 hours (after-hours fallback)
