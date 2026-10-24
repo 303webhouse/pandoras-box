@@ -52,9 +52,12 @@ async def test_it_MAKES_NO_VENDOR_CALL_while_its_tag_is_unregistered():
     """An unregistered tag is not inert -- `quota_for` falls back to DEFAULT_QUOTA 500 and the
     walk would spend them on a path nobody approved. So the assertion is on `collect_one`
     never being reached, not on a boolean."""
-    assert not fwd.tag_is_registered(), (
-        "darkpool_forward is registered -- if that is the funding ruling landing, update this "
-        "test deliberately after re-reading R-IV.1398(b)3")
+    # FUNDED by R-IV.1408(b)1 at 250/night from the reserve. Same flip as the grid's, for
+    # the same reason, and the property is proved the stronger way: remove the registration
+    # and the refusal must return.
+    from integrations import uw_governor as _gov
+    assert fwd.tag_is_registered(), "R-IV.1408(b)1 registered this tag; it is missing"
+    saved = _gov.FOREIGN_RESERVE_QUOTAS.pop(fwd.CALLER_TAG)
     calls = {"n": 0}
 
     async def _never(*a, **k):
@@ -66,18 +69,24 @@ async def test_it_MAKES_NO_VENDOR_CALL_while_its_tag_is_unregistered():
     try:
         out = await fwd.walk_night(now=datetime(2026, 10, 26, 21, 0, tzinfo=ET))
     finally:
+        ceiling_unfunded = fwd.night_ceiling()
         census.collect_one = real
+        _gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = saved
 
     assert calls["n"] == 0, "the forward walk spent %d calls while unfunded" % calls["n"]
     assert out["blocked"] is True
-    assert fwd.night_ceiling() == 0
+    assert ceiling_unfunded == 0
+    assert fwd.night_ceiling() == int(250 * fwd.NIGHT_CEILING_FRACTION) == 240
 
 
 def test_the_two_gates_are_reported_SEPARATELY():
     from integrations import uw_governor as gov
 
-    assert "quota table" in (fwd.preflight() or ""), fwd.preflight()
-    gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (250, gov.TIER_STANDARD)
+    saved = gov.FOREIGN_RESERVE_QUOTAS.pop(fwd.CALLER_TAG)
+    try:
+        assert "quota table" in (fwd.preflight() or ""), fwd.preflight()
+    finally:
+        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = saved
     try:
         reason = fwd.preflight()
         assert reason is not None and fwd.ENV_FLAG in reason, reason
@@ -88,7 +97,8 @@ def test_the_two_gates_are_reported_SEPARATELY():
         finally:
             del os.environ[fwd.ENV_FLAG]
     finally:
-        gov.FOREIGN_RESERVE_QUOTAS.pop(fwd.CALLER_TAG, None)
+        # Restored to the RULED figure (R-IV.1408(b)1), never popped.
+        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (250, gov.TIER_STANDARD)
 
 
 def test_an_empty_env_value_is_OFF():
@@ -105,7 +115,8 @@ def test_an_unreadable_quota_table_is_not_a_licence_to_spend():
     sys.modules["integrations.uw_governor"] = None
     try:
         assert fwd.tag_is_registered() is False
-        assert fwd.night_ceiling() == 0
+        assert fwd.night_ceiling() == 0, (
+            "an unreadable quota table must not yield a spendable ceiling, funded or not")
     finally:
         if real is not None:
             sys.modules["integrations.uw_governor"] = real
@@ -223,12 +234,20 @@ def test_the_target_is_the_session_that_JUST_CLOSED_not_yesterday(y, m, d, expec
     assert (got.isoformat() if got else None) == expect
 
 
-def test_the_tier_1_list_is_the_set_the_CALLS_FIGURE_WAS_MEASURED_ON():
-    """158.6 calls a night is measured for exactly these eight names. A divergent list would
-    make the funding figure describe a different job -- and no tier list is invented here
-    (R-IV.925(b)); if §6.4's Tier-1 differs, the ruling names it."""
-    assert fwd.tier_1_names() == census.CORE_NAMES
-    assert len(fwd.tier_1_names()) == 8
+def test_the_universe_is_the_CENSUS_EIGHT_and_is_not_called_tier_1():
+    """R-IV.1408(b)3 settled the set: the census's eight names, the ones TRITON-R and R2 read,
+    explicitly NOT Tier-1's sixteen.
+
+    The eight were always right -- 158.6 calls a night is measured on exactly this set, so a
+    divergent list would make the funded figure describe a different job. What was wrong was
+    the NAME, which came from R-IV.1398(b)3's "floored Tier-1 job" wording and was published
+    on /health, telling every reader of that surface the opposite of the scope.
+    """
+    assert fwd.census_names() == census.CORE_NAMES
+    assert len(fwd.census_names()) == 8
+    assert not hasattr(fwd, "tier_1_names"), (
+        "the misnamed accessor is still present: a caller reaching for it gets the census set "
+        "under a label the ruling rejected")
 
 
 def test_a_blocked_or_holiday_tick_does_NOT_consume_the_night():
@@ -248,8 +267,12 @@ async def test_the_health_surface_NAMES_the_block():
     st = await fwd.status()
     assert st["job"] == "darkpool_forward"
     assert st["caller_tag"] == fwd.CALLER_TAG
-    assert st["blocked"] and "quota table" in st["blocked"]
-    assert st["tag_registered"] is False and st["env_enabled"] is False
-    assert st["ceiling"] == 0
-    assert len(st["tier_1"]) == 8
+    assert st["tag_registered"] is True, "R-IV.1408(b)1 registered this tag"
+    assert st["env_enabled"] is False
+    assert st["blocked"] and fwd.ENV_FLAG in st["blocked"], st["blocked"]
+    assert "quota table" not in st["blocked"], (
+        "the surface still blames the funding gate after the ruling funded it")
+    assert st["ceiling"] == int(250 * fwd.NIGHT_CEILING_FRACTION) == 240
+    assert len(st["census_names"]) == 8
+    assert "tier_1" not in st, "the surface still publishes the rejected label"
     assert st["nights_fired_this_process"] == []

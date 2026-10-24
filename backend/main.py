@@ -1341,7 +1341,7 @@ async def lifespan(app: FastAPI):
             logger.info("darkpool_forward: loop armed but NOT collecting - %s", _dpf_block)
         else:
             logger.info("✅ darkpool_forward collecting (tag=%s, %d names, ceiling=%d/night)",
-                        _dpf.CALLER_TAG, len(_dpf.tier_1_names()), _dpf.night_ceiling())
+                        _dpf.CALLER_TAG, len(_dpf.census_names()), _dpf.night_ceiling())
     except Exception as e:
         logger.error("❌ darkpool_forward did NOT start: %s", e)
 

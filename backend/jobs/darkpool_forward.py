@@ -1,4 +1,8 @@
-"""R-IV.1398(b)3 — the FORWARD dark-pool walk. A floored Tier-1 job, one session a night.
+"""R-IV.1398(b)3 — the FORWARD dark-pool walk. One session a night, floored, census universe.
+
+FUNDED AND LIVE under R-IV.1408(b)1: 250 calls a night from the reserve. The universe is the
+CENSUS's eight names, which R-IV.1408(b)3 settled -- not Tier-1's sixteen, despite the earlier
+ruling's wording, and `census_names()` is named for what it is.
 
 WHY THIS IS A SEPARATE INSTRUMENT AND NOT A DATE EDIT
     `darkpool_backfill.py` already walks a session per night, floored at 04:00 ET, and writes
@@ -71,11 +75,17 @@ CALLER_TAG = "darkpool_forward"
 
 ENV_FLAG = "DARKPOOL_FORWARD_ENABLED"
 
-#: §6.4's Tier-1 names, taken from the census's CORE_NAMES rather than retyped -- the measured
-#: calls-per-night figure above is for exactly this set, so a divergent list would make the
-#: funding figure describe a different job. If §6.4's Tier-1 is NOT these eight, the ruling
-#: names the set; no tier list is invented here (R-IV.925(b)).
-def tier_1_names() -> Tuple[str, ...]:
+#: THE CENSUS'S EIGHT NAMES -- the universe TRITON-R and R2 actually read (R-IV.1408(b)3).
+#:
+#: NOT "Tier-1", and this function was called `tier_1_names` until the ruling settled it.
+#: R-IV.1398(b)3 described this as "the §6.4 floored Tier-1 job", so the name followed the
+#: ruling's wording; R-IV.1408(b)3 then named the set and it is explicitly NOT Tier-1's 16.
+#: A label that contradicts the ruling is worse than no label, and this one was also published
+#: on /health, so every reader of that surface was told the wrong thing about the scope.
+#:
+#: Taken from CORE_NAMES rather than retyped: the measured 158.6 calls/night is for exactly
+#: this set, so a divergent list would make the funded figure describe a different job.
+def census_names() -> Tuple[str, ...]:
     from jobs.darkpool_backfill import CORE_NAMES
     return CORE_NAMES
 
@@ -187,7 +197,7 @@ async def walk_night(now: Optional[datetime] = None,
     if session is None:
         return {"session": None, "reason": "not a trading session", "collected": 0}
 
-    names = tier_1_names()
+    names = census_names()
     ceiling = night_ceiling()
     budget = Budget(ceiling)
 
@@ -318,7 +328,9 @@ async def status() -> dict:
         "blocked": block,
         "tag_registered": tag_is_registered(),
         "env_enabled": enabled(),
-        "tier_1": list(tier_1_names()),
+        #: Renamed from `tier_1` under R-IV.1408(b)3: the universe is the census's eight, not
+        #: Tier-1's sixteen, and the old key published the opposite on every read.
+        "census_names": list(census_names()),
         "target_session": (lambda d: d.isoformat() if d else None)(target_session(now_et)),
         "nights_fired_this_process": sorted(_fired),
         "ceiling": night_ceiling(),

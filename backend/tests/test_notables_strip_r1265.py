@@ -133,13 +133,30 @@ def test_the_two_caps_agree():
 
 
 def test_the_quota_came_from_the_buffer_and_the_table_still_fits():
-    """R-IV.1265(d): carved from the 2,000 buffer, which becomes 1,950. The table summed to
-    exactly the old target, so this is the only change that funds the tag without reopening a
-    measured sizing."""
+    """R-IV.1265(d): carved from the 2,000 buffer, which became 1,950. The table summed to
+    exactly the old target, so this was the only change that funded the tag without reopening a
+    measured sizing.
+
+    THE BUFFER HAS MOVED AGAIN SINCE, and the literals went with it: R-IV.1408(b)2 took a
+    further 640 for `option_quote_grid`, so the buffer is 1,310 and the target 26,690. Pinning
+    1,950 and 26,050 made this test fail on a ruling it has nothing to do with, while the
+    PROPERTY it exists for -- the buffer is where a new tag comes from, and the table lands
+    exactly on its target rather than merely under it -- is independent of either figure.
+
+    So the invariant is asserted from the governor, and what stays pinned is the part that is
+    R-IV.1265(d)'s own: `notables_strip` is funded, at 50, and it did not come out of any other
+    caller's measured demand.
+    """
     from integrations.uw_api_cache import DAILY_BUDGET
-    assert g.QUOTA_SAFETY_BUFFER == 1950
     total = sum(q for q, _ in g.QUOTAS.values())
-    assert total == DAILY_BUDGET - g.QUOTA_SAFETY_BUFFER == 26050, total
+    assert total == DAILY_BUDGET - g.QUOTA_SAFETY_BUFFER, (
+        "the table no longer lands exactly on its target: %d against %d"
+        % (total, DAILY_BUDGET - g.QUOTA_SAFETY_BUFFER))
+    assert g.QUOTAS[ns.UW_CALLER] == (50, g.TIER_STANDARD), (
+        "R-IV.1265(d) funded this tag at 50 from the buffer")
+    # The buffer must still BE a buffer. A later carve that emptied it would leave the table
+    # sized to the whole hub budget with no headroom for the next unregistered code path.
+    assert g.QUOTA_SAFETY_BUFFER >= 1000, g.QUOTA_SAFETY_BUFFER
 
 
 def test_the_tag_is_logged_beside_the_others():

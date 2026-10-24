@@ -93,7 +93,31 @@ def write_text(path: str, text: str) -> dict:
 
 # ── 1-minute bars, the 8 census names ───────────────────────────────────
 
-def export_bars1m() -> None:
+#: R-IV.1378(c). Sessions whose files must not be rewritten until QUERY's R-IV.1377
+#: reproduction lands. READS ARE ALLOWED; only writing over them is held.
+#:
+#: TWO VALUES THAT MUST MOVE TOGETHER: the flag and the dates. Lifting the hold is flipping
+#: `HOLD_ACTIVE` to False, and a test asserts the dates are still here when it is True -- a
+#: flag cleared while the range stayed, or a range emptied while the flag stood, would each
+#: read as "the hold is honoured" while doing the opposite.
+R1378C_HOLD_ACTIVE = True
+R1378C_HELD_FROM = date(2026, 9, 25)
+R1378C_HELD_TO = date(2026, 10, 15)
+
+
+def session_is_held(d: date) -> bool:
+    """Is this session inside R-IV.1378(c)'s held range, with the hold still in force?
+
+    Inclusive at BOTH ends: the ruling names "09-25 to 10-15", and a half-open reading would
+    leave 10-15 writable. Censoring scans are half-open and date RANGES in rulings are not --
+    that distinction has already produced one withdrawn finding in this register.
+    """
+    if not R1378C_HOLD_ACTIVE:
+        return False
+    return R1378C_HELD_FROM <= d <= R1378C_HELD_TO
+
+
+def export_bars1m() -> dict:
     """Every 1-minute bar yfinance still holds, split per session date.
 
     YFINANCE'S WINDOW IS ABOUT 30 DAYS, measured 2026-10-13: a request starting 2026-09-14
@@ -107,6 +131,9 @@ def export_bars1m() -> None:
     today = date.today()
     start = today - timedelta(days=29)
     print("=== bars1m: %s .. %s (yfinance window) ===" % (start, today))
+    summary = {"window_start": start.isoformat(), "window_end": today.isoformat(),
+               "files_written": 0, "sessions_held": 0, "tickers_empty": [],
+               "sessions_written": set()}
     for ticker in CENSUS:
         frames = []
         chunk_start = start
@@ -130,6 +157,7 @@ def export_bars1m() -> None:
             chunk_start = chunk_end
         if not frames:
             print("  %-5s no bars returned" % ticker)
+            summary["tickers_empty"].append(ticker)
             continue
         all_df = pd.concat(frames)
         all_df = all_df[~all_df.index.duplicated(keep="first")].sort_index()
@@ -142,13 +170,30 @@ def export_bars1m() -> None:
         by_day = {}
         for ts, row in all_df.iterrows():
             by_day.setdefault(ts.date(), []).append((ts, row))
-        written = 0
+        written = held = 0
         for d, rows in sorted(by_day.items()):
+            # R-IV.1378(c): the request window reaches back 29 days and today that is
+            # 2026-09-25 -- the first day of the held range -- so without this the export
+            # rewrites every held session on every run. The yfinance window, the paths and the
+            # parquet schema are all unchanged (R-IV.1408(b)5); what is skipped is writing OVER
+            # a file the hold protects, which is what the hold asks for.
+            if session_is_held(d):
+                held += 1
+                summary["sessions_held"] += 1
+                continue
             sub = all_df.loc[[ts for ts, _ in rows]]
             path = os.path.join(ROOT, "bars1m", d.isoformat(), "%s.parquet" % ticker)
             write_parquet(sub, path)
             written += 1
-        print("  %-5s %6d bars -> %d session files" % (ticker, len(all_df), written))
+            summary["sessions_written"].add(d.isoformat())
+        # HELD IS REPORTED, never silent. A run that wrote 9 of 30 sessions and said only "9"
+        # is indistinguishable from a vendor that returned a third of the data.
+        summary["files_written"] += written
+        print("  %-5s %6d bars -> %d session files%s"
+              % (ticker, len(all_df), written,
+                 (", %d HELD by R-IV.1378(c)" % held) if held else ""))
+    summary["sessions_written"] = sorted(summary["sessions_written"])
+    return summary
 
 
 # ── BTC / ETH daily, 7 days a week, from 2017 ───────────────────────────
