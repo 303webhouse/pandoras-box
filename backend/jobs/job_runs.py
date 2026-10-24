@@ -39,6 +39,12 @@ JOB_REGIME = "regime_v1"            # the v1 regime classifier (R-IV.1195(b))
 # QUERY's complete.csv. `scripts/f_export_gate.py` imports this name so the two cannot drift;
 # a test asserts its literal fallback matches.
 JOB_F_EXPORT = "f_export"
+# R-IV.1408(b)5. The 1-minute bars export, DE-COUPLED from the dark-pool gate into its own
+# scheduled job. It was running inside `f_export.py` behind a gate keyed on
+# `(latest_ended_run_id, eligible_count)` from the dark-pool backfill tables -- so the yfinance
+# bars were gated on a dark-pool run counter, and when that counter stopped moving the bars
+# stopped with it, reporting exit 0 the whole time.
+JOB_F_EXPORT_BARS = "f_export_bars"
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"

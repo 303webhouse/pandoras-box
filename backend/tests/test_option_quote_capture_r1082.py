@@ -377,9 +377,20 @@ def test_the_protected_tags_are_UNCHANGED(tag, expected):
 
 
 def test_the_reserve_was_not_touched():
+    """R-IV.1082(b) funded this capture budget-neutrally out of `flow_per_expiry`, NOT out of
+    the foreign reserve. That claim is unchanged and is what this asserts.
+
+    The `== 5165` it used to carry was INCIDENTAL to that claim and broke on an unrelated
+    ruling: R-IV.1408(b)1 added `darkpool_forward` at 250 to the reserve, making it 5,415. A
+    test that fails when a different ruling spends a different pot was measuring the pot, not
+    the claim.
+    """
+    from integrations.uw_api_cache import UW_FOREIGN_RESERVE
     from integrations.uw_governor import FOREIGN_RESERVE_QUOTAS
-    assert sum(q for q, _t in FOREIGN_RESERVE_QUOTAS.values()) == 5165
-    assert "option_quote_capture" not in FOREIGN_RESERVE_QUOTAS
+    assert "option_quote_capture" not in FOREIGN_RESERVE_QUOTAS, (
+        "this capture is funded from the hub table, not the reserve")
+    # The reserve must still fit inside itself, whoever has drawn on it since.
+    assert sum(q for q, _t in FOREIGN_RESERVE_QUOTAS.values()) <= UW_FOREIGN_RESERVE
 
 
 def test_it_gets_NO_off_hours_exemption():

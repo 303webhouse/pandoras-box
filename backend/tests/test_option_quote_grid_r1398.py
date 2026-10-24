@@ -126,9 +126,16 @@ async def test_the_grid_MAKES_NO_VENDOR_CALL_while_its_tag_is_unregistered():
     An unregistered tag is not inert: `quota_for` falls back to DEFAULT_QUOTA 500 and the job
     would spend them. The assertion is therefore that `_fetch` is never reached.
     """
-    assert not oqg.tag_is_registered(), (
-        "option_quote_grid is in QUOTAS -- if that is the funding ruling landing, this test "
-        "is the one to update, deliberately, after re-reading R-IV.1398(b)1")
+    # FUNDED by R-IV.1408(b)2 at 640/day, so the tag IS registered now and the original
+    # form of this test -- `assert not tag_is_registered()` -- would fail on the ruling
+    # landing. It said so itself and told the reader to update it here.
+    #
+    # The property it protected is unchanged and is now proved the stronger way: the
+    # registration is REMOVED and the refusal must come back. That holds whatever the quota
+    # table says today, where the original held only while the tag was absent.
+    from integrations import uw_governor as _gov
+    assert oqg.tag_is_registered(), "R-IV.1408(b)2 registered this tag; it is missing"
+    saved = _gov.QUOTAS.pop(oqg.CALLER_TAG)
     calls = {"n": 0}
 
     async def _counting(ticker, expiry):
@@ -141,12 +148,17 @@ async def test_the_grid_MAKES_NO_VENDOR_CALL_while_its_tag_is_unregistered():
         out = await oqg.capture_slot(
             now=datetime(2026, 10, 26, 11, 0, tzinfo=ET).astimezone(UTC))
     finally:
+        ceiling_unfunded = oqg.session_ceiling()
         oqg._fetch = real
+        _gov.QUOTAS[oqg.CALLER_TAG] = saved
 
     assert calls["n"] == 0, "the grid spent %d calls while unfunded" % calls["n"]
     assert out["blocked"] is True
     assert out["captured"] == 0
-    assert oqg.session_ceiling() == 0
+    # Both states pinned, not just one: unfunded there is nothing to spend, funded the
+    # ceiling follows the RULED quota so the code and the table cannot drift.
+    assert ceiling_unfunded == 0
+    assert oqg.session_ceiling() == int(640 * oqg.SESSION_CEILING_FRACTION) == 614
 
 
 def test_the_two_gates_are_reported_SEPARATELY():
@@ -154,7 +166,12 @@ def test_the_two_gates_are_reported_SEPARATELY():
     different fixes, and one message for both is the collapse this register keeps filing."""
     from integrations import uw_governor as gov
 
-    assert "QUOTAS" in (oqg.preflight() or ""), oqg.preflight()
+    # The funding gate, proved by removing the funding rather than by its absence.
+    saved = gov.QUOTAS.pop(oqg.CALLER_TAG)
+    try:
+        assert "QUOTAS" in (oqg.preflight() or ""), oqg.preflight()
+    finally:
+        gov.QUOTAS[oqg.CALLER_TAG] = saved
 
     gov.QUOTAS[oqg.CALLER_TAG] = (1000, gov.TIER_STANDARD)
     try:
@@ -171,7 +188,9 @@ def test_the_two_gates_are_reported_SEPARATELY():
         finally:
             del os.environ[oqg.ENV_FLAG]
     finally:
-        gov.QUOTAS.pop(oqg.CALLER_TAG, None)
+        # Restored to the RULED figure, not popped: R-IV.1408(b)2 funds it at 640 and a test
+        # that left the tag unregistered would disarm every later test in the session.
+        gov.QUOTAS[oqg.CALLER_TAG] = (640, gov.TIER_STANDARD)
 
 
 def test_an_empty_env_value_is_OFF_not_ON():
@@ -193,7 +212,8 @@ def test_an_unreadable_quota_table_is_not_a_licence_to_spend():
     sys.modules["integrations.uw_governor"] = None   # import raises
     try:
         assert oqg.tag_is_registered() is False
-        assert oqg.session_ceiling() == 0
+        assert oqg.session_ceiling() == 0, (
+            "an unreadable quota table must not yield a spendable ceiling, funded or not")
     finally:
         if real is not None:
             sys.modules["integrations.uw_governor"] = real
@@ -541,7 +561,9 @@ async def test_a_funded_slot_writes_FOUR_LEGS_per_ticker_on_EIGHT_calls():
     finally:
         oqg._fetch, pg.get_postgres_client = real_fetch, real_pool
         del os.environ[oqg.ENV_FLAG]
-        gov.QUOTAS.pop(oqg.CALLER_TAG, None)
+        # RESTORED to the RULED figure, never popped: popping leaves the tag
+        # unregistered for every later test in the file (R-IV.1408(b)2 funds it at 640).
+        gov.QUOTAS[oqg.CALLER_TAG] = (640, gov.TIER_STANDARD)
 
     assert out.get("blocked") is not True, out
     assert out["slot"] == "11:00"
@@ -593,7 +615,9 @@ async def test_the_second_visit_to_a_captured_slot_spends_nothing():
     finally:
         oqg._fetch, pg.get_postgres_client = real_fetch, real_pool
         del os.environ[oqg.ENV_FLAG]
-        gov.QUOTAS.pop(oqg.CALLER_TAG, None)
+        # RESTORED to the RULED figure, never popped: popping leaves the tag
+        # unregistered for every later test in the file (R-IV.1408(b)2 funds it at 640).
+        gov.QUOTAS[oqg.CALLER_TAG] = (640, gov.TIER_STANDARD)
 
     n_first = len(calls)
     assert n_first == 8, calls
@@ -640,12 +664,18 @@ async def test_the_health_surface_NAMES_the_block_rather_than_looking_idle():
     st = await oqg.capture_status()
     assert st["job"] == "option_quote_grid"
     assert st["caller_tag"] == oqg.CALLER_TAG
-    assert st["blocked"] and "QUOTAS" in st["blocked"]
-    assert st["tag_registered"] is False
+    # FUNDED NOW, so the surface's remaining gate is the env flag. Both are still reported
+    # separately, which is the property this test exists for.
+    assert st["tag_registered"] is True, "R-IV.1408(b)2 registered this tag"
     assert st["env_enabled"] is False
+    assert st["blocked"] and oqg.ENV_FLAG in st["blocked"], st["blocked"]
+    assert "QUOTAS" not in st["blocked"], (
+        "the surface still blames the funding gate after the ruling funded it")
     assert st["slots_total"] == 75
     # While blocked, nothing is EXPECTED -- a refusal by ruling is not 75 missed slots, and
     # reporting it as one would bury the real alarm the day it fires.
     assert st["slots_expected_so_far"] == 0
     assert st["slots_missed"] == []
-    assert st["ceiling"] == 0
+    # The ceiling now follows the RULED quota, which is what makes it impossible for the code
+    # and the table to drift: 640 x 0.96.
+    assert st["ceiling"] == int(640 * oqg.SESSION_CEILING_FRACTION) == 614

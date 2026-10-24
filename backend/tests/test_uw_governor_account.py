@@ -404,3 +404,47 @@ async def test_an_unreadable_refusal_timestamp_does_not_shed(account):
     account["last_429_at"] = "not-a-time"
     assert await g.account_shed(g.TIER_STANDARD) is None
     assert g.gate_state()["state"] != "shed:rate_limited"
+
+
+def test_the_two_R_IV_1408_registrations_are_the_RULED_figures():
+    """R-IV.1408(b)1 and (b)2 named the numbers, so the numbers are asserted rather than
+    trusted to a comment -- this file's own reason for existing.
+
+    option_quote_grid 640/day came out of QUOTA_SAFETY_BUFFER, which is why the buffer moved
+    1,950 -> 1,310: the table summed to exactly DAILY_BUDGET - buffer, so a new tag can only
+    come from a reallocation or from the buffer, and the ruling took the buffer.
+
+    darkpool_forward 250/night came from the RESERVE, which asks the hub table for nothing.
+    """
+    from integrations.uw_api_cache import DAILY_BUDGET, UW_FOREIGN_RESERVE
+
+    assert g.QUOTAS["option_quote_grid"] == (640, g.TIER_STANDARD)
+    assert g.FOREIGN_RESERVE_QUOTAS["darkpool_forward"] == (250, g.TIER_STANDARD)
+    assert g.QUOTA_SAFETY_BUFFER == 1310
+
+    # The hub table lands EXACTLY on its ceiling, which is the whole point of taking the 640
+    # from the buffer rather than from a caller.
+    assert sum(q for q, _ in g.QUOTAS.values()) == DAILY_BUDGET - g.QUOTA_SAFETY_BUFFER
+
+    # And the reserve still has room: 12,000 against 5,415 claimed.
+    assert sum(q for q, _ in g.FOREIGN_RESERVE_QUOTAS.values()) <= UW_FOREIGN_RESERVE
+
+    # NOT RULED and therefore NOT TAKEN: the +20 I asked for to restore
+    # option_quote_capture's 1.2x sizing margin. It stays at 300 against a measured peak of
+    # 244, whose safe ceiling under the table's own rule is 250.
+    assert g.QUOTAS["option_quote_capture"] == (300, g.TIER_STANDARD)
+
+
+def test_both_new_tags_are_STANDARD_so_the_binding_shed_line_is_seventy_five_percent():
+    """R-IV.1408(b)4 asks for the threshold the CODE enforces. It is a fraction of the
+    vendor-reported account limit, per tier, and both new jobs are STANDARD."""
+    from integrations.uw_api_cache import UW_ACCOUNT_LIMIT
+
+    assert g.quota_for("option_quote_grid")[1] == g.TIER_STANDARD
+    assert g.quota_for("darkpool_forward")[1] == g.TIER_STANDARD
+    assert g.ACCOUNT_SHED_AT[g.TIER_STANDARD] == 0.75
+    assert int(g.ACCOUNT_SHED_AT[g.TIER_STANDARD] * UW_ACCOUNT_LIMIT) == 30000
+    # Stated for the record: neither new job is FOREGROUND, so neither buys immunity from
+    # shedding. A forward collection should be shed before a live quote.
+    assert g.ACCOUNT_SHED_AT[g.TIER_BACKGROUND] == 0.55
+    assert g.ACCOUNT_SHED_AT[g.TIER_FOREGROUND] == 0.92

@@ -232,7 +232,18 @@ def describe_block(sentinel) -> str:
 # `test_hub_quota_table_fits_inside_the_hub_budget`, not left to this comment -- the previous
 # version of this line carried an arithmetic comment that survived two edits to the numbers it
 # described, which is why the assertion exists.
-QUOTA_SAFETY_BUFFER = 1950  # headroom under the HUB budget, not the account limit
+# R-IV.1408(b)2: CUT FROM 1,950 TO 1,310 to fund `option_quote_grid` at 640/day. The table
+# summed to exactly DAILY_BUDGET - buffer, so a new tag can only come from a reallocation or
+# from the buffer, and the ruling took the buffer -- the only route that touches no caller's
+# MEASURED demand. (Measured free under the table's own 1.2x sizing rule at the time: 9,594
+# across daily_budget tags, but 5,000 of it sits on six `crypto_bars_*` tags whose sizing rests
+# on a 2,764 sighting the ledger can no longer attribute, and four days is thinner than the ten
+# UW days R-IV.886(e) required before resizing a tag.)
+#
+# The arithmetic is asserted by `test_hub_quota_table_fits_inside_the_hub_budget`, never by
+# this comment -- the line this replaced carried arithmetic that outlived two edits to the
+# numbers it described, which is why that test exists.
+QUOTA_SAFETY_BUFFER = 1310  # headroom under the HUB budget, not the account limit
 
 # ── RETUNED 2026-09-14 AGAINST MEASURED DEMAND (R-IV.379(c)) ────────────
 # The previous table called itself "STARTING VALUES to tune against the first
@@ -374,6 +385,19 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     # so the STANDARD haircut never applies to it and an exemption would be a licence it has
     # no use for.
     "option_quote_capture": (300, TIER_STANDARD),
+    # R-IV.1408(b)2: the 5-minute ATM-vertical grid, TRITON-R2 Stage A. 640/day, funded from
+    # QUOTA_SAFETY_BUFFER above (1,950 -> 1,310), so no caller gives up measured demand.
+    #
+    # MEASURED BEFORE A CALL WAS SPENT, which is what the ruling required first: 75 slots
+    # (09:45-15:55 ET, every 5 minutes) x 8 names x 1 nearest expiry = 600 fixed, plus
+    # first-slot expiry discovery -- wasted probes only -- at ~20 on a Monday with Friday-only
+    # names and 40 as an absolute bound. 640 is that bound, not a guess.
+    #
+    # NO off-hours entry below: the window is entirely RTH, so the STANDARD haircut never
+    # applies and an exemption would be a licence it has no use for. STANDARD, not FOREGROUND:
+    # a forward collection should be shed before a live quote, and FOREGROUND would buy
+    # immunity from shedding that this does not need.
+    "option_quote_grid": (640, TIER_STANDARD),
     "darkpool_ticker": (500, TIER_STANDARD),
     # R-IV.867(e): the daily ATM implied-volatility snapshot. Runs ONCE a session at 16:45 ET,
     # one /option-contracts call per universe ticker. 250 covers the universe with headroom and
@@ -730,6 +754,12 @@ async def account_shed(tier: str, now=None) -> Optional[str]:
 #: These entries are TEMPORARY by ruling: the allowance lapses after 2026-10-23 and the job
 #: refuses to run past it on its own (darkpool_backfill.ALLOWANCE_THROUGH).
 FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
+    # LAPSED 2026-10-24 and left at its number on purpose. `darkpool_backfill.ALLOWANCE_THROUGH`
+    # is 2026-10-23, and both `run()` and the nightly loop refuse past it -- the loop RETURNS --
+    # so this allowance is now unspendable whatever the figure says. Its census is finished (312
+    # of 312 ticker-sessions, outstanding 0). `darkpool_forward` below is the live successor.
+    # Reducing this is a budget decision nobody has ruled, so the number stands and the state is
+    # written down instead.
     "darkpool_backfill_triton": (5000, TIER_STANDARD),   # R-IV.983(c), raised from 2,500; through 2026-10-23
     # R-IV.1073(c): the IV term-structure calibration backfill. 8 census names x 17 sessions
     # (2026-09-01 -> 09-24) = 136 calls, x1.2 = 164, rounded to 165.
@@ -742,6 +772,24 @@ FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
     # The reserve is 12,000 and the only other claim on it is the 5,000 above, so this is funded
     # from genuinely unallocated room and takes nothing from anyone.
     "iv_term_backfill": (165, TIER_STANDARD),
+    # R-IV.1408(b)1: the FORWARD dark-pool walk. 250 a night, from the reserve, writing
+    # `darkpool_backfill_pages` for each new session per R-IV.1403(c) with
+    # `darkpool_collector` untouched (R-IV.912(c)2).
+    #
+    # IT ADDS ALMOST NOTHING, measured: the five most recent nights that walked one new session
+    # across the 8 names spent 202 / 140 / 132 / 131 / 188 -- mean 158.6, median 140, max 202.
+    # That spend was already happening through `darkpool_backfill_triton` until its allowance
+    # lapsed at 00:00 UTC on 2026-10-24. 250 covers the measured maximum with headroom.
+    #
+    # FROM THE RESERVE and not the hub table, for the reason the two entries above give: the
+    # reserve is 12,000 with 5,165 claimed, so this is funded from genuinely unallocated room
+    # and takes nothing from anyone. STANDARD, matching the census walk it succeeds.
+    #
+    # NO EXPIRY DATE, deliberately, and that is the whole reason it is a separate tag: the
+    # entry above expired, its loop RETURNED rather than slept, and one date literal stopped
+    # the dark-pool pages and the F: bars export together. A forward collection has no end
+    # date to write.
+    "darkpool_forward": (250, TIER_STANDARD),
 }
 
 
