@@ -77,7 +77,7 @@ class TestIdentityByNumber:
         ("...3158", FIDELITY_ROTH),
         ("...1836", FIDELITY_401A),
         ("X...1836 ", FIDELITY_401A),      # digits extracted
-        ("Z-...3158", FIDELITY_ROTH),
+        ("Z-000-003-158", FIDELITY_ROTH),  # synthetic digits; only the last four are real
     ])
     def test_a_number_resolves_however_it_is_written(self, raw, expected):
         assert account_for_number(raw) == expected
