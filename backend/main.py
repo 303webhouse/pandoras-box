@@ -540,6 +540,30 @@ async def lifespan(app: FastAPI):
                     result = await run_mark_to_market()
                     updated = result.get("updated", 0)
                     errors = result.get("errors", [])
+
+                    # R-IV.1381(d)1: THE GREEKS REFRESH HERE, not on the request path.
+                    #
+                    # They used to be pinned by a 24-hour stale key, so the BOOK tile's leg
+                    # fraction could not move for a day. Recomputing per request would have
+                    # fixed that and put a vendor-backed computation behind every page load.
+                    #
+                    # IMMEDIATELY AFTER THE MARK JOB IS THE CHEAP PLACE TO DO IT, and that is
+                    # the whole point: the mark job has just pulled each ticker's option chain,
+                    # `get_options_snapshot` caches under `option_contracts` with a 300s TTL,
+                    # and this loop runs at MTM_MINUTES = [2, 17, 32, 47]. So the recompute
+                    # reads chains that are seconds old and already paid for -- NO ADDITIONAL
+                    # VENDOR CALLS, at a 15-minute cadence rather than a daily one.
+                    #
+                    # It never fails the mark run: the greeks are display-only (#42).
+                    try:
+                        from api.unified_positions import _portfolio_greeks_inner
+                        _g = await _portfolio_greeks_inner(force=True)
+                        _cov = (_g or {}).get("coverage") or {}
+                        logger.info("Greeks refreshed with the mark run: %s/%s legs",
+                                    _cov.get("legs_priced"), _cov.get("legs_expected"))
+                    except Exception as _ge:
+                        logger.warning("Greeks refresh failed (%s); the stale copy stands "
+                                       "with its own as-of", type(_ge).__name__)
                     if is_closing_bell:
                         closing_bell_fired_today = today_date
                         logger.info("🔔 Closing bell MTM: updated %d positions", updated)

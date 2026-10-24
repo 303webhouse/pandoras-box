@@ -1874,6 +1874,37 @@ async def get_ticker_greeks_summary(
         long_strike = pos.get("long_strike")
         short_strike = pos.get("short_strike")
 
+        # R-IV.1381(d)2: WHEN THE POSITION CARRIES ITS REAL LEGS, USE THEM.
+        #
+        # The branch below can express at most two legs (`long_strike`, `short_strike`) with
+        # ONE option type inferred from the structure name. NVDA 415 is a put_debit_spread plus
+        # a long_put -- three legs, two counted, and the portfolio reported better coverage
+        # than it had. A leg row carries its OWN type, strike, expiry, side and size, so a
+        # three-leg position counts three and a mixed call/put structure is no longer forced
+        # into a single type.
+        #
+        # NO EXTRA VENDOR CALL: `chain` is already fetched once per ticker above, and this only
+        # changes which contracts are looked up inside it.
+        _legs = pos.get("legs") or []
+        if _legs:
+            for _leg in _legs:
+                _lt = (_leg.get("option_type") or "").lower()
+                _lt = "put" if _lt.startswith("p") else ("call" if _lt.startswith("c") else "")
+                _ls = _leg.get("strike")
+                _le = _leg.get("expiry") or expiry
+                if not _lt or _ls is None or not _le:
+                    legs_expected += 1          # a leg we cannot price is a GAP, not a non-event
+                    continue
+                legs_expected += 1
+                _side = (_leg.get("side") or "").lower()
+                _sign = -1 if _side.startswith("s") else +1
+                _lq = abs(int(_leg.get("qty") or qty or 1))
+                _c = _find_contract(chain, float(_ls), str(_le), _lt)
+                if _c:
+                    legs_priced += 1
+                    _accumulate(sums, priced, _get_contract_greeks(_c), _sign, _lq)
+            continue
+
         # Identify options FIRST, so a non-option (equity, no greeks concept) is
         # excluded from coverage entirely rather than counted as a gap.
         if "put" in structure:
