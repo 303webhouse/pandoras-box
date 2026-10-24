@@ -223,3 +223,40 @@ def test_BOTH_crowded_headlines_are_NOTABLE_not_bear_or_bull():
     assert cb.headline([_ex("FUTURES")])[1] == "notable"
     assert cb.headline([_ex("PUT/CALL")])[1] == "notable"
     assert cb.HEADLINE_LEAN_CROWDED == "notable"
+
+
+# ── R-IV.1369(f)3/(f)4: the window each row was ranked against, and a missed release ─────────
+
+def test_EACH_GAUGE_ROW_SERVES_THE_WINDOW_IT_WAS_RANKED_AGAINST():
+    """"more puts than 82% of the last N sessions" needs N. It is COUNTED, never assumed to be
+    the full window -- a thin history ranked against 31 readings must not read as 52."""
+    hist = [1.0, 2.0, None, 3.0]
+    pc = cb.put_call_row(2.5, hist, universe_size=20, sessions=5, as_of="2026-10-23")
+    assert pc["history_n"] == 3, "a None in the history is not a reading"
+    assert pc["history_full"] == cb.FULL_WINDOW == 52
+    fut = cb.cftc_row({"ES": 1.0, "NQ": 1.0}, [0.0] * 31, _dt.date(2026, 10, 20),
+                      today=_dt.date(2026, 10, 24))
+    assert fut["history_n"] == 31 and fut["thin"] is True
+
+
+def test_THE_NEWEST_EXPECTED_CFTC_AS_OF_IS_THE_TUESDAY_OF_THE_LAST_FRIDAY_BEFORE_TODAY():
+    """Published Friday for the prior Tuesday. 2026-10-23 is a Friday, 10-20 its Tuesday."""
+    sat = _dt.date(2026, 10, 24)
+    assert cb.expected_cftc_as_of(sat) == _dt.date(2026, 10, 20)
+    # A Friday is STRICT: that afternoon's release may not be out, so the week before counts.
+    assert cb.expected_cftc_as_of(_dt.date(2026, 10, 23)) == _dt.date(2026, 10, 13)
+    # Monday through Thursday all expect the PREVIOUS Friday's release.
+    for d in (26, 27, 28, 29):
+        assert cb.expected_cftc_as_of(_dt.date(2026, 10, d)) == _dt.date(2026, 10, 20)
+
+
+def test_A_FUTURES_ROW_IS_AMBER_ONLY_WHEN_A_RELEASE_WAS_MISSED():
+    """(f)4: always show the as-of; amber only when a weekly release was missed."""
+    nets = {"ES": 1.0, "NQ": 1.0}
+    current = cb.cftc_row(nets, [0.0, 1.0], _dt.date(2026, 10, 20), today=_dt.date(2026, 10, 24))
+    assert current["release_missed"] is False
+    assert current["expected_as_of"] == "2026-10-20"
+    late = cb.cftc_row(nets, [0.0, 1.0], _dt.date(2026, 10, 13), today=_dt.date(2026, 10, 24))
+    assert late["release_missed"] is True
+    # Unknown is not "fine": no as-of means it cannot be judged, and says so.
+    assert cb.cftc_row(nets, [0.0, 1.0], None, today=_dt.date(2026, 10, 24))["release_missed"] is None

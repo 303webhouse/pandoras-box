@@ -52,6 +52,10 @@
     }
   },
   "v2.html": {
+    "assets/agora-clean.css": {
+      "pin": 1,
+      "sha256": "7f87c932cf731a295c2c9bb4f9073f776febccbaf9ba988ee2342129f3b715af"
+    },
     "assets/agora-quotes.js": {
       "pin": 3,
       "sha256": "5e78b18e68442d288e703d40c33ec2ab01b89464aa0b2889ba0cfd35b64b0441"
@@ -61,8 +65,8 @@
       "sha256": "f9d82de6281c3b171ef308abc1b381f79275d6efc96ec8f5e75f0f20eb55ca88"
     },
     "v2.js": {
-      "pin": 109,
-      "sha256": "568dc46b24dcdc291a026accf0f6e93b7fc972fd41b6384423204a852213e501"
+      "pin": 110,
+      "sha256": "96bbe6c8040a736cd8426884cef58e46ca7ed0ea897f5fad0741edd4f3125ab7"
     }
   }
 }

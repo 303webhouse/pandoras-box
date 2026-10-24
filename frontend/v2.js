@@ -633,7 +633,46 @@
     'PREMIUM SELLING': 'notable', 'TWO-WAY': 'neutral', 'NO READING': 'neutral',
     // Vol curve
     'CALM': 'notable', 'FIRMING': 'bear-mild', 'STRESS': 'strong-bear',
+    // R-IV.1369(d)3: WORDS THE CLEANED POP-OUT AND TILES USE THAT THE BAND NEVER NEEDED.
+    // Mapped BY MEANING, as the ruling says: supports higher prices is bull, lower is bear,
+    // neither is neutral. Each line names the read that produces the word, so the mapping can
+    // be audited against its source rather than guessed at.
+    //   200-day line (regime_ma200.side): SPY above its 200-day supports higher prices.
+    'ABOVE': 'bull', 'BELOW': 'bear',
+    //   Credit (regime_sections_b8, HY OAS): wide spreads are stress. CALM is NOT re-mapped
+    //   here -- it is 'notable' above for the vol curve, and one word keeps one colour.
+    'WIDE': 'bear', 'MIDDLING': 'neutral',
+    //   Auction state (regime_sections_b8.auction): the three words it can produce.
+    'ABOVE VALUE': 'bull', 'INSIDE VALUE': 'neutral', 'BELOW VALUE': 'bear',
+    //   Crowd (crowd_b6.headline, its "CROWD " prefix dropped). BOTH crowded sides are
+    //   'notable', not bear/bull (R-IV.1369(f)7): a crowded side is contrarian fuel.
+    'MIXED': 'neutral', 'BEARS CROWDED': 'notable', 'BULLS CROWDED': 'notable',
+    //   The STORED keys the ribbon and flip_triggers carry ('range_chop', 'crash_liquidation')
+    //   read as these once the underscore goes. Without them those sessions fell through to the
+    //   neutral fallback by accident -- right for range_chop, wrong for crash_liquidation.
+    'RANGE CHOP': 'neutral', 'CRASH LIQUIDATION': 'strong-bear',
   };
+
+  // ═══ R-IV.1369 · AGORA CLEANUP ROUND 1 ═════════════════════════════════════════════════════
+  //
+  // The Regime pop-out, the BOOK tile and the CROWD tile, rebuilt to Nick's approved boards
+  // (10:22 MT 2026-10-23). DISPLAY ONLY (#42): nothing here computes a new figure, gates
+  // anything or touches the kill switch. Every value is one a route already serves.
+  //
+  // SHIPPED AS THE DEFAULT (R-IV.1369(g), as R-IV.1354(a) did). `?clean=off` restores the old
+  // three surfaces UNTIL 2026-11-06 -- REMOVE THE ROLLBACK ON OR AFTER THAT DATE, with the old
+  // branches it guards, unless Nick says otherwise. The date is written here because "until"
+  // in a ruling becomes "forever" in a codebase that does not record when it ends.
+  const CLEAN = (() => {
+    try { return new URLSearchParams(location.search).get('clean') !== 'off'; }
+    catch (_) { return true; }
+  })();
+
+  // A stored regime key ('range_chop') as the word LEAN_BY_WORD is keyed on ('RANGE CHOP').
+  const keyWord = (k) => String(k || '').replace(/_/g, ' ').trim().toUpperCase();
+  // R-IV.1369(c)3: a NEUTRAL headline is --text, never --text-2, because a --text-2 headline
+  // reads as disabled. Every other lean takes leanColor() exactly.
+  const headColor = (lean) => (!lean || lean === 'neutral') ? 'var(--text)' : leanColor(lean);
 
   // The ruling's "mild" steps share a side with their full step but are not extremes. Folded
   // here so LEAN_SCALE stays the five ruled colours and nothing invents a sixth.
@@ -1834,6 +1873,358 @@
       + 'Global markets returns here once its live data is wired.</span></div>';
   }
 
+  // ═══ R-IV.1369(d) · THE REGIME POP-OUT, CLEANED ═══════════════════════════════════════════
+  //
+  // Three layers, top to bottom, for a reader who wants the answer first: 1 the market right
+  // now, 2 what it means for you, 3 the evidence -- collapsed, one row open at a time. Every
+  // section reads what `renderPopV2` already reads (_rsLive, _rsSections, _rsPlaybooks,
+  // _lastRegime, _lastKillView); nothing here fetches or computes a new figure.
+
+  const RC_DOW = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  // 'YYYY-MM-DD' -> 'TUE 10-20'. A CALENDAR date read at UTC noon, so no timezone can move it
+  // across midnight -- this is naming a stored date, not working out a session from a clock.
+  function rcDay(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return '';
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12));
+    return RC_DOW[d.getUTCDay()] + ' ' + m[2] + '-' + m[3];
+  }
+  const rcMd = (iso) => { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? m[1] + '-' + m[2] : ''; };
+
+  // R-IV.1369(d)1: THE STALE CHIP. Today's two-staleness logic and wording, exactly as
+  // `rsHeadline` decides it -- the bars stopping beats "no rule matched" -- and ONLY ITS
+  // PLACEMENT CHANGES: here it is a chip under the held line instead of R-IV.1278(b)4's
+  // headline swap, so the last label stays readable. The BAND keeps the swap; this does not
+  // touch `rsHeadline`. "Never a silent old label" still holds: the chip says how old.
+  function rcStaleChip(m) {
+    const fresh = m.data_freshness || {}, held = m.held_no_match || {};
+    if (fresh.headline || fresh.stale) {
+      const n = fresh.lag_sessions;
+      const txt = (n != null ? n + (Number(n) === 1 ? ' SESSION OLD' : ' SESSIONS OLD') : 'DATA STALE')
+        + (fresh.newest_bar ? ' · ' + rcDay(fresh.newest_bar) : '');
+      return '<span class="rg-chip rg-amber" title="' + esc((fresh.headline || '') + ' · '
+        + (fresh.reason || '')) + '">' + esc(txt) + '</span>';
+    }
+    if (held.stale) {
+      return '<span class="rg-chip rg-amber" title="' + esc(held.reason || '') + '">STALE'
+        + (held.group_word ? ' · ' + esc(held.group_word) : '') + '</span>';
+    }
+    return '';
+  }
+
+  // The kill-switch and event-overlay chips, in their EXISTING states (pvLamps): armed is the
+  // only alarm, unreadable is amber ("cannot confirm"), clear is quiet. Quiet is --text-2, not
+  // the old opacity dim, because H-13 forbids opacity-dimmed readable text.
+  function rcLampChips(lamps) {
+    const v = _lastKillView;
+    // ONE CHANGE FROM pvLamps, deliberately: a view that was NEVER READ (null) is amber "not
+    // read", not "clear". pvLamps falls through to "kill clear" there, which states a fact
+    // about a switch nobody has looked at -- the fake-healthy fault in the one chip where it
+    // matters most.
+    const kill = v && v.state === 'armed'
+      ? '<span class="rg-chip rg-down">KILL ARMED</span>'
+      : (!v ? '<span class="rg-chip rg-amber">Kill switch not read</span>'
+        : (v.state === 'unknown'
+          ? '<span class="rg-chip rg-amber">Kill switch unreadable</span>'
+          : '<span class="rg-chip rg-quiet">Kill switch clear</span>'));
+    // "no feed", not "no overlay": overlays are not computed in v1, and "No event overlay"
+    // would claim one was checked and found absent.
+    const o = (lamps && lamps.overlays) || {};
+    const ov = o.available
+      ? '<span class="rg-chip rg-teal">Event overlay on</span>'
+      : '<span class="rg-chip rg-quiet" title="' + esc(o.reason || '') + '">Event overlay: no feed</span>';
+    return kill + ov;
+  }
+
+  // R-IV.1369(d)1: one cell per session in its label's lean colour, a dashed outline for a
+  // session with no reading, and a legend with counts. A SHORT history is drawn short and
+  // flagged amber -- it is not padded out to 40 with invented "no reading" cells, which would
+  // claim sessions were read and found empty when they were simply not in this generation.
+  function rcRibbon(rb) {
+    if (!rb || !rb.sessions || !rb.sessions.length) {
+      return '<div class="rg-ribbon">' + pvNa((rb && rb.error) || 'no stored sessions') + '</div>';
+    }
+    const counts = new Map();
+    const cells = rb.sessions.map((s) => {
+      if (!s.label) {
+        counts.set('', (counts.get('') || 0) + 1);
+        return '<i class="rg-cell rg-none" title="' + esc((s.as_of || '') + ' · no reading') + '"></i>';
+      }
+      counts.set(s.label, (counts.get(s.label) || 0) + 1);
+      return '<i class="rg-cell" style="background:' + leanColor(leanOf(keyWord(s.label)))
+        + '" title="' + esc((s.as_of || '') + ' · ' + keyWord(s.label)) + '"></i>';
+    }).join('');
+    const legend = [...counts.entries()].map(([k, n]) => k
+      ? '<span class="rg-leg"><i style="background:' + leanColor(leanOf(keyWord(k))) + '"></i>'
+        + esc(keyWord(k).toLowerCase().replace(/^./, (c) => c.toUpperCase())) + ' ' + n + '</span>'
+      : '<span class="rg-leg"><i class="rg-none"></i>No reading ' + n + '</span>').join('');
+    const short = rb.short_history
+      ? '<span class="rg-chip rg-amber" title="' + esc(rb.basis || '') + '">SHORT HISTORY · '
+        + esc(rb.count) + ' OF ' + esc(rb.asked_for) + '</span>' : '';
+    return '<div class="rg-ribbon"><div class="rg-cells">' + cells + '</div>'
+      + '<div class="rg-legend">' + legend + short + '</div>'
+      + '<div class="rg-note">last ' + esc(rb.count) + ' session' + (Number(rb.count) === 1 ? '' : 's') + '</div></div>';
+  }
+
+  function rcLayer1(m) {
+    const ft = m.flip_triggers || {};
+    const lab = m.regime_label || ft.shown || '—';
+    const lean = leanOf(lab) || leanOf(keyWord(m.regime_key));
+    const held = ft.held_sessions != null ? ft.held_sessions : m.held_sessions;
+    const minHold = ft.min_hold;
+    // "leaning toward <candidate>" only when the classifier IS proposing one; the clause is
+    // dropped, not filled with "nothing", when it is not (R-IV.1369(d)1).
+    const lean2 = ft.candidate_differs && ft.candidate
+      ? ' · leaning toward <b class="rg-cand" style="color:' + leanColor(leanOf(ft.candidate))
+        + '">' + esc(ft.candidate) + '</b>' : '';
+    return '<section class="rg-l rg-l1">'
+      + '<div class="rg-sec">1 · THE MARKET RIGHT NOW</div>'
+      + '<div class="rg-hero" style="color:' + headColor(lean) + '">' + esc(lab) + '</div>'
+      + '<div class="rg-held">Held ' + esc(held != null ? held : '—') + ' session'
+      + (Number(held) === 1 ? '' : 's') + (minHold != null ? ' (minimum ' + esc(minHold) + ')' : '')
+      + lean2 + '</div>'
+      + '<div class="rg-chips">' + rcStaleChip(m) + rcLampChips((_rsSections || {}).lamps) + '</div>'
+      + rcRibbon(m.ribbon)
+      + '</section>';
+  }
+
+  // R-IV.1369(d)2(i): the playbook card, VERBATIM from playbooks.v2.json for the shown regime.
+  // Premium in full at 90 characters or fewer; otherwise its first and last sentences, with
+  // "more" for the rest. Sentences split only on punctuation FOLLOWED BY WHITESPACE, so
+  // "0.15%" and "[MKT]." do not cut a sentence in half.
+  function rcSentences(t) {
+    return String(t || '').replace(/([.!?])\s+/g, '$1\u0000').split('\u0000').map((s) => s.trim()).filter(Boolean);
+  }
+  function rcPlaybook(m) {
+    const pb = (((_rsPlaybooks || {}).regimes) || {})[m.regime_key];
+    if (!pb) return '<div class="rg-card">' + pvNa('no registered playbook for ' + (m.regime_key || 'this label')) + '</div>';
+    const prem = String(pb.premium || '');
+    let premHtml = '';
+    if (prem) {
+      const ss = rcSentences(prem);
+      premHtml = prem.length <= 90 || ss.length < 3
+        ? '<p>Premium: ' + esc(prem) + '</p>'
+        : '<p>Premium: <span class="rg-pshort">' + esc(ss[0] + ' ' + ss[ss.length - 1]) + '</span>'
+          + '<span class="rg-pfull" hidden>' + esc(prem) + '</span> '
+          + '<button type="button" class="rg-more" data-rg-more aria-expanded="false">more</button></p>';
+    }
+    const watch = (pb.matters_now || []).length
+      ? '<p>Watch: ' + esc(pb.matters_now.join(' · ')) + '</p>' : '';
+    return '<div class="rg-card rg-pb">'
+      + '<div class="rg-ct">What usually works · ' + esc(pb.label || keyWord(m.regime_key)) + '</div>'
+      + (pb.tape ? '<p>' + esc(pb.tape) + '</p>' : '') + premHtml + watch
+      + '<div class="rg-foot">From the registered playbook · context, not a signal</div></div>';
+  }
+
+  // R-IV.1369(d)2(ii): B8's flip_triggers() in the new style, B8'S HONESTY RULES INTACT
+  // (R-IV.1243(e)): no distance anywhere; a counter ONLY on the label the classifier is
+  // proposing, drawn as segments; each neighbour's condition VERBATIM; a proposed label that is
+  // also a neighbour shown ONCE; and B8's sector bar stays where B8 shows it, with the up side.
+  function rcSegs(banked, needed, cls) {
+    let s = '';
+    for (let i = 0; i < (Number(needed) || 0); i++) s += '<i class="' + (i < banked ? 'on ' : '') + cls + '"></i>';
+    return s;
+  }
+  function rcBlock(kind, b, ft, withSectors) {
+    if (!b) return '';
+    const proposing = !!(b.proposing && b.counter);
+    const right = proposing
+      ? '<span class="rg-bk">' + esc(b.counter.text) + ' closes</span>'
+      : '<span class="rg-bk rg-dim">not in progress</span>';
+    const segs = proposing
+      ? '<div class="rg-segs" title="' + esc(b.closes_basis || '') + '">'
+        + rcSegs(Math.min(Number(b.counter.banked) || 0, Number(b.counter.needed) || 0),
+                 b.counter.needed, 'rg-seg') + '</div>' : '';
+    const sec = ft.sectors || {};
+    let sectors = '';
+    if (withSectors && sec.above != null && sec.total) {
+      let bar = '';
+      for (let i = 1; i <= sec.total; i++) {
+        bar += '<i class="rg-sseg' + (i <= sec.above ? ' on' : '') + (sec.threshold === i ? ' th' : '') + '"></i>';
+      }
+      sectors = '<div class="rg-sbar" title="' + esc(sec.basis || '') + '">' + bar + '</div>'
+        + '<div class="rg-note">' + esc(sec.above) + ' of ' + esc(sec.total) + ' sectors above their 50-day · rule '
+        + esc(sec.threshold) + '</div>';
+    } else if (withSectors && sec.reason) {
+      sectors = '<div class="rg-note">' + esc(sec.reason) + '</div>';
+    }
+    return '<div class="rg-blk">'
+      + '<div class="rg-bh"><b style="color:' + leanColor(leanOf(b.target_words)) + '">' + esc(kind)
+      + ' → ' + esc(b.target_words || '') + '</b>' + right + '</div>' + segs
+      + '<div class="rg-cond">Shows when: ' + esc(b.condition || '') + '</div>' + sectors + '</div>';
+  }
+  function rcChange(ft) {
+    if (!ft || ft.error) return '<div class="rg-card">' + pvNa(ft && ft.error) + '</div>';
+    const ip = ft.in_progress;
+    const same = (b) => ip && b && b.target === ip.target;
+    return '<div class="rg-card rg-chg">'
+      + '<div class="rg-ct">What would change it<span class="rg-ctr">counts, not distances'
+      + pvInfo((ft.no_distance_estimate || '') + ' ' + (ft.order_note || '')) + '</span></div>'
+      + (ip ? rcBlock('IN PROGRESS', ip, ft, false) : '')
+      + (same(ft.down_order) ? '' : rcBlock('ONE STEP DOWN', ft.down_order, ft, false))
+      + (same(ft.up_order) ? '' : rcBlock('ONE STEP UP', ft.up_order, ft, true))
+      + '<div class="rg-foot">“One step up” means the next label in the hub’s list, not a safer one.</div></div>';
+  }
+
+  // R-IV.1369(d)2(iii): WARNING SIGNS ARE THE REGISTERED TAGS. The rules file lists them under
+  // "Section 2: tags, not regimes" -- tags never change the label, which is exactly this
+  // section's footnote. The payload's `tags` says which are lit. The list is the rules file's
+  // `tags.available` (regime_rules.v2.1.json), and tests/test_r1369_agora_clean.py fails if the
+  // two ever differ, so this cannot drift into a list nobody registered.
+  const RC_TAGS = ['narrow', 'credit-stress', 'recession-backed', 'lens-split', 'index-divergence',
+    'capitulation-day'];
+  function rcWarnings(m) {
+    const lit = new Set((m.tags || []).map(String));
+    // A lit tag the list does not know is shown, never dropped: a new registered tag must
+    // appear before anyone updates this file.
+    const all = RC_TAGS.concat([...lit].filter((t) => RC_TAGS.indexOf(t) < 0));
+    const human = (t) => t.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    return '<div class="rg-warn"><div class="rg-ct">Warning signs</div><div class="rg-chips">'
+      + all.map((t) => lit.has(t)
+        ? '<span class="rg-chip rg-teal">● ' + esc(human(t)) + '</span>'
+        : '<span class="rg-chip rg-off">○ ' + esc(human(t)) + '</span>').join('')
+      + '</div><div class="rg-foot">Warnings never change the label on their own.</div></div>';
+  }
+
+  // R-IV.1369(d)3: ONE COLLAPSED ROW PER FAMILY. Each row's status is the word that family's
+  // read already produces; where it produces none, its key number is shown instead, and a
+  // number takes no lean colour. The opened row reuses that family's existing section
+  // renderer, so its sources come with it and nothing is re-derived.
+  function rcEvidenceRows(m) {
+    const S = _rsSections || {};
+    const sign = (v) => (Number(v) > 0 ? '+' : Number(v) < 0 ? '−' : '') + Math.abs(Number(v));
+    const rows = [];
+    const r200 = m.ma200_row || {};
+    rows.push({ k: 'ma200', name: '200-day line',
+      word: r200.available ? r200.side : null,
+      detail: r200.available
+        ? 'SPY ' + Math.abs(Number(r200.pct)) + '% ' + (String(r200.side) === 'ABOVE' ? 'above' : 'below')
+          + ' it · since ' + rcMd(r200.since)
+        : (r200.reason || 'not available'),
+      body: r200.available
+        ? '<div class="rg-src">' + esc(r200.text || '') + '</div>'
+          + (r200.caveat ? '<div class="rg-src">' + esc(r200.caveat) + '</div>' : '')
+          + '<div class="rg-src rg-dim">' + esc(r200.basis || '') + '</div>'
+        : pvNa(r200.reason) });
+    const z = S.zweig || {};
+    rows.push({ k: 'breadth', name: 'Breadth', number: breadthNow(),
+      detail: z.available ? (z.reason || '') : (z.reason || 'not read yet'),
+      body: pvBreadth(S.zweig) });
+    const c = S.credit || {};
+    rows.push({ k: 'credit', name: 'Credit',
+      word: c.available ? c.word : null,
+      detail: c.available
+        ? 'High-yield spread ' + c.bp + 'bp · ' + sign(c.change_20d_bp) + 'bp in 20 days'
+        : (c.reason || 'not read yet'),
+      body: pvCredit(S.credit) });
+    const rr = S.rates || {}, rrow = (k) => ((rr.rows || []).find((x) => x.key === k) || {});
+    const real = rrow('real_10y'), be = rrow('breakeven_10y');
+    rows.push({ k: 'rates', name: 'Rates',
+      number: real.available ? Number(real.pct).toFixed(2) + '%' : null,
+      // MOVE's absence is stated INSIDE the opened row (pvRates names it with its reason), not on
+      // this one collapsed line: the line is the headline figure, and a third clause about a
+      // missing series pushed it past one line on a phone.
+      detail: rr.available
+        ? '10y real yield' + (be.available ? ' · breakeven ' + Number(be.pct).toFixed(2) + '%' : '')
+        : (rr.reason || 'not read yet'),
+      body: pvRates(S.rates) });
+    const vc = volCurveView(_lastRegime.composite);
+    rows.push({ k: 'vol', name: 'Volatility',
+      word: vc.word || null,
+      detail: vc.word ? 'VIX against its 3-month: ' + vc.value + ' · ' + vc.sub : vc.sub,
+      body: '<div class="rg-src">' + esc(vc.sub) + '</div><div class="rg-src rg-dim">'
+        + esc(GLOSSARY.VOLCURVE || '') + '</div>' });
+    const l = S.leadership || {};
+    const live = (l.rows || []).filter((x) => x.available && x.change_pct != null);
+    const top = live.slice().sort((a, b) => b.change_pct - a.change_pct);
+    rows.push({ k: 'lead', name: 'Leadership',
+      number: l.available ? (l.headline || null) : null,
+      detail: top.length >= 2
+        ? 'leading ' + top[0].name + ' · lagging ' + top[top.length - 1].name
+        : (l.reason || 'not read yet'),
+      body: pvLead(S.leadership) });
+    const cr = (_agora || {}).crowd || null;
+    const cw = cr && cr.headline ? String(cr.headline).replace(/^CROWD\s+/i, '') : null;
+    rows.push({ k: 'crowd', name: 'Crowd', word: cw,
+      detail: cr ? (cr.headline_basis || '') : 'the crowd read did not load',
+      body: cr ? (cr.rows || []).map((x) => '<div class="rg-src"><b>' + esc(x.key) + '</b> '
+        + esc(x.value == null ? '—' : x.value) + (x.pct_label ? ' · ' + esc(x.pct_label) : '')
+        + ' · ' + esc(x.source || '') + '</div>').join('') : pvNa('the crowd read did not load') });
+    const a = S.auction || {};
+    rows.push({ k: 'auction', name: 'Auction state',
+      word: a.available ? a.where : null,
+      detail: a.available ? (a.where_basis || '') : (a.reason || 'no snapshot'),
+      body: pvAuction(S.auction) });
+    return rows;
+  }
+  let _rcOpenEv = null;
+  function rcEvidence(m) {
+    const rows = rcEvidenceRows(m).map((r) => {
+      const open = _rcOpenEv === r.k;
+      const lean = r.word ? leanOf(r.word) : null;
+      const status = r.word
+        ? '<span class="rg-st" style="color:' + headColor(lean) + ';border-color:' + headColor(lean) + '">' + esc(r.word) + '</span>'
+        : (r.number != null && r.number !== '—'
+          ? '<span class="rg-st rg-num">' + esc(r.number) + '</span>'
+          : '<span class="rg-st rg-num" title="' + esc(r.detail || '') + '">—</span>');
+      return '<div class="rg-ev' + (open ? ' open' : '') + '" data-ev="' + r.k + '">'
+        + '<button type="button" class="rg-evh" data-rg-ev="' + r.k + '" aria-expanded="' + open + '">'
+        + '<span class="rg-evn"><b>' + esc(r.name) + '</b><span>' + esc(r.detail || '') + '</span></span>'
+        + status + '<span class="rg-chev" aria-hidden="true">›</span></button>'
+        + '<div class="rg-evb"' + (open ? '' : ' hidden') + '>' + r.body + '</div></div>';
+    }).join('');
+    return '<section class="rg-l rg-l3"><div class="rg-sec">3 · THE EVIDENCE</div>'
+      + '<div class="rg-hint">One line each. Tap a row for its detail and sources.</div>' + rows
+      + '</section>';
+  }
+
+  // R-IV.1432(d): B9'S MOUNT POINT. BUILD's B9 section (R-IV.1431) replaces the CONTENT of
+  // #b9-mount when it ships; the element, its id and its place below the evidence stay. Until
+  // then it holds the one --text-3 line R-IV.1369(d)4 names.
+  function rcB9Mount() {
+    return '<div id="b9-mount" class="rg-b9" data-mount="b9">'
+      + 'Global markets returns here once its live data is wired.</div>';
+  }
+
+  function renderPopClean(body) {
+    const m = _rsLive || {};
+    // R-IV.1357(b): the header still carries the rules version the payload reports.
+    const ttl = $('drawerTitle');
+    if (ttl) ttl.textContent = 'REGIME STRATEGY' + (m.rules_version ? ' ' + String(m.rules_version) : '');
+    body.innerHTML = '<div class="rg">'
+      + rcLayer1(m)
+      + '<section class="rg-l rg-l2"><div class="rg-sec">2 · WHAT IT MEANS FOR YOU</div>'
+      + rcPlaybook(m) + rcChange(m.flip_triggers) + rcWarnings(m) + '</section>'
+      + rcEvidence(m) + rcB9Mount() + '</div>';
+    if (!body.__rcWired) {
+      body.__rcWired = true;
+      body.addEventListener('click', (e) => {
+        const ev = e.target.closest && e.target.closest('[data-rg-ev]');
+        if (ev) {
+          // ONE ROW OPEN AT A TIME: opening a row closes the last one, tapping it again closes it.
+          const k = ev.getAttribute('data-rg-ev');
+          _rcOpenEv = _rcOpenEv === k ? null : k;
+          body.querySelectorAll('.rg-ev').forEach((row) => {
+            const on = row.getAttribute('data-ev') === _rcOpenEv;
+            row.classList.toggle('open', on);
+            const h = row.querySelector('.rg-evh'), b = row.querySelector('.rg-evb');
+            if (h) h.setAttribute('aria-expanded', String(on));
+            if (b) b.hidden = !on;
+          });
+          return;
+        }
+        const more = e.target.closest && e.target.closest('[data-rg-more]');
+        if (more) {
+          const p = more.parentNode, on = more.getAttribute('aria-expanded') !== 'true';
+          p.querySelector('.rg-pshort').hidden = on;
+          p.querySelector('.rg-pfull').hidden = !on;
+          more.setAttribute('aria-expanded', String(on));
+          more.textContent = on ? 'less' : 'more';
+        }
+      });
+    }
+  }
+
   function renderPopV2(body) {
     const m = _rsLive || {};
     // R-IV.1357(b): THE HEADER CARRIES THE RULES VERSION THE PAYLOAD REPORTS, never a literal.
@@ -1891,6 +2282,18 @@
     // R-IV.1257(b)1: v2 renders ONLY for ?pop=v2, and v1 below is untouched. Branching
     // here rather than replacing the function keeps the default on the code Nick is
     // using all week, so the preview cannot regress what it is compared against.
+    // R-IV.1369(g): the cleaned pop-out is the default; `?clean=off` falls through to the v2
+    // drawer below, untouched. Same width class, same backdrop and history wiring as v2, so the
+    // ✕, the backdrop and Android's back gesture behave exactly as R-IV.1364(a) measured.
+    if (CLEAN && POP_V2) {
+      d.classList.add('pv-wide');
+      renderPopClean(body);
+      $('drawerBackdrop').classList.add('open'); openedDrawerHistory();
+      d.classList.add('open');
+      const b3 = $('rsOpen');
+      if (b3) b3.setAttribute('aria-expanded', 'true');
+      return;
+    }
     if (POP_V2) {
       // R-IV.1357(b): the version is NOT written here any more. It was the literal string
       // 'REGIME STRATEGY v2' while the payload's `rules_version` had been v2.1 since the
@@ -3060,6 +3463,117 @@
       + ' fixture did not load</div>';
   }
 
+  // R-IV.1369: a tile-header ⓘ, created once beside `anchorId` and re-titled on every paint.
+  // What a cleaned tile moves off its face goes HERE, so nothing is deleted -- only moved.
+  // The anchor itself is hidden: its text is one of the things the ⓘ now carries.
+  function tileInfo(anchorId, id, note) {
+    const a = $(anchorId);
+    if (!a) return;
+    let i = $(id);
+    if (!i) {
+      i = document.createElement('span');
+      i.id = id; i.className = 'pv-i rg-tinfo'; i.tabIndex = 0;
+      i.setAttribute('role', 'img'); i.setAttribute('aria-label', 'about this tile');
+      i.textContent = 'i';
+      a.parentNode.insertBefore(i, a);
+    }
+    i.title = note;
+    a.hidden = true;
+  }
+
+  // ═══ R-IV.1369(f) · THE CROWD TILE, CLEANED ═══════════════════════════════════════════════
+  //
+  // One axis for every gauge: bears crowded on the LEFT, bulls crowded on the RIGHT. So each
+  // row is plotted by what its high end MEANS (crowd_b6.CROWDED_SIDE_AT_HIGH): a high FUTURES
+  // net is bulls crowded and sits right, at `pct`; a high PUT/CALL is bears crowded and sits
+  // left, at `100 - pct`. Same rule the headline counts by, so the dot and the word cannot
+  // disagree about which side is full.
+  const CROWD_PLOT = { 'FUTURES': (p) => p, 'PUT/CALL': (p) => 100 - p };
+  const CROWD_NAME = { 'FUTURES': 'Futures positioning', 'PUT/CALL': 'Put/call · UW flow' };
+  function crowdGauge(r) {
+    const plot = CROWD_PLOT[r.key];
+    // The ticks and end zones sit at crowd_b6's EXTREME_LOW / EXTREME_HIGH (10 / 90).
+    const track = '<i class="cg-z lo"></i><i class="cg-z hi"></i>'
+      + '<i class="cg-t" style="left:10%"></i><i class="cg-t" style="left:50%"></i><i class="cg-t" style="left:90%"></i>';
+    // No percentile, no marker: a dot at 0 would read as a reading.
+    const mark = (r.pct != null && plot)
+      ? '<b class="cg-m' + (r.thin ? ' thin' : '') + '" style="left:'
+        + Math.max(0, Math.min(100, plot(Number(r.pct)))).toFixed(1) + '%"></b>' : '';
+    return '<div class="cg-track" role="img" aria-label="' + esc((r.key || '') + ' ' + (r.pct_label || 'not ranked'))
+      + '">' + track + mark + '</div>';
+  }
+  function crowdRow(r) {
+    if (!CROWD_PLOT[r.key]) return '';
+    // A row the payload did not carry is SAID to be missing. Dropping it would leave a tile
+    // that looks complete with one of its two gauges gone.
+    if (r._absent) {
+      return '<div class="cg-row"><div class="cg-h"><b>' + esc(CROWD_NAME[r.key]) + '</b></div>'
+        + '<div class="cg-line">— · the crowd read did not include this row</div></div>';
+    }
+    const n = r.history_n, full = r.history_full || 52;
+    // "of the row's REAL window": the count crowd_b6 served, never an assumed 52.
+    const win = n != null
+      ? (r.key === 'FUTURES' ? 'the last ' + n + ' weekly readings' : 'the last ' + n + ' sessions ranked')
+      : 'its ranked history';
+    const cmp = r.pct == null ? 'not ranked yet'
+      : (r.key === 'FUTURES' ? 'more long' : 'more puts') + ' than ' + r.pct + '% of ' + win;
+    const value = r.key === 'FUTURES'
+      ? esc(r.value || '—')
+      : esc(r.value || '—') + ' over ' + esc(String((/(\d+)D/.exec(r.sub || '') || [])[1] || '?')) + ' days';
+    let right = '';
+    if (r.key === 'FUTURES') {
+      // (f)4: the as-of ALWAYS shows, as its test requires; amber ONLY when a weekly release
+      // was missed, which crowd_b6.release_missed decides on New York's calendar.
+      right = '<span class="cg-asof' + (r.release_missed ? ' rg-amber-t' : '') + '" title="'
+        + esc((r.staleness_note || '') + (r.release_missed ? ' · a weekly release was missed: expected '
+          + (r.expected_as_of || '?') : '')) + '">AS OF ' + esc(rcDay(r.as_of) || '—') + '</span>';
+    }
+    if (r.thin) {
+      right += '<span class="rg-chip rg-amber">SHORT HISTORY · ' + esc(n != null ? n : '?') + ' OF ' + esc(full) + '</span>';
+    }
+    return '<div class="cg-row' + (r.mock ? ' ag-row-mock' : '') + '" title="' + esc(r.source || '') + '">'
+      + '<div class="cg-h"><b>' + esc(CROWD_NAME[r.key]) + '</b>'
+      + (r.mock ? '<span class="ag-rmock" title="not wired">MOCK</span>' : '') + right + '</div>'
+      + '<div class="cg-line"><span class="cg-v">' + value + '</span> · ' + esc(cmp) + '</div>'
+      + crowdGauge(r) + '</div>';
+  }
+  function crowdShortRow(r) {
+    if (!r) return '';
+    // (f)5: shown, not counted -- no gauge, because it has no percentile.
+    const flag = r.crowded_short === true
+      ? '<span class="rg-chip rg-teal">CROWDED SHORT</span>' : '';
+    return '<div class="cg-row cg-si" title="' + esc(r.cadence || '') + '">'
+      + '<div class="cg-h"><b>Short interest</b>' + flag
+      + (r.settlement_date ? '<span class="cg-asof">SETTLED ' + esc(rcMd(r.settlement_date)) + '</span>' : '') + '</div>'
+      + '<div class="cg-line">' + (r.symbol ? esc(r.symbol) + ' ' : '')
+      + '<span class="cg-v">' + esc(r.value == null ? '—' : r.value) + '</span> days to cover (flag at '
+      + esc(r.crowded_short_at != null ? r.crowded_short_at : 5) + ') · shown, not counted'
+      // R-IV.1318(b): FINRA's terms require it be named as owner and source WHEREVER its data
+      // shows, so this stays on the face of the tile rather than moving behind the ⓘ.
+      + (r.attribution ? ' · ' + esc(r.attribution) : '') + '</div></div>';
+  }
+  function renderCrowdClean(host, m) {
+    const rows = m.rows || [];
+    const word = m.headline ? String(m.headline).replace(/^CROWD\s+/i, '') : null;
+    // (f)1: with no live percentile there is no headline word -- "—" and the basis say so.
+    const basis = String(m.headline_basis || '').replace(/^./, (c) => c.toUpperCase());
+    host.innerHTML = '<div class="cg">'
+      + '<div class="cg-hero" style="color:' + headColor(m.headline_lean) + '">' + esc(word || '—') + '</div>'
+      + '<div class="cg-basis">' + esc(basis) + '</div>'
+      + '<div class="cg-axis"><span>◀ BEARS CROWDED</span><span>BULLS CROWDED ▶</span></div>'
+      + crowdRow(rows.find((r) => r.key === 'FUTURES') || { key: 'FUTURES', _absent: true })
+      + crowdRow(rows.find((r) => r.key === 'PUT/CALL') || { key: 'PUT/CALL', _absent: true })
+      + crowdShortRow(rows.find((r) => r.key === 'SHORT INT'))
+      + '<div class="cg-foot">Crowded means everyone is already positioned that way, which is fuel for a '
+      + 'move the other way. Context, not a signal.</div></div>';
+    // (f)8: sources and the full basis go behind the ⓘ, with the settled close the header
+    // used to show -- moved, not deleted.
+    tileInfo('crowdSettled', 'crowdInfo', ['Settled close ' + (m.settled_close || '—'),
+      'Basis: ' + (m.headline_basis || '—')]
+      .concat((m.footnotes || []).map((f) => 'Source: ' + f))
+      .concat(m.caption ? [m.caption] : []).join('\n'));
+  }
+
   // \u2500\u2500 board 1: Crowd \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   function renderCrowd() {
     // R-IV.1318(b): BOTH DATES ON EVERY VALUE. FINRA publishes twice monthly about 7 business
@@ -3083,6 +3597,8 @@
     if (!m) return agoraWait(host, 'crowd');
     const st = $('crowdSettled');
     if (st) st.textContent = 'close ' + (m.settled_close || '\u2014');
+    // R-IV.1369(f): the cleaned tile is the default; `?clean=off` keeps the rows below.
+    if (CLEAN) { renderCrowdClean(host, m); return; }
 
     const rows = (m.rows || []).map((r) => {
       // A THIN HISTORY STARS THE PERCENTILE AND GOES AMBER. R-IV.1194(f): short history shows
@@ -4293,6 +4809,21 @@
     // Theme concentration: join open-position tickers -> theme, sum at-risk (current_value).
     const conc = computeConcentration(positions);
 
+    // R-IV.1369(e): the cleaned tile is the default; `?clean=off` keeps the lines below. It is
+    // handed the SAME values the old tile computed above -- the floor, the scope, the Day P&L
+    // reason, the greeks coverage -- so the two cannot disagree about a single figure.
+    if (CLEAN) {
+      el.innerHTML = bookCleanHtml({ counted, total, hasBal, balFloor, balMissing, balPartial,
+        scopeKnown, day, dayUnavailable, gTotals, gCov, gPer, gUnreachable, greeks, conc,
+        positions });
+      bookCleanChrome({ bookNote, balPartial, balMissing, scopeKnown, gTotals, gCov, greeks, conc });
+      applyGlossary(el);
+      _openPositions = (positions && positions.positions) || [];
+      renderPositions();
+      bookFold();
+      return;
+    }
+
     el.innerHTML = `
       <div class="book-line"><span class="k">Balance</span><span class="v">${counted.filter(hasBal).length ? (balFloor ? '≥' : '') + fmt$(total) : 'not recorded'}${scopeKnown ? '' : ' ' + vintageChip({ unknownLabel: 'scope unknown', unknownTitle: 'this backend does not report account scope; the total is every row' })}${balFloor ? ' ' + vintageChip({ unknownLabel: 'floor only', unknownTitle: [balPartial.length ? balPartial.length + ' account(s) serve a PARTIAL balance: ' + balPartial.map((a) => (a.account_display || a.account_name) + ' — ' + (a.balance_reason || 'partial, no reason given')).join('; ') : '', balMissing.length ? balMissing.length + ' account(s) have no balance recorded at all, and are not in this sum' : ''].filter(Boolean).join('. ') }) : ''}</span></div>
       <div class="book-line"><span class="k">Day P&amp;L</span>${dayCell}</div>
@@ -4319,6 +4850,280 @@
     _openPositions = (positions && positions.positions) || [];
     renderPositions();
   }
+
+  // ═══ R-IV.1369(e) · THE BOOK TILE, CLEANED (as amended by R-IV.1381(e)) ═══════════════════
+  //
+  // COUNTS POSITIONS, NOT LEGS (R-IV.1381(e)1). The source is the mark job's own result -- the
+  // SAME set the balance and its ≥ floor are built from: each account's
+  // `balance_positions_counted` (valued) and `balance_positions_unvalued` (not). So the meter,
+  // the floor and Day P&L can never disagree about what is priced. The old "10/22" counted
+  // only option LEGS from a greeks snapshot up to a day old, which left every stock and ETF
+  // invisible to it.
+
+  const MT_HM = (() => {
+    try { return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); }
+    catch (_) { return null; }
+  })();
+  // A stored INSTANT shown as Nick's clock reads it. Formatting a recorded time for display,
+  // not working out a session from a clock (R-IV.416(c)).
+  const mtHM = (iso) => {
+    const t = Date.parse(iso || '');
+    return (MT_HM && Number.isFinite(t)) ? MT_HM.format(new Date(t)) + ' MT' : null;
+  };
+  // R-IV.726's DAY-VERSUS-MOMENT rule for a cash anchor: an instant is a moment, converted to
+  // Denver's calendar; a date-only anchor is a day, taken as written.
+  const MT_DAY = (() => {
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }); }
+    catch (_) { return null; }
+  })();
+  function anchorDay(ca) {
+    if (!ca || !ca.as_of) return null;
+    if (ca.as_of_is_instant && MT_DAY) {
+      const t = Date.parse(ca.as_of);
+      if (Number.isFinite(t)) return MT_DAY.format(new Date(t));
+    }
+    return String(ca.as_of).slice(0, 10);
+  }
+
+  // #35: LARGEST-REMAINDER rounding, so the account shares sum to exactly 100. Each share is
+  // floored, then the points left over go to the largest fractional parts, ties to the larger
+  // balance. A plain round() can sum to 99 or 101, and a column of percentages that does not
+  // add up reads as an error even when every figure in it is right.
+  function shares100(vals) {
+    const tot = vals.reduce((s, v) => s + v, 0);
+    if (!(tot > 0) || vals.some((v) => v < 0)) return null;
+    const raw = vals.map((v) => (v / tot) * 100);
+    const out = raw.map(Math.floor);
+    let left = 100 - out.reduce((s, v) => s + v, 0);
+    raw.map((v, i) => ({ i, r: v - Math.floor(v), v: vals[i] }))
+      .sort((a, b) => (b.r - a.r) || (b.v - a.v))
+      .forEach((x) => { if (left > 0) { out[x.i] += 1; left -= 1; } });
+    return out;
+  }
+
+  function bookCleanHtml(o) {
+    const accts = o.counted;
+    const name = (a) => a.account_display || a.account_name || '?';
+    // (e)2 as amended: valued / unvalued per account, from the balance route's own result.
+    const cov = accts.map((a) => {
+      const n = a.balance_positions_counted;
+      const un = Array.isArray(a.balance_positions_unvalued) ? a.balance_positions_unvalued.length : 0;
+      return { a, n: n == null ? null : Number(n), un, m: n == null ? null : Number(n) + un };
+    });
+    const known = cov.length > 0 && cov.every((c) => c.n != null);
+    const N = cov.reduce((s, c) => s + (c.n || 0), 0), M = cov.reduce((s, c) => s + (c.m || 0), 0);
+    const anyUnpriced = !known || N < M;
+    const inScope = new Set(accts.map((a) => a.account_name));
+    const open = ((o.positions && o.positions.positions) || []).filter((p) => inScope.has(p.account));
+
+    // ── top: total value and Day P&L ──
+    const totalTxt = accts.filter(o.hasBal).length
+      ? (o.balFloor ? '≥' : '') + fmt$(o.total) : 'not recorded';
+    let dayHtml;
+    if (anyUnpriced) {
+      // R-IV.1381(e)2: "—" WHILE ANY POSITION IS UNPRICED. A day-over-day figure built from
+      // part of the book reads as the whole book's day.
+      dayHtml = '<div class="bk-dayv bk-na" title="Day P&L waits until every position has a price">—</div>';
+    } else if (o.dayUnavailable || o.day.dollar == null) {
+      dayHtml = '<div class="bk-dayv bk-na">—</div><div class="bk-why">'
+        + esc(o.dayUnavailable || 'not reported') + '</div>';
+    } else {
+      const v = Number(o.day.dollar);
+      // R-IV.1381(e)2: and when it IS a number, say how many positions carry a STALE mark --
+      // those read FLAT in a day-over-day figure, and the reader should know which way that cuts.
+      const stale = open.filter((p) => String(p.mark_status || '').toUpperCase() === 'STALE').length;
+      dayHtml = '<div class="bk-dayv ' + signCls(v) + '">' + (v >= 0 ? '+' : '−') + fmt$(Math.abs(v)) + '</div>'
+        + (o.day.pct != null ? '<div class="bk-why ' + signCls(v) + '">' + (o.day.pct >= 0 ? '+' : '−')
+          + Math.abs(Number(o.day.pct)).toFixed(1) + '%</div>' : '')
+        + (stale ? '<div class="bk-why">' + stale + ' stale mark' + (stale === 1 ? ' counts' : 's count')
+          + ' as no change today</div>' : '');
+    }
+
+    // ── the priced box, or the quiet all-priced line ──
+    let priced;
+    if (!known) {
+      priced = '<div class="bk-box"><div class="bk-boxh">PRICING NOT REPORTED</div>'
+        + '<div class="bk-boxt">The balance route did not say how many positions it valued, so this '
+        + 'tile cannot say whether the total is whole. Day P&amp;L waits.</div></div>';
+    } else if (N < M) {
+      let segs = '';
+      cov.forEach((c) => {
+        for (let i = 0; i < c.n; i++) segs += '<i class="on"></i>';
+        for (let i = 0; i < c.un; i++) segs += '<i title="' + esc(name(c.a)) + ': no live price"></i>';
+      });
+      const who = cov.filter((c) => c.un > 0);
+      const U = M - N;
+      const where = who.length === 1 ? ' in ' + name(who[0].a)
+        : ' — ' + who.map((c) => c.un + ' in ' + name(c.a)).join(', ') + ' —';
+      priced = '<div class="bk-box"><div class="bk-boxh">PARTIAL · ' + N + ' OF ' + M + ' POSITIONS PRICED</div>'
+        + '<div class="bk-segs" role="img" aria-label="' + N + ' of ' + M + ' positions priced">' + segs + '</div>'
+        + '<div class="bk-boxt">' + U + ' position' + (U === 1 ? '' : 's') + esc(where) + ' '
+        + (U === 1 ? 'has' : 'have') + ' no live price yet. The total is a floor, and Day P&amp;L waits until '
+        + (U === 1 ? 'it does' : 'they do') + '.</div></div>';
+    } else {
+      // "HH:MM MT" is when the mark job last LOOKED -- the newest mark_checked_at -- because
+      // that is the moment "every position is priced" was last true by measurement.
+      const t = open.map((p) => p.mark_checked_at).filter(Boolean).sort().pop();
+      const hm = mtHM(t);
+      priced = '<div class="bk-ok"><b>✓</b> All ' + M + ' position' + (M === 1 ? '' : 's') + ' priced'
+        + (hm ? ' · ' + esc(hm) : '') + '</div>';
+    }
+
+    // ── one row per in-scope account ──
+    const sh = shares100(accts.filter((a) => a.balance != null).map((a) => Number(a.balance)));
+    let si = 0;
+    const rows = cov.map((c) => {
+      const a = c.a;
+      const has = a.balance != null;
+      const pct = has && sh ? sh[si++] : null;
+      // Three states as the chips drew them: a figure, a PARTIAL figure (≥), and none.
+      const val = !has ? '<span class="bk-nr" title="The hub has no balance recorded for this account. Shown as not recorded rather than as $0.00, which would claim the account is empty.">not recorded</span>'
+        : (a.balance_partial === true ? '<span class="bk-floor" title="' + esc(a.balance_reason || 'The hub says this figure is partial.') + '">≥</span>' : '')
+          + fmt$(a.balance);
+      return '<button type="button" class="bk-acct" data-bk-acct="' + esc(a.account_name) + '">'
+        + '<span class="bk-an"><b>' + esc(name(a)) + '</b>'
+        + (c.un > 0 ? '<span class="bk-np">' + c.n + ' of ' + c.m + ' priced</span>' : '') + '</span>'
+        + '<span class="bk-av">' + val + '</span><span class="rg-chev" aria-hidden="true">›</span>'
+        + (pct != null ? '<span class="bk-sh"><i style="width:' + pct + '%"></i></span><span class="bk-pc">' + pct + '%</span>' : '')
+        + '</button>';
+    }).join('');
+
+    // ── cash: part of the total, and when it last matched the brokers ──
+    // Summed in INTEGER CENTS from each account's served `balance_cash`, so no float tail can
+    // creep into the figure (the page has always summed the balance the same way).
+    const cashVals = accts.map((a) => a.balance_cash).filter((v) => v != null);
+    const cash = cashVals.length ? cashVals.reduce((s, v) => s + Math.round(Number(v) * 100), 0) / 100 : null;
+    const anchors = accts.map((a) => anchorDay(a.cash_anchor));
+    // "matches brokers <date>" is only true of EVERY account as of the OLDEST of their latest
+    // re-anchors, so that is the date shown. An account never re-anchored makes the line amber.
+    const never = anchors.some((d) => !d);
+    const oldest = never ? null : anchors.slice().sort()[0];
+    const cashLine = never
+      ? '<span class="rg-amber-t">not checked against brokers</span>'
+      : 'Part of the total · matches brokers <span class="bk-nw">' + esc(rcMd(oldest)) + '</span>';
+    const cashRow = '<button type="button" class="bk-acct bk-cash" data-bk-cash>'
+      + '<span class="bk-an"><b>Cash</b><span class="bk-sub">' + cashLine + '</span></span>'
+      + '<span class="bk-av">' + (cash == null ? '<span class="bk-nr">not recorded</span>'
+        : (cashVals.length < accts.length ? '<span class="bk-floor">≥</span>' : '') + fmt$(cash)) + '</span>'
+      + '<span class="rg-chev" aria-hidden="true">›</span></button>';
+
+    // ── risk: the greeks on one line, and the concentration lamp ──
+    const per = o.gPer || {};
+    const gv = (k, dp) => {
+      const v = (o.gTotals || {})[k];
+      if (v == null) return null;
+      const c = per[k] || {};
+      const floor = o.gCov && c.expected > 0 && c.priced !== c.expected;
+      const n = Number(v);
+      return (floor ? '≥' : '') + (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(dp);
+    };
+    let greeksHtml;
+    if (o.gUnreachable) {
+      greeksHtml = '<div class="bk-greeks bk-dim">Greeks unavailable · the greeks source did not answer</div>';
+    } else {
+      const d = gv('delta', 0), t = gv('theta', 0), vg = gv('vega', 0);
+      const partial = !!(o.gCov && o.gCov.legs_expected && !o.gCov.complete);
+      // (e)5 as amended: the greeks keep THEIR OWN fraction, "N of M legs", in legs.
+      //
+      // IT IS THE GREEKS ROUTE'S OWN COUNT, AND SAYS SO. The amendment asks for M from
+      // position_legs, and no route serves a book-wide position_legs count. The tempting
+      // substitute -- each row's `legs` field -- is the trap R-IV.697(c)1 names: that jsonb is
+      // NOT the table, and on the live book (2026-10-24) it is null or a string on all 15 option
+      // rows, so counting it prints 0 and falls back silently to this same figure. Showing the
+      // route's fraction under its own name is the honest version; it becomes the position_legs
+      // count with no change here when BUILD's leg-count job (R-IV.1387(a)) moves the route onto
+      // the table. tests/test_r1369_agora_clean.py pins that the row field is never read.
+      const legsPriced = o.gCov ? Number(o.gCov.legs_priced) || 0 : 0;
+      const legsExpected = o.gCov ? Number(o.gCov.legs_expected) || 0 : 0;
+      const parts = [d != null ? 'Delta ' + d : null,
+        t != null ? 'Theta ' + t.replace(/(\d)/, '$$$1') + '/day' : null,
+        vg != null ? 'Vega ' + vg : null].filter(Boolean);
+      // Each greek is one unbreakable unit, so a narrow tile wraps BETWEEN them, never inside
+      // "Vega ≥+72" -- a value stranded on the line under its name reads as a different figure.
+      greeksHtml = '<div class="bk-greeks' + (partial ? ' bk-dim' : '') + '">'
+        + '<span>' + (parts.length ? parts.map((x) => '<span class="bk-nw">' + esc(x) + '</span>').join(' · ')
+          : 'Greeks —') + '</span>'
+        + (partial ? '<span class="bk-ptag" title="' + esc('The greeks route’s own count: ' + legsPriced + ' of the '
+          + legsExpected + ' legs it found are priced. It is not yet read from position_legs (BUILD’s leg-count job, '
+          + 'R-IV.1387(a)), and until then it can undercount a three-leg structure as two.') + '">partial · '
+          + legsPriced + ' of ' + legsExpected + ' legs</span>' : '')
+        + '</div>';
+    }
+    const cc = o.conc;
+    const concHtml = cc ? '<div class="bk-conc' + (cc.hot ? ' hot' : '') + '" data-gloss="CONC">'
+      + '<div class="bk-cl"><span>Concentration' + (cc.theme ? ' · ' + esc(cc.theme) : '') + '</span>'
+      + '<span>' + (cc.pct != null ? cc.pct + '% of book' : '—')
+      + (cc.skipped ? ' <span class="bk-ptag" title="' + esc(cc.skipped + ' of ' + cc.total
+        + ' positions have no dollar figure and are left out of this percentage') + '">partial</span>' : '')
+      + '</span></div>'
+      + (cc.pct != null ? '<div class="bk-cbar"><i style="width:' + Math.max(0, Math.min(100, cc.pct)) + '%"></i></div>' : '')
+      + '</div>' : '';
+
+    const now = mtHM(new Date().toISOString());
+    return '<div class="bk">'
+      + '<div class="bk-top"><div><div class="bk-k">Total value</div><div class="bk-total">' + totalTxt + '</div></div>'
+      + '<div class="bk-day"><div class="bk-k">Day P&amp;L</div>' + dayHtml + '</div></div>'
+      + priced + rows + cashRow + greeksHtml + concHtml
+      + '<div class="bk-foot"><span>' + (now ? 'updated ' + esc(now) : '') + '</span>'
+      + '<button type="button" class="bk-pos" data-bk-pos>Positions ›</button></div></div>';
+  }
+
+  // (e)8: what the cleaned tile no longer shows moves behind the header ⓘ -- nothing deleted.
+  function bookCleanChrome(o) {
+    const g = (o.gTotals || {}).gamma;
+    const lines = [o.bookNote,
+      'Day P&L: vintage not recorded (no field records when it was computed)',
+      o.scopeKnown ? null : 'Scope unknown: this backend does not report account scope; the total is every row',
+      o.balPartial.length ? 'Floor: ' + o.balPartial.map((a) => (a.account_display || a.account_name)
+        + ' — ' + (a.balance_reason || 'partial, no reason given')).join('; ') : null,
+      o.balMissing.length ? o.balMissing.length + ' account(s) have no balance recorded and are not in the total' : null,
+      g != null ? 'Gamma ' + Number(g).toFixed(1) : null,
+      o.gCov ? 'Greeks coverage: ' + o.gCov.legs_priced + ' of ' + o.gCov.legs_expected + ' legs priced by the greeks route'
+        + (o.greeks && o.greeks.stale ? ' (served from its stale cache)' : '') : null,
+      o.greeks && (o.greeks.computed_at || o.greeks.as_of) ? 'Greeks computed ' + (o.greeks.computed_at || o.greeks.as_of) : null,
+    ].filter(Boolean);
+    tileInfo('bookPanelBtn', 'bookInfo', lines.join('\n'));
+    // (e)7: the book-stress section (book_stress_mock.json) stays off this tile until B7
+    // serves real data.
+    const bs = $('bookStress');
+    if (bs) bs.hidden = true;
+  }
+
+  // THE OPEN-POSITIONS LIST FOLDS, IT DOES NOT LEAVE (the one deviation from (e)8, reported).
+  // A row in it opens the live position drawer, which is where Close lives -- and the Positions
+  // panel has no Close until R-IV.1382 ships. Moving the list off the tile now would put the
+  // only Close button behind a panel that cannot close anything. It moves into Positions in
+  // R-IV.1382's commit, once Close is there.
+  let _bkFoldOpen = false;
+  function bookFold() {
+    const list = $('bookPositions');
+    if (!list) return;
+    let btn = $('bookFoldBtn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button'; btn.id = 'bookFoldBtn'; btn.className = 'bk-fold';
+      list.parentNode.insertBefore(btn, list);
+      btn.addEventListener('click', () => { _bkFoldOpen = !_bkFoldOpen; bookFold(); });
+    }
+    const n = (_openPositions || []).length;
+    btn.setAttribute('aria-expanded', String(_bkFoldOpen));
+    btn.innerHTML = 'Open positions · ' + n + '<span class="rg-chev" aria-hidden="true">'
+      + (_bkFoldOpen ? '⌄' : '›') + '</span>';
+    list.hidden = !_bkFoldOpen;
+  }
+
+  // The tile's own doorways into Positions (R-IV.555): an account row, the cash row and the
+  // footer link. They press the existing #bookPanelBtn, so the panel opens through its one
+  // existing path. The account and the tab ride along on window for R-IV.1382's filter to read;
+  // until that ships the panel opens unfiltered.
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest && e.target.closest('#bookStrip [data-bk-acct], #bookStrip [data-bk-cash], #bookStrip [data-bk-pos]');
+    if (!t) return;
+    window.__ppAcct = t.hasAttribute('data-bk-acct') ? t.getAttribute('data-bk-acct') : null;
+    window.__ppTab = t.hasAttribute('data-bk-cash') ? 'cash' : null;
+    const b = $('bookPanelBtn');
+    if (b) b.click();
+  });
 
   // ── c5: Book positions (same source as legacy Ledger: GET /api/v2/positions?status=OPEN) ──
   let _openPositions = [];
