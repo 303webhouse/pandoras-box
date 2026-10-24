@@ -4740,11 +4740,11 @@
     // A row with NO balance renders "not recorded", never 0: a null is unknown and a zero is a
     // claim that the account is empty.
     const hasBal = (a) => a && a.balance != null;
-    const total = counted.filter(hasBal).reduce((s, a) => s + Number(a.balance), 0);
-    const balMissing = counted.filter((a) => !hasBal(a));
-    const balPartial = counted.filter((a) => hasBal(a) && a.balance_partial === true);
+    // R-IV.1382(d)2: the floor rule lives in ONE function, which the Positions panel's account
+    // strip calls too -- so the tile and the panel cannot disagree about whether a total is whole.
     // A sum over partial parts is a FLOOR, exactly as the greeks below are. Same word, same mark.
-    const balFloor = balPartial.length > 0 || balMissing.length > 0;
+    const bt = bookTotalOf(counted);
+    const total = bt.total, balMissing = bt.missing, balPartial = bt.partial, balFloor = bt.floor;
     const day = pnl && pnl.daily ? pnl.daily : {};
 
 
@@ -4821,6 +4821,7 @@
       _openPositions = (positions && positions.positions) || [];
       renderPositions();
       bookFold();
+      bookAnnounce();
       return;
     }
 
@@ -4849,6 +4850,14 @@
     applyGlossary(el);
     _openPositions = (positions && positions.positions) || [];
     renderPositions();
+    bookAnnounce();
+  }
+
+  // R-IV.1382(d)6: "after a close or an add succeeds, reload the book". Both forms already end in
+  // refreshDesk() -> loadBook(); this tells the Positions panel the book was re-read, so it re-reads
+  // too. An event, not a call into the other module, so neither reaches into the other's state.
+  function bookAnnounce() {
+    try { window.dispatchEvent(new CustomEvent('v2:book')); } catch (_) {}
   }
 
   // ═══ R-IV.1369(e) · THE BOOK TILE, CLEANED (as amended by R-IV.1381(e)) ═══════════════════
@@ -4901,6 +4910,54 @@
     return out;
   }
 
+  // ── R-IV.1382(d)2/(d)5(ii): THE BOOK TILE'S RULES, SHARED WITH THE POSITIONS PANEL ──────────
+  // One copy of each rule, called from both places, so the panel's account strip and its Day P&L
+  // card cannot drift from the tile ("Share the BOOK tile's code; don't copy it").
+
+  // The total and its floor: partial OR missing balances make the sum a floor.
+  function bookTotalOf(accts) {
+    const has = (a) => a && a.balance != null;
+    const total = accts.filter(has).reduce((s, a) => s + Number(a.balance), 0);
+    const missing = accts.filter((a) => !has(a));
+    const partial = accts.filter((a) => has(a) && a.balance_partial === true);
+    return { total, missing, partial, any: accts.some(has), floor: partial.length > 0 || missing.length > 0 };
+  }
+  function bookTotalHtml(t) {
+    return t.any ? (t.floor ? '<span class="bk-floor" title="A floor: at least one account is partial or has no balance recorded.">≥</span>' : '')
+      + fmt$(t.total) : '<span class="bk-nr">not recorded</span>';
+  }
+  // One account's balance, in its three states: a figure, a PARTIAL figure (≥), and none.
+  function balanceHtml(a) {
+    if (!a || a.balance == null) {
+      return '<span class="bk-nr" title="The hub has no balance recorded for this account. Shown as not recorded rather than as $0.00, which would claim the account is empty.">not recorded</span>';
+    }
+    return (a.balance_partial === true ? '<span class="bk-floor" title="' + esc(a.balance_reason || 'The hub says this figure is partial.') + '">≥</span>' : '')
+      + fmt$(a.balance);
+  }
+  // Day P&L. `d` is { known, N, M, day, dayUnavailable, open }. `explain` puts the waiting
+  // reason on the face (the panel's card has room; the tile keeps it in the title).
+  let _bookDayIn = null;
+  function bookDayHtml(d, explain) {
+    if (!d.known || d.N < d.M) {
+      // R-IV.1381(e)2: "—" WHILE ANY POSITION IS UNPRICED. A day-over-day figure built from
+      // part of the book reads as the whole book's day.
+      return '<div class="bk-dayv bk-na" title="Day P&L waits until every position has a price">—</div>'
+        + (explain ? '<div class="bk-why">waits until every position has a price</div>' : '');
+    }
+    if (d.dayUnavailable || d.day.dollar == null) {
+      return '<div class="bk-dayv bk-na">—</div><div class="bk-why">' + esc(d.dayUnavailable || 'not reported') + '</div>';
+    }
+    const v = Number(d.day.dollar);
+    // R-IV.1381(e)2: and when it IS a number, say how many positions carry a STALE mark --
+    // those read FLAT in a day-over-day figure, and the reader should know which way that cuts.
+    const stale = d.open.filter((p) => String(p.mark_status || '').toUpperCase() === 'STALE').length;
+    return '<div class="bk-dayv ' + signCls(v) + '">' + (v >= 0 ? '+' : '−') + fmt$(Math.abs(v)) + '</div>'
+      + (d.day.pct != null ? '<div class="bk-why ' + signCls(v) + '">' + (d.day.pct >= 0 ? '+' : '−')
+        + Math.abs(Number(d.day.pct)).toFixed(1) + '%</div>' : '')
+      + (stale ? '<div class="bk-why">' + stale + ' stale mark' + (stale === 1 ? ' counts' : 's count')
+        + ' as no change today</div>' : '');
+  }
+
   function bookCleanHtml(o) {
     const accts = o.counted;
     const name = (a) => a.account_display || a.account_name || '?';
@@ -4912,32 +4969,13 @@
     });
     const known = cov.length > 0 && cov.every((c) => c.n != null);
     const N = cov.reduce((s, c) => s + (c.n || 0), 0), M = cov.reduce((s, c) => s + (c.m || 0), 0);
-    const anyUnpriced = !known || N < M;
     const inScope = new Set(accts.map((a) => a.account_name));
     const open = ((o.positions && o.positions.positions) || []).filter((p) => inScope.has(p.account));
 
-    // ── top: total value and Day P&L ──
-    const totalTxt = accts.filter(o.hasBal).length
-      ? (o.balFloor ? '≥' : '') + fmt$(o.total) : 'not recorded';
-    let dayHtml;
-    if (anyUnpriced) {
-      // R-IV.1381(e)2: "—" WHILE ANY POSITION IS UNPRICED. A day-over-day figure built from
-      // part of the book reads as the whole book's day.
-      dayHtml = '<div class="bk-dayv bk-na" title="Day P&L waits until every position has a price">—</div>';
-    } else if (o.dayUnavailable || o.day.dollar == null) {
-      dayHtml = '<div class="bk-dayv bk-na">—</div><div class="bk-why">'
-        + esc(o.dayUnavailable || 'not reported') + '</div>';
-    } else {
-      const v = Number(o.day.dollar);
-      // R-IV.1381(e)2: and when it IS a number, say how many positions carry a STALE mark --
-      // those read FLAT in a day-over-day figure, and the reader should know which way that cuts.
-      const stale = open.filter((p) => String(p.mark_status || '').toUpperCase() === 'STALE').length;
-      dayHtml = '<div class="bk-dayv ' + signCls(v) + '">' + (v >= 0 ? '+' : '−') + fmt$(Math.abs(v)) + '</div>'
-        + (o.day.pct != null ? '<div class="bk-why ' + signCls(v) + '">' + (o.day.pct >= 0 ? '+' : '−')
-          + Math.abs(Number(o.day.pct)).toFixed(1) + '%</div>' : '')
-        + (stale ? '<div class="bk-why">' + stale + ' stale mark' + (stale === 1 ? ' counts' : 's count')
-          + ' as no change today</div>' : '');
-    }
+    // ── top: total value and Day P&L (both through the shared rules above) ──
+    const totalTxt = bookTotalHtml(bookTotalOf(accts));
+    _bookDayIn = { known, N, M, day: o.day, dayUnavailable: o.dayUnavailable, open };
+    const dayHtml = bookDayHtml(_bookDayIn, false);
 
     // ── the priced box, or the quiet all-priced line ──
     let priced;
@@ -4976,10 +5014,7 @@
       const a = c.a;
       const has = a.balance != null;
       const pct = has && sh ? sh[si++] : null;
-      // Three states as the chips drew them: a figure, a PARTIAL figure (≥), and none.
-      const val = !has ? '<span class="bk-nr" title="The hub has no balance recorded for this account. Shown as not recorded rather than as $0.00, which would claim the account is empty.">not recorded</span>'
-        : (a.balance_partial === true ? '<span class="bk-floor" title="' + esc(a.balance_reason || 'The hub says this figure is partial.') + '">≥</span>' : '')
-          + fmt$(a.balance);
+      const val = balanceHtml(a);
       return '<button type="button" class="bk-acct" data-bk-acct="' + esc(a.account_name) + '">'
         + '<span class="bk-an"><b>' + esc(name(a)) + '</b>'
         + (c.un > 0 ? '<span class="bk-np">' + c.n + ' of ' + c.m + ' priced</span>' : '') + '</span>'
@@ -5093,15 +5128,24 @@
     if (bs) bs.hidden = true;
   }
 
-  // THE OPEN-POSITIONS LIST FOLDS, IT DOES NOT LEAVE (the one deviation from (e)8, reported).
-  // A row in it opens the live position drawer, which is where Close lives -- and the Positions
-  // panel has no Close until R-IV.1382 ships. Moving the list off the tile now would put the
-  // only Close button behind a panel that cannot close anything. It moves into Positions in
-  // R-IV.1382's commit, once Close is there.
+  // THE OPEN-POSITIONS LIST. Under R-IV.1369 it FOLDED rather than leaving, because its rows were
+  // the only Close. R-IV.1382 gives the Positions panel CLOSE, ADD and CHART, so the list now
+  // LEAVES the tile, as R-IV.1369(e)8 asked -- into Positions, behind the tile's account rows and
+  // its "Positions ›" link. Under `?pos=v1` the old panel comes back WITHOUT Close, so the fold
+  // comes back with it: the rollback must not strand the only Close button.
+  const POS_V1_TILE = (() => {
+    try { return new URLSearchParams(location.search).get('pos') === 'v1'; } catch (_) { return false; }
+  })();
   let _bkFoldOpen = false;
   function bookFold() {
     const list = $('bookPositions');
     if (!list) return;
+    if (!POS_V1_TILE) {
+      list.hidden = true;
+      const old = $('bookFoldBtn');
+      if (old) old.remove();
+      return;
+    }
     let btn = $('bookFoldBtn');
     if (!btn) {
       btn = document.createElement('button');
@@ -5118,8 +5162,8 @@
 
   // The tile's own doorways into Positions (R-IV.555): an account row, the cash row and the
   // footer link. They press the existing #bookPanelBtn, so the panel opens through its one
-  // existing path. The account and the tab ride along on window for R-IV.1382's filter to read;
-  // until that ships the panel opens unfiltered.
+  // existing path. The account and the tab ride along on window; R-IV.1382's panel reads them
+  // (an account row opens filtered to that account, the cash row opens the CASH tab).
   document.addEventListener('click', (e) => {
     const t = e.target.closest && e.target.closest('#bookStrip [data-bk-acct], #bookStrip [data-bk-cash], #bookStrip [data-bk-pos]');
     if (!t) return;
@@ -5131,7 +5175,34 @@
 
   // ── c5: Book positions (same source as legacy Ledger: GET /api/v2/positions?status=OPEN) ──
   let _openPositions = [];
-  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o), popSide, setSide, openChart, placeChartSoon };
+  // The drawer's earnings words, ONE function for the drawer and the Positions panel's facts
+  // (R-IV.1382(d)6, "Earnings, as the drawer reads it"). /chronos/next-earnings-batch answers an
+  // ETF with its EARLIEST HOLDING's date (`is_etf`, `component`): an ETF reports no earnings, so
+  // that date is named as the holding's rather than read as the fund's own.
+  function earningsWords(en) {
+    if (!en || !en.date) return 'none scheduled';
+    return en.date + (en.timing ? ' · ' + en.timing : '')
+      + (en.is_etf && en.component ? ' (' + en.component + ', a holding)' : '');
+  }
+
+  window.__v2 = { openPositionDrawerAt: (i) => openPositionDrawer(_openPositions[i]), apiFetch: (u, o) => apiFetch(u, o), popSide, setSide, openChart, placeChartSoon,
+    // R-IV.1382: what the Positions panel SHARES with the Book module instead of copying it --
+    // the floor rule, the Day P&L rule, the four forms and the drawer's own readings. Every entry
+    // is an arrow resolved at CALL time: several of these are declared further down this file as
+    // const/let, and naming them directly here would throw at page load (temporal dead zone).
+    bookTotalHtml: (rows) => bookTotalHtml(bookTotalOf(rows || [])),
+    bookTotalFloor: (rows) => bookTotalOf(rows || []).floor,
+    balanceHtml: (a) => balanceHtml(a),
+    bookDay: (explain) => (_bookDayIn ? bookDayHtml(_bookDayIn, explain) : null),
+    openAddForm: () => openAddForm(),
+    openCloseForm: (p) => openCloseForm(p),
+    openAddToPositionForm: (p) => openAddToPositionForm(p),
+    addPosEligible: (p) => ADD_POS_ELIGIBLE(p),
+    pnlPct: (p) => pnlPct(p),
+    basisSuspect: (p, pct) => basisSuspect(p, pct),
+    themeOf: (t) => ((_themeMap || {})[String(t || '').toUpperCase()] || null),
+    earningsWords: (en) => earningsWords(en),
+  };
   const OPT_PUT = /put/i, OPT_CALL = /call/i;
   // ── R-IV.662(c)/668(c) · WHAT IS OPEN IS `open_quantity`, NEVER `quantity` ────────────────
   // `quantity` is the size the position was OPENED at. After a partial exit it is not what is
@@ -5339,7 +5410,7 @@
       if (r.ok) {
         const e = (await r.json()).earnings || {}; const en = e[(p.ticker || '').toUpperCase()];
         const cell = $('posEarn');
-        if (cell) cell.querySelector('.v').textContent = en && en.date ? en.date + (en.timing ? ' · ' + en.timing : '') : 'none scheduled';
+        if (cell) cell.querySelector('.v').textContent = earningsWords(en);
       }
     } catch (_) {}
   }
@@ -7699,8 +7770,9 @@
   else boot();
 })();
 
-/* Positions panel, R-IV.509. A slide-over on Agora, MOCK DATA ONLY until BUILD's backend scope is ruled (R-IV.511(d)).
-   One panel: layout B on desktop, layout C on phone. */
+/* Positions panel, R-IV.509, LIVE since R-IV.697 (the "mock data only" this line used to say stopped
+   being true then, and a stale header is how a reader gets the module wrong). Redesigned by R-IV.1382,
+   with `?pos=v1` restoring the R-IV.697 layout until 2026-11-06. */
 (function () {
   'use strict';
 // ── The live book (R-IV.697) ─────────────────────────────────────────────────────────────────
@@ -7831,6 +7903,9 @@ async function loadOpen() {
   try {
     const d = await bkJson('/api/v2/positions?status=OPEN');
     BK.open.rows = (d.positions || []).map(viewRow);
+    // R-IV.1382(d)6: the RAW row is kept beside the view row, because the Book module's Close and
+    // Add forms read the /api/v2/positions row itself -- handing them a view row would be a copy.
+    BK.open.raw = new Map((d.positions || []).map((r) => [r.position_id, r]));
     BK.open.age = bkNum(d.cache_age_seconds);
     BK.open.status = 'ok';
   } catch (e) { BK.open.status = 'error'; BK.open.err = String((e && e.message) || e); }
@@ -7970,18 +8045,20 @@ const X = (function () {
       : m < 1440 ? Math.floor(m / 60) + ' h old' : Math.floor(m / 1440) + ' d old';
     return { txt: txt, iso: iso, src: src, odd: false };
   }
-  function ageChip(p) {
-    const a = markAge(p);
-    const verdict = p.markIntegrity ? (MARK_VERDICT[p.markIntegrity] || 'unknown')
+  // The age's VERDICT and its WHY, shared by the chip below and by R-IV.1382's AGE cell, so the
+  // two places that show a mark's age cannot explain the same age two ways.
+  function ageVerdict(p) {
+    return p.markIntegrity ? (MARK_VERDICT[p.markIntegrity] || 'unknown')
       : (p.markState === 'fresh' ? 'verified' : 'unknown');
+  }
+  function ageUnknownWhy(p) {
+    return 'The hub served no time for this price, so how old it is cannot be stated. That is not the '
+      + 'same as having no price: this row HAS one.'
+      + (p.markIntegrityWhy ? ' The hub says: ' + p.markIntegrityWhy : '');
+  }
+  function ageWhy(p, a) {
     const word = p.markIntegrity || (p.markState === 'fresh' ? null : p.markState);
-    if (!a) {
-      return ' ' + chip('unknown', 'age unknown',
-        'The hub served no time for this price, so how old it is cannot be stated. That is not the '
-        + 'same as having no price: this row HAS one.'
-        + (p.markIntegrityWhy ? ' The hub says: ' + p.markIntegrityWhy : ''));
-    }
-    const why = [
+    return [
       a.src === 'mark' ? 'From `mark_as_of`, the mark\'s own instant.'
                        : 'From `price_updated_at` — this row carries no `mark_as_of`, so the age is the price\'s, not the mark\'s.',
       'Timed ' + when(a.iso) + '.',
@@ -7989,7 +8066,21 @@ const X = (function () {
       p.markIntegrityWhy || p.markWhy || '',
       a.odd ? 'The hub timed it AHEAD of now, which is a clock disagreement, not a fresh price.' : '',
     ].filter(Boolean).join(' ');
-    return ' ' + chip(a.odd ? 'unknown' : verdict, a.txt, why);
+  }
+  function ageChip(p) {
+    const a = markAge(p);
+    if (!a) return ' ' + chip('unknown', 'age unknown', ageUnknownWhy(p));
+    return ' ' + chip(a.odd ? 'unknown' : ageVerdict(p), a.txt, ageWhy(p, a));
+  }
+  // R-IV.1382(d)4 AGE, as a short cell: "N min" / "N h" / "N d" in --text-2; amber when the hub's
+  // verdict is not current; amber "age unknown" when the hub served no time; "—" with no price.
+  // R-IV.1262(b)3: this one cell carries the age for BOTH the mark and the P&L on its row.
+  function ageInfo(p) {
+    if (p.mark == null) return { txt: '—', amber: false, why: 'No price, so there is no age to show.' };
+    const a = markAge(p);
+    if (!a) return { txt: 'age unknown', amber: true, why: ageUnknownWhy(p) };
+    const txt = a.odd ? 'ahead of now' : a.txt === 'seconds old' ? '<1 min' : a.txt.replace(/ old$/, '');
+    return { txt, amber: a.odd || ageVerdict(p) !== 'verified', why: ageWhy(p, a), words: a.txt };
   }
   function markCell(p) {
     if (p.mark == null) return `<span class="pp-amber" title="${esc(p.markWhy || 'the hub served no mark for this position')}">no mark</span>`;
@@ -8172,18 +8263,41 @@ const X = (function () {
       <div class="pp-dim">Live here: the open book, marks with their status, lot-derived P&amp;L and max loss, provenance, lots, legs, the closed history with the hub’s census, and cash.</div></details>`;
   }
 
-  return { ladder, buckets, esc, usd, pct, prov, chip, tone, state, acctLabel, qtyCell, markCell, pnlCell, sleeveLine, stopLine, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, notCaptured };
+  // R-IV.1382: the provenance rung as [state, label, why] -- the row's 7px dot is the SAME
+  // ::before that .pp-chip draws, so it takes the chip's state and the chip's words.
+  const provInfo = (p) => PROV[p] || ['reported', String(p || ''), ''];
+  return { ladder, buckets, esc, usd, pct, prov, chip, tone, state, acctLabel, qtyCell, markCell, pnlCell, sleeveLine, stopLine, bookTable, bookRow, bookHead, detail, actions, ticket, history, missing, notCaptured,
+    markAge, ageInfo, provInfo, when, BUCKET_NOTE, GAP_COUNT: () => GAPS.length };
 })();
 
   // ── Panel ────────────────────────────────────────────────────────────────
   const mq = window.matchMedia('(max-width: 820px)');
+  // R-IV.1382(g): the redesigned panel is the DEFAULT. `?pos=v1` restores today's panel UNTIL
+  // 2026-11-06 -- REMOVE THE ROLLBACK ON OR AFTER THAT DATE, with the v1 builders it keeps alive
+  // (head, desktop, phone, summaryCard, card, the ticket), unless Nick says otherwise.
+  const POS_V1 = (() => {
+    try { return new URLSearchParams(location.search).get('pos') === 'v1'; } catch (_) { return false; }
+  })();
   const st = { cb: { status: 'idle', accounts: {}, scope: [], names: {}, error: null }, cash: null, open: false, id: null, tab: 'Detail', mtab: 'Book', card: null, actions: false, opener: null };
   let backdrop = null, panel = null;
   const TABS = ['Detail', 'Actions', 'New', 'History'];
   const MTABS = ['Book', 'New', 'History'];
   const byId = (id) => BK.open.rows.find((p) => p.id === Number(id)) || null;
-  const hashFor = () => '#positions' + (st.id ? '/' + st.id : '') + (st.id && st.tab !== 'Detail' ? '/' + st.tab.toLowerCase() : '');
+  // R-IV.1382(d)11: #positions, #positions/<id>, #positions/closed and #positions/cash. The old
+  // addresses keep working: /detail and /actions open the picked row, /history opens CLOSED, and
+  // /new opens the plain list (the sample ticket is gone from the panel).
+  const hashFor = () => (!POS_V1
+    ? '#positions' + (st.id ? '/' + st.id : pq.view === 'closed' ? '/closed' : pq.view === 'cash' ? '/cash' : '')
+    : '#positions' + (st.id ? '/' + st.id : '') + (st.id && st.tab !== 'Detail' ? '/' + st.tab.toLowerCase() : ''));
   function readHash() {
+    if (!POS_V1) {
+      const q = /^#positions(?:\/(\d+))?(?:\/(detail|actions|new|history|closed|cash))?$/.exec(location.hash || '');
+      if (!q) return null;
+      const tail = q[2] || '';
+      const view = tail === 'closed' || tail === 'history' ? 'closed' : tail === 'cash' ? 'cash' : 'open';
+      const qid = q[1] ? Number(q[1]) : null;
+      return { id: Number.isFinite(qid) && view === 'open' ? qid : null, tab: 'Detail', view };
+    }
     const m = /^#positions(?:\/(\d+))?(?:\/(detail|actions|new|history))?$/.exec(location.hash || '');
     if (!m) return null;
     const id = m[1] ? Number(m[1]) : null;
@@ -8237,6 +8351,9 @@ const X = (function () {
       const d = await rc.json(), bal = await rb.json();
       st.cb.accounts = (d && d.accounts) || {};
       const rows = Array.isArray(bal) ? bal : [];
+      // R-IV.1382(d)2: the whole balance rows, so the account strip can hand each one to the BOOK
+      // tile's own floor rule (window.__v2.balanceHtml) rather than re-deciding it here.
+      st.cb.balances = rows;
       st.cb.scope = rows.filter((a) => a && a.in_scope === true).map((a) => a.account_name);
       // R-IV.704(b): the NAME comes from the balances row, joined on `account_name`. /cash-balance
       // is keyed by the name and carries no label, so the join is what names a cash card — and it
@@ -8264,7 +8381,10 @@ const X = (function () {
       return { ok: r.ok, status: r.status, body };
     } catch (err) { return { ok: false, status: 0, body: null, err }; } finally { clearTimeout(timer); }
   }
-  function cashPanel(s) {
+  // `o.noAcct` (R-IV.1382(d)8): the form opens UNDER its own account's row, so the account picker
+  // would ask a question the placement already answered. Everything else -- the steps, the CSRF
+  // header, the one confirmation, the key and every word -- is unchanged (R-IV.550).
+  function cashPanel(s, o) {
     const k = st.cash;
     if (!k || k.acct !== s.account) return '';
     const v = k.v, accts = st.cb.scope.map((n) => `<option value="${X.esc(n)}"${n === k.acct ? ' selected' : ''}>${X.esc(acctName(n))}</option>`).join('');
@@ -8284,7 +8404,7 @@ const X = (function () {
         <div class="pp-cash-btns"><button type="button" class="pp-btn primary" data-cash-confirm="1"${k.busy ? ' disabled aria-busy="true"' : ''}>${k.busy ? 'Recording…' : (k.err ? 'Confirm again' : 'Confirm and record')}</button><button type="button" class="pp-btn" data-cash-back="1"${k.busy ? ' disabled' : ''}>Back</button></div></div>`;
     }
     return `<div class="pp-ticket pp-cashform" data-cash-form role="group" aria-label="${flow ? 'Add deposit or withdrawal' : 'Set cash to broker figure'}"><div>${head}</div>
-      <label>Account<select data-cf="acct">${accts}</select></label>
+      ${o && o.noAcct ? '' : `<label>Account<select data-cf="acct">${accts}</select></label>`}
       ${flow ? `<label>Type<select data-cf="type"><option value="deposit"${v.type === 'deposit' ? ' selected' : ''}>Deposit</option><option value="withdrawal"${v.type === 'withdrawal' ? ' selected' : ''}>Withdrawal</option><option value="other"${v.type === 'other' ? ' selected' : ''}>Other</option></select></label>
         ${v.type === 'other' ? `<label>Direction<select data-cf="dir"><option value="in"${v.dir === 'in' ? ' selected' : ''}>Money in (+)</option><option value="out"${v.dir === 'out' ? ' selected' : ''}>Money out (−)</option></select></label>` : ''}` : ''}
       ${flow ? '' : '<div class="pp-cash-q">Enter any trades you haven\'t recorded yet first — the figure you type should already include them.</div>'}
@@ -8329,12 +8449,19 @@ const X = (function () {
     const when = a.as_of_is_instant ? whenMT(a.as_of) : dayLabel(String(a.as_of || '').slice(0, 10));
     return when ? what + ' · ' + when : what;
   }
-  function moveLine(d) {
-    if (d.movement_since_opening == null || d.movement_since_opening === 0) return '';
+  // The movement since the anchor, as words. ONE builder for the card's line (moveLine) and for
+  // R-IV.1382's CASH row, which joins it onto the source line.
+  function moveParts(d) {
+    if (d.movement_since_opening == null || d.movement_since_opening === 0) return null;
     const words = []; Object.keys(d.by_type || {}).forEach((t) => { const w = TYPE_WORD[t] || String(t).toLowerCase(); if (words.indexOf(w) < 0) words.push(w); });
     const detail = Object.keys(d.by_type || {}).map((t) => (TYPE_WORD[t] || t) + ' ' + money2(d.by_type[t])).join(', ');
     const sign = d.movement_since_opening > 0 ? 'pp-up' : 'pp-down';
-    return `<div class="pp-acct-mv ${sign}" title="${X.esc(detail)}">${d.movement_since_opening > 0 ? '+' : ''}${money2(d.movement_since_opening)}${words.length ? ' from ' + X.esc(words.join(', ')) : ''} since</div>`;
+    const text = `${d.movement_since_opening > 0 ? '+' : ''}${money2(d.movement_since_opening)}${words.length ? ' from ' + X.esc(words.join(', ')) : ''} since`;
+    return { sign, detail, text };
+  }
+  function moveLine(d) {
+    const m = moveParts(d);
+    return m ? `<div class="pp-acct-mv ${m.sign}" title="${X.esc(m.detail)}">${m.text}</div>` : '';
   }
   function cashCard(name) {
     if (!name) return '';
@@ -8448,8 +8575,33 @@ const X = (function () {
     panel.addEventListener('input', cashInput);
     panel.addEventListener('change', cashInput);
     panel.addEventListener('submit', (e) => e.preventDefault());
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st.open) close(); });
+    // Escape closes the panel -- but NOT while one of the Book's forms is open over it. Close and
+    // Add now open FROM the panel (R-IV.1382(d)6); without this, Escape took the panel away from
+    // underneath an open form.
+    //
+    // CAPTURE phase, deliberately. The page-wide Escape handler (registered at boot, bubble phase)
+    // closes the form FIRST, so a bubble-phase check here saw no open form and closed the panel
+    // too -- one keypress, two layers. Capturing reads the form's state before anything changes
+    // it. The chart's own capture handler is registered earlier, so it still runs first and still
+    // stops the event when it closes a chart.
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st.open && !document.querySelector('.pos-modal.open')) close(); }, true);
     mq.addEventListener('change', () => { if (st.open) { render(); liftBook(); } });
+    if (!POS_V1) {
+      // R-IV.1382: the scoping class for its CSS, which also lifts the Close/Add forms above
+      // the panel on a phone (both sat at z-index 95, and the panel came later in the page).
+      panel.classList.add('pq');
+      // Two columns <-> one as the PANEL crosses 900px (d)9.
+      window.addEventListener('resize', () => { if (st.open && pqWide() !== pq.lastWide) render(); });
+      // (d)6 "After a close or an add succeeds, reload the book": the Book module announces each
+      // re-read (`v2:book`). NOT while a cash form is open or a field has focus -- a re-render
+      // under someone typing would take the field away from them.
+      window.addEventListener('v2:book', () => {
+        if (!st.open || st.cash) return;
+        const a = document.activeElement;
+        if (a && panel.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return;
+        loadOpen(); loadCash();
+      });
+    }
   }
   function head() {
     // R-IV.697: the banner names what is live and what has no source, because "sample data" was
@@ -8511,11 +8663,467 @@ const X = (function () {
       : st.mtab === 'New' ? `<div class="pp-card">${X.ticket()}</div>` : `<div class="pp-card">${X.history()}</div>`;
     return `<div class="pp-tabs" role="tablist">${MTABS.map((t) => `<button type="button" role="tab" aria-selected="${t === st.mtab}" data-mtab="${t}">${t === 'New' ? 'New (ticket)' : t}</button>`).join('')}</div>${v}${legend()}${X.missing()}`;
   }
+
+  // ═══ R-IV.1382 · THE POSITIONS PANEL, REDESIGNED ════════════════════════════════════════
+  //
+  // Nick's approved boards (13:27 MT 2026-10-23). His complaint: the panel made "very
+  // inefficient use of space" -- cash cards filled the left column and pushed the book below the
+  // fold, while the right column sat empty until a row was picked. Positions first, no empty
+  // column, and every button really works. Display only (#42): nothing new gates, and the kill
+  // switch is untouched.
+  //
+  // The honesty rules carried over, each cited where it is kept below: R-IV.662(c)/668(c),
+  // R-IV.1262(b)3, R-IV.719(c), R-IV.726, R-IV.697, R-IV.704(b) and R-IV.550.
+  const pq = { view: 'open', acctF: null, sortK: 'days', sortD: 1, noPrice: null, info: false, glance: false,
+    earn: {}, earnState: 'idle', earnSeq: -1, openSeq: 0, lastWide: null, folds: pqLoadFolds() };
+
+  // A folded group is REMEMBERED per account, in localStorage, inside try/catch: a private window
+  // or blocked storage must cost the memory, never the panel.
+  function pqLoadFolds() {
+    try { const v = JSON.parse(localStorage.getItem('pq-folds-v1') || '[]'); return new Set(Array.isArray(v) ? v : []); }
+    catch (_) { return new Set(); }
+  }
+  function pqSaveFolds() { try { localStorage.setItem('pq-folds-v1', JSON.stringify([...pq.folds])); } catch (_) {} }
+
+  // Two columns only when the PANEL is at least 900px wide (d)9 -- the panel, not the window.
+  function pqWide() {
+    if (mq.matches) return false;
+    const w = panel ? panel.getBoundingClientRect().width : window.innerWidth * 0.5;
+    return w >= 900;
+  }
+  const PQ_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // 'YYYY-MM-DD' -> 'Nov 20'. A stored date named as written; no clock is involved.
+  const pqMonD = (ymd) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); return m ? PQ_MON[+m[2] - 1] + ' ' + (+m[3]) : ''; };
+  const PQ_STRUCT = { 'put debit spread': 'Put spread', 'put credit spread': 'Put spread', 'call debit spread': 'Call spread',
+    'call credit spread': 'Call spread', 'long put': 'Long put', 'long call': 'Long call', 'short put': 'Short put', 'short call': 'Short call' };
+  // WHAT: the structure and strikes, then the expiry as "Mon D". Equity rows read "Shares".
+  function pqWhat(p) {
+    if (p.assetType === 'EQUITY' || /^(stock|equity|shares?)$/i.test(p.structure)) return 'Shares';
+    const s = String(p.structure || '').toLowerCase();
+    const w = PQ_STRUCT[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Position');
+    return w + (p.strikes ? ' ' + p.strikes : '') + (p.expiry ? ' · ' + pqMonD(p.expiry) : '');
+  }
+  // MARK per unit, no $ sign; as many places as the price needs, never fewer than two.
+  const pqMark = (v) => (Math.abs(v) >= 1 ? v.toFixed(2) : String(Number(v.toFixed(4)) < 0.01 ? Number(v.toFixed(4)) : v.toFixed(2)));
+  const pqName = (key) => (key ? acctName(key) : 'Unattributed');
+  const pqBal = (key) => (st.cb.balances || []).find((a) => a && a.account_name === key) || null;
+  const pqOpenIn = (key) => BK.open.rows.filter((p) => key == null || p.account === key).length;
+
+  // ── header (d)1 ──
+  function pqAgeWords(short) {
+    const age = BK.open.age;
+    if (BK.open.status === 'error') return 'not read';
+    if (BK.open.status !== 'ok') return 'reading…';
+    if (age == null) return short ? 'now' : 'just now';
+    const t = age < 60 ? Math.round(age) + 's' : Math.round(age / 60) + 'm';
+    return short ? t : t + ' ago';
+  }
+  // Edit and Roll have no writer, so they are not drawn as buttons (d)6; they are listed here,
+  // with the gaps they wait on, instead of being deleted.
+  const PQ_GAPS_MORE = [
+    'Edit (tags, stop, invalidation, time stop) waits on the capture path: those columns have no writer yet (BUILD gap 3). Not shown as a button until it has one.',
+    'Roll (close this and open the next as one linked trade) waits on R-IV.452, and on a link field: nothing in the schema records that one position followed another. Not shown as a button until it has one.',
+  ];
+  // (d)1: the banner, the legend, the GAPS and the evidence note MOVE behind the ⓘ. Nothing is
+  // deleted; it moves.
+  function pqInfo() {
+    return `<div class="pq-info" role="note">
+      <p>Live from the hub: your open book, marks with their status, lot-derived P&amp;L, provenance, lots, legs, the closed history and cash. Stops, invalidations, time stops and tags read “not captured yet”: the columns exist and nothing can write to them. Sleeve ceilings and roll chains have no source, so nothing is drawn for them.</p>
+      ${X.ladder()}${X.buckets()}
+      <p>This row’s own <code>broker_ref</code> field is not read: it is empty on every open position, while the lots behind them are not. The evidence lives at the fill.</p>
+      ${X.missing()}
+      <ul class="pq-gx">${PQ_GAPS_MORE.map((g) => '<li>' + X.esc(g) + '</li>').join('')}</ul></div>`;
+  }
+  function pqHead() {
+    const ok = BK.open.status !== 'error';
+    const live = mq.matches
+      ? `<span class="pq-live${ok ? '' : ' bad'}" title="live · read ${X.esc(pqAgeWords(false))}"><i aria-hidden="true"></i>${X.esc(pqAgeWords(true))}</span>`
+      : X.chip(ok ? 'verified' : 'unknown', 'live · read ' + pqAgeWords(false), 'Your book, marks, lots, legs, the closed history and cash all come from the hub.');
+    return `<div class="pp-head pq-head"><h2>Positions</h2>${live}<span class="pq-sp"></span>
+      <button type="button" class="pq-ib" data-pq-info aria-expanded="${pq.info}" aria-label="About this panel">i</button>
+      <button type="button" class="pp-x pq-x" aria-label="Close positions panel">✕</button></div>${pq.info ? pqInfo() : ''}`;
+  }
+
+  // ── account strip (d)2 ──
+  // Line 2 is the BOOK tile's own floor rule, called through window.__v2 (shared, not copied).
+  // Line 3's cash is the server's derived figure, to the cent, never rounded or summed here.
+  // R-IV.704(b)/R-IV.697: names come from account_display and are never uppercased.
+  function pqStrip() {
+    const v2 = window.__v2 || {};
+    const scope = st.cb.scope.length ? st.cb.scope : accountsOf(BK.open.rows).map((g) => g.account).filter(Boolean);
+    const rows = scope.map(pqBal).filter(Boolean);
+    const btn = (key, name, bal, l3) => `<button type="button" class="pq-acct" data-pq-acct="${X.esc(key)}" aria-pressed="${key ? pq.acctF === key : pq.acctF == null}">`
+      + `<span class="pq-an">${X.esc(name)}</span><span class="pq-ab">${bal}</span>${mq.matches ? '' : `<span class="pq-a3">${l3}</span>`}</button>`;
+    const floor = v2.bookTotalFloor ? v2.bookTotalFloor(rows) : false;
+    const all = btn('', 'All accounts', v2.bookTotalHtml ? v2.bookTotalHtml(rows) : '—',
+      (floor ? '<span class="pq-amb">floor only</span> · ' : '') + pqOpenIn(null) + ' open');
+    const each = scope.map((n) => {
+      const cb = st.cb.accounts[n], d = cb && cb.derived;
+      const cash = d && d.derivable ? 'cash ' + money2(d.balance) : (st.cb.status === 'ok' ? 'cash —' : 'cash …');
+      return btn(n, pqName(n), v2.balanceHtml ? v2.balanceHtml(pqBal(n)) : '—', X.esc(cash) + ' · ' + pqOpenIn(n) + ' open');
+    }).join('');
+    return `<div class="pq-strip" role="group" aria-label="Accounts">${all}${each}</div>`;
+  }
+
+  // ── tab row (d)3 ──
+  function pqRows() {
+    let rows = BK.open.rows;
+    if (pq.acctF) rows = rows.filter((p) => p.account === pq.acctF);
+    if (pq.noPrice != null) rows = rows.filter((p) => p.mark == null && (pq.noPrice === '*' || (p.account || '') === pq.noPrice));
+    return rows;
+  }
+  function pqTabs() {
+    const n = BK.open.status === 'ok' ? pqRows().length : null;
+    const tab = (k, label, count) => `<button type="button" role="tab" data-pq-view="${k}" aria-selected="${pq.view === k}">${label}${count != null ? ' <span>' + count + '</span>' : ''}</button>`;
+    // + ADD POSITION opens the Book module's own form (exposed, not duplicated).
+    const add = mq.matches ? '<button type="button" class="pq-addp" data-pq-add aria-label="Add position">+</button>'
+      : '<button type="button" class="pq-add" data-pq-add>+ Add position</button>';
+    return `<div class="pq-tabs" role="tablist">${tab('open', 'Open', n)}${tab('closed', 'Closed')}${tab('cash', 'Cash')}<span class="pq-sp"></span>${add}</div>`;
+  }
+
+  // ── OPEN: one table grouped by account (d)4 ──
+  // Sort: DAYS ascending by default, soonest expiry first, no-expiry rows last; ties by P&L
+  // descending; within each group. A missing figure sorts LAST in both directions -- it is not
+  // the smallest or the largest value, it is no value.
+  const PQ_SORT = { ticker: (p) => p.ticker, what: (p) => pqWhat(p), qty: (p) => p.qty, mark: (p) => p.mark,
+    age: (p) => { const a = X.markAge(p); return a ? Date.now() - Date.parse(a.iso) : null; }, pnl: (p) => p.pnl, days: (p) => p.dte };
+  function pqSort(rows) {
+    const f = PQ_SORT[pq.sortK] || PQ_SORT.days, d = pq.sortD;
+    const tie = (a, b) => (a.pnl == null && b.pnl == null ? 0 : a.pnl == null ? 1 : b.pnl == null ? -1 : b.pnl - a.pnl);
+    return rows.slice().sort((a, b) => {
+      const x = f(a), y = f(b);
+      if (x == null && y == null) return tie(a, b);
+      if (x == null) return 1;
+      if (y == null) return -1;
+      const c = typeof x === 'string' ? x.localeCompare(y) : x - y;
+      return (c * d) || tie(a, b);
+    });
+  }
+  function pqDot(p) {
+    const [s, l, t] = X.provInfo(p.prov);
+    return `<span class="pp-chip pq-dot" data-state="${s}" title="${X.esc(l + (t ? ': ' + t : ''))}"></span>`;
+  }
+  function pqPnl(p, cls) {
+    // P&L: the hub's unrealized_pnl. Null is "—" in --text-3 with its reason, never 0.
+    if (p.pnl == null) return `<span class="pq-na ${cls || ''}" title="${X.esc(p.pnlWhy || 'the hub derived no P&L for this row')}">—</span>`;
+    return `<span class="${X.tone(p.pnl)} ${cls || ''}" title="${X.esc(X.usd(p.pnl, true))}">${X.usd(Math.round(p.pnl), true)}</span>`;
+  }
+  function pqMarkCell(p) {
+    return p.mark == null ? `<span class="pq-amb" title="${X.esc(p.markWhy || 'the hub served no mark for this position')}">no price</span>` : X.esc(pqMark(p.mark));
+  }
+  function pqRow(p) {
+    const age = X.ageInfo(p), w = pqWhat(p);
+    // QTY is open_quantity or an amber "unknown" -- it never falls back to quantity (R-IV.662(c)/668(c)).
+    return `<tr class="pp-row pq-row${p.id === st.id ? ' sel' : ''}" data-pq-row data-id="${p.id}">`
+      + `<td class="pq-tk">${pqDot(p)}<b>${X.esc(p.ticker)}</b></td>`
+      + `<td class="pq-what" title="${X.esc(w)}">${X.esc(w)}</td>`
+      + `<td class="pp-num">${X.qtyCell(p)}</td><td class="pp-num">${pqMarkCell(p)}</td>`
+      + `<td class="pp-num pq-age${age.amber ? ' amb' : ''}" title="${X.esc(age.why)}">${X.esc(age.txt)}</td>`
+      + `<td class="pp-num">${pqPnl(p)}</td><td class="pp-num">${p.dte == null ? '—' : X.esc(p.dte)}</td></tr>`;
+  }
+  function pqGroupHead(g, cols) {
+    const key = g.account || '', folded = pq.folds.has(key);
+    const np = g.rows.filter((p) => p.mark == null).length;
+    const nopnl = g.rows.filter((p) => p.mark != null && p.pnl == null).length;
+    // The group's P&L sum appears ONLY when every row in the group has one: a sum over some of
+    // the rows reads as the account's figure.
+    const sum = g.rows.every((p) => p.pnl != null) ? g.rows.reduce((s, p) => s + p.pnl, 0) : null;
+    const flags = (np ? np + ' no price' : '') + (nopnl ? (np ? ' · ' : '') + nopnl + ' no P&amp;L' : '');
+    const inner = `<span class="pq-gn">${X.esc(pqName(g.account))}</span><span class="pq-gc">${g.rows.length} open${folded ? ' · folded' : ''}</span>`
+      + `<span class="pq-sp"></span>${flags ? `<span class="pq-gnp">${flags}</span>` : ''}`
+      + (sum != null ? `<span class="pq-gs ${X.tone(sum)}">${X.usd(Math.round(sum), true)}</span>` : '')
+      + `<span class="pq-gch" aria-hidden="true">${folded ? '›' : '⌄'}</span>`;
+    const b = `<button type="button" class="pq-gbtn" data-pq-fold="${X.esc(key)}" aria-expanded="${!folded}">${inner}</button>`;
+    return cols ? `<tr class="pq-grp"><td colspan="${cols}">${b}</td></tr>` : `<div class="pq-grp">${b}</div>`;
+  }
+  const PQ_COLS = [['ticker', 'Ticker', 0], ['what', 'What', 0], ['qty', 'Qty', 1], ['mark', 'Mark', 1], ['age', 'Age', 1], ['pnl', 'P&L', 1], ['days', 'Days', 1]];
+  function pqTable() {
+    if (BK.open.status !== 'ok') return X.state(BK.open, 'Reading your book…', 'your book', 'open');
+    const groups = accountsOf(pqRows());
+    if (!groups.length) return `<div class="pp-note">${pq.noPrice != null ? 'Every position in view has a price.' : pq.acctF ? 'The hub reports no open positions in this account.' : 'The hub reports no open positions.'}</div>`;
+    const head = '<thead><tr>' + PQ_COLS.map(([k, l, n]) => {
+      const on = pq.sortK === k;
+      return `<th class="${n ? 'pp-num' : ''}" aria-sort="${on ? (pq.sortD > 0 ? 'ascending' : 'descending') : 'none'}">`
+        + `<button type="button" class="pq-sort${on ? ' on' : ''}" data-pq-sort="${k}">${X.esc(l)}${on ? (pq.sortD > 0 ? ' ▴' : ' ▾') : ''}</button></th>`;
+    }).join('') + '</tr></thead>';
+    const body = groups.map((g) => pqGroupHead(g, 7) + (pq.folds.has(g.account || '') ? '' : pqSort(g.rows).map(pqRow).join(''))).join('');
+    return `<table class="pq-table">${head}<tbody>${body}</tbody></table>`;
+  }
+  // Phone (d)10: rows of 56px on two lines instead of a table.
+  function pqPhoneList() {
+    if (BK.open.status !== 'ok') return X.state(BK.open, 'Reading your book…', 'your book', 'open');
+    const groups = accountsOf(pqRows());
+    if (!groups.length) return '<div class="pp-note">The hub reports no open positions here.</div>';
+    return groups.map((g) => pqGroupHead(g, 0) + (pq.folds.has(g.account || '') ? '' : pqSort(g.rows).map((p) => {
+      const age = X.ageInfo(p);
+      const right2 = p.mark == null ? pqMarkCell(p)
+        : `<span title="${X.esc(age.why)}" class="${age.amber ? 'pq-amb' : ''}">${X.esc(pqMark(p.mark))} · ${X.esc(age.txt)}</span>`;
+      return `<button type="button" class="pq-prow${p.id === st.id ? ' sel' : ''}" data-pq-row data-id="${p.id}">`
+        + `<span class="pq-l1">${pqDot(p)}<b>${X.esc(p.ticker)}</b><span class="pq-x2">×${p.qty == null ? '?' : X.esc(p.qty)}</span><span class="pq-sp"></span>${pqPnl(p)}</span>`
+        + `<span class="pq-l2"><span class="pq-w">${X.esc(pqWhat(p))}${p.dte != null ? ' · ' + X.esc(p.dte) + 'd' : ''}</span><span class="pq-sp"></span>${right2}</span></button>`;
+    }).join(''))).join('');
+  }
+
+  // ── AT A GLANCE (d)5 ──
+  // Earnings: ONE call per panel open, to /api/chronos/next-earnings-batch -- a database read of
+  // earnings_calendar, no vendor call. An ETF's date is its earliest HOLDING's, and is said so.
+  function pqEarnItems() {
+    const out = [], seen = new Set();
+    BK.open.rows.filter((p) => p.expiry && p.assetType !== 'EQUITY').forEach((p) => {
+      const T = String(p.ticker || '').toUpperCase(), en = pq.earn[T];
+      if (!en || !en.date || en.date > p.expiry) return;          // only ON or BEFORE the expiry
+      const k = T + '|' + p.expiry;
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({ T, en, exp: p.expiry, text: en.is_etf && en.component
+        ? `${X.esc(en.component)}, held in ${X.esc(T)}, reports earnings before ${X.esc(T)}’s ${pqMonD(p.expiry)} expiry.`
+        : `${X.esc(T)} reports earnings before its ${pqMonD(p.expiry)} expiry.` });
+    });
+    return out;
+  }
+  function pqNeeds() {
+    const items = accountsOf(BK.open.rows.filter((p) => p.mark == null)).map((g) => {
+      const n = g.rows.length;
+      return `<li class="amb"><span>${n} ${X.esc(pqName(g.account))} position${n === 1 ? ' has' : 's have'} no price, so ${n === 1 ? 'its' : 'their'} P&amp;L is blank. `
+        + `<button type="button" class="pq-tl" data-pq-noprice="${X.esc(g.account || '')}">Show ${n === 1 ? 'it' : 'them'} ›</button></span></li>`;
+    });
+    pqEarnItems().forEach((e) => items.push(`<li class="tl"><span>${e.text}</span></li>`));
+    let tail = '';
+    if (pq.earnState === 'loading') tail = '<div class="pq-t3">Checking earnings…</div>';
+    else if (pq.earnState === 'error') tail = '<div class="pq-t3">Earnings could not be read, so none are listed.</div>';
+    return `<div class="pq-card"><div class="pq-ct">Needs a look</div>${items.length ? `<ul class="pq-needs">${items.join('')}</ul>`
+      : (pq.earnState === 'loading' ? '' : '<div class="pq-t3">Nothing needs a look.</div>')}${tail}</div>`;
+  }
+  function pqDayCard() {
+    // The BOOK tile's figure and rules EXACTLY, from the same shared code (R-IV.1369(e)1 as amended
+    // by R-IV.1381(e)2). If the tile has not read the book yet, this says so rather than guessing.
+    const v2 = window.__v2 || {};
+    const d = v2.bookDay ? v2.bookDay(true) : null;
+    return `<div class="pq-card pq-day"><div class="pq-ct">Day P&amp;L</div>${d || '<div class="bk-why">the Book tile has not read the book yet</div>'}</div>`;
+  }
+  function pqExp() {
+    // Positions, not legs. Days come from the served `dte`, never from this page's clock.
+    const opt = BK.open.rows.filter((p) => p.expiry && p.assetType !== 'EQUITY');
+    const by = new Map();
+    opt.forEach((p) => by.set(p.expiry, (by.get(p.expiry) || 0) + 1));
+    const ks = [...by.keys()].sort(), max = Math.max(1, ...by.values());
+    const dte = (e) => { const p = opt.find((x) => x.expiry === e && x.dte != null); return p ? p.dte : null; };
+    const shares = BK.open.rows.filter((p) => !p.expiry).length;
+    return `<div class="pq-card"><div class="pq-ct">Expirations</div>`
+      + (ks.map((e) => `<div class="pq-ex"><span>${pqMonD(e)}${dte(e) != null ? ' · ' + dte(e) + ' days' : ''}</span>`
+        + `<span class="pq-eb"><i style="width:${Math.round(by.get(e) / max * 100)}%"></i></span><span class="pp-num">${by.get(e)}</span></div>`).join('')
+        || '<div class="pq-t3">No option positions.</div>')
+      + `<div class="pq-ex pq-ex0"><span>Shares, no expiry</span><span></span><span class="pp-num">${shares}</span></div></div>`;
+  }
+  function pqGlance() {
+    return `<div class="pq-glance"><div class="pq-gh">At a glance</div>${pqNeeds()}${pqDayCard()}${pqExp()}`
+      + '<div class="pq-t3">Click a row and this side shows that position.</div></div>';
+  }
+  // Narrow and phone: AT A GLANCE as one line above the list; its chevron opens the full cards.
+  function pqGlanceStrip() {
+    const np = BK.open.rows.filter((p) => p.mark == null).length, e = pqEarnItems()[0];
+    const bits = [];
+    if (np) bits.push(`<span class="amb">● ${np} ha${np === 1 ? 's' : 've'} no price</span>`);
+    if (e) bits.push(`<span class="tl">● ${X.esc(e.en.is_etf && e.en.component ? e.en.component : e.T)} earnings first</span>`);
+    return `<button type="button" class="pq-gstrip" data-pq-glance aria-expanded="${pq.glance}">${bits.join('') || '<span class="pq-t3">Nothing needs a look</span>'}`
+      + `<span class="pq-sp"></span><span aria-hidden="true">${pq.glance ? '⌄' : '›'}</span></button>`;
+  }
+
+  // ── a picked row (d)6 ──
+  // R-IV.726: a lot's fill_time is a DAY when it sits at exactly midnight UTC (taken as written)
+  // and a MOMENT otherwise (converted to Mountain Time).
+  function pqLotDay(iso) {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return String(iso || '—');
+    const d = new Date(t);
+    const day = !d.getUTCHours() && !d.getUTCMinutes() && !d.getUTCSeconds() && !d.getUTCMilliseconds();
+    return new Intl.DateTimeFormat('en-US', { timeZone: day ? 'UTC' : 'America/Denver', month: 'short', day: 'numeric' }).format(d);
+  }
+  const pqCap = (s) => String(s || '').replace(/^./, (c) => c.toUpperCase());
+  function pqExitPlan(p) {
+    if (p.stopType) return X.stopLine(p);
+    const bits = [p.timeStop ? 'time stop ' + X.esc(p.timeStop) : '', p.invalidation ? X.esc(p.invalidation) : '',
+      p.tags.length ? p.tags.map((t) => X.esc(t)).join(', ') : ''].filter(Boolean);
+    return bits.length ? bits.join(' · ') : '<span class="pq-t2">not captured yet</span>';
+  }
+  function pqPicked(p, narrow) {
+    const v2 = window.__v2 || {}, raw = BK.open.raw ? BK.open.raw.get(p.pid) : null;
+    const s = BK.sub[p.pid] || { status: 'idle', lots: [], legs: [] };
+    const age = X.ageInfo(p);
+    const pct = raw && v2.pnlPct ? v2.pnlPct(raw) : null;
+    const sus = raw && v2.basisSuspect ? v2.basisSuspect(raw, pct) : null;
+    const back = narrow ? '← All positions' : '← At a glance';
+    const theme = v2.themeOf ? v2.themeOf(p.ticker) : null;
+    const en = pq.earn[String(p.ticker || '').toUpperCase()];
+    const bucket = p.bucket ? X.chip('verified', p.bucket + (X.BUCKET_NOTE[p.bucket] ? ' · ' + X.BUCKET_NOTE[p.bucket] : '')) : '';
+    const stat = (k, v, cls) => `<div class="pq-stat"><span class="pq-sk">${k}</span><span class="pq-sv ${cls || ''}">${v}</span></div>`;
+    const pnlV = p.pnl == null ? `<span class="pq-na" title="${X.esc(p.pnlWhy || '')}">—</span>`
+      : `<span class="${sus ? 'pq-sus' : X.tone(p.pnl)}" title="${X.esc(sus ? 'Basis looks wrong: ' + sus : X.usd(p.pnl, true))}">${X.usd(Math.round(p.pnl), true)}</span>`
+        + (pct != null ? ` <span class="pq-pct ${sus ? 'pq-sus' : X.tone(p.pnl)}">${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(0)}%</span>` : '')
+        + (sus ? '<span class="pq-amb"> basis suspect</span>' : '');
+    // Actions call the Book module's OWN forms with the RAW row; ADD only when the Book's rule
+    // allows it. Edit and Roll are not drawn (they wait on writers; listed under ⓘ).
+    const eligible = raw && v2.addPosEligible ? v2.addPosEligible(raw) : false;
+    const noRaw = raw ? '' : ' disabled title="the raw row is not loaded yet"';
+    const acts = `<div class="pq-acts"><button type="button" class="pq-ab pq-close" data-pq-act="close"${noRaw}>Close</button>`
+      + (eligible ? '<button type="button" class="pq-ab" data-pq-act="add">Add</button>' : '')
+      + '<button type="button" class="pq-ab" data-pq-act="chart">Chart</button></div>';
+    const warns = [p.basisIncomplete ? 'Basis under review — ' + X.esc(p.basisIncomplete) : '',
+      s.agreesKnown && !s.agrees ? `The lots sum to ${X.esc(s.lotQty)} and the row stores ${X.esc(s.storedQty)}: this position’s stored quantity has drifted from its own fills.` : '',
+      s.mergedInto ? 'The legs for this position are recorded on ' + X.esc(s.mergedInto) + '.' : ''].filter(Boolean)
+      .map((w) => `<div class="pq-warn">${w}</div>`).join('');
+    let lotsLegs;
+    if (s.status !== 'ok') lotsLegs = X.state(s, 'Reading this position’s lots and legs…', 'lots and legs', p.pid);
+    else {
+      const refs = s.lots.filter((l) => l.broker_ref).length;
+      const lots = s.lots.map((l) => {
+        const pv = X.provInfo(String(l.provenance || 'UNKNOWN').toUpperCase());
+        return `<div class="pq-li"><span title="${X.esc(X.when(l.fill_time))}">${X.esc(pqLotDay(l.fill_time))} · ${X.esc(l.qty)} at ${X.esc(l.price)}</span><span>${l.fees == null ? '—' : X.esc(l.fees)}</span></div>`
+          + `<div class="pq-li2">${X.esc(pv[1])} · ${l.broker_ref ? X.esc(l.broker_ref) : 'no reference'}</div>`;
+      }).join('') || '<div class="pq-t3">The hub holds no lots for this position.</div>';
+      const legs = s.legs.map((g) => `<div class="pq-li"><span>${X.esc(pqCap(String(g.side || '').toLowerCase()))} ${X.esc(String(g.option_type || '').toLowerCase())} ${g.strike == null ? '—' : X.esc(g.strike)} · ×${g.qty == null ? '—' : X.esc(g.qty)}</span>`
+        + `<span>${g.price == null ? '<span class="pq-amb">unpriced</span>' : X.esc(g.price)}</span></div>`).join('')
+        || `<div class="pq-t3">${s.mergedInto ? 'Recorded on ' + X.esc(s.mergedInto) + '.' : 'The hub holds no legs for this position.'}</div>`;
+      lotsLegs = `<div class="pq-sh"><span>Lots</span><span>${s.lots.length} · ${refs} with a broker reference</span></div>${lots}`
+        + `<div class="pq-sh"><span>Legs</span></div>${legs}`;
+    }
+    return `<div class="pq-pick"><button type="button" class="pq-back" data-allpos="1">${back}</button>`
+      + `<div class="pq-ptk">${X.esc(p.ticker)}</div>`
+      + `<div class="pq-psub">${X.esc(pqWhat(p))} · ×${p.qty == null ? '?' : X.esc(p.qty)}</div>`
+      + `<div class="pq-pchips">${X.prov(p.prov)}${X.chip('screen', pqName(p.account))}${bucket}</div>`
+      + `<div class="pq-stats">${stat('Cost', X.usd(p.cost))}`
+      + stat('Mark · ' + X.esc(age.words || age.txt), p.mark == null ? pqMarkCell(p) : X.esc(pqMark(p.mark)), age.amber ? 'pq-amb' : '')
+      + stat('P&amp;L', pnlV) + stat('Days left', p.dte == null ? '—' : X.esc(p.dte)) + '</div>'
+      + warns + acts
+      + `<div class="pq-kv"><span>Earnings</span><span>${en !== undefined || pq.earnState === 'ok' ? X.esc(v2.earningsWords ? v2.earningsWords(en) : '—') : (pq.earnState === 'error' ? 'could not be read' : '…')}</span></div>`
+      + `<div class="pq-kv"><span>Theme</span><span>${theme && theme.theme ? X.esc(theme.theme) : '<span class="pq-t2">no theme mapped</span>'}</span></div>`
+      + `<div class="pq-kv"><span>Exit plan</span><span>${pqExitPlan(p)}</span></div>`
+      + lotsLegs
+      + (p.markAt ? `<div class="pq-t3 pq-chk">Mark checked ${X.esc(X.when(p.markAt))}${p.markWhy ? ' — ' + X.esc(p.markWhy) : ''}</div>` : '')
+      + '</div>';
+  }
+
+  // ── CLOSED (d)7 and CASH (d)8 ──
+  function pqClosed() { return `<div class="pq-closed">${X.history()}</div>`; }
+  function pqCash() {
+    const cb = st.cb;
+    if (!cb.scope.length) return `<div class="pq-cash">${cashCards()}</div>`;
+    const rows = cb.scope.map((n) => {
+      const a = cb.accounts[n], d = (a && a.derived) || {}, k = st.cash, off = k && k.acct === n && k.busy ? ' disabled' : '';
+      let fig = '<span class="pq-t3">…</span>', line2 = '';
+      if (cb.status === 'error') { fig = '<span class="pq-t2">Cash unavailable</span>'; line2 = X.esc(cb.error || ''); }
+      else if (cb.status === 'ok' && !a) { fig = '<span class="pq-t2">No record</span>'; line2 = 'The hub returned nothing for this account.'; }
+      else if (cb.status === 'ok' && d.derivable) {
+        const src = sourceLine(d), mv = moveParts(d);
+        fig = money2(d.balance);
+        line2 = [src ? X.esc(pqCap(src)) : '', mv ? `<span class="${mv.sign}" title="${X.esc(mv.detail)}">${mv.text}</span>` : ''].filter(Boolean).join(' · ');
+      } else if (cb.status === 'ok') {
+        fig = '<span class="pq-t2">No balance yet</span>';
+        line2 = `<span title="${X.esc(d.reason || '')}">Nothing has told the hub where this account started. Use “Set to broker’s figure” to give it a starting point.</span>`;
+      }
+      return `<div class="pq-crow" data-acct-card="${X.esc(n)}"><div class="pq-c1"><b>${X.esc(pqName(n))}</b><span class="pq-cf">${fig}</span></div>`
+        + `<div class="pq-c2"><span class="pq-cl">${line2}</span><span class="pq-ca"><button type="button" class="pq-tl" data-cash-open="flow" data-acct="${X.esc(n)}"${off}>Deposit / withdrawal</button>`
+        + `<button type="button" class="pq-tl" data-cash-open="set" data-acct="${X.esc(n)}"${off}>Set to broker’s figure</button></span></div>`
+        + `${cashPanel({ account: n }, { noAcct: true })}</div>`;
+    }).join('');
+    return `<div class="pq-cash">${rows}<div class="pq-cfoot">Set to broker’s figure replaces the hub’s cash with your broker’s number. Do it after your broker history is booked, so nothing counts twice.</div></div>`;
+  }
+
+  // ── the two layouts ──
+  function pqMissingPick() {
+    if (st.id == null || byId(st.id)) return '';
+    if (BK.open.status !== 'ok') return X.state(BK.open, 'Reading your book…', 'your book', 'open');
+    return `<div class="pp-note pp-warn">Position #${X.esc(st.id)} is not in your open book. It may have been closed, or the address may be old.<div><button type="button" class="pq-back" data-allpos="1">← All positions</button></div></div>`;
+  }
+  function pqDesktop() {
+    const sel = byId(st.id), wide = pqWide();
+    const top = pqStrip() + pqTabs();
+    if (pq.view === 'closed') return top + pqClosed();
+    if (pq.view === 'cash') return top + pqCash();
+    const chip = pq.noPrice != null ? '<button type="button" class="pq-npc" data-pq-clear-noprice>No price ✕</button>' : '';
+    const list = chip + pqTable() + '<div class="pq-t3 pq-hint">Click a row for its detail · click a group to fold it · click a column to sort</div>';
+    if (wide) {
+      const side = sel ? pqPicked(sel, false) : (pqMissingPick() || pqGlance());
+      return top + `<div class="pq-cols"><div class="pq-main">${list}</div><aside class="pq-side">${side}</aside></div>`;
+    }
+    // Narrow: one column. A picked row opens IN PLACE of the list, with "← All positions".
+    if (sel) return top + pqPicked(sel, true);
+    return top + (pqMissingPick() || '') + pqGlanceStrip() + (pq.glance ? pqGlance() : '') + list;
+  }
+  function pqPhone() {
+    const sel = byId(st.id);
+    // A picked row is a FULL-PANEL sheet with ← back; the back gesture closes it, because picking
+    // pushed a history entry (see the row handler).
+    if (sel) return `<div class="pq-sheet">${pqPicked(sel, true)}</div>`;
+    const top = pqStrip() + pqTabs();
+    if (pq.view === 'closed') return top + pqClosed();
+    if (pq.view === 'cash') return top + pqCash();
+    const chip = pq.noPrice != null ? '<button type="button" class="pq-npc" data-pq-clear-noprice>No price ✕</button>' : '';
+    return top + (pqMissingPick() || '') + pqGlanceStrip() + (pq.glance ? pqGlance() : '') + chip + pqPhoneList();
+  }
+
+  // ── clicks, for the redesigned panel only ──
+  function pqClick(t) {
+    // On a phone the pick PUSHED a history entry, so "← All positions" steps BACK through it:
+    // replacing it would leave a dead entry for the back gesture to walk through next.
+    if (t.closest('[data-allpos]') && mq.matches && /^#positions\/\d+/.test(location.hash)) { history.back(); return true; }
+    if (t.closest('[data-pq-info]')) { pq.info = !pq.info; render(); return true; }
+    const ac = t.closest('[data-pq-acct]');
+    if (ac) { pq.acctF = ac.dataset.pqAcct || null; pq.noPrice = null; render(); return true; }
+    const vw = t.closest('[data-pq-view]');
+    if (vw) { pq.view = vw.dataset.pqView; st.id = null; setHash(true); wantTab(); render(); return true; }
+    if (t.closest('[data-pq-add]')) { const v = window.__v2; if (v && v.openAddForm) v.openAddForm(); return true; }
+    const so = t.closest('[data-pq-sort]');
+    if (so) { const k = so.dataset.pqSort; if (pq.sortK === k) pq.sortD = -pq.sortD; else { pq.sortK = k; pq.sortD = 1; } render(); return true; }
+    const fo = t.closest('[data-pq-fold]');
+    if (fo) { const k = fo.dataset.pqFold; if (pq.folds.has(k)) pq.folds.delete(k); else pq.folds.add(k); pqSaveFolds(); render(); return true; }
+    const np = t.closest('[data-pq-noprice]');
+    if (np) { pq.noPrice = np.dataset.pqNoprice; pq.view = 'open'; pq.glance = false; st.id = null; setHash(true); render(); return true; }
+    if (t.closest('[data-pq-clear-noprice]')) { pq.noPrice = null; render(); return true; }
+    if (t.closest('[data-pq-glance]')) { pq.glance = !pq.glance; render(); return true; }
+    const act = t.closest('[data-pq-act]');
+    if (act) {
+      const p = byId(st.id), v = window.__v2 || {};
+      const raw = p && BK.open.raw ? BK.open.raw.get(p.pid) : null;
+      if (act.dataset.pqAct === 'chart') { if (p && v.openChart) v.openChart(p.ticker, act); }
+      else if (act.dataset.pqAct === 'close') { if (raw && v.openCloseForm) v.openCloseForm(raw); }
+      else if (act.dataset.pqAct === 'add') { if (raw && v.openAddToPositionForm) v.openAddToPositionForm(raw); }
+      return true;
+    }
+    const row = t.closest('[data-pq-row]');
+    if (row) {
+      st.id = Number(row.dataset.id);
+      // On a phone the pick PUSHES a history entry, so Android's back gesture closes the sheet;
+      // on a desktop it replaces, so back leaves the panel rather than walking every pick.
+      setHash(!mq.matches);
+      wantSub(); render(); return true;
+    }
+    return false;
+  }
+
+  // Earnings, once per panel open (d)5(i).
+  async function pqLoadEarn() {
+    if (pq.earnSeq === pq.openSeq) return;
+    pq.earnSeq = pq.openSeq;
+    const tks = [...new Set(BK.open.rows.map((p) => String(p.ticker || '').toUpperCase()).filter(Boolean))];
+    if (!tks.length) { pq.earnState = 'ok'; return; }
+    pq.earnState = 'loading'; if (st.open) render();
+    try {
+      const d = await bkJson('/api/chronos/next-earnings-batch?tickers=' + encodeURIComponent(tks.join(',')));
+      pq.earn = (d && d.earnings) || {}; pq.earnState = 'ok';
+    } catch (_) { pq.earnState = 'error'; }
+    if (st.open) render();
+  }
+
   function render() {
     if (!panel) return;
     const prev = panel.querySelector('.pp-body');
     const keepTop = prev ? prev.scrollTop : 0;
-    panel.innerHTML = head() + `<div class="pp-body">${mq.matches ? phone() : desktop()}</div>`;
+    if (POS_V1) panel.innerHTML = head() + `<div class="pp-body">${mq.matches ? phone() : desktop()}</div>`;
+    else {
+      pq.lastWide = pqWide();
+      panel.innerHTML = pqHead() + `<div class="pp-body pq-body">${mq.matches ? pqPhone() : pqDesktop()}</div>`;
+    }
     panel.querySelectorAll('tr.pp-row').forEach((r) => r.classList.toggle('sel', Number(r.dataset.id) === st.id));
     const body = panel.querySelector('.pp-body'); if (body) body.scrollTop = keepTop;
     if (st.cash && st.cash.focus) { const el = panel.querySelector('[data-cf="' + st.cash.focus + '"]'); if (el) el.focus(); st.cash.focus = null; }
@@ -8524,6 +9132,7 @@ const X = (function () {
     const t = e.target;
     if (t.closest('.pp-x')) return close();
     if (cashClick(t)) return;
+    if (!POS_V1 && pqClick(t)) return;
     const retry = t.closest('[data-bk-retry]');
     if (retry) {
       const k = retry.dataset.bkRetry;
@@ -8545,7 +9154,8 @@ const X = (function () {
   // Only what the open view needs. The closed history is 500-odd rows and the drawer's lots and
   // legs are two requests per position, so neither is fetched until something asks to see it.
   function wantTab() {
-    const onHistory = mq.matches ? st.mtab === 'History' : st.tab === 'History';
+    // R-IV.1382(d)7: CLOSED still loads only when opened.
+    const onHistory = !POS_V1 ? pq.view === 'closed' : mq.matches ? st.mtab === 'History' : st.tab === 'History';
     if (onHistory && BK.hist.status === 'idle') loadHist();
   }
   function wantSub() {
@@ -8554,14 +9164,26 @@ const X = (function () {
   }
   function show(opts) {
     build();
+    if (!st.open) pq.openSeq += 1;                 // one earnings read per panel OPEN, not per paint
     st.open = true;
     if (opts.id != null) { st.id = opts.id; st.card = opts.id; }
     if (opts.tab) st.tab = opts.tab;
     if (mq.matches && opts.id != null) st.mtab = 'Book';
+    if (!POS_V1) {
+      if (opts.view) pq.view = opts.view;
+      // The BOOK tile's doorways (R-IV.1369(e)3/(e)4) hand over which account and which tab: an
+      // account row opens filtered to it, the cash row opens CASH, the footer link clears both.
+      if ('__ppAcct' in window) {
+        pq.acctF = window.__ppAcct || null;
+        pq.view = window.__ppTab === 'cash' ? 'cash' : 'open';
+        pq.noPrice = null;
+        try { delete window.__ppAcct; delete window.__ppTab; } catch (_) { window.__ppAcct = undefined; }
+      }
+    }
     render();
     liftBook();
     loadCash();
-    loadOpen().then(() => { wantSub(); });
+    loadOpen().then(() => { wantSub(); if (!POS_V1) pqLoadEarn(); });
     wantTab();
     const first = !panel.classList.contains('open');
     requestAnimationFrame(() => { backdrop.classList.add('open'); panel.classList.add('open'); document.documentElement.classList.add('pp-open'); if (first) { const x = panel.querySelector('.pp-x'); if (x) x.focus(); } });
@@ -8587,7 +9209,15 @@ const X = (function () {
   }
   function sync() {
     const h = readHash();
-    if (h) { if (!st.open) show({ id: h.id, tab: h.tab }); else { st.id = h.id; st.tab = h.tab; render(); } }
+    if (h) {
+      if (!st.open) show({ id: h.id, tab: h.tab, view: h.view });
+      else {
+        st.id = h.id; st.tab = h.tab;
+        // A popped pick (the back gesture closing a phone sheet) lands here with id null.
+        if (!POS_V1 && h.view) { pq.view = h.view; wantTab(); wantSub(); }
+        render();
+      }
+    }
     else if (st.open) hide();
   }
   // The doorway (R-IV.555): the "Positions" button on the Book tile, or the #positions address. A Book row is NOT a
