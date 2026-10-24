@@ -389,8 +389,13 @@ def test_the_classifier_and_the_nightly_do_not_know_it_exists():
 def test_the_renderer_draws_BOTH_states_through_ONE_path():
     js = read_source(V2JS)
     assert "rcRender(REPORT_MOCK ? _rcMock : (m && m.regime_report_card))" in js
+    # The ONE PATH is what this test is for, and that is unchanged. The flag vocabulary
+    # moved under R-IV.1392(a): the card is the default now, so `'1'` is no longer a value
+    # the gate tests for -- `'off'` is. Bounded by the next const rather than a character
+    # window, because the comment above REPORT_ON is longer than 400 characters.
     i = js.index("const REPORT_PARAM")
-    assert "'mock'" in js[i:i + 400] and "'1'" in js[i:i + 400]
+    block = js[i:js.index("const RC_CSS")]
+    assert "'mock'" in block and "'off'" in block
 
 
 def test_the_empty_state_prints_a_REASON_and_a_dash_per_panel():
