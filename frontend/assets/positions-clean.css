@@ -13,6 +13,14 @@
   html.pp-open .pos-modal { z-index: 97; }
 }
 
+/* Text in the redesigned panel is 12px or larger. The shared .pp-chip (10px) and .pp-dim /
+   .pp-amber (11px) keep v2.css's sizes everywhere else; inside .pq they come up. Found by the
+   R-IV.1434(c) dry run: the desktop live chip and the CLOSED tab's census chips were 10-11px,
+   and the phone-only text check never looked there. Declared BEFORE .pq-dot, whose font-size: 0
+   (same specificity, later) must still win for the dot. */
+.pq .pp-chip { font-size: 12px; }
+.pq .pp-dim, .pq .pp-amber { font-size: 12px; }
+
 /* ── header ─────────────────────────────────────────────────────────────────────────── */
 .pq .pq-head { gap: 10px; padding: 8px 12px 8px 16px; background: var(--panel); }
 .pq .pq-head .pp-x { margin-left: 0; }

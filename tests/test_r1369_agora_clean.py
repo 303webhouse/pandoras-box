@@ -257,7 +257,9 @@ def open_pop(pg):
 SMALL = """(sel) => { const out = []; document.querySelectorAll(sel).forEach((root) => {
   root.querySelectorAll('*').forEach((e) => {
     // An icon glyph (the ⓘ, role="img" with an aria-label) is not readable text.
-    if (e.closest('.rg-evb') || e.closest('[role="img"]') || e.children.length || !(e.textContent || '').trim()) return;
+    // #b9-mount's CONTENTS are BUILD's B9 section, styled by BUILD's b9_live.css; its sizes are
+    // reported to BUILD, not asserted by this lane's suite.
+    if (e.closest('.rg-evb') || e.closest('#b9-mount') || e.closest('[role="img"]') || e.children.length || !(e.textContent || '').trim()) return;
     const s = getComputedStyle(e); if (s.display === 'none' || s.visibility === 'hidden') return;
     const px = parseFloat(s.fontSize); if (px && px < 12) out.push((e.textContent||'').trim().slice(0,18) + ' @' + px); }); });
   return out.slice(0, 6); }"""
@@ -356,8 +358,12 @@ with sync_playwright() as p:
     pg.click('[data-rg-more]'); pg.wait_for_timeout(150)
     full = pg.evaluate("() => (document.querySelector('.rg-pfull') || {}).hidden === false")
     check('pop-out: "more" reveals the full premium', full)
-    check('pop-out: B9\'s mount point #b9-mount holds the ruled line, below the evidence',
-          pop['b9'] == 'Global markets returns here once its live data is wired.' and pop['b9After'], pop['b9'])
+    # BUILD's B9 (R-IV.1431) now FILLS the mount, as R-IV.1432(d) intended, so it holds either the
+    # ruled line (B9 not loaded) or B9's own section. What this lane owns is the mount: its id, and
+    # its place below the evidence.
+    check('pop-out: #b9-mount sits below the evidence, holding the ruled line or B9\'s section',
+          pop['b9After'] and (pop['b9'] == 'Global markets returns here once its live data is wired.'
+                              or 'global markets' in (pop['b9'] or '').lower()), pop['b9'])
     check('pop-out: the header still carries the rules version', 'v2.1' in pop['title'], pop['title'])
     check('pop-out 1920: no errors', not errs, errs)
     ctx.close()
