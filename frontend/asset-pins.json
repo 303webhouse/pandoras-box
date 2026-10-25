@@ -61,12 +61,12 @@
       "sha256": "5e78b18e68442d288e703d40c33ec2ab01b89464aa0b2889ba0cfd35b64b0441"
     },
     "assets/b9/b9_live.css": {
-      "pin": 2,
-      "sha256": "3247ced7270e715973e3e1a936c1b67d2ae791974057ab2b67ce303e52f2808b"
+      "pin": 3,
+      "sha256": "42fbed177551c67dc09162212768065b7726f1a0f42986772b1e64c4b59ed66d"
     },
     "assets/b9/b9_live.js": {
-      "pin": 1,
-      "sha256": "ce41b136da0b4b085bbe409db9c00b616d304f61d731a8022062cd25f0bb72f1"
+      "pin": 2,
+      "sha256": "c1eb703d2f56c508dde2ba00af1bb1f45414ffa458ec404d185516e7d86ab61f"
     },
     "assets/positions-clean.css": {
       "pin": 2,

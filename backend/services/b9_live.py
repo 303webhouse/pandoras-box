@@ -212,6 +212,142 @@ def meltdown_line(spy: Dict[Any, float]) -> Dict[str, Any]:
             "high_sessions": n, "as_of": days[-1].isoformat()}
 
 
+# ── RECOVERY RACE (R-IV.1436(e)3, SPEC-B9.md "RECOVERY RACE") ─────────────────────────
+#
+# The equity markets plus SPY and QQQ, ranked in R-IV.1224's column order. Commodities are OUT
+# (R-IV.1220): `b9_world.race_rows` REFUSES one rather than filtering it. SPY and QQQ are ranked
+# and marked exactly like every other row, so the panel is as loud when SPY leads as when any
+# other market does (the spec's bias check). Display only (#42).
+
+RACE_ANCHOR_WINDOW = 63          # SPY's lowest close of the last 63 sessions ...
+RACE_ANCHOR_MIN_AGE = 10         # ... at least 10 sessions old
+RACE_FALL_HIGH_SESSIONS = 252    # "fell least" measures from SPY's 252-session high to the anchor
+ACCEPT_RUN, ACCEPT_RANGE = 3, 20
+
+#: SPEC-B9.md's footnote, WORD FOR WORD (R-IV.1436(e)3). It differs from the older
+#: `b9_world.RACE_FOOTNOTE` (amendment 7 of the 10-18 document: two of the four figures, with its
+#: own universe and as-of); that constant is left untouched and the discrepancy is reported.
+RACE_FOOTNOTE_SPEC = ("QUERY's equity-only figures: the leader in each column was still leading "
+                      "SPY 6 months later in 8/9, 6/9, 4/8 and 2/9 of past selloffs respectively "
+                      "(QUERY R-IV.1221).")
+
+RACE_COLUMNS = (
+    ("gained", "Gained most since SPY's low", False,
+     "Change from the anchor date (SPY's low) to the latest close."),
+    ("back200", "First back above its 200-day", False,
+     "The first close above the market's own 200-day on or after the anchor; a market that "
+     "never fell below it counts from the anchor date."),
+    ("accept", "First to accept higher prices", True,
+     "PROXY: the first run of 3 consecutive closes each above the prior 20 sessions' highest "
+     "close, after the anchor (the spec's acceptance test, on closes)."),
+    ("fell", "Fell least", False,
+     "Change from SPY's highest close in the 252 sessions up to the anchor, to the anchor."),
+)
+
+
+def _on_or_before(series: Dict[Any, float], d):
+    """The close on `d`, or on the latest date before it; None if there is none."""
+    if d in series:
+        return series[d]
+    prior = [x for x in series if x <= d]
+    return series[max(prior)] if prior else None
+
+
+def _first_back_above_200(series: Dict[Any, float], anchor):
+    days, xs = _closes(series)
+    if len(xs) < SMA_SLOW:
+        return None, "needs %d sessions" % SMA_SLOW
+    for i in range(SMA_SLOW - 1, len(xs)):
+        if days[i] < anchor:
+            continue
+        if xs[i] > sma_at(xs, SMA_SLOW, i):
+            note = "never fell below it" if days[i] == anchor else None
+            return days[i], note
+    return None, "not back above its 200-day yet"
+
+
+def _first_acceptance(series: Dict[Any, float], anchor):
+    days, xs = _closes(series)
+    run = 0
+    for i in range(ACCEPT_RANGE, len(xs)):
+        above = xs[i] > max(xs[i - ACCEPT_RANGE:i])
+        run = run + 1 if above else 0
+        if run >= ACCEPT_RUN and days[i - ACCEPT_RUN + 1] > anchor:
+            return days[i], None
+    return None, "no acceptance of higher prices since the anchor"
+
+
+def recovery_race(series: Dict[str, Dict[Any, float]], *, armed=None) -> Dict[str, Any]:
+    """The race payload. A missing anchor is a STATE with its reason, not an empty panel."""
+    base = {"title": "RECOVERY RACE", "footnote": RACE_FOOTNOTE_SPEC,
+            "columns": [{"key": k, "label": lab, "proxy": proxy, "rule": rule}
+                        for k, lab, proxy, rule in RACE_COLUMNS],
+            "open_by_default": bool(armed),
+            "visibility": "Always shown, collapsed by default; opens by default while meltdown "
+                          "mode is armed"}
+    spy = series.get("SPY") or {}
+    spy_days, spy_xs = _closes(spy)
+    if len(spy_xs) < RACE_ANCHOR_WINDOW:
+        return dict(base, anchor=None, rows=[],
+                    reason="needs %d SPY sessions, has %d" % (RACE_ANCHOR_WINDOW, len(spy_xs)))
+    lo = len(spy_xs) - RACE_ANCHOR_WINDOW
+    low_i = min(range(lo, len(spy_xs)), key=lambda i: spy_xs[i])
+    age = len(spy_xs) - 1 - low_i
+    anchor = spy_days[low_i]
+    anchor_info = {"date": anchor.isoformat(), "spy_close": round(spy_xs[low_i], 2),
+                   "sessions_ago": age, "rule": "SPY's lowest close of the last %d sessions, at "
+                   "least %d sessions old" % (RACE_ANCHOR_WINDOW, RACE_ANCHOR_MIN_AGE)}
+    if age < RACE_ANCHOR_MIN_AGE:
+        return dict(base, anchor=dict(anchor_info, valid=False), rows=[],
+                    reason="no anchor yet: SPY's %d-session low (%s) is %d session(s) old, and the "
+                           "race needs it at least %d sessions old"
+                           % (RACE_ANCHOR_WINDOW, anchor.isoformat(), age, RACE_ANCHOR_MIN_AGE))
+    hi_lo = max(0, low_i - RACE_FALL_HIGH_SESSIONS + 1)
+    peak_i = max(range(hi_lo, low_i + 1), key=lambda i: spy_xs[i])
+    peak = spy_days[peak_i]
+    anchor_info.update(valid=True, fall_window_from=peak.isoformat())
+
+    racers = W.race_rows([{"ticker": t} for t in W.RACE_UNIVERSE])     # refuses a commodity
+    rows = []
+    for r in racers:
+        t = r["ticker"]
+        s = series.get(t)
+        row: Dict[str, Any] = {"ticker": t, "name": NAMES.get(t, t)}
+        if not s:
+            row["missing"] = "no Adj Close history was served for %s" % t
+            rows.append(row)
+            continue
+        days, xs = _closes(s)
+        at_anchor, at_peak = _on_or_before(s, anchor), _on_or_before(s, peak)
+        row["gained"] = (round((xs[-1] / at_anchor - 1.0) * 100.0, 2) if at_anchor else None)
+        row["fell"] = (round((at_anchor / at_peak - 1.0) * 100.0, 2)
+                       if at_anchor and at_peak else None)
+        d200, why200 = _first_back_above_200(s, anchor)
+        dacc, whyacc = _first_acceptance(s, anchor)
+        row["back200"] = d200.isoformat() if d200 else None
+        row["back200_note"] = why200
+        row["accept"] = dacc.isoformat() if dacc else None
+        row["accept_note"] = whyacc
+        rows.append(row)
+
+    def rank(key, value_of, reverse):
+        ranked = [r for r in rows if value_of(r) is not None]
+        ranked.sort(key=lambda r: (value_of(r), -(r.get("gained") or 0)) if not reverse
+                    else (-value_of(r), -(r.get("gained") or 0)))
+        for i, r in enumerate(ranked, 1):
+            r.setdefault("ranks", {})[key] = i
+        return [r["ticker"] for r in ranked]
+
+    order = {
+        "gained": rank("gained", lambda r: r.get("gained"), True),
+        "back200": rank("back200", lambda r: r.get("back200"), False),
+        "accept": rank("accept", lambda r: r.get("accept"), False),
+        "fell": rank("fell", lambda r: r.get("fell"), True),
+    }
+    leaders = {k: (v[0] if v else None) for k, v in order.items()}
+    return dict(base, anchor=anchor_info, rows=rows, order=order, leaders=leaders, reason=None)
+
+
 def build_world(series: Dict[str, Dict[Any, float]], *, as_of=None) -> Dict[str, Any]:
     """The whole section from `series` = {ticker: {date: adj_close}}. Missing tickers are reported,
     never filled. Raises ValueError if the payload breaks B9's lint (fail closed)."""
@@ -251,6 +387,7 @@ def build_world(series: Dict[str, Dict[Any, float]], *, as_of=None) -> Dict[str,
         "missing": missing,
         "display_only": True,
     }
+    payload["race"] = recovery_race(series, armed=(payload["meltdown"] or {}).get("armed"))
     findings = W.lint_findings(payload)
     if findings:
         raise ValueError("B9 payload refused by its own lint: %s" % "; ".join(findings[:5]))

@@ -90,6 +90,47 @@
       + '<div class="b9l-l2">' + arrows(p.changes) + flag(p.move, 'Price') + '</div></div>';
   }
 
+  // R-IV.1436(e)3: THE RECOVERY RACE. Always shown, collapsed by default with the anchor date on
+  // its summary line, and open by default while meltdown mode is armed. Every ticker -- SPY and QQQ
+  // included -- is ranked and led the same way: the leader mark does not care who leads.
+  function raceVal(key, r) {
+    var v = r[key];
+    if (v == null) return NA(r[key + '_note'] || 'not available');
+    if (key === 'gained' || key === 'fell') return (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+    return esc(v) + (r[key + '_note'] ? ' <i>' + esc(r[key + '_note']) + '</i>' : '');
+  }
+  function race(rc) {
+    if (!rc) return '';
+    var a = rc.anchor;
+    var head = 'RECOVERY RACE · ' + (a && a.valid
+      ? 'from SPY’s low ' + esc(a.date) + ' (' + esc(a.sessions_ago) + ' sessions ago)'
+      : 'no anchor yet');
+    var body;
+    if (!a || !a.valid) {
+      body = '<div class="b9l-un">' + esc(rc.reason || 'the race has no anchor') + '</div>';
+    } else {
+      var byT = {};
+      (rc.rows || []).forEach(function (r) { byT[r.ticker] = r; });
+      body = (rc.columns || []).map(function (c) {
+        var order = (rc.order || {})[c.key] || [];
+        var unranked = (rc.rows || []).filter(function (r) { return order.indexOf(r.ticker) < 0; });
+        return '<div class="b9l-rc"><div class="b9l-rch" title="' + esc(c.rule) + '">' + esc(c.label)
+          + (c.proxy ? ' <span class="b9l-proxy">proxy</span>' : '') + '</div><ol>'
+          + order.map(function (t, i) {
+              var r = byT[t] || {};
+              return '<li' + (i === 0 ? ' class="b9l-lead"' : '') + '><b>' + esc(t) + '</b> ' + raceVal(c.key, r) + '</li>';
+            }).join('') + '</ol>'
+          + (unranked.length ? '<div class="b9l-rnu">not yet: ' + unranked.map(function (r) {
+              return '<span title="' + esc(r.missing || r[c.key + '_note'] || '') + '">' + esc(r.ticker) + '</span>';
+            }).join(', ') + '</div>' : '')
+          + '</div>';
+      }).join('')
+        + '<div class="b9l-rnote">Anchor: ' + esc(a.rule) + '. ' + esc(rc.visibility || '') + '.</div>';
+    }
+    return '<details class="b9l-race"' + (rc.open_by_default ? ' open' : '') + '><summary>' + head
+      + '</summary>' + body + '<div class="b9l-foot">' + esc(rc.footnote || '') + ' Display only.</div></details>';
+  }
+
   function render(el, env) {
     if (!el) return;
     var d = env && env.data;
@@ -115,6 +156,7 @@
       + (d.rows || []).map(function (r) { return row(r, bench); }).join('')
       + '<div class="b9l-h2">COMMODITIES · context</div>'
       + (d.context || []).map(ctx).join('')
+      + race(d.race)
       + '<div class="b9l-foot">' + esc(d.trend_rule || '') + ' ' + esc(d.flag_rule || '')
       + ' Display only.</div>'
       + '</div>';

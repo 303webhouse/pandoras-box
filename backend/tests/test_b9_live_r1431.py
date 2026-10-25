@@ -173,10 +173,13 @@ def test_the_payload_is_REFUSED_if_it_breaks_B9s_keep_out_lint(monkeypatch):
 
 
 def test_after_Monday_items_are_NOT_in_the_payload():
+    """The Recovery Race is now ruled in (R-IV.1436(e)3) and its proxy column uses the spec's
+    acceptance test, so "recovery race" and the word "acceptance" left this list. The other extras,
+    including the separate acceptance-vs-rejection panel, still wait for SPINE."""
     s = series(ramp(320, 100, 0.1))
     blob = repr(L.build_world({t: s for t in L.ALL_TICKERS})).lower()
-    for later in ("recovery race", "currency gap", "overnight", "new leader is real", "coupled",
-                  "acceptance"):
+    for later in ("currency gap", "overnight", "new leader is real", "coupled",
+                  "acceptance vs rejection", "rejection"):
         assert later not in blob, later
 
 
