@@ -379,7 +379,20 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=113"></script>
+    <script src="/v2.js?v=114"></script>
     <script src="/assets/b9/b9_live.js?v=2"></script>
+    <script>
+      /* R-IV.1440: the TV tile is a PREVIEW. Without ?tv=preview nothing of it loads: not its script,
+         not its stylesheet, not YouTube's player. Desktop only: wider than Agora's 768px phone
+         breakpoint and a fine pointer, so a phone held sideways does not get it either. */
+      (function () {
+        if (!/(?:^|[?&])tv=preview(?:&|$)/.test(location.search)) return;
+        if (!window.matchMedia('(min-width: 769px) and (hover: hover) and (pointer: fine)').matches) return;
+        var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/assets/tv/tv_tile.css?v=1';
+        document.head.appendChild(l);
+        var s = document.createElement('script'); s.src = '/assets/tv/tv_tile.js?v=1';
+        document.body.appendChild(s);
+      })();
+    </script>
 </body>
 </html>

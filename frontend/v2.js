@@ -3619,6 +3619,10 @@
         clearTimeout(saveTimer);
         saveTimer = setTimeout(saveLayout, 800);
       });
+      // R-IV.1440: the TV preview tile (assets/tv/tv_tile.js, loaded only under ?tv=preview)
+      // places itself AFTER the restore, so reconcileMissingTiles() never parks it at the bottom.
+      window.__agoraGrid = grid;
+      document.dispatchEvent(new CustomEvent('agora:grid-ready', { detail: { grid } }));
     });
 
     MOBILE_MQ.addEventListener('change', () => {
@@ -3637,7 +3641,9 @@
     if (isCollapsed()) { $('layoutStatus').textContent = 'mobile · layout locked'; return; }
     if (!saveArmed) return;
     try {
-      const layout = grid.save(false); // positions + gs-id, no content
+      // The TV preview tile is never written into the one layout row (R-IV.1440(c)1: a preview
+      // leaves nothing behind once the flag is gone).
+      const layout = grid.save(false).filter((n) => n && n.id !== 'tv'); // positions + gs-id, no content
       const r = await apiFetch('/api/layout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify({ layout }) });
       $('layoutStatus').textContent = r.ok ? 'layout saved ' + new Date().toLocaleTimeString() : (r.status === 401 ? 'sign in to save layout' : 'layout save failed');
     } catch (_) { $('layoutStatus').textContent = 'layout save failed'; }

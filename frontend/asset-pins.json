@@ -72,13 +72,21 @@
       "pin": 2,
       "sha256": "97d13925f0ff33ff3a726a385c08ee4aa1a57881335d6790b748601261eea696"
     },
+    "assets/tv/tv_tile.css": {
+      "pin": 1,
+      "sha256": "16ca90bc4fd96837509d2c8eb1f13aac0e224c058ed1c377c5600ad125d99f64"
+    },
+    "assets/tv/tv_tile.js": {
+      "pin": 1,
+      "sha256": "399056a3f575cf7b4e242cadafd1858bb22f5bcc71edf1190d9d6b5d7d59978a"
+    },
     "v2.css": {
       "pin": 75,
       "sha256": "f9d82de6281c3b171ef308abc1b381f79275d6efc96ec8f5e75f0f20eb55ca88"
     },
     "v2.js": {
-      "pin": 113,
-      "sha256": "833b950ffa163a00ecf9acbc4d705b4f08ec9424acbf0189653d73f05fba7343"
+      "pin": 114,
+      "sha256": "2c71f9aebec87678572e82288814d34d89cc5939f5717745c178bdbb8660f3f0"
     }
   }
 }
