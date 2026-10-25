@@ -33,7 +33,8 @@ router = APIRouter(prefix="/b9", tags=["b9"])
 # The version moves whenever the payload's SHAPE does, or a session cached before a deploy keeps
 # serving the old shape for up to CACHE_TTL_S: v2 = the Recovery Race (R-IV.1436(e)3), whose first
 # deploy served 10-23's v1 entry with no race in it.
-CACHE_PREFIX = "b9:world:v2:"
+# v3 = R-IV.1441(b)1: the race's ties (`places`, `ties`, `back200_status`, leaders as lists).
+CACHE_PREFIX = "b9:world:v3:"
 CACHE_TTL_S = 20 * 3600
 FAIL_HOLD_S = 300
 HISTORY_DAYS = 770            # ~2.1y: 252 sparkline + 220 for the trend test, with holidays

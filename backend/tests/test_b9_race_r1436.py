@@ -101,7 +101,7 @@ def test_gained_most_ranks_the_strongest_bounce_off_SPYs_low_first():
     others = {"INDA": v_shape(n, low_at=290, end=110.0), "FXI": v_shape(n, low_at=290, end=85.0)}
     race = L.recovery_race(build(spy, others)[0])
     assert race["order"]["gained"][0] == "INDA" and race["order"]["gained"][-1] == "FXI"
-    assert race["leaders"]["gained"] == "INDA"
+    assert race["leaders"]["gained"] == ["INDA"]
 
 
 def test_fell_least_ranks_the_smallest_decline_into_the_low_first():
@@ -112,13 +112,66 @@ def test_fell_least_ranks_the_smallest_decline_into_the_low_first():
     assert race["order"]["fell"][0] == "EWJ"
 
 
-def test_a_market_that_never_lost_its_200_day_counts_from_the_anchor_and_says_so():
+def test_a_market_that_never_lost_its_200_day_reads_HELD_ABOVE():
     n = 320
     spy = v_shape(n, low_at=290)
     up = [50 + 0.2 * i for i in range(n)]                          # never below its 200-day
     race = L.recovery_race(build(spy, {"EWT": up})[0])
     ewt = [r for r in race["rows"] if r["ticker"] == "EWT"][0]
-    assert ewt["back200"] == race["anchor"]["date"] and ewt["back200_note"] == "never fell below it"
+    assert ewt["back200_status"] == "held" and ewt["back200_note"] == "held above"
+
+
+# ── R-IV.1441(b)1: ties are shown as ties ───────────────────────────────────
+
+def _tie_race():
+    """EWT and EWJ never lose their 200-day; INDA and FXI fall below it and come back on different
+    days (INDA first); VGK is still below. SPY and the rest follow SPY's V."""
+    n = 320
+    spy = v_shape(n, low_at=290)
+    up = [50 + 0.2 * i for i in range(n)]
+    def dip_back(k):                     # flat, a dip below the 200-day, then back above it
+        return [100.0] * 250 + [80.0] * (45 + k) + [130.0] * (25 - k)   # below at the anchor (290)
+    others = {"EWT": up, "EWJ": [50 + 0.1 * i for i in range(n)], "INDA": dip_back(0), "FXI": dip_back(5),
+              "VGK": [100 - 0.1 * i for i in range(n)]}
+    return L.recovery_race(build(spy, others)[0])
+
+
+def test_held_above_markets_SHARE_FIRST_PLACE_marked_as_a_tie():
+    race = _tie_race()
+    first = race["places"]["back200"][0]
+    assert first["rank"] == 1 and first["tie"] is True
+    assert {"EWT", "EWJ"} <= set(first["tickers"])
+    for t in first["tickers"]:
+        row = [r for r in race["rows"] if r["ticker"] == t][0]
+        assert row["back200_status"] == "held" and row["ranks"]["back200"] == 1
+        assert row["ties"]["back200"] is True
+    assert race["leaders"]["back200"] == first["tickers"]
+
+
+def test_ties_are_NOT_ordered_by_gained_but_alphabetically():
+    race = _tie_race()
+    first = race["places"]["back200"][0]["tickers"]
+    assert first == sorted(first)
+    rows = {r["ticker"]: r for r in race["rows"]}
+    by_gained = sorted(first, key=lambda t: -rows[t]["gained"])
+    assert by_gained != first, "the fixture must make gained disagree with the alphabet"
+
+
+def test_comebacks_rank_AFTER_the_held_group_in_the_order_they_came_back():
+    race = _tie_race()
+    order = race["order"]["back200"]
+    held = race["places"]["back200"][0]["tickers"]
+    assert order[:len(held)] == held
+    assert order.index("INDA") < order.index("FXI")            # INDA came back first
+    rows = {r["ticker"]: r for r in race["rows"]}
+    assert rows["INDA"]["back200_status"] == "back" and rows["INDA"]["ranks"]["back200"] == len(held) + 1
+
+
+def test_a_market_still_below_is_NOT_YET_and_unranked():
+    race = _tie_race()
+    vgk = [r for r in race["rows"] if r["ticker"] == "VGK"][0]
+    assert vgk["back200_status"] == "not_yet" and "VGK" not in race["order"]["back200"]
+    assert "back200" not in (vgk.get("ranks") or {})
 
 
 def test_not_back_above_the_200_day_is_UNRANKED_with_a_reason_not_last_place():
@@ -144,7 +197,7 @@ def test_when_SPY_leads_it_is_THE_leader_marked_the_same_way():
     spy = v_shape(n, low_at=290, end=110.0)
     weaker = {t: v_shape(n, low_at=290, end=90.0) for t in W.RACE_UNIVERSE if t != "SPY"}
     race = L.recovery_race(build(spy, weaker)[0])
-    assert race["leaders"]["gained"] == "SPY"
+    assert race["leaders"]["gained"] == ["SPY"]
     spy_row = [r for r in race["rows"] if r["ticker"] == "SPY"][0]
     assert spy_row["ranks"]["gained"] == 1
 

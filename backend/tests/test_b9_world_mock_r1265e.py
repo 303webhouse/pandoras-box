@@ -110,14 +110,13 @@ def test_fxi_stands_and_mchi_is_refused():
 # ── 5 and 6 · the columns and the footnote ───────────────────────────────────
 
 
-def test_the_footnote_is_a_worked_example_of_convention_37():
-    """Source, universe and as-of in the SAME SENTENCE as the figure."""
-    f = b9.RACE_FOOTNOTE
-    for part in ("QUERY 2026-10-18", "9 episodes", "equity ETFs", "USD total return",
-                 "8 of 9", "2 of 9"):
-        assert part in f, part
-    assert f.index("QUERY 2026-10-18") < f.index("8 of 9"), (
-        "the source must sit in the same sentence as the figure, before it")
+def test_the_race_footnote_has_ONE_source():
+    """R-IV.1441(b)2: SPEC-B9.md's sentence, held once in b9_live; amendment 7's older wording is
+    gone, so no second footnote can drift from it."""
+    from services import b9_live
+    assert not hasattr(b9, "RACE_FOOTNOTE")
+    f = b9_live.RACE_FOOTNOTE_SPEC
+    assert "8/9, 6/9, 4/8 and 2/9" in f and "(QUERY R-IV.1221)" in f
 
 
 # ── 7 · the reframe, and the keep-out list ───────────────────────────────────

@@ -228,6 +228,6 @@ def test_the_cache_key_carries_the_SESSION():
     from api import b9
     # v2 since the Recovery Race joined the payload: a shape change must move the version, or the
     # session cached before the deploy is served without it.
-    assert b9.CACHE_PREFIX == "b9:world:v2:"
+    assert b9.CACHE_PREFIX == "b9:world:v3:"   # v3: the race's ties (R-IV.1441(b)1)
     src = (_BACKEND / "api" / "b9.py").read_text(encoding="utf-8")
     assert "CACHE_PREFIX + settled.isoformat()" in src

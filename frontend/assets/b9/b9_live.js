@@ -95,6 +95,9 @@
   // included -- is ranked and led the same way: the leader mark does not care who leads.
   function raceVal(key, r) {
     var v = r[key];
+    if (key === 'back200' && r.back200_status === 'held') {
+      return '<i title="above its own 200-day on the day of SPY’s low">held above</i>';
+    }
     if (v == null) return NA(r[key + '_note'] || 'not available');
     if (key === 'gained' || key === 'fell') return (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%';
     return esc(v) + (r[key + '_note'] ? ' <i>' + esc(r[key + '_note']) + '</i>' : '');
@@ -111,14 +114,23 @@
     } else {
       var byT = {};
       (rc.rows || []).forEach(function (r) { byT[r.ticker] = r; });
+      // R-IV.1441(b)1: ties are SHOWN as ties -- one shared place number on every tied market, a
+      // "tie" mark on each, alphabetical inside the tie. Every market in first place is a leader.
       body = (rc.columns || []).map(function (c) {
         var order = (rc.order || {})[c.key] || [];
+        var places = (rc.places || {})[c.key] || order.map(function (t, i) { return { rank: i + 1, tickers: [t], tie: false }; });
         var unranked = (rc.rows || []).filter(function (r) { return order.indexOf(r.ticker) < 0; });
         return '<div class="b9l-rc"><div class="b9l-rch" title="' + esc(c.rule) + '">' + esc(c.label)
           + (c.proxy ? ' <span class="b9l-proxy">proxy</span>' : '') + '</div><ol>'
-          + order.map(function (t, i) {
-              var r = byT[t] || {};
-              return '<li' + (i === 0 ? ' class="b9l-lead"' : '') + '><b>' + esc(t) + '</b> ' + raceVal(c.key, r) + '</li>';
+          + places.map(function (p) {
+              return p.tickers.map(function (t) {
+                var r = byT[t] || {};
+                return '<li value="' + esc(p.rank) + '"' + (p.rank === 1 ? ' class="b9l-lead"' : '') + '><b>' + esc(t)
+                  + '</b> ' + raceVal(c.key, r)
+                  + (p.tie ? ' <span class="b9l-tie" title="tied for place ' + esc(p.rank) + ' with '
+                      + esc(p.tickers.filter(function (x) { return x !== t; }).join(', ')) + '">tie</span>' : '')
+                  + '</li>';
+              }).join('');
             }).join('') + '</ol>'
           + (unranked.length ? '<div class="b9l-rnu">not yet: ' + unranked.map(function (r) {
               return '<span title="' + esc(r.missing || r[c.key + '_note'] || '') + '">' + esc(r.ticker) + '</span>';

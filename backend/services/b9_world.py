@@ -75,13 +75,8 @@ Z_EXCLUDES_TODAY = True
 RACE_COLUMNS = ("gained most since SPY's low", "first back above 200d",
                 "first to accept higher prices", "fell least")
 
-#: Amendment 7: the footnote, VERBATIM. Not paraphrased, not reflowed. It is also a worked
-#: example of Convention #37 as clarified by R-IV.1224(g): source, universe and as-of in the
-#: same sentence as the figure.
-RACE_FOOTNOTE = (
-    "US selloffs since 2003 (9 episodes; equity ETFs; USD total return; QUERY 2026-10-18): "
-    "the 'gained most' leader still led SPY 6 months later in 8 of 9, 'fell least' in 2 of 9. "
-    "History, not a forecast.")
+#: The race footnote lives in ONE place: `b9_live.RACE_FOOTNOTE_SPEC`, SPEC-B9.md's sentence word
+#: for word (R-IV.1441(b)2). Amendment 7's older wording was deleted here; nothing read it.
 
 #: The document's own caveat, carried onto the surface.
 RECOLLECTION_CAVEAT = ("Every historical figure in B9's source document is the seats' "

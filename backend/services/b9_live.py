@@ -224,9 +224,9 @@ RACE_ANCHOR_MIN_AGE = 10         # ... at least 10 sessions old
 RACE_FALL_HIGH_SESSIONS = 252    # "fell least" measures from SPY's 252-session high to the anchor
 ACCEPT_RUN, ACCEPT_RANGE = 3, 20
 
-#: SPEC-B9.md's footnote, WORD FOR WORD (R-IV.1436(e)3). It differs from the older
-#: `b9_world.RACE_FOOTNOTE` (amendment 7 of the 10-18 document: two of the four figures, with its
-#: own universe and as-of); that constant is left untouched and the discrepancy is reported.
+#: SPEC-B9.md's footnote, WORD FOR WORD (R-IV.1436(e)3), and the race footnote's SINGLE source
+#: (R-IV.1441(b)2): the older `b9_world.RACE_FOOTNOTE` was read by nothing but its own test and is
+#: deleted.
 RACE_FOOTNOTE_SPEC = ("QUERY's equity-only figures: the leader in each column was still leading "
                       "SPY 6 months later in 8/9, 6/9, 4/8 and 2/9 of past selloffs respectively "
                       "(QUERY R-IV.1221).")
@@ -235,8 +235,10 @@ RACE_COLUMNS = (
     ("gained", "Gained most since SPY's low", False,
      "Change from the anchor date (SPY's low) to the latest close."),
     ("back200", "First back above its 200-day", False,
-     "The first close above the market's own 200-day on or after the anchor; a market that "
-     "never fell below it counts from the anchor date."),
+     "A market still above its own 200-day on the day of SPY's low HELD ABOVE: every such market "
+     "shares first place, as a tie. Markets that fell below and came back rank after them, in the "
+     "order they came back (first close above the 200-day after the anchor). Any still below: "
+     "not yet."),
     ("accept", "First to accept higher prices", True,
      "PROXY: the first run of 3 consecutive closes each above the prior 20 sessions' highest "
      "close, after the anchor (the spec's acceptance test, on closes)."),
@@ -261,7 +263,7 @@ def _first_back_above_200(series: Dict[Any, float], anchor):
         if days[i] < anchor:
             continue
         if xs[i] > sma_at(xs, SMA_SLOW, i):
-            note = "never fell below it" if days[i] == anchor else None
+            note = "held above" if days[i] == anchor else None
             return days[i], note
     return None, "not back above its 200-day yet"
 
@@ -326,26 +328,48 @@ def recovery_race(series: Dict[str, Dict[Any, float]], *, armed=None) -> Dict[st
         dacc, whyacc = _first_acceptance(s, anchor)
         row["back200"] = d200.isoformat() if d200 else None
         row["back200_note"] = why200
+        # held: above its 200-day at SPY's low; back: came back after it; not_yet: still below.
+        row["back200_status"] = ("not_yet" if d200 is None else
+                                 "held" if why200 == "held above" else "back")
         row["accept"] = dacc.isoformat() if dacc else None
         row["accept_note"] = whyacc
         rows.append(row)
 
-    def rank(key, value_of, reverse):
-        ranked = [r for r in rows if value_of(r) is not None]
-        ranked.sort(key=lambda r: (value_of(r), -(r.get("gained") or 0)) if not reverse
-                    else (-value_of(r), -(r.get("gained") or 0)))
-        for i, r in enumerate(ranked, 1):
-            r.setdefault("ranks", {})[key] = i
-        return [r["ticker"] for r in ranked]
+    # R-IV.1441(b)1: EQUAL VALUES ARE A TIE, shown as one. Tied markets share a place (competition
+    # ranking: 1, 1, 1, 4), are listed alphabetically inside it -- a neutral order, never a second
+    # measure, which would imply a race that did not happen -- and every one of them is marked.
+    def rank(key, sort_key):
+        keyed = sorted(((sort_key(r), r) for r in rows if sort_key(r) is not None),
+                       key=lambda kr: (kr[0], kr[1]["ticker"]))
+        places, pos = [], 0
+        while pos < len(keyed):
+            k = keyed[pos][0]
+            group = [r for kk, r in keyed[pos:] if kk == k]
+            for r in group:
+                r.setdefault("ranks", {})[key] = pos + 1
+                if len(group) > 1:
+                    r.setdefault("ties", {})[key] = True
+            places.append({"rank": pos + 1, "tickers": [r["ticker"] for r in group],
+                           "tie": len(group) > 1})
+            pos += len(group)
+        return [r["ticker"] for _, r in keyed], places
 
-    order = {
-        "gained": rank("gained", lambda r: r.get("gained"), True),
-        "back200": rank("back200", lambda r: r.get("back200"), False),
-        "accept": rank("accept", lambda r: r.get("accept"), False),
-        "fell": rank("fell", lambda r: r.get("fell"), True),
+    def back200_key(r):
+        st = r.get("back200_status")
+        return (0, "") if st == "held" else (1, r["back200"]) if st == "back" else None
+
+    ranked = {
+        "gained": rank("gained", lambda r: None if r.get("gained") is None else -r["gained"]),
+        "back200": rank("back200", back200_key),
+        "accept": rank("accept", lambda r: r.get("accept")),
+        "fell": rank("fell", lambda r: None if r.get("fell") is None else -r["fell"]),
     }
-    leaders = {k: (v[0] if v else None) for k, v in order.items()}
-    return dict(base, anchor=anchor_info, rows=rows, order=order, leaders=leaders, reason=None)
+    order = {k: v[0] for k, v in ranked.items()}
+    places = {k: v[1] for k, v in ranked.items()}
+    # Every market in first place, so a tie at the top names all of them.
+    leaders = {k: (p[0]["tickers"] if p else []) for k, p in places.items()}
+    return dict(base, anchor=anchor_info, rows=rows, order=order, places=places, leaders=leaders,
+                reason=None)
 
 
 def build_world(series: Dict[str, Dict[Any, float]], *, as_of=None) -> Dict[str, Any]:
