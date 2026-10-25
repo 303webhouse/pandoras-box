@@ -136,6 +136,69 @@ def first_gradeable_bar_index(df, created_at) -> Optional[int]:
     return None
 
 
+#: The grader that produces an outcome today: score_signals' walk after 6c4f943e, which judges
+#: stops and targets on POST-FIRE price action only (R-IV.1195(d)). Recorded on regraded rows so
+#: every outcome names the grader that produced it (R-IV.1392(d)2).
+GRADER_VERSION = "score_signals@6c4f943e"
+
+
+def walk_outcome(df, direction, entry, stop, t1, t2, invalidation):
+    """One row's verdict over `df`, which must ALREADY be sliced to post-fire bars.
+
+    Returns (outcome or None, outcome_price, max_favorable, max_adverse). None means no terminal
+    touch yet (the row stays PENDING). Lifted VERBATIM from score_pending_signals so the live job
+    and the ARTEMIS regrade (R-IV.1392(d)) run the same code: import it, never reimplement it.
+    """
+    if direction == "LONG":
+        max_favorable = float(df["High"].max()) - entry
+        max_adverse = entry - float(df["Low"].min())
+    else:
+        max_favorable = entry - float(df["Low"].min())
+        max_adverse = float(df["High"].max()) - entry
+
+    outcome = None
+    outcome_price = None
+    hit_t1 = False
+
+    for _, bar in df.iterrows():
+        if direction == "LONG":
+            if invalidation and bar["Close"] < invalidation:
+                outcome = "INVALIDATED"
+                outcome_price = round(float(bar["Close"]), 2)
+                break
+            if stop and bar["Low"] <= stop:
+                outcome = "STOPPED_OUT"
+                outcome_price = stop
+                break
+            if t2 and bar["High"] >= t2:
+                outcome = "HIT_T2"
+                outcome_price = t2
+                break
+            if t1 and bar["High"] >= t1:
+                hit_t1 = True
+                outcome_price = t1
+        else:
+            if invalidation and bar["Close"] > invalidation:
+                outcome = "INVALIDATED"
+                outcome_price = round(float(bar["Close"]), 2)
+                break
+            if stop and bar["High"] >= stop:
+                outcome = "STOPPED_OUT"
+                outcome_price = stop
+                break
+            if t2 and bar["Low"] <= t2:
+                outcome = "HIT_T2"
+                outcome_price = t2
+                break
+            if t1 and bar["Low"] <= t1:
+                hit_t1 = True
+                outcome_price = t1
+
+    if outcome is None and hit_t1:
+        outcome = "HIT_T1"
+    return outcome, outcome_price, max_favorable, max_adverse
+
+
 async def _fetch_history(symbol: str, start: str):
     def _sync_fetch():
         ticker = yf.Ticker(symbol)
@@ -228,53 +291,8 @@ async def score_pending_signals() -> None:
             if entry is None:
                 continue
 
-            if direction == "LONG":
-                max_favorable = float(df["High"].max()) - entry
-                max_adverse = entry - float(df["Low"].min())
-            else:
-                max_favorable = entry - float(df["Low"].min())
-                max_adverse = float(df["High"].max()) - entry
-
-            outcome = None
-            outcome_price = None
-            hit_t1 = False
-
-            for _, bar in df.iterrows():
-                if direction == "LONG":
-                    if invalidation and bar["Close"] < invalidation:
-                        outcome = "INVALIDATED"
-                        outcome_price = round(float(bar["Close"]), 2)
-                        break
-                    if stop and bar["Low"] <= stop:
-                        outcome = "STOPPED_OUT"
-                        outcome_price = stop
-                        break
-                    if t2 and bar["High"] >= t2:
-                        outcome = "HIT_T2"
-                        outcome_price = t2
-                        break
-                    if t1 and bar["High"] >= t1:
-                        hit_t1 = True
-                        outcome_price = t1
-                else:
-                    if invalidation and bar["Close"] > invalidation:
-                        outcome = "INVALIDATED"
-                        outcome_price = round(float(bar["Close"]), 2)
-                        break
-                    if stop and bar["High"] >= stop:
-                        outcome = "STOPPED_OUT"
-                        outcome_price = stop
-                        break
-                    if t2 and bar["Low"] <= t2:
-                        outcome = "HIT_T2"
-                        outcome_price = t2
-                        break
-                    if t1 and bar["Low"] <= t1:
-                        hit_t1 = True
-                        outcome_price = t1
-
-            if outcome is None and hit_t1:
-                outcome = "HIT_T1"
+            outcome, outcome_price, max_favorable, max_adverse = walk_outcome(
+                df, direction, entry, stop, t1, t2, invalidation)
 
             if outcome:
                 days_to = (now_utc - created_at).days
