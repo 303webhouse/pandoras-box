@@ -55,15 +55,19 @@ class the stylesheet acts on, NOT an upper-cased string -- so the checks below a
 computed transform AND that the text under it is still the spelling BUILD served. The River lives
 in an overlay that has to be opened first; see `river()`.
 
-Control: the pinned build (9beda308) shows the name and description as two separate spans, with no
-pipe, no tag and no glow, however the feed is labelled.
+Control: the pinned build (4854ee390539, pre-purge 9beda308) shows the name and description as two
+separate spans, with no pipe, no tag and no glow, however the feed is labelled.
 """
 import io, json, threading, http.server, socketserver, os, sys, subprocess, time
 from playwright.sync_api import sync_playwright
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.join(REPO, 'frontend')
-PINNED = '9beda308'
+# R-IV.1442: the pin is the POST-PURGE id. It read '9beda308', a commit the 2026-10-24 history
+# rewrite replaced; this script passed only because the old object still sat in this machine's
+# .git, and it would have crashed on any fresh clone. Translated through PURGE-COMMIT-MAP.txt
+# (FINAL): 9beda308ae5d -> 4854ee390539, which is on main with byte-identical v2.js and v2.css.
+PINNED = '4854ee390539'
 class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a): pass
     def translate_path(self, path): return os.path.join(ROOT, path.split('?')[0].lstrip('/') or 'v2.html')
