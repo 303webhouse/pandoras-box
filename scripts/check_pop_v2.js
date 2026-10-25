@@ -31,7 +31,7 @@ const SECTIONS = {
   // R-IV.1265(e): B9 renders beside leadership, so the gate that proves the drawer is whole
   // has to know about it. A section added to the drawer and not to this list is a section
   // whose absence the gate would report as a pass.
-  '10 global markets (B9)': 'pv-world',
+  '10 global markets (B9)': 'b9-mount',
 };
 
 async function main() {

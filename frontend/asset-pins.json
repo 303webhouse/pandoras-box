@@ -61,8 +61,8 @@
       "sha256": "5e78b18e68442d288e703d40c33ec2ab01b89464aa0b2889ba0cfd35b64b0441"
     },
     "assets/b9/b9_live.css": {
-      "pin": 1,
-      "sha256": "e9d0377af714656c6e5ab5b4cf7c1ef7b221d00086cc45fb80b5025bd801bb32"
+      "pin": 2,
+      "sha256": "3247ced7270e715973e3e1a936c1b67d2ae791974057ab2b67ce303e52f2808b"
     },
     "assets/b9/b9_live.js": {
       "pin": 1,
@@ -77,8 +77,8 @@
       "sha256": "f9d82de6281c3b171ef308abc1b381f79275d6efc96ec8f5e75f0f20eb55ca88"
     },
     "v2.js": {
-      "pin": 112,
-      "sha256": "c395062a575274e081ebd41ed45d5b641ed1151ada251dea3ae40aeea7ad0674"
+      "pin": 113,
+      "sha256": "833b950ffa163a00ecf9acbc4d705b4f08ec9424acbf0189653d73f05fba7343"
     }
   }
 }

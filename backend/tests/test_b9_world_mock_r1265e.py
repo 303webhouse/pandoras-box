@@ -1,31 +1,11 @@
-"""B9's mock: the global markets + commodities tracker. R-IV.1265(e).
+"""B9's vocabulary and lint. R-IV.1265(e), amended by R-IV.1364(c).
 
-THE DOCUMENT WAS VERIFIED BEFORE ANY OF THIS WAS WRITTEN, which is the clause R-IV.1224(f)
-added for a reason: three hashes have governed this one document, and the copy sitting on this
-machine before the ferry was the TWICE-SUPERSEDED `5c97eeea...`. Building from it would have
-committed exactly the error the re-verification clause exists to prevent, so the hash is
-asserted here too -- a verification that happened once and was not written down is a
-verification the next reader has to repeat.
-
-WHAT THESE PIN, each because the amendment it comes from says why:
-
-1. THE RACE IS EQUITY ONLY (amendment 1). "A race is a comparison, and comparing an equity
-   index's recovery with gold's is a comparison of two different things on one axis." A
-   commodity in the race is a REFUSAL, not a filter: silently dropping it would leave a caller
-   believing it raced eleven markets when it raced seven.
-2. THE RETURN BASIS IS LABELLED (amendment 2). Adj Close, "USD total return" -- a reader who
-   assumes price return misreads a year of VGK by its yield.
-3. EVERY LABEL CARRIES ITS MEASURED FREQUENCY (amendment 3). A threshold whose frequency is not
-   stated is a threshold nobody can calibrate against.
-4. ONE CHINA PROXY (amendment 4). FXI stands, MCHI is superseded -- not both.
-5. THE COLUMN ORDER IS AN ORDER OF AUTHORITY (amendments 6-7). The footnote reorders the
-   columns' standing: the first is the measure history supports in 8 of 9 episodes, the last in
-   2 of 9.
-6. THE FOOTNOTE IS VERBATIM (amendment 7). Not paraphrased, not reflowed.
-7. THE REFRAME SUPERSEDES THE ASIA FRAMING. No Asia-specific panel exists, the keep-out list
-   forbids the labels, and the bias check's own line is the test: the tool must be as loud when
-   SPY reclaims first as when any other market does -- so SPY and QQQ are IN the race.
-8. "1 of 10" IS WITHDRAWN and no panel states it.
+THE MOCK IS GONE. B9 went live under R-IV.1431 (/api/b9/world, services/b9_live.py), so the no-mock
+sweep removed the fixture (world_mock.v1.json), its `?b9=1` review flag and the mock renderer in
+v2.js, and the tests that read them. What stays here is what b9_live still computes and lints with:
+the race universe (equity only, SPY and QQQ in it), the commodity refusal, one China proxy, the
+UNUSUAL/EXTREME labels with their measured fires per year, the keep-out and no-orders lints, the
+governing document's hash and the footnote's convention. The tests at the end pin the removal.
 """
 from __future__ import annotations
 
@@ -45,10 +25,6 @@ from services import b9_world as b9                                 # noqa: E402
 DOC = pathlib.Path(r"C:\temp\cc-query-handoff") / b9.DOC_FILE
 
 
-def _mock():
-    return b9.load_mock()
-
-
 # ── the document ─────────────────────────────────────────────────────────────
 
 def test_the_governing_document_still_hashes_to_what_the_ruling_named():
@@ -63,10 +39,6 @@ def test_the_superseded_copies_are_recorded_so_one_cannot_be_used_by_mistake():
     assert b9.DOC_SHA256 not in b9.DOC_SUPERSEDED
     assert any(h.startswith("5c97eeea") for h in b9.DOC_SUPERSEDED)
     assert any(h.startswith("75c4ba39") for h in b9.DOC_SUPERSEDED)
-
-
-def test_the_fixture_records_the_same_hash():
-    assert _mock()["governing_document"]["sha256"] == b9.DOC_SHA256
 
 
 # ── 1 · the race is equity only ──────────────────────────────────────────────
@@ -90,27 +62,7 @@ def test_a_commodity_in_the_race_is_refused_and_not_filtered(ticker):
     assert "commodity" in str(e.value) and "separate context list" in str(e.value)
 
 
-def test_the_four_commodities_are_their_own_list_with_the_reason_on_it():
-    m = _mock()
-    assert [c["ticker"] for c in m["commodities"]] == list(b9.COMMODITIES)
-    assert "never raced" in m["commodities_note"]
-    raced = {r["ticker"] for r in m["recovery_race"]["rows"]}
-    assert not (raced & set(b9.COMMODITIES))
-
-
-def test_the_race_rows_are_exactly_the_race_universe():
-    raced = {r["ticker"] for r in _mock()["recovery_race"]["rows"]}
-    assert raced == set(b9.RACE_UNIVERSE), sorted(raced ^ set(b9.RACE_UNIVERSE))
-
-
 # ── 2 · the return basis ─────────────────────────────────────────────────────
-
-def test_the_return_basis_is_labelled_on_the_fixture():
-    m = _mock()
-    assert m["return_basis"] == b9.RETURN_BASIS == "USD total return"
-    assert "dividends are included" in m["return_basis_note"]
-    assert "VGK" in m["return_basis_note"], (
-        "the note must name the holding the mislabel would hurt most")
 
 
 # ── 3 · the labels and their measured frequency ──────────────────────────────
@@ -146,14 +98,6 @@ def test_every_label_carries_its_measured_fires_per_year():
     assert b9.FIRES_PER_YEAR == {"UNUSUAL": "14-16/yr", "EXTREME": "2.6-3.8/yr"}
 
 
-def test_today_is_excluded_from_its_own_denominator():
-    """Included, a large move inflates the window it is scored against and scores LOWER than it
-    should -- the move the test exists to catch is the one it would understate."""
-    assert b9.Z_EXCLUDES_TODAY is True and b9.Z_WINDOW == 60
-    note = _mock()["labels"]["note"]
-    assert "excluded" in note and "inflates its own denominator" in note
-
-
 # ── 4 · one China proxy ──────────────────────────────────────────────────────
 
 def test_fxi_stands_and_mchi_is_refused():
@@ -163,30 +107,7 @@ def test_fxi_stands_and_mchi_is_refused():
     assert "superseded by FXI" in str(e.value)
 
 
-def test_mchi_appears_nowhere_in_the_fixture():
-    assert "MCHI" not in json.dumps(_mock())
-
-
 # ── 5 and 6 · the columns and the footnote ───────────────────────────────────
-
-def test_the_column_order_is_the_amendments():
-    assert b9.RACE_COLUMNS == ("gained most since SPY's low", "first back above 200d",
-                               "first to accept higher prices", "fell least")
-    assert _mock()["recovery_race"]["columns"] == list(b9.RACE_COLUMNS)
-
-
-def test_the_column_order_is_an_order_of_authority_and_the_panel_says_so():
-    note = _mock()["recovery_race"]["column_authority_note"]
-    assert "history supports" in note and "did not" in note
-
-
-def test_the_footnote_is_verbatim():
-    """Amendment 7: not paraphrased, not reflowed. Compared character for character."""
-    expected = ("US selloffs since 2003 (9 episodes; equity ETFs; USD total return; "
-                "QUERY 2026-10-18): the 'gained most' leader still led SPY 6 months later in "
-                "8 of 9, 'fell least' in 2 of 9. History, not a forecast.")
-    assert b9.RACE_FOOTNOTE == expected
-    assert _mock()["recovery_race"]["footnote"] == expected
 
 
 def test_the_footnote_is_a_worked_example_of_convention_37():
@@ -200,17 +121,6 @@ def test_the_footnote_is_a_worked_example_of_convention_37():
 
 
 # ── 7 · the reframe, and the keep-out list ───────────────────────────────────
-
-def test_the_panel_is_market_neutral_and_not_an_asia_thesis():
-    panel = _mock()["new_leader_panel"]
-    assert panel["title"] == "A NEW LEADER IS REAL IF"
-    assert "every market" in panel["note"] and "US included" in panel["note"]
-    assert len(panel["confirms"]) == 3 and len(panel["refutes"]) == 3
-
-
-def test_no_string_in_the_fixture_breaks_the_keep_out_list_or_reads_as_an_order():
-    findings = b9.lint_findings(_mock())
-    assert not findings, "B9 keep-out / no-orders findings:\n  " + "\n  ".join(findings)
 
 
 @pytest.mark.parametrize("bad", [
@@ -241,161 +151,50 @@ def test_the_order_lint_is_the_playbook_one_and_not_a_second_copy():
 
 # ── 8 · the withdrawn line, and the recollection caveat ──────────────────────
 
-def test_the_withdrawn_dry_run_line_appears_nowhere():
-    """"1 of 10" is WITHDRAWN. A panel stating it would be quoting a figure the board pulled."""
-    blob = json.dumps(_mock())
-    assert "1 of 10" not in blob
-    assert "1 of 10" not in b9.RACE_FOOTNOTE
-
-
-def test_the_recollection_caveat_is_on_the_surface_and_not_only_in_the_document():
-    """"Every historical figure below is the seats' recollection. No live data or web was used."
-    A panel built from recalled figures that does not say so launders recollection into data."""
-    m = _mock()
-    assert "recollection" in m["caveat"] and "not a measurement" in m["caveat"]
-    assert "race footnote" in m["caveat"], (
-        "the caveat must name the one figure that IS measured, or it reads as distrusting that "
-        "too")
-    assert b9.RECOLLECTION_CAVEAT.startswith("Every historical figure")
-
-
-def test_the_mock_is_labelled_a_mock_and_its_ranks_say_they_are_illustrative():
-    m = _mock()
-    assert "MOCK" in m["badge"].upper()
-    assert "illustrative" in m["recovery_race"]["anchor_note"]
-
 
 # ── the rest of the synthesis's own numbers ──────────────────────────────────
-
-def test_meltdown_arms_at_ten_percent_below_the_252_day_high():
-    """The PIVOT synthesis's figure, not THALES's 15%: the synthesis is the design and a seat's
-    own number is an input to it."""
-    assert b9.MELTDOWN_DRAWDOWN_PCT == 10.0 and b9.MELTDOWN_HIGH_SESSIONS == 252
-    assert "10%" in _mock()["meltdown"]["arms_at"]
-    assert "252-day high" in _mock()["meltdown"]["arms_at"]
-
-
-def test_a_not_armed_meltdown_says_why_rather_than_being_blank():
-    md = _mock()["meltdown"]
-    assert md["armed"] is False and md["reason_not_armed"]
-    assert "inside the 10% arming level" in md["reason_not_armed"]
-
-
-def test_nothing_is_pushed_from_the_mock_and_it_says_so():
-    assert "Nothing is sent from this mock" in _mock()["meltdown"]["push_note"]
-
-
-def test_the_currency_gap_flag_and_the_commodity_flags_are_the_documents():
-    assert b9.CURRENCY_GAP_FLAG_PP == 1.5
-    assert b9.CRUDE_ATR_FLAG == 2.0
-    assert b9.USDJPY_5D_FLAG_PCT == -3.0
-    flags = [c.get("flag") for c in _mock()["cross_reads"]]
-    assert any(f and "2 ATR" in f for f in flags)
-    assert any(f and "\u22123%" in f for f in flags)
-
-
-def test_the_overnight_label_is_the_documents_words():
-    assert b9.OVERNIGHT_LABEL == "reacting to the prior US close \u00b7 context, not a forecast"
-    assert _mock()["overnight"]["label"] == b9.OVERNIGHT_LABEL
-
-
-def test_a_holiday_shows_as_stale_with_its_reason():
-    rows = _mock()["overnight"]["rows"]
-    stale = [r for r in rows if r.get("stale")]
-    assert stale and all(r.get("stale_reason") for r in stale)
-
-
-def test_a_leadership_change_shows_how_far_through_confirmation_it_is():
-    lc = _mock()["leadership_change"]
-    assert lc["state"] == "EMERGING" and lc["held_sessions"] < lc["confirm_after"] == 10
-    assert "flicker" in lc["basis"], "a reader must know it can reset"
 
 
 # ── the renderer ─────────────────────────────────────────────────────────────
 
-V2JS = _REPO / "frontend" / "v2.js"
+
+# ── R-IV.1364(c): THE MOCK IS GONE ───────────────────────────────────────────
+#
+# B9 went live under R-IV.1431 (/api/b9/world, services/b9_live.py), so the no-mock sweep removed
+# the fixture, its `?b9=1` review flag and the mock renderer. The tests that read the fixture or
+# the old renderer went with them; the vocabulary and lint tests above stay, because b9_live
+# computes and lints with them. These pin the removal so it cannot quietly come back.
+
+def _v2_code():
+    """v2.js with comment lines dropped: the slot's own comment SAYS `?b9=1` was removed, and a
+    scan that reads prose fails on the explanation instead of the code (memory: source-scan
+    tests must strip prose)."""
+    src = (_REPO / "frontend" / "v2.js").read_text(encoding="utf-8")
+    return "\n".join(l for l in src.splitlines() if not l.strip().startswith(("//", "*", "/*")))
 
 
-def _src():
-    from ._srcscan import read_source
-    return read_source(str(V2JS))
+def test_the_mock_fixture_and_its_loader_are_gone():
+    assert not (_REPO / "frontend" / "assets" / "b9" / "world_mock.v1.json").exists()
+    for name in ("load_mock", "mock_path", "MOCK_FILE", "MOCK_VERSION"):
+        assert not hasattr(b9, name), name
 
 
-def test_the_section_renders_beside_leadership_which_is_where_the_synthesis_puts_it():
-    """"section 7 of the left Regime pop-out, next to the leadership ratios." So pvWorld sits
-    between pvLead and pvRates, and the ORDER is the assertion -- a section appended at the end
-    would also be "in the drawer" and would not be next to anything."""
-    src = _src()
-    lead = src.index("pvLead(S.leadership)")
-    # R-IV.1371(c)3: THE SECTION IS NOW BEHIND `?b9=1`, and the DEFAULT pop-out carries
-    # R-IV.1369(d)4's placeholder line in its place. Every number in the panel comes from
-    # a fixture, and it sat among eight live reads with nothing on its face to say so.
-    #
-    # The ORDER is still the assertion, and for the original reason: a section appended at
-    # the end would also be "in the drawer" and would not be next to anything. What is
-    # ordered is now the SLOT, which renders the panel or the placeholder in that spot.
-    # SEARCHED FROM `lead`, because `function pvWorldSlot() {` CONTAINS the string
-    # "pvWorldSlot()" and is defined ABOVE renderPopV2 -- an unanchored index finds the
-    # DEFINITION, not the call site, and the order assertion then compares the wrong
-    # two positions.
-    world = src.index("pvWorldSlot()", lead)
-    rates = src.index("pvRates(S.rates)", lead)
-    assert lead < world < rates, (lead, world, rates)
-    slot = src[src.index("function pvWorldSlot"):]
-    assert "B9_MOCK_SHOWN" in slot, "the panel must be behind the flag"
-    assert "pvWorld(_b9Mock)" in slot, "and still reachable through it"
-    assert "Global markets returns here once its live data is wired." in slot
+def test_no_b9_mock_code_is_left_in_v2js():
+    code = _v2_code()
+    for gone in ("pvWorld(", "_b9Mock", "b9Load", "B9_MOCK_SHOWN", "world_mock", "get('b9')",
+                 "PW_CSS", "pwStyle"):
+        assert gone not in code, gone
 
 
-def test_the_section_carries_its_marker_even_when_the_fixture_has_not_loaded():
-    """`pvWorld(null)` must still emit the id, or the headless gate would report a drawer with
-    a missing section as a pass on a slow fetch."""
-    src = _src()
-    fn = src[src.index("function pvWorld("):]
-    fn = fn[:fn.index("  // ── end b9")] if "end b9" in fn else fn[:4000]
-    head = fn[:fn.index("const L =")] if "const L =" in fn else fn[:900]
-    assert 'id="pv-world"' in head, head[:400]
-    assert "pvNa(" in head
+def test_the_rollback_drawers_slot_carries_the_LIVE_mount():
+    """`?clean=off` still renders the old drawer; its B9 slot is the same #b9-mount the cleaned
+    pop-out has (R-IV.1432(d)), so assets/b9/b9_live.js fills it with live data there too."""
+    code = _v2_code()
+    fn = code[code.index("function pvWorldSlot()"):]
+    fn = fn[:fn.index("\n  }") + 4]
+    assert 'id="b9-mount"' in fn and "pvWorld(" not in fn
 
 
-def test_the_popout_gate_knows_about_the_new_section():
+def test_the_popout_gate_checks_the_live_mount_not_the_mock():
     gate = (_REPO / "scripts" / "check_pop_v2.js").read_text(encoding="utf-8")
-    assert "pv-world" in gate
-    assert "10 global markets (B9)" in gate
-
-
-def test_no_backtick_appears_inside_the_injected_stylesheet():
-    """A backtick ends the template literal. One in a CSS comment closed NB_CSS mid-block
-    earlier today and the whole file stopped parsing; `node --check` caught it, and node is
-    skipped when it is not installed, so this assertion needs no node."""
-    src = _src()
-    i = src.index("const PW_CSS = `") + len("const PW_CSS = `")
-    j = src.index("`;", i)
-    assert "`" not in src[i:j]
-    assert len(src[i:j]) > 1200, "the block being checked is suspiciously short"
-
-
-def test_the_renderer_reuses_the_popouts_one_sparkline_and_does_not_add_a_second():
-    """Two sparkline renderers in one drawer would eventually scale differently, and two lines
-    in the same drawer that are not comparable is worse than one line."""
-    src = _src()
-    fn = src[src.index("function b9Spark("):src.index("function b9Arrows(")]
-    assert "pvSpark(" in fn
-    assert "Math.min" not in fn and "Math.max" not in fn, (
-        "the scaling belongs to pvSpark, not to a second implementation")
-
-
-def test_a_z_under_the_unusual_threshold_renders_no_label_at_all():
-    """"normal" is not one of the two labels, so nothing is printed. A third label would be a
-    vocabulary the amendment does not have (R-IV.925(b))."""
-    src = _src()
-    fn = src[src.index("function b9ZTag("):src.index("function b9Row(")]
-    assert "if (!name) return ''" in fn
-    assert "NORMAL" not in fn.upper().replace("UNUSUAL", "").replace("EXTREME", "")
-
-
-def test_the_meltdown_panel_shows_a_reason_when_it_is_not_armed():
-    """A blank panel and "SPY is 3.1% below its 252-day high, inside the 10% arming level" are
-    not the same information."""
-    src = _src()
-    assert "MELTDOWN MODE OFF" in src and "reason_not_armed" in src
+    assert "'b9-mount'" in gate and "'pv-world'" not in gate

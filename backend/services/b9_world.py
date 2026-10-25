@@ -26,22 +26,13 @@ THE DRY-RUN LINE "1 of 10" IS WITHDRAWN and no panel states it.
 """
 from __future__ import annotations
 
-import io
-import json
-import os
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from services.regime_playbook import order_findings, walk_texts
 
-#: Under `frontend/assets/` because CLAUDE.md serves only that folder wholesale: the browser and
-#: this lint read THE SAME BYTES.
-ASSETS = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "frontend", "assets", "b9")
-
-MOCK_VERSION = "v1"
-MOCK_FILE = "world_mock.%s.json" % MOCK_VERSION
+#: R-IV.1364(c): the B9 mock fixture (world_mock.v1.json) and its loader were removed in the
+#: no-mock sweep; B9 is live (services/b9_live.py, /api/b9/world).
 
 DOC_SHA256 = "3c9c2850825f4477b7885f0dd160c0ab4d129169611e72e3dcbb39681784fd1c"
 DOC_FILE = "GLOBAL-MARKETS-TRACKER-2026-10-18-v3.md"
@@ -165,17 +156,6 @@ def lint_findings(obj: Any) -> List[str]:
         for f in keep_out_findings(text):
             out.append("%s: %s" % (path, f))
     return out
-
-
-def mock_path() -> str:
-    return os.path.join(ASSETS, MOCK_FILE)
-
-
-def load_mock() -> Dict[str, Any]:
-    """The fixture, parsed. Raises rather than returning a default: a mock that cannot be read
-    must fail the build, not render as an empty panel that looks like a quiet market."""
-    with io.open(mock_path(), encoding="utf-8") as fh:
-        return json.load(fh)
 
 
 def label_for(z: Optional[float]) -> Optional[str]:

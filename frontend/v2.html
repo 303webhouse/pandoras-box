@@ -17,7 +17,7 @@
     <!-- R-IV.1382: the redesigned Positions panel, scoped under .pp-panel.pq. -->
     <link rel="stylesheet" href="/assets/positions-clean.css?v=2">
     <!-- R-IV.1431: B9 global markets, live. Fills #b9-mount in the Regime pop-out (R-IV.1432(d)). -->
-    <link rel="stylesheet" href="/assets/b9/b9_live.css?v=1">
+    <link rel="stylesheet" href="/assets/b9/b9_live.css?v=2">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -96,7 +96,7 @@
                         </div>
                         <div class="tile-body">
                             <div class="rs-card" id="regimeStrategy">
-                                <div class="rs-wait">loading the mock fixture&hellip;</div>
+                                <div class="rs-wait">loading&hellip;</div>
                             </div>
                             <div class="rs-playbook" id="rsPlaybook" hidden></div>
                         </div>
@@ -219,11 +219,10 @@
                         <div class="tile-header">
                             <span class="tile-title" data-gloss="BOOK">Book</span>
                             <div class="spacer"></div>
-                            <button type="button" class="btn-add" id="bookPanelBtn" title="Open the positions panel (mock positions; the cash lines and cash actions are live)">Positions</button>
-                            <!-- A3 (R-IV.1209(c)): Position Watch. MOCK LIST ONLY --
-                                 no push is sent and the phone block is a PICTURE of a
-                                 notification, not a notification. -->
-                            <button type="button" class="btn-add" id="posWatchBtn" title="Position Watch (A3 mock list; no live pushes)">Watch</button>
+                            <button type="button" class="btn-add" id="bookPanelBtn" title="Open the positions panel">Positions</button>
+                            <!-- Position Watch: live alert history from /api/position-watch
+                                 (R-IV.1364(c) retired the "mock list" wording). -->
+                            <button type="button" class="btn-add" id="posWatchBtn" title="Position Watch: alerts on what you hold">Watch</button>
                             <button type="button" class="btn-add" id="bookAdd" data-gloss="ADD">+ add</button>
                             <span class="health-dot" id="bookHealthDot"></span>
                             <span class="tile-grip" data-gloss="GRIP">⠿</span>
@@ -318,7 +317,7 @@
                             <span class="tile-title" data-gloss="RIVER">River</span>
                             <div class="spacer"></div>
                             <button type="button" class="btn-add" id="riverViewBtn" aria-pressed="false" title="Show the classic single stream instead of the five lanes. Same items, one list.">Classic view</button>
-                            <button type="button" class="btn-add" id="riverPreviewBtn" title="Preview a redesigned River: a mockup on sample data. Your River is unchanged.">Preview</button>
+                            <button type="button" class="btn-add" id="riverPreviewBtn" hidden title="Preview a redesigned River: a mockup on sample data. Your River is unchanged.">Preview</button>
                             <span class="seg" id="riverPills"></span>
                             <span class="tile-grip" data-gloss="GRIP">⠿</span>
                         </div>
@@ -380,7 +379,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=112"></script>
+    <script src="/v2.js?v=113"></script>
     <script src="/assets/b9/b9_live.js?v=1"></script>
 </body>
 </html>
