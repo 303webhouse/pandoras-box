@@ -119,9 +119,20 @@ def route(r):
     if '/api/v2/positions' in u:
         if 'status=OPEN' in u:
             return j({'positions': OPEN, 'count': len(OPEN), 'cache_age_seconds': 5})
+        if 'status=CLOSED' in u:
+            # Synthetic closes, so the CLOSED tab draws its rows and chips (the 12px check needs them).
+            return j({'positions': [
+                {'id': 801, 'position_id': 'POS_C1', 'ticker': 'SYNA', 'structure': 'long_put', 'account': 'ACCT_A',
+                 'exit_date': '2026-10-20', 'realized_pnl': 12.5, 'provenance': 'PRINCIPAL_REPORTED', 'status': 'CLOSED'},
+                {'id': 802, 'position_id': 'POS_C2', 'ticker': 'SYNB', 'structure': 'stock', 'account': 'ACCT_B',
+                 'exit_date': '2026-10-19', 'realized_pnl': None, 'provenance': 'IMPORTED', 'status': 'CLOSED'}], 'count': 2})
         return j({'positions': [], 'count': 0})
     if '/api/abacus/summary' in u:
-        return j({'stats': [], 'range': {'key': 'all'}})
+        cov = {'counted': 9, 'total': 10, 'excluded': {'no_realized_pnl': 1}, 'predicate': 'synthetic'}
+        return j({'stats': [{'key': 'net_profit', 'value': 40.0, 'source': 'live', 'coverage': cov},
+                            {'key': 'win_rate', 'value': 0.5, 'source': 'live', 'n': 9, 'coverage': cov},
+                            {'key': 'expected_return', 'value': 0.02, 'source': 'live', 'n': 9}],
+                  'range': {'key': 'all'}})
     return j({}, 404)
 
 
@@ -243,6 +254,9 @@ with sync_playwright() as p:
     check('desktop: earnings is ONE batch call per panel open', sum(1 for u in SEEN if 'next-earnings-batch' in u) == 1,
           sum(1 for u in SEEN if 'next-earnings-batch' in u))
     shot(pg, 'pq-1920-list')
+    # R-IV.1434(c): 12px at DESKTOP too -- the live chip was 10px and only phones were checked.
+    tiny = pg.evaluate(SMALL)
+    check('desktop: no text in the panel under 12px (OPEN, header included)', not tiny, tiny)
     # ⓘ: what moved, nothing deleted.
     pg.click('.pq-ib'); pg.wait_for_timeout(200)
     info = pg.evaluate("() => (document.querySelector('.pq-info') || {}).innerText || ''")
@@ -309,6 +323,9 @@ with sync_playwright() as p:
     pg.click('[data-pq-view="closed"]'); pg.wait_for_timeout(700)
     after = sum(1 for u in SEEN if 'status=CLOSED' in u)
     check('desktop: CLOSED loads only when it is opened', before == 0 and after == 1, (before, after))
+    closed_rows = pg.evaluate("() => document.querySelectorAll('.pq-closed tbody tr').length")
+    tiny = pg.evaluate(SMALL)
+    check('desktop: CLOSED draws its rows and census, and no text under 12px', closed_rows == 2 and not tiny, (closed_rows, tiny))
     pg.click('[data-pq-view="cash"]'); pg.wait_for_timeout(500)
     c = pg.evaluate("""() => ({ rows: [...document.querySelectorAll('.pq-crow')].map((r) => r.innerText.replace(/\\s+/g, ' ').trim()),
       foot: (document.querySelector('.pq-cfoot') || {}).innerText || '', hash: location.hash })""")
@@ -380,6 +397,10 @@ with sync_playwright() as p:
         check('%dpx: every tap target in the panel is at least 44px' % w, not pg.evaluate(TAPS), pg.evaluate(TAPS))
         tiny = pg.evaluate(SMALL)
         check('%dpx: no text in the panel under 12px' % w, not tiny, tiny)
+        pg.click('[data-pq-view="closed"]'); pg.wait_for_timeout(700)
+        tiny = pg.evaluate(SMALL)
+        check('%dpx: no text under 12px on the CLOSED tab either' % w, not tiny, tiny)
+        pg.click('[data-pq-view="open"]'); pg.wait_for_timeout(500)
         # The last row is reachable and not covered.
         last = pg.evaluate("""() => { const b = document.querySelector('.pp-panel .pp-body'); b.scrollTop = b.scrollHeight;
           const r = [...document.querySelectorAll('.pq-prow')].pop().getBoundingClientRect();
