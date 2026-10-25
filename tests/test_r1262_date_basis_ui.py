@@ -369,93 +369,92 @@ with sync_playwright() as p:
     ctx.close()
 
     # ── (b)2 and (b)3 · AGORA ───────────────────────────────────────────────────
+    #
+    # R-IV.1442(b): RE-POINTED, NOT RETIRED. These checks were written against the BOOK tile's
+    # `.acct-chip`s and `.book-line`, and against the Positions panel's per-cell "... old" chips.
+    # R-IV.1369 replaced that tile with account rows, and R-IV.1382 moved the mark's age into ONE
+    # AGE cell that carries R-IV.1262(b)3 for both MARK and P&L on its row (R-IV.1382(d)4). The old
+    # layouts live on only under ?clean=off / ?pos=v1 until 2026-11-06. The RULES are unchanged, so
+    # each check now reads the screen Nick actually sees. They went red when #78 and #80 shipped
+    # and nobody here ran this file; R-IV.1437(c)1 now requires all five root scripts before a push.
     pg, ctx, errs, assets = open_page(b, 'v2.html')
-    chips = pg.evaluate("""() => [...document.querySelectorAll('.acct-chip')].map((e) => ({
-        cls: e.className, text: e.textContent.trim(), title: e.getAttribute('title') || '' }))""")
-    none_chip = [c for c in chips if 'acct-chip-none' in c['cls']]
-    part_chip = [c for c in chips if 'acct-chip-partial' in c['cls']]
+    rows = pg.evaluate("""() => [...document.querySelectorAll('#bookStrip .bk-acct:not(.bk-cash)')].map((r) => ({
+        name: ((r.querySelector('.bk-an b') || {}).textContent || '').trim(),
+        val: ((r.querySelector('.bk-av') || {}).textContent || '').trim(),
+        nr: (r.querySelector('.bk-nr') || {}).title || '',
+        floor: (r.querySelector('.bk-floor') || {}).title || '' }))""")
+    none_row = [r for r in rows if r['name'] == 'FID ROTH']
+    part_row = [r for r in rows if r['name'] == 'FID 401A']
     check('an account with NO balance renders "not recorded", never $0.00',
-          len(none_chip) == 1 and 'not recorded' in none_chip[0]['text']
-          and '0.00' not in none_chip[0]['text'], none_chip)
-    check('...and says why in its title', none_chip and 'no balance recorded' in none_chip[0]['title'],
-          none_chip)
+          len(none_row) == 1 and 'not recorded' in none_row[0]['val']
+          and '0.00' not in none_row[0]['val'], rows)
+    check('...and says why in its title', none_row and 'no balance recorded' in none_row[0]['nr'], none_row)
     check('a PARTIAL balance is marked as a floor, not shown as a whole figure',
-          len(part_chip) == 1 and part_chip[0]['text'].count('≥') == 1, part_chip)
-    check('...carrying the hub\'s own reason', part_chip and 'understates' in part_chip[0]['title'],
-          part_chip)
-    bal = pg.evaluate("""() => {
-        const l = [...document.querySelectorAll('.book-line')].find(
-            (e) => (e.textContent || '').indexOf('Balance') === 0);
-        return l ? l.textContent.trim() : null; }""")
+          len(part_row) == 1 and part_row[0]['val'].count('≥') == 1, part_row)
+    check('...carrying the hub\'s own reason', part_row and 'understates' in part_row[0]['floor'], part_row)
+    tot = pg.evaluate("""() => { const t = document.querySelector('#bookStrip .bk-total');
+        const f = t && t.querySelector('.bk-floor');
+        return { text: t ? t.textContent.trim() : null, title: f ? f.title : '' }; }""")
     check('the Balance TOTAL is a floor while any part is partial or absent',
-          bal and '≥' in bal and 'floor only' in bal, bal)
-
+          bool(tot['text']) and tot['text'].startswith('≥') and 'floor' in tot['title'].lower(), tot)
     ctx.close()
 
-    # The positions panel has its own doorway: the `#positions` address (v2.js:5429). Opening it
-    # renders the Book table from the stubbed payload, so the cells under test are the ones the
-    # principal actually sees -- not functions called in isolation.
-    pg, ctx, errs, assets = open_page(b, 'v2.html#positions')
-    pg.wait_for_timeout(1200)
-    cells = pg.evaluate("""() => {
-      const out = {};
-      document.querySelectorAll('tr').forEach((tr) => {
-        const t = (tr.textContent || '');
-        const cellOf = (i) => {
-          const td = tr.querySelectorAll('td')[i];
-          return td ? {text: td.textContent.trim(),
-                       titles: [...td.querySelectorAll('[title]')].map((e) => e.getAttribute('title')).join(' | ')}
-                    : null; };
-        const tds = tr.querySelectorAll('td');
-        if (!tds.length) return;
-        const key = ['GUSH', 'BX', 'VIX', 'SQQQ'].find((k) => t.indexOf(k) >= 0);
+    # The Positions panel opened by its `#positions` address. Cells are read BY COLUMN of the
+    # R-IV.1382 table: TICKER WHAT QTY MARK AGE P&L DAYS.
+    AGE_CELLS = """() => { const out = {};
+      document.querySelectorAll('.pp-panel tr.pq-row').forEach((tr) => {
+        const td = [...tr.cells];
+        const key = ['GUSH', 'BX', 'VIX', 'SQQQ'].find((k) => (tr.textContent || '').indexOf(k) >= 0);
         if (!key) return;
-        const all = [...tds].map((td) => ({text: td.textContent.trim(),
-          titles: [...td.querySelectorAll('[title]')].map((e) => e.getAttribute('title')).join(' | ')}));
-        out[key] = all;
-      });
-      return out; }""")
+        const c = (k) => { const e = td[k]; if (!e) return { text: '', title: '', amber: false };
+          return { text: e.textContent.trim(),
+                   title: [e.getAttribute('title') || ''].concat([...e.querySelectorAll('[title]')].map((x) => x.getAttribute('title'))).join(' | '),
+                   amber: e.classList.contains('amb') || !!e.querySelector('.pq-amb') }; };
+        out[key] = { mark: c(3), age: c(4), pnl: c(5), row: tr.textContent };
+      }); return out; }"""
+    pg, ctx, errs2, assets2 = open_page(b, 'v2.html#positions')
+    pg.wait_for_timeout(1200)
+    cells = pg.evaluate(AGE_CELLS)
+    errs += errs2
+    assets += assets2
     check('the positions panel opened and drew a row per stubbed position',
           sorted(cells) == ['BX', 'GUSH', 'SQQQ', 'VIX'], sorted(cells))
-
-    def cellpair(key):
-        """The Mark cell and the P&L cell of a row, found by content rather than by index: a
-        column order this test hard-codes is a test that breaks when a column is added."""
-        tds = cells.get(key) or []
-        blob = ' '.join(c['text'] + ' ' + c['titles'] for c in tds)
-        mark = next((c for c in tds if 'old' in c['text'] or 'no mark' in c['text']
-                     or 'age unknown' in c['text'] or 'stale mark' in c['text']), None)
-        pnl = next((c for c in tds if 'no P&L' in c['text']
-                    or (('$' in c['text'] or '-' in c['text']) and c is not mark
-                        and ('old' in c['text'] or 'unknown' in c['text']))), None)
-        return blob, (mark or {'text': '', 'titles': ''}), (pnl or {'text': '', 'titles': ''})
-
-    gush, g_mark, g_pnl = cellpair('GUSH')
-    check('(b)3 a mark with `mark_as_of` shows its age', 'min old' in g_mark['text'], g_mark)
-    check('...naming mark_as_of as the clock it used', 'own instant' in g_mark['titles'], g_mark)
+    import re as _re0
+    g = cells.get('GUSH') or {}
+    ga = g.get('age') or {}
+    check('(b)3 a mark with `mark_as_of` shows its age', bool(_re0.match(r'^\d+ min$', ga.get('text', ''))), g)
+    check('...naming mark_as_of as the clock it used', 'own instant' in ga.get('title', ''), ga)
     check('...and the age shows even though the mark is FRESH (rule 1 of the draft)',
-          'min old' in g_mark['text'], g_mark)
-    check('...and the P&L drawn from it carries an age too', 'old' in g_pnl['text'], g_pnl)
+          bool(_re0.match(r'^\d+ min$', ga.get('text', ''))) and not ga.get('amber'), ga)
+    check('...and the P&L drawn from it shares that row\'s one AGE cell (R-IV.1382(d)4)',
+          bool(g.get('pnl', {}).get('text')) and bool(ga.get('text')), g)
+    x = cells.get('BX') or {}
+    xa = x.get('age') or {}
+    check('a row with only `price_updated_at` still shows an age', bool(_re0.match(r'^\d+ d$', xa.get('text', ''))), xa)
+    check('...and says it is the PRICE\'s clock, not the mark\'s', 'not the mark' in xa.get('title', ''), xa)
+    check('...and keeps the hub\'s own STALE verdict beside it (amber, the hub\'s word in its title)',
+          xa.get('amber') and 'STALE' in xa.get('title', ''), xa)
+    check('...and its P&L shares that age cell, which is the whole point',
+          bool(x.get('pnl', {}).get('text')) and bool(xa.get('text')), x)
+    v = cells.get('VIX') or {}
+    va = v.get('age') or {}
+    check('a priced row with NO time reads "age unknown"', va.get('text') == 'age unknown', va)
+    check('...and says that is not the same as having no price', 'not the same as having no price' in va.get('title', ''), va)
+    q = cells.get('SQQQ') or {}
+    check('a row with no mark says "no price" (R-IV.1382\'s word), not "age unknown"',
+          'no price' in q.get('mark', {}).get('text', '') and 'age unknown' not in q.get('row', ''), q)
+    check('...and its row shows no age at all, having no price to age', q.get('age', {}).get('text') == '—', q)
+    ctx.close()
 
-    bx, b_mark, b_pnl = cellpair('BX')
-    check('a row with only `price_updated_at` still shows an age', 'd old' in b_mark['text'], b_mark)
-    check('...and says it is the PRICE\'s clock, not the mark\'s',
-          'not the mark' in b_mark['titles'], b_mark)
-    check('...and keeps the hub\'s own STALE verdict beside it', 'stale mark' in b_mark['text'],
-          b_mark)
-    check('...and its P&L carries the age too, which is the whole point',
-          'old' in b_pnl['text'], b_pnl)
-
-    vix, v_mark, _vp = cellpair('VIX')
-    check('a priced row with NO time reads "age unknown"', 'age unknown' in v_mark['text'], v_mark)
-    check('...and says that is not the same as having no price',
-          'not the same as having no price' in v_mark['titles'], v_mark)
-
-    sq, s_mark, s_pnl = cellpair('SQQQ')
-    check('a row with no mark still says "no mark", not "age unknown"',
-          'no mark' in s_mark['text'] and 'age unknown' not in s_mark['text'], s_mark)
-    check('...and its row shows no age at all, having no price to age',
-          'old' not in sq.replace('no mark', ''), sq[:200])
+    # CONTROL: the ?pos=v1 rollback still keeps (b)3 in ITS layout -- the per-cell chips -- until
+    # 2026-11-06. One check, so the rollback cannot quietly lose the rule while it is still live.
+    pg, ctx, errs3, assets3 = open_page(b, 'v2.html?pos=v1#positions')
+    pg.wait_for_timeout(1200)
+    v1 = pg.evaluate("""() => { const tr = [...document.querySelectorAll('.pp-panel tr')].find((r) => (r.textContent || '').indexOf('GUSH') >= 0);
+        return tr ? tr.textContent : ''; }""")
+    check('?pos=v1 control: the rollback panel still shows the mark\'s age per cell', 'min old' in v1, v1[:160])
+    errs += errs3
+    assets += assets3
 
     # THE PAGE PICKS NO THRESHOLD (R-IV.943(c)): "stale" is the hub's word, and this file renders
     # the verdict it was given. Asserted on the SOURCE of the two functions, which is where such a
@@ -465,7 +464,12 @@ with sync_playwright() as p:
     src = io.open(os.path.join(ROOT, 'v2.js'), encoding='utf-8').read()
     fn = src[src.index('function markAge(p)'):src.index('function markCell(p)')]
     import re as _re
-    nums = [n for n in _re.findall(r'\b\d+\b', fn) if n not in ('0', '1', '60', '1440', '60000')]
+    # COMMENTS ARE STRIPPED FIRST (R-IV.1442(b)): a ruling cited in prose -- "R-IV.1382(d)4" --
+    # is not a threshold, and it was the only thing this scan found after #80. The scan tests
+    # code; a number in a string is still code, and is still caught.
+    code = _re.sub(r'/\*.*?\*/', '', fn, flags=_re.S)
+    code = _re.sub(r'//[^\n]*', '', code)
+    nums = [n for n in _re.findall(r'\b\d+\b', code) if n not in ('0', '1', '60', '1440', '60000')]
     check('no staleness threshold is hard-coded in the age code', not nums, nums)
     check('...and the verdict word comes from the hub\'s own fields',
           'mark_integrity' in src and 'MARK_VERDICT' in src, '')
