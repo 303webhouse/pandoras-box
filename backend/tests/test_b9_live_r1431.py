@@ -226,6 +226,8 @@ def test_a_failure_is_UNAVAILABLE_with_its_reason_and_never_the_mock(monkeypatch
 
 def test_the_cache_key_carries_the_SESSION():
     from api import b9
-    assert b9.CACHE_PREFIX.endswith(":") and "v1" in b9.CACHE_PREFIX
+    # v2 since the Recovery Race joined the payload: a shape change must move the version, or the
+    # session cached before the deploy is served without it.
+    assert b9.CACHE_PREFIX == "b9:world:v2:"
     src = (_BACKEND / "api" / "b9.py").read_text(encoding="utf-8")
     assert "CACHE_PREFIX + settled.isoformat()" in src
