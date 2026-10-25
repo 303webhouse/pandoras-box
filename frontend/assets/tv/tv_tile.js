@@ -1,4 +1,5 @@
-/* TV · PREVIEW (R-IV.1371(e), R-IV.1440). Loaded ONLY by v2.html's ?tv=preview loader, on a desktop.
+/* TV (R-IV.1371(e), R-IV.1440, default since R-IV.1444). Loaded by v2.html's loader on a desktop unless
+ * the page carries ?tv=off.
  *
  * One tile in the square Nick cleared in Agora's top-right corner (columns 9-11, rows 0-11 of the
  * 12-column grid). It places itself only if that square is EMPTY and never moves another tile; if
@@ -100,7 +101,7 @@
     el.className = 'grid-stack-item';
     el.setAttribute('gs-id', 'tv');
     el.innerHTML = '<div class="grid-stack-item-content"><div class="tile tv-tile">'
-      + '<div class="tile-header"><span class="tile-title">TV</span><span class="tv-pv">preview</span>'
+      + '<div class="tile-header"><span class="tile-title">TV</span>'
       + '<span class="spacer"></span><span class="tv-sw" role="group" aria-label="live stream">'
       + STREAMS.map(function (x) {
           return '<button type="button" class="tv-b" data-tv-s="' + esc(x.key) + '">' + esc(x.label) + '</button>';
@@ -134,7 +135,7 @@
   function place(grid) {
     if (!grid || tile || PHONE.matches || grid.getColumn() !== 12) return;
     if (!grid.isAreaEmpty(AREA.x, AREA.y, AREA.w, AREA.h)) {
-      status('TV preview not placed: the top-right square is taken');
+      status('TV not placed: the top-right square is taken');
       return;
     }
     // GridStack 11: append, then makeWidget (the two-argument addWidget(el, opts) form is gone).

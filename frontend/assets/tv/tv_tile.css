@@ -1,4 +1,4 @@
-/* TV · PREVIEW (R-IV.1440). Only loaded under ?tv=preview on a desktop. Tokens only, no hex.
+/* TV (R-IV.1440; default since R-IV.1444). Loaded on a desktop unless ?tv=off. Tokens only, no hex.
    Text floor 12px, as ABACUS's pop-out rule sets it. */
 .tv-tile .tile-title { font-size: 12px; }
 .tv-tile .tv-pv { font-family: var(--mono); font-size: 12px; color: var(--amber); letter-spacing: 0.5px;

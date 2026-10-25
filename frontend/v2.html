@@ -382,15 +382,17 @@
     <script src="/v2.js?v=114"></script>
     <script src="/assets/b9/b9_live.js?v=3"></script>
     <script>
-      /* R-IV.1440: the TV tile is a PREVIEW. Without ?tv=preview nothing of it loads: not its script,
-         not its stylesheet, not YouTube's player. Desktop only: wider than Agora's 768px phone
-         breakpoint and a fine pointer, so a phone held sideways does not get it either. */
+      /* R-IV.1444: the TV tile is ON BY DEFAULT on a desktop (Nick approved the preview 10-25).
+         ?tv=off is the permanent off switch for that page load: nothing of the tile loads -- not its
+         script, not its stylesheet, not YouTube's player. Any other ?tv= value (the old ?tv=preview
+         bookmark included) is harmless. Desktop only: wider than Agora's 768px phone breakpoint and
+         a fine pointer, so a phone held sideways does not get it either. */
       (function () {
-        if (!/(?:^|[?&])tv=preview(?:&|$)/.test(location.search)) return;
+        if (/(?:^|[?&])tv=off(?:&|$)/.test(location.search)) return;
         if (!window.matchMedia('(min-width: 769px) and (hover: hover) and (pointer: fine)').matches) return;
-        var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/assets/tv/tv_tile.css?v=1';
+        var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/assets/tv/tv_tile.css?v=2';
         document.head.appendChild(l);
-        var s = document.createElement('script'); s.src = '/assets/tv/tv_tile.js?v=1';
+        var s = document.createElement('script'); s.src = '/assets/tv/tv_tile.js?v=2';
         document.body.appendChild(s);
       })();
     </script>
