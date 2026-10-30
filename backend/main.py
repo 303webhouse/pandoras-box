@@ -1873,6 +1873,15 @@ async def _revalidate_html(request, call_next):
         response.headers["Cache-Control"] = "no-cache"
     return response
 
+
+# R-IV.1446(d): every write request needs the session or the key, except utils/write_guard.py's
+# ALLOWLIST. Added LAST so it is the OUTERMOST layer: it sees every request, mounts included,
+# before any handler. Log-only unless WRITE_GUARD_MODE=enforce.
+from utils.write_guard import WriteGuardMiddleware  # noqa: E402
+
+app.add_middleware(WriteGuardMiddleware)
+
+
 @app.get("/")
 async def root():
     """Health check endpoint"""

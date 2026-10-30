@@ -16,6 +16,8 @@ os.environ["POLYGON_API_KEY"] = "test-polygon-key"
 os.environ["FRED_API_KEY"] = "test-fred-key"
 os.environ["DASHBOARD_SESSION_SECRET"] = "test-session-secret"
 os.environ["DASHBOARD_PASSWORD"] = "test-dashboard-password"
+# R-IV.1446(d): the write guard runs in every app test; its database record stays off here.
+os.environ["WRITE_GUARD_RECORD"] = "off"
 
 from fastapi.testclient import TestClient
 
