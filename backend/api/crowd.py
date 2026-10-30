@@ -91,7 +91,10 @@ def _cftc_block(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     # The history is each EARLIER week's total, so today's reading is ranked against weeks
     # that are complete rather than against itself.
     history: List[Optional[float]] = []
-    for d in dates[1:]:
+    # R-IV.1451(f): ranked against the 52 most recent earlier weeks (R-IV.1369(f)4), not every
+    # week fetched. CFTC_WEEKS stays 60 so a missed week still leaves 52; only the ranked slice
+    # is capped. Newest first, so the head is the most recent.
+    for d in dates[1:1 + cb.FULL_WINDOW]:
         vals = [v for v in by_date[d].values() if v is not None]
         history.append(sum(vals) if vals else None)
     try:
