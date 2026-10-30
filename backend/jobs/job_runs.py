@@ -49,6 +49,10 @@ JOB_F_EXPORT_BARS = "f_export_bars"
 # session, not one a minute. Under the collector law a slot it fails to store is permanently
 # absent, so "stored nothing" has to be a recorded fault rather than a log line.
 JOB_OPTION_QUOTE_CAPTURE = "option_quote_capture"
+# R-IV.1451(b). The forward dark-pool walk, one row per night, keyed on the session that just
+# closed. It hit its call limit four nights running and recorded nothing anywhere but its own
+# run table, so the failure was invisible.
+JOB_DARKPOOL_FORWARD = "darkpool_forward"
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"
@@ -75,6 +79,10 @@ STATUS_COMPLETED_DEFECTIVE = "completed_defective"
 # the retry re-attempt the session instead of leaving it for a ruling. 2026-10-15 recorded `ok`
 # and sat two sessions stale until it was healed by hand; under this status it heals itself.
 STATUS_DEGRADED = "degraded"
+# R-IV.1451(b). The pass stopped (call limit, account shed, a vendor refusal) before it finished
+# the session it exists to collect. NEVER `ok`; kept out of PASS_COMPLETE_STATUSES like
+# `degraded`, because what it did not reach is still outstanding. skip_reason names the names.
+STATUS_PARTIAL = "partial"
 # What the RETRY question counts as "this session's pass is done". Not the same question as
 # "this session produced good data" -- last_completed() below still counts only ok/skipped.
 # NOTE `degraded` is absent ON PURPOSE: a short vendor day is not a completed pass.

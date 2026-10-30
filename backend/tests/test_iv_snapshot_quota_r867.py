@@ -98,6 +98,9 @@ def test_only_the_ruled_callers_are_exempt():
         # unchanged." It earned it the same hard way as the line above -- the 0.25 factor cut
         # the ruled 165 to 41 and the governor logged "BLOCK ... count=41 limit=41".
         "iv_term_backfill",           # R-IV.1073(c) / R-IV.1079(a)
+        # R-IV.1451(b): the third with the same haircut -- 250 x 0.25 = 62, "QUOTA_EXCEEDED
+        # darkpool_forward 62/62" every night 10-27 -> 10-30, partway through NVDA.
+        "darkpool_forward",           # R-IV.1451(b)
     }
 
 

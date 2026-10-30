@@ -208,6 +208,29 @@ def catchup_sessions(session: date, done: set, names) -> List[date]:
 # one night
 # ---------------------------------------------------------------------------
 
+def session_verdict(names, session: date, done, results: List[dict],
+                    stop_reason: Optional[str]) -> Tuple[str, Optional[str]]:
+    """R-IV.1451(b): did tonight finish THE SESSION THAT JUST CLOSED? -> (status, reason).
+
+    `ok` only when every name is walked to its end (exhausted) tonight or by an earlier attempt.
+    Otherwise `partial`, naming the names cut mid-walk and the names never reached -- never `ok`.
+    Catch-up progress does not change this: the backlog is reported in the run summary.
+    """
+    from jobs.job_runs import STATUS_OK, STATUS_PARTIAL
+
+    walked = {r["ticker"]: r for r in results}
+    cut = [t for t in names if t in walked and not walked[t].get("exhausted")]
+    unreached = [t for t in names if t not in walked and (t, session) not in done]
+    if not cut and not unreached:
+        return STATUS_OK, None
+    parts = []
+    if cut:
+        parts.append("cut mid-walk: " + ",".join(cut))
+    if unreached:
+        parts.append("never reached: " + ",".join(unreached))
+    parts.append("stop: " + (stop_reason or "unknown"))
+    return STATUS_PARTIAL, "; ".join(parts)[:480]
+
 async def walk_night(now: Optional[datetime] = None,
                      session: Optional[date] = None) -> dict:
     """Walk Tier-1 for one session, floored. Creates and ENDS a run. Never raises."""
@@ -235,6 +258,9 @@ async def walk_night(now: Optional[datetime] = None,
     names = census_names()
     ceiling = night_ceiling()
     budget = Budget(ceiling)
+
+    from jobs.job_runs import JOB_DARKPOOL_FORWARD, STATUS_ERROR, finish_run, start_run
+    job_run_id = await start_run(JOB_DARKPOOL_FORWARD, session)
 
     pool = await get_postgres_client()
     async with pool.acquire() as conn:
@@ -295,6 +321,8 @@ async def walk_night(now: Optional[datetime] = None,
         # an `except Exception` would be blind to it -- which is how the census job left run 7
         # recorded as in progress forever, and the gate then read that silence as a wait.
         await _end_run(pool, run_id, budget.calls, "cancelled mid-walk", summary)
+        await finish_run(job_run_id, STATUS_ERROR, rows_touched=len(results) + len(catchup),
+                         error="cancelled mid-walk")
         raise
 
     summary["collected"] = len(results)
@@ -317,8 +345,15 @@ async def walk_night(now: Optional[datetime] = None,
     except Exception:                                               # noqa: BLE001
         logger.warning("[dp-forward] completeness refresh failed", exc_info=True)
 
+    status, why = session_verdict(names, session, done, results, budget.stop_reason)
+    summary["status"] = status
+    summary["status_reason"] = why
     await _end_run(pool, run_id, budget.calls,
                    budget.stop_reason or "walked the Tier-1 list", summary)
+    await finish_run(job_run_id, status, rows_touched=len(results) + len(catchup),
+                     skip_reason=why)
+    if why:
+        logger.warning("[dp-forward] run %s session %s PARTIAL: %s", run_id, session, why)
     _last_result.clear()
     _last_result.update(summary)
     logger.info("[dp-forward] run %s session %s: %d walked, %d already done, %d pages, "

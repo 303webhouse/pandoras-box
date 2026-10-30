@@ -529,6 +529,12 @@ OFF_HOURS_FACTOR_BY_CALLER = {
     # the backfill is still the first thing shed under account pressure -- which is right: it
     # reads sessions that already happened and can always wait, unlike a live quote.
     "iv_term_backfill": 1.0,
+    # R-IV.1451(b): the forward dark-pool walk is the third to hit the IDENTICAL haircut. Its
+    # whole window is 20:30-23:00 ET, so 250 x 0.25 = 62 was all it ever had: measured, the
+    # vendor block read "QUOTA_EXCEEDED darkpool_forward 62/62" on every night from 10-27 to
+    # 10-30, partway through NVDA, and AAPL, MSFT and TSLA were never reached. Off-hours quota
+    # only; the 250 and STANDARD are unchanged, so it is still shed first under pressure.
+    "darkpool_forward": 1.0,
 }
 
 NON_RTH_QUOTA_FACTOR = {
