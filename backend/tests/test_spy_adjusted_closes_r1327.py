@@ -99,6 +99,9 @@ def test_the_two_columns_in_the_stamped_file_are_GENUINELY_DIFFERENT_SERIES():
     """The reconciliation, re-measured rather than quoted. If `close` and `adj_close` were the
     same, "fully adjusted" would be a distinction without a difference and picking the wrong
     column would cost nothing -- which is exactly the reasoning that leads to picking it."""
+    # R-IV.1456(b): read_parquet needs a parquet engine; an environment without pyarrow skips
+    # this rather than failing it (it was ABACUS's 24th failure, from 5b9e3b7f).
+    pytest.importorskip("pyarrow")
     import pandas as pd
 
     df = pd.read_parquet(STAMPED)
