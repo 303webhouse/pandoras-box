@@ -1396,7 +1396,7 @@ async def lifespan(app: FastAPI):
         else:
             asyncio.create_task(_oqc.run_forever())
             logger.info("✅ option_quote_capture started (tag=%s, ceiling=%d/session)",
-                        _oqc.CALLER_TAG, _oqc.SESSION_CALL_CEILING)
+                        _oqc.CALLER_TAG, _oqc.session_ceiling())  # renamed in 864c4f16
     except Exception as e:
         logger.error("❌ option_quote_capture did NOT start: %s", e)
 

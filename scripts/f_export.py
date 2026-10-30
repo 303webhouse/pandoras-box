@@ -353,8 +353,23 @@ def export_bars1d() -> None:
                  row["bytes"]))
 
 
-# ── R-IV.1456(g)2: a Polygon reference copy of the same 1-minute bars ───────────────────
+# ── R-IV.1456(g)2 / R-IV.1461(e): a Polygon reference copy of the same 1-minute bars ────
+#
+# THE SHAPE IS THE INSTRUMENT'S (R-IV.1461(e)3): <T>_adjusted_false.parquet, built by
+# polygon_1m_export.to_frame -- the same function that wrote bars1m_polygon/ and the reserve, so
+# the columns are identical (timestamp_utc, timestamp_et, session_et, OHLCV, vwap, transactions,
+# ticker, source, adjusted=False) and triton_census.load_polygon reads it unchanged.
+#
+# ONE FOLDER PER SESSION: bars1m_polygon_daily/<YYYY-MM-DD>/<T>_adjusted_false.parquet. That is
+# what makes it write-once (a session's file is never rewritten), and it keeps the sealed
+# TRITON-R reserve window (09-25..10-15, its own folder under R-IV.1126) addressable by date:
+# a reader picks sessions by their folder and never gets the reserve mixed in by one glob.
 
+POLY_DAILY_DIR = "bars1m_polygon_daily"
+#: The columns of bars1m_polygon/ and both reserve folders, in their order.
+POLY_COLUMNS = ("volume", "vwap", "open", "close", "high", "low", "transactions", "timestamp_utc",
+                "timestamp_et", "session_et", "ticker", "source", "adjusted")
+POLY_VS_YF_FILE = "bars1m_polygon_vs_yfinance.tsv"
 POLY_VS_YF_HEADER = ("logged_utc", "session", "ticker", "yf_bars", "polygon_bars",
                      "common_bars", "bars_price_differ", "largest_price_diff", "largest_at",
                      "only_yfinance", "only_polygon", "volume_bars_differ")
@@ -369,24 +384,46 @@ POLYGON_SESSIONS_PER_CALL = 10
 VENDOR_PRICE_TOLERANCE = 0.005
 
 
-def polygon_frame(results) -> pd.DataFrame:
-    """Polygon /v2/aggs results -> the yfinance file's shape: an ET DatetimeIndex named
-    Datetime, Open/High/Low/Close/Volume, plus VWAP, Transactions and source='polygon'."""
-    cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "Transactions", "source"]
-    if not results:
-        return pd.DataFrame(columns=cols, index=pd.DatetimeIndex([], tz=_et_zone(),
-                                                                 name="Datetime"))
-    df = pd.DataFrame(results)
-    idx = pd.to_datetime(df["t"], unit="ms", utc=True).dt.tz_convert(_et_zone())
-    out = pd.DataFrame({
-        "Open": df["o"].astype(float).values, "High": df["h"].astype(float).values,
-        "Low": df["l"].astype(float).values, "Close": df["c"].astype(float).values,
-        "Volume": df["v"].astype(float).values,
-        "VWAP": df["vw"].values if "vw" in df else [None] * len(df),
-        "Transactions": df["n"].values if "n" in df else [None] * len(df),
-    }, index=pd.DatetimeIndex(idx, name="Datetime"))   # NOT idx.values: that drops the zone
-    out["source"] = "polygon"
-    return out[~out.index.duplicated(keep="first")].sort_index()
+def poly_path(root: str, d: date, ticker: str) -> str:
+    return os.path.join(root, POLY_DAILY_DIR, d.isoformat(), "%s_adjusted_false.parquet" % ticker)
+
+
+def polygon_key() -> str:
+    """POLYGON_API_KEY from the environment, else from the user's registry environment (a
+    scheduled task started before the variable was set does not inherit it). Never printed."""
+    k = os.getenv("POLYGON_API_KEY") or ""
+    if k:
+        return k
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as h:
+            return str(winreg.QueryValueEx(h, "POLYGON_API_KEY")[0] or "")
+    except Exception:                                               # noqa: BLE001
+        return ""
+
+
+def polygon_frame(results, ticker: str) -> pd.DataFrame:
+    """Polygon /v2/aggs results -> the instrument's columns, via polygon_1m_export.to_frame."""
+    if HERE_DIR not in sys.path:
+        sys.path.insert(0, HERE_DIR)
+    from polygon_1m_export import to_frame
+    df = to_frame(list(results or []), ticker, False)
+    if df.empty:
+        return df
+    # The column ORDER of bars1m_polygon/ and the reserve, whatever order the response used.
+    df = df[[c for c in POLY_COLUMNS if c in df.columns]]
+    return df.drop_duplicates("timestamp_utc").sort_values("timestamp_utc").reset_index(drop=True)
+
+
+def _as_bars(pdf: pd.DataFrame) -> pd.DataFrame:
+    """The Polygon columns as the yfinance file's (ET index, capitalised OHLCV) for comparing."""
+    out = pd.DataFrame({"Open": pdf["open"].astype(float).values,
+                        "High": pdf["high"].astype(float).values,
+                        "Low": pdf["low"].astype(float).values,
+                        "Close": pdf["close"].astype(float).values,
+                        "Volume": pdf["volume"].astype(float).values},
+                       index=pd.DatetimeIndex(pd.to_datetime(pdf["timestamp_utc"], utc=True)))
+    return out
 
 
 def compare_vendors(yfd: pd.DataFrame, pod: pd.DataFrame) -> dict:
@@ -427,21 +464,21 @@ def _polygon_get(url: str, key: str, params: dict, sleep, get):
 
 def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, get=None,
                           root: str = None) -> dict:
-    """Write Polygon's 1-minute bars for every census name and every session from
+    """Write Polygon's unadjusted 1-minute bars for every census name and every session from
     POLYGON_FROM that F: has a yfinance file for and no Polygon file yet, WRITE-ONCE, and log
-    how each differs from the yfinance file (bars1m-polygon-vs-yfinance.tsv).
+    how each differs from the yfinance file (bars1m_polygon_vs_yfinance.tsv).
 
     Polygon Starter withholds the CURRENT session (measured 2026-10-15: a 403 seven hours
     after the close), so a session's copy lands the night after it. A 403 on a past session
     means the plan does not serve these bars after all: the run STOPS and says so
     (R-IV.1456(g)2: "If Polygon's plan doesn't serve these bars at no extra cost, stop").
-    Nothing here changes what TRITON reads (R-IV.1456(g)3): a separate folder.
+    What TRITON reads is unchanged until SPINE rules (R-IV.1456(g)3).
     """
     import time as _time
-    key = key if key is not None else (os.getenv("POLYGON_API_KEY") or "")
+    key = key if key is not None else polygon_key()
     root = root or ROOT
     out = {"status": "ok", "calls": 0, "files_written": 0, "sessions_written": set(),
-           "compared": 0, "no_bars": [], "reason": None}
+           "per_ticker": {}, "compared": 0, "no_bars": [], "reason": None}
     if not key:
         out.update(status="skipped", reason="no POLYGON_API_KEY in this environment")
         return _poly_done(out)
@@ -452,7 +489,6 @@ def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, 
     now_et = now_et or datetime.now(timezone.utc).astimezone(_et_zone())
     today = now_et.date()
     yroot = os.path.join(root, "bars1m")
-    proot = os.path.join(root, "bars1m-polygon")
     sessions = []
     for name in (sorted(os.listdir(yroot)) if os.path.isdir(yroot) else []):
         try:
@@ -465,8 +501,7 @@ def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, 
     for ticker in CENSUS:
         missing = [d for d in sessions
                    if os.path.exists(os.path.join(yroot, d.isoformat(), "%s.parquet" % ticker))
-                   and not os.path.exists(os.path.join(proot, d.isoformat(),
-                                                       "%s.parquet" % ticker))]
+                   and not os.path.exists(poly_path(root, d, ticker))]
         for i in range(0, len(missing), POLYGON_SESSIONS_PER_CALL):
             group = missing[i:i + POLYGON_SESSIONS_PER_CALL]
             if not first_call:
@@ -488,39 +523,37 @@ def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, 
             if body.get("next_url"):
                 out.update(status="partial", reason="Polygon paginated %s %s..%s; the rest "
                            "is left for the next night" % (ticker, group[0], group[-1]))
-            frame = polygon_frame(list(body.get("results") or []))
-            by_day = {}
-            for ts in frame.index:
-                by_day.setdefault(ts.date(), []).append(ts)
+            frame = polygon_frame(body.get("results"), ticker)
             for d in group:
-                ppath = os.path.join(proot, d.isoformat(), "%s.parquet" % ticker)
-                if d not in by_day:
+                ppath = poly_path(root, d, ticker)
+                pod = frame[frame["session_et"] == d.isoformat()] if len(frame) else frame
+                if not len(pod):
                     out["no_bars"].append("%s %s" % (d, ticker))
                     continue
                 if os.path.exists(ppath):        # write-once, like the yfinance files
                     continue
-                pod = frame.loc[by_day[d]]
-                write_parquet(pod, ppath)
+                write_parquet(pod.reset_index(drop=True), ppath)
                 out["files_written"] += 1
                 out["sessions_written"].add(d.isoformat())
+                out["per_ticker"][ticker] = out["per_ticker"].get(ticker, 0) + 1
                 yfd = pd.read_parquet(os.path.join(yroot, d.isoformat(), "%s.parquet" % ticker))
-                c = compare_vendors(yfd, pod)
-                append_tsv(os.path.join(root, "bars1m-polygon-vs-yfinance.tsv"),
-                           POLY_VS_YF_HEADER, (
-                               datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                               d.isoformat(), ticker, c["yf_bars"], c["polygon_bars"],
-                               c["common_bars"], c["bars_price_differ"],
-                               c["largest_price_diff"], c["largest_at"], c["only_yfinance"],
-                               c["only_polygon"], c["volume_bars_differ"]))
+                c = compare_vendors(yfd, _as_bars(pod))
+                append_tsv(os.path.join(root, POLY_VS_YF_FILE), POLY_VS_YF_HEADER, (
+                    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    d.isoformat(), ticker, c["yf_bars"], c["polygon_bars"], c["common_bars"],
+                    c["bars_price_differ"], c["largest_price_diff"], c["largest_at"],
+                    c["only_yfinance"], c["only_polygon"], c["volume_bars_differ"]))
                 out["compared"] += 1
     return _poly_done(out)
 
 
 def _poly_done(out: dict) -> dict:
     out["sessions_written"] = sorted(out["sessions_written"])
-    print("=== bars1m-polygon: %s | %d calls | wrote %d files across %d sessions: %s%s ==="
+    per = ",".join("%s:%d" % (t, n) for t, n in sorted(out.get("per_ticker", {}).items()))
+    print("=== bars1m_polygon_daily: %s | %d calls | wrote %d files across %d sessions: %s%s%s ==="
           % (out["status"].upper(), out["calls"], out["files_written"],
              len(out["sessions_written"]), ",".join(out["sessions_written"]) or "NONE",
+             (" | per ticker " + per) if per else "",
              (" | " + out["reason"]) if out["reason"] else ""))
     return out
 

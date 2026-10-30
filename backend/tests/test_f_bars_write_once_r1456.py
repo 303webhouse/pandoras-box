@@ -208,9 +208,19 @@ def test_POLYGON_backfills_from_09_25_writes_once_and_logs_the_differences(fx, c
     url, params = calls[0]
     assert url.endswith("/SPY/range/1/minute/2026-09-25/2026-10-21")
     assert params["adjusted"] == "false"
-    pol = pd.read_parquet(_path(fx, D1, folder="bars1m-polygon"))
-    assert (pol["source"] == "polygon").all() and str(pol.index.tz) == "America/New_York"
-    log = pd.read_csv(os.path.join(fx.ROOT, "bars1m-polygon-vs-yfinance.tsv"), sep="\t")
+    # R-IV.1461(e)3: the instrument's shape -- the same columns as bars1m_polygon/ and the
+    # reserve, one ticker, unadjusted, one folder per session.
+    ppath = fx.poly_path(fx.ROOT, D1, "SPY")
+    assert ppath.endswith(os.path.join("bars1m_polygon_daily", D1.isoformat(),
+                                       "SPY_adjusted_false.parquet"))
+    pol = pd.read_parquet(ppath)
+    assert list(pol.columns) == ["volume", "vwap", "open", "close", "high", "low",
+                                 "transactions", "timestamp_utc", "timestamp_et", "session_et",
+                                 "ticker", "source", "adjusted"]
+    assert str(pol["timestamp_utc"].dt.tz) == "UTC" and set(pol["session_et"]) == {D1.isoformat()}
+    assert set(pol["ticker"]) == {"SPY"} and not pol["adjusted"].any()
+    assert set(pol["source"]) == {"polygon_v2_aggs_1minute"} and len(pol) == 5
+    log = pd.read_csv(os.path.join(fx.ROOT, "bars1m_polygon_vs_yfinance.tsv"), sep="\t")
     assert list(log.columns) == list(fx.POLY_VS_YF_HEADER) and len(log) == 3
     d1 = log[log["session"] == D1.isoformat()].iloc[0]
     assert d1["bars_price_differ"] == 0 and d1["only_yfinance"] == 0
@@ -221,10 +231,21 @@ def test_POLYGON_backfills_from_09_25_writes_once_and_logs_the_differences(fx, c
     assert "TEST-KEY-NEVER-PRINTED" not in capsys.readouterr().out
 
     # Second night: nothing missing -> no call, nothing rewritten.
-    before = _sha(_path(fx, D1, folder="bars1m-polygon"))
+    before = _sha(fx.poly_path(fx.ROOT, D1, "SPY"))
     out2 = fx.export_polygon_bars1m(key="k", now_et=_now(), sleep=sleeps.append, get=get)
     assert out2["calls"] == 0 and out2["files_written"] == 0
-    assert _sha(_path(fx, D1, folder="bars1m-polygon")) == before
+    assert _sha(fx.poly_path(fx.ROOT, D1, "SPY")) == before
+
+    # TRITON's own reader accepts these files as they are (amendment 7 sec. 2).
+    spec = importlib.util.spec_from_file_location(
+        "_triton_census_r1461", os.path.join(REPO, "scripts", "lab", "triton_census.py"))
+    tc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tc)
+    bars, info = tc.load_polygon(os.path.join(fx.ROOT, "bars1m_polygon_daily", "*",
+                                              "*_adjusted_false.parquet"))
+    assert len(bars) == 5 + 4 + 5 and set(bars["source"]) == {"polygon"}
+    assert sorted(i["first_session_et"] for i in info) == ["2026-09-25", D1.isoformat(),
+                                                           D2.isoformat()]
 
 
 def test_POLYGON_paces_at_13s_and_waits_out_a_429(fx):
@@ -250,6 +271,11 @@ def test_POLYGON_stops_on_a_403_and_says_so(fx):
 
 
 def test_POLYGON_without_a_key_is_SKIPPED_not_an_error(fx, monkeypatch):
-    monkeypatch.delenv("POLYGON_API_KEY", raising=False)
+    monkeypatch.setattr(fx, "polygon_key", lambda: "")
     out = fx.export_polygon_bars1m(now_et=_now(), get=lambda *a, **k: 1 / 0)
     assert out["status"] == "skipped" and "POLYGON_API_KEY" in out["reason"]
+
+
+def test_the_key_is_read_from_the_environment_first(fx, monkeypatch):
+    monkeypatch.setenv("POLYGON_API_KEY", "from-env")
+    assert fx.polygon_key() == "from-env"
