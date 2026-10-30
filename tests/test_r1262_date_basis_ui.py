@@ -12,7 +12,12 @@ WHAT IT GUARDS, and why each one needs a test rather than a look:
   payload decides which one applies and a page that could only render the happy state would be
   untested the next time a backfill lags.
 
-  (b)1  Every Abacus PERIOD figure states its date basis on its face, with the COUNT of rows whose
+  (b)1  RETIRED by R-IV.1448(b), 2026-10-29: the Abacus summary view these checks rendered was
+        removed with its `?view=summary` rollback, and abacus.js with it. Nothing on any page reads
+        the write-date basis any more: the P&L view that replaced it is dated by `trade_date`, and
+        its date-unknown money (R-IV.1270(b)) is pinned by tests/test_r1315_pnl_preview.py. What
+        the retired checks guarded, for the record:
+        Every Abacus PERIOD figure states its date basis on its face, with the COUNT of rows whose
         write date and trade date differ. The count is in the visible label, not only a tooltip: a
         reader who must hover to learn that a figure is on the wrong date basis has been told
         nothing. The WITHHELD tile must NOT carry a basis -- there is no measurement behind it.
@@ -64,7 +69,7 @@ def check(n, c, x=''):
 
 
 # ── the parse test, first: a page that does not parse renders nothing at all ──────────────────
-for name in ('abacus.js', 'v2.js'):
+for name in ('v2.js',):
     r = subprocess.run(['node', '--check', os.path.join(ROOT, name)],
                        capture_output=True, text=True)
     check('parses: ' + name, r.returncode == 0, (r.stderr or '')[:300])
@@ -75,88 +80,6 @@ NOW = datetime.now(timezone.utc)
 def iso(**kw):
     return (NOW - timedelta(**kw)).isoformat().replace('+00:00', 'Z')
 
-
-BASIS = {
-    'label': 'by the day each closure row was WRITTEN, not the day the trade closed',
-    'trade_date_exists': False,
-    'column': 'position_lot_closures.created_at',
-    'mixed': True,
-    'mixed_detail': 'A row with closures is placed by the day its closure was WRITTEN.',
-    'closure_rows': 839, 'rows_differing': 803, 'rows_agreeing': 35, 'rows_no_exit_date': 1,
-    'earliest_exit_in_ledger': '2025-12-11', 'written_from': '2026-09-23', 'written_to': '2026-10-15',
-    'meaning': 'On 803 of 839 closure rows the two days differ.',
-    'fix': "BUILD's trade_date column and POSITIONS' backfill.",
-}
-LIVE = {'source': 'live', 'computed_at': NOW.isoformat().replace('+00:00', 'Z')}
-SPAN = {'from': '2026-09-01', 'to': '2026-10-19'}
-COV = {'counted': 100, 'total': 110, 'excluded': {'basis_incomplete': 10}}
-
-
-def stat(key, label, fmt, value, basis=True):
-    d = {'key': key, 'label': label, 'format': fmt, 'value': value, 'n': 100,
-         'span': SPAN, 'coverage': COV, 'meaning': label + ' means this.', **LIVE}
-    if basis:
-        d['date_basis'] = BASIS
-    return d
-
-
-SUMMARY = {
-    'version': 1, 'mock': True, 'combined_is_pooled': True,
-    'range': {'key': '90d', 'from': '2026-07-21', 'to': '2026-10-19', 'label': '90 days'},
-    'range_applied': True,
-    'scope': {'label': 'Robinhood - FID ROTH - FID 401A', 'closed_positions': 110,
-              'accounts': 3, **LIVE},
-    'date_basis': BASIS,
-    'accounts_date_basis': BASIS,
-    'stats': [
-        stat('net_profit', 'Net profit', 'usd', 1234.56),
-        stat('win_rate', 'Win rate', 'pct', 0.51),
-        stat('expectancy', 'Expectancy', 'usd', 11.22),
-        stat('profit_factor', 'Profit factor', 'ratio', 1.3),
-        stat('avg_win_loss', 'Average win / loss', 'usd', 40.0),
-        stat('expected_return', 'Expected return per trade', 'pct', 0.02),
-        # WITHHELD: no figure, so no basis. If this one ever grows a basis chip the page is
-        # claiming a measurement it has explicitly taken down (R-IV.716(c)).
-        {'key': 'loss_vs_risk', 'label': 'Loss vs risk', 'format': 'pct', 'value': None,
-         'n': None, 'unavailable': 'max loss not reliable yet', 'span': SPAN,
-         'meaning': 'Withheld: the max loss field is unreliable.', **LIVE},
-    ],
-    'accounts': [
-        {'account': 'ROBINHOOD', 'account_display': 'Robinhood', 'net_profit': 211.53,
-         'win_rate': 0.5, 'win_rate_n': 40, 'expected_return': 0.01,
-         'expected_return_n': 38, 'coverage': COV},
-        {'account': 'FIDELITY_ROTH', 'account_display': 'FID ROTH', 'net_profit': -422.82,
-         'win_rate': 0.4, 'win_rate_n': 30, 'expected_return': -0.02,
-         'expected_return_n': 29, 'coverage': COV},
-    ],
-    'equity': {'accounts': [], 'computed_at': LIVE['computed_at'], 'source': 'live'},
-    'leaks': {'items': [], 'partly_live': True, **LIVE},
-    'strategies': {'note': 'No figures yet.', 'source': 'mock',
-                   'computed_at': '2026-01-01T00:00:00Z'},
-    'breakdowns': [
-        {'key': 'structure', 'label': 'By structure', 'columns': [['Structure', 'text']],
-         'rows': [['vertical', 1]], 'note': 'n is the counted closes.', 'date_basis': BASIS, **LIVE},
-        {'key': 'discipline', 'label': 'By discipline', 'columns': [['Rule', 'text']],
-         'rows': [['stop honoured', 1]], 'note': 'Sample data.', 'source': 'mock',
-         'computed_at': '2026-01-01T00:00:00Z'},
-    ],
-    'realized_fallback': {'count': 0, 'rows': []}, 'realized_excluded_no_date': [],
-    # R-IV.1270(b). Two rows, both Robinhood expiries, outside every total.
-    'realized_dating': {'basis': 'position_lot_closures.trade_date', 'note': 'the broker action date'},
-    'realized_date_unknown': {
-        'count': 2, 'total': -57.26, 'in_any_total': False,
-        'by_account': {'ROBINHOOD': -57.26},
-        'rows': [
-            {'closure_id': 1942, 'position_id': 'POS_IWM_20261006_R652', 'ticker': 'IWM',
-             'status': 'EXPIRED', 'account': 'ROBINHOOD', 'account_display': 'Robinhood',
-             'realized': -13.08},
-            {'closure_id': 1943, 'position_id': 'POS_NVDA_20261008_171815', 'ticker': 'NVDA',
-             'status': 'EXPIRED', 'account': 'ROBINHOOD', 'account_display': 'Robinhood',
-             'realized': -44.18},
-        ],
-        'note': 'closures with no trade_date, so no window can place them.',
-    },
-}
 
 # Three accounts, one of each state the chips must tell apart.
 BALANCES = [
@@ -214,8 +137,6 @@ def route(r):
     def j(o, s=200):
         r.fulfill(status=s, content_type='application/json', body=json.dumps(o))
 
-    if '/api/abacus/summary' in u:
-        return j(SUMMARY)
     if '/api/v2/positions' in u:
         return j({'positions': POSITIONS, 'count': len(POSITIONS)})
     if '/api/portfolio/balances' in u:
@@ -288,85 +209,6 @@ with sync_playwright() as p:
     ENGINE = os.environ.get('ENGINE', 'chromium')
     say('engine: ' + ENGINE)
     b = getattr(p, ENGINE).launch()
-
-    # ── (b)1 · ABACUS ───────────────────────────────────────────────────────────
-    # R-IV.1356 made the P&L view the DEFAULT, so `abacus.html` with no query no longer
-    # renders the summary page these checks are about. They ask for it explicitly now.
-    # THIS SUITE WENT RED AT R-IV.1356 AND I DID NOT NOTICE, because I ran the R-IV.1315
-    # suite and the backend tests that turn and not this one. A test that is not run is
-    # not a test; the lesson is to run every suite the change can reach, not the ones the
-    # change was written against.
-    pg, ctx, errs, assets = open_page(b, 'abacus.html?view=summary')
-    tiles = pg.evaluate("""() => [...document.querySelectorAll('.ab-stat')].map((e) => ({
-        key: e.dataset.key, basis: e.dataset.basis || null, text: e.textContent,
-        chips: [...e.querySelectorAll('.ab-chip')].map((c) => c.textContent.trim()) }))""")
-    live_keys = ['net_profit', 'win_rate', 'expectancy', 'profit_factor', 'avg_win_loss',
-                 'expected_return']
-    got = {t['key']: t for t in tiles}
-    check('every live period tile rendered', all(k in got for k in live_keys), sorted(got))
-    missing = [k for k in live_keys
-               if not any('by write date' in c for c in got.get(k, {}).get('chips', []))]
-    check('every live period tile states its date basis ON ITS FACE', not missing, missing)
-    nocount = [k for k in live_keys
-               if not any('803 of 839 rows differ' in c for c in got.get(k, {}).get('chips', []))]
-    check('...and the COUNT is in the visible label, not only the tooltip', not nocount, nocount)
-    check('...and the tile is marked for styling/selection', got.get('net_profit', {}).get('basis') == 'write-date',
-          got.get('net_profit'))
-    check('the WITHHELD tile carries NO basis, having no measurement behind it',
-          not any('by write date' in c for c in got.get('loss_vs_risk', {}).get('chips', [])),
-          got.get('loss_vs_risk'))
-
-    note = pg.evaluate("() => (document.querySelector('#abAccountsNote') || {}).textContent || ''")
-    check('the per-account card says the basis in full', 'dated by when the row was' in note, note[:160])
-    check('...naming the count and the span the ledger was written over',
-          '803 of 839' in note and 'written between' in note, note[:200])
-    check('...and keeps the pooled sentence beside it', 'pooled' in note, note[:120])
-
-    # R-IV.1270(b): MONEY NO WINDOW CAN PLACE must be on the page, with its count and its money,
-    # and must say it is outside every total. A count on its own would not answer the question a
-    # reader actually has, which is how much money is unplaced.
-    note = pg.evaluate("() => (document.querySelector('#abAccountsNote') || {}).textContent || ''")
-    check('the date-unknown money is on the page, with its count', 'Date unknown: 2 rows' in note,
-          note[:240])
-    check('...and its total', '-$57.26' in note or '\u2212$57.26' in note, note[:240])
-    check('...and says it is outside every figure, in every range',
-          'Outside every figure' in note and 'every range' in note, note[:240])
-    check('...and names the rows that hold it',
-          'IWM' in note and 'NVDA' in note, note[:300])
-
-    panels = pg.evaluate("""() => [...document.querySelectorAll('.ab-panel-chip')].map(
-        (e) => e.textContent)""")
-    check('a live breakdown panel states the basis',
-          any('by write date' in t for t in panels), panels)
-    check('the SAMPLE-DATA breakdown does not claim a measured basis',
-          sum(1 for t in panels if 'by write date' in t) < len(panels), panels)
-
-    head = pg.evaluate("() => (document.querySelector('#abAsof') || {}).textContent || ''")
-    check('the page header states the basis too', 'by write date' in head, head[:160])
-    check('abacus: no console errors and no page errors', not errs, errs)
-    check('abacus: every page asset loaded', not assets, assets)
-
-    ctx.close()
-
-    # THE TREATMENT MUST VANISH BY ITSELF once a real trade date exists -- tested end to end,
-    # because the day BUILD's column lands, nobody should have to hunt a stale warning down.
-    for d in [BASIS] + [b.get('date_basis') for b in SUMMARY['breakdowns'] if b.get('date_basis')]:
-        d['trade_date_exists'] = True
-    pg, ctx, errs, assets = open_page(b, 'abacus.html?view=summary')
-    body = pg.evaluate("() => document.body.textContent || ''")
-    check('once trade_date exists the basis treatment is GONE from the page',
-          'by write date' not in body and 'dated by when the row was' not in body,
-          [t for t in body.split('\n') if 'write date' in t][:2])
-    check('...and the figures are still there', 'Net profit' in body, body[:120])
-    # R-IV.1270(b): the warning going away must NOT take the unplaced money with it. They are
-    # different claims -- "these figures are on the wrong date" and "this money is on no date" --
-    # and the second outlives the first.
-    check('...and the date-unknown money SURVIVES the label removing itself',
-          'Date unknown: 2 rows' in body, body[:200])
-    check('...with no console errors on that path', not errs, errs)
-    for d in [BASIS] + [b2.get('date_basis') for b2 in SUMMARY['breakdowns'] if b2.get('date_basis')]:
-        d['trade_date_exists'] = False
-    ctx.close()
 
     # ── (b)2 and (b)3 · AGORA ───────────────────────────────────────────────────
     #

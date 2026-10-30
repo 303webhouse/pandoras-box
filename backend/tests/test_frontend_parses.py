@@ -18,7 +18,9 @@ import subprocess
 import pytest
 
 FRONTEND = pathlib.Path(__file__).resolve().parents[2].joinpath("frontend")
-JS_FILES = ("v2.js", "app.js", "stater.js", "abacus.js", "knowledgebase.js")
+# abacus.js was retired with the ?view=summary rollback (R-IV.1448(b)); the Abacus page's one script
+# is now assets/abacus-pnl.js.
+JS_FILES = ("v2.js", "app.js", "stater.js", "assets/abacus-pnl.js", "knowledgebase.js")
 
 
 @pytest.mark.parametrize("name", JS_FILES)

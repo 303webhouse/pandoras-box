@@ -923,9 +923,9 @@ class TestAbacusDayVsMoment:
 
 class TestAbacusPageServed:
     @pytest.mark.parametrize("path,needle", [
-        ("/app/abacus", b"abacus.js"),
+        ("/app/abacus", b"abacus-pnl.js"),
         ("/abacus.css", b".ab-page"),
-        ("/abacus.js", b"/api/abacus/summary"),
+        ("/assets/abacus-pnl.js", b"/api/abacus/pnl"),
     ])
     def test_served(self, client, path, needle):
         r = client.get(path)
@@ -935,7 +935,14 @@ class TestAbacusPageServed:
     def test_abacus_route_beats_the_catch_all(self, client):
         """/app/{mode} serves legacy index.html; /app/abacus must not be swallowed by it."""
         body = client.get("/app/abacus").content
-        assert b"abacus.js" in body and b"/app.js" not in body
+        assert b"abacus-pnl.js" in body and b"/app.js" not in body
+
+    def test_the_retired_summary_script_is_not_served(self, client):
+        """R-IV.1448(b): abacus.js went with the ?view=summary rollback. Its route went too, so
+        nothing can serve a summary renderer that no page loads any more."""
+        r = client.get("/abacus.js")
+        assert r.status_code != 200 or b"/api/abacus/summary" not in r.content
+        assert b'src="/abacus.js' not in client.get("/app/abacus").content
 
     def test_legacy_analytics_still_legacy(self, client):
         """R-IV.413(a): /app/analytics is not repointed until the replacement is live."""

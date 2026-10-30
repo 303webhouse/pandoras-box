@@ -31,53 +31,9 @@
         <a class="v2-legacy-link" href="/app/analytics" title="The legacy Abacus, which still carries the live figures">Legacy Abacus →</a>
     </header>
 
-    <main class="ab-page" id="abPage">
-        <header class="ab-head">
-            <div>
-                <h1 class="ab-h1">Abacus</h1>
-                <div class="ab-asof" id="abAsof">loading…</div>
-            </div>
-            <div class="ab-controls">
-                <div class="ab-seg" role="group" aria-label="Date range" id="abRange">
-                    <button type="button" data-range="30d" aria-pressed="false">30d</button><button type="button" data-range="90d" aria-pressed="true">90d</button><button type="button" data-range="ytd" aria-pressed="false">YTD</button><button type="button" data-range="all" aria-pressed="false">All</button>
-                </div>
-                <div class="ab-dates">
-                    <label>from <input type="date" id="abFrom"></label>
-                    <label>to <input type="date" id="abTo"></label>
-                </div>
-            </div>
-        </header>
-
-        <div class="ab-banner" id="abBanner" hidden></div>
-        <div class="ab-error" id="abError" hidden></div>
-
-        <div class="ab-grid">
-            <div>
-                <div class="ab-stats" id="abStats"></div>
-                <section class="ab-card" id="abAccountsCard" hidden>
-                    <h2 class="ab-h2">By account <span id="abAccountsChip"></span></h2>
-                    <div class="ab-acct-ctl" id="abAccountFilter" role="group" aria-label="Filter by account"></div>
-                    <div class="ab-acct-table" id="abAccounts"></div>
-                    <p class="ab-acct-note" id="abAccountsNote"></p>
-                </section>
-                <section class="ab-card ab-equity">
-                    <h2 class="ab-h2">Equity <span id="abEquityChip"></span></h2>
-                    <div id="abEquity"></div>
-                </section>
-            </div>
-            <aside class="ab-card">
-                <h2 class="ab-h2">Where you're leaking <span id="abLeaksChip"></span></h2>
-                <ul class="ab-leaks" id="abLeaks"></ul>
-            </aside>
-        </div>
-
-        <div class="ab-tabs" role="tablist" aria-label="Breakdowns" id="abTabs"></div>
-        <div id="abPanels"></div>
-
-        <section class="ab-slot" id="abSlot"></section>
-
-        <footer class="ab-foot">Every rate shows its n. Every figure carries when it was computed. Unknown is shown as unknown, never as 0.</footer>
-    </main>
+    <!-- R-IV.1448(b): the P&L view (assets/abacus-pnl.js) fills this. The summary view that used to
+         live here, and abacus.js with it, were removed with the ?view=summary rollback on 2026-10-29. -->
+    <main class="ab-page" id="abPage"></main>
 
     <div class="ab-login" id="abLogin" hidden>
         <form class="ab-login-form" id="abLoginForm">
@@ -107,7 +63,6 @@
       })();
     </script>
 
-    <script src="/assets/abacus-pnl.js?v=4"></script>
-    <script src="/abacus.js?v=10"></script>
+    <script src="/assets/abacus-pnl.js?v=5"></script>
 </body>
 </html>

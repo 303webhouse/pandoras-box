@@ -48,7 +48,8 @@ def check(n, c, x=''):
         fails.append(n)
 
 
-for name in ('abacus.js', os.path.join('assets', 'abacus-pnl.js')):
+# abacus.js was retired with the ?view=summary rollback (R-IV.1448(b)).
+for name in (os.path.join('assets', 'abacus-pnl.js'),):
     r = subprocess.run(['node', '--check', os.path.join(ROOT, name)], capture_output=True, text=True)
     check('parses: ' + name, r.returncode == 0, (r.stderr or '')[:300])
 
@@ -166,12 +167,6 @@ def route(r):
 
     if '/api/abacus/pnl' in u:
         return j(PAYLOAD)
-    if '/api/abacus/summary' in u:
-        return j({'version': 1, 'mock': True, 'stats': [], 'breakdowns': [], 'accounts': [],
-                  'scope': {'source': 'live'}, 'equity': {'accounts': []},
-                  'leaks': {'items': []}, 'strategies': {'note': ''},
-                  'range': {'key': '90d', 'from': '2026-07-23', 'to': '2026-10-21'},
-                  'combined_is_pooled': True})
     return j({}, 404)
 
 
@@ -200,9 +195,9 @@ with sync_playwright() as p:
     check('the P&L view is the DEFAULT, with no query string',
           'P&L' in body and 'realized, by trade date' in body, body[:160])
     check('...and no longer calls itself a preview', 'Preview (?pnl=v1)' not in body, body[:200])
-    check('the summary view did NOT also paint',
-          pg.evaluate("() => !!document.getElementById('abPnl') && [...document.getElementById('abPage').children]"
-                      ".filter(e => e.id !== 'abPnl').every(e => e.hidden)"))
+    check('the P&L view is the ONLY thing on the page (R-IV.1448(b): the summary view is gone)',
+          pg.evaluate("() => { const c = [...document.getElementById('abPage').children];"
+                      " return c.length === 1 && c[0].id === 'abPnl'; }"))
     kpis = pg.evaluate("() => [...document.querySelectorAll('.pnl-kpi')].map(e => e.innerText)")
     check('all five KPIs rendered', len(kpis) == 5, len(kpis))
     blob = '\n'.join(kpis)
@@ -258,14 +253,17 @@ with sync_playwright() as p:
     check('no console or page errors', not errs, errs)
     ctx.close()
 
-    # THE ROLLBACK FLAG (R-IV.1356(c)), which expires 2026-10-29. Tested because a flag nobody
-    # exercises is a flag that has already broken by the time someone needs it.
+    # THE ROLLBACK FLAG (R-IV.1356(c)) EXPIRED 2026-10-29 and R-IV.1448(b) removed it. The old
+    # address must not break: it lands on the P&L view like any other, with nothing asking for
+    # the retired summary route.
     pg, ctx, errs = page(b, 'abacus.html?view=summary', 1920, 1080)
-    check('?view=summary still reaches the OLD summary view',
-          pg.evaluate("() => !document.getElementById('abPnl')"))
-    check('...and the summary sections are not hidden',
-          pg.evaluate("() => [...document.getElementById('abPage').children].some(e => !e.hidden)"))
-    check('rollback path: no errors', not errs, errs)
+    check('?view=summary, the retired rollback, now lands on the P&L view',
+          'realized, by trade date' in pg.evaluate("() => document.body.innerText"))
+    check('...and the old summary view is not there',
+          pg.evaluate("() => !document.getElementById('abStats') && !document.getElementById('abLeaks')"))
+    check('...and abacus.js is not loaded',
+          pg.evaluate("() => ![...document.scripts].some(s => /\\/abacus\\.js/.test(s.src))"))
+    check('retired rollback address: no errors', not errs, errs)
     ctx.close()
 
     # And the old address keeps working, so links already shared do not break.
@@ -280,7 +278,7 @@ with sync_playwright() as p:
     # looks at a phone is a width check with a hole in exactly the place it matters most.
     # 360 is the Galaxy S25; 384 the S25+/Ultra class.
     for (w, h) in ((360, 780), (384, 832), (1920, 1080), (2560, 1440), (1366, 768)):
-        for path, tag in (('abacus.html?pnl=v1', 'pnl'), ('abacus.html', 'summary')):
+        for path, tag in (('abacus.html?pnl=v1', 'pnl'), ('abacus.html', 'default')):
             pp, pctx, perrs = page(b, path, w, h)
             geo = pp.evaluate("""() => {
                 const d = document.documentElement, m = document.querySelector('.ab-page');

@@ -2872,10 +2872,6 @@ if frontend_path:
     async def serve_abacus_css():
         return FileResponse(os.path.join(frontend_path, "abacus.css"))
 
-    @app.get("/abacus.js", response_class=FileResponse)
-    async def serve_abacus_js():
-        return FileResponse(os.path.join(frontend_path, "abacus.js"))
-
     @app.get("/app/{mode}", response_class=FileResponse)
     async def serve_frontend_mode(mode: str):
         """Serve legacy frontend for SPA client-side routes, including
