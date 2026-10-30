@@ -53,6 +53,8 @@ JOB_OPTION_QUOTE_CAPTURE = "option_quote_capture"
 # closed. It hit its call limit four nights running and recorded nothing anywhere but its own
 # run table, so the failure was invisible.
 JOB_DARKPOOL_FORWARD = "darkpool_forward"
+# R-IV.1456(f): the one weekend top-up of that walk's backlog (jobs/darkpool_topup.py).
+JOB_DARKPOOL_TOPUP = "darkpool_topup"
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"

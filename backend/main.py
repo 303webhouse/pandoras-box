@@ -1345,6 +1345,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("❌ darkpool_forward did NOT start: %s", e)
 
+    # R-IV.1456(f): the ONE weekend top-up of the forward walk's backlog. Does nothing unless
+    # DARKPOOL_TOPUP_ARM is set to its exact value; refuses a second run by itself. Removed in
+    # the next push.
+    try:
+        from jobs import darkpool_topup as _dpt
+        asyncio.create_task(_dpt.start_if_armed())
+    except Exception as e:
+        logger.error("❌ darkpool_topup did NOT start: %s", e)
+
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
     # strip (yfinance, zero UW).
     try:

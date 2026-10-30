@@ -101,6 +101,7 @@ def test_only_the_ruled_callers_are_exempt():
         # R-IV.1451(b): the third with the same haircut -- 250 x 0.25 = 62, "QUOTA_EXCEEDED
         # darkpool_forward 62/62" every night 10-27 -> 10-30, partway through NVDA.
         "darkpool_forward",           # R-IV.1451(b)
+        "darkpool_topup",             # R-IV.1456(f): the one weekend top-up
     }
 
 

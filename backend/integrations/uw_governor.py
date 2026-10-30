@@ -535,6 +535,9 @@ OFF_HOURS_FACTOR_BY_CALLER = {
     # 10-30, partway through NVDA, and AAPL, MSFT and TSLA were never reached. Off-hours quota
     # only; the 250 and STANDARD are unchanged, so it is still shed first under pressure.
     "darkpool_forward": 1.0,
+    # R-IV.1456(f): the ONE weekend top-up of the same catch-up. A weekend is all off-hours,
+    # so without this its 1,000 would be 250. Removed with the job in the next push.
+    "darkpool_topup": 1.0,
 }
 
 NON_RTH_QUOTA_FACTOR = {
@@ -804,6 +807,11 @@ FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
     # the dark-pool pages and the F: bars export together. A forward collection has no end
     # date to write.
     "darkpool_forward": (250, TIER_STANDARD),
+    # R-IV.1456(f): ONE weekend top-up of the forward walk's backlog (10-23, then 10-26 -> 10-29),
+    # "up to 1,000 calls", from the reserve: 12,000 with 5,415 claimed above, so it takes
+    # nothing from anyone. One-shot by construction (jobs/darkpool_topup.py refuses a second
+    # run) and REMOVED with the job in the next push.
+    "darkpool_topup": (1000, TIER_STANDARD),
 }
 
 
