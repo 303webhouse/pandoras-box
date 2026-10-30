@@ -61,7 +61,9 @@
         return fetch(url, {
             method: opts.method || 'POST',
             body: formData,
-            headers: opts.headers || {}
+            // R-IV.1456(d)2: the CSRF header every session write must carry. Without it the
+            // CSV import preview was refused (403) by require_api_key, and the guard agrees.
+            headers: Object.assign({ 'X-Requested-With': 'XMLHttpRequest' }, opts.headers || {})
         }).then(function (response) {
             if (!response.ok) {
                 return response.json().catch(function () { return {}; }).then(function (payload) {

@@ -3676,7 +3676,8 @@ async def log_tide_command(ctx, sentiment: str, bullish_pct: int = None):
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{PANDORA_API_URL}/bias/uw/market_tide",
-                json=tide_data
+                json=tide_data,
+                headers=_auth_headers(),  # R-IV.1456(d)2: every hub write carries the key
             ) as resp:
                 success = resp.status == 200
     except Exception:

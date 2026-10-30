@@ -19,11 +19,11 @@ from utils.write_guard import ALLOWLIST, WriteGuardMiddleware
 
 KEY = "test-api-key-12345"   # conftest's placeholder
 
-#: The allowlist as ruled (R-IV.1446(d)1) plus the MCP's own sign-in and protocol paths and
-#: mp_levels, which R-IV.1447 is asked to rule on. Changing the allowlist means changing this.
+#: The allowlist as ruled (R-IV.1446(d)1, R-IV.1456(c)). /mcp/v1/consent is NOT on it: it needs
+#: Nick's session (test_write_guard_r1456). Changing the allowlist means changing this.
 EXPECTED_ALLOWLIST = {
     "/api/auth/login", "/api/auth/logout",
-    "/register", "/mcp/v1/register", "/mcp/v1/token", "/mcp/v1/authorize", "/mcp/v1/consent",
+    "/register", "/mcp/v1/register", "/mcp/v1/token", "/mcp/v1/authorize",
     "/mcp/v1", "/mcp/v1/",
     "/webhook/tradingview", "/webhook/breadth", "/webhook/tick", "/webhook/circuit_breaker",
     "/webhook/whale", "/webhook/footprint", "/api/webhook/hermes", "/api/webhook/pythia",

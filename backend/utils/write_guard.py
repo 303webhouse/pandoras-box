@@ -18,6 +18,17 @@ The alert hooks are on the allowlist because their senders cannot carry a sessio
 each checks its own secret, switched separately (WEBHOOK_*_ENFORCE). Their requests are
 recorded as `hook_seen`, sources only, a bounded sample per day, so a hook's real sender can be
 shown by address before its own switch is turned on.
+
+R-IV.1456(e)3, THE SOURCE CHECK: every hook TradingView sends to is also checked by where the
+request came from. A request whose real source address (X-Real-IP, which Railway overwrites --
+a client-supplied value does not survive, measured 2026-10-30 18:07 UTC) is not one of
+TradingView's four published webhook addresses is recorded as `source_unlisted`. It refuses
+nothing until `WEBHOOK_SOURCE_CHECK` is "enforce" (a deploy, on SPINE's go).
+
+R-IV.1456(c)2, THE CONSENT FORM: /mcp/v1/consent is NOT on the allowlist. It needs Nick's signed-in
+session, and a session cookie alone is enough there: the form is a plain HTML POST that cannot
+add the CSRF header, it carries FastMCP's own double-submit CSRF token, and the session cookie
+is SameSite=Lax, so a cross-site POST never carries it.
 """
 
 from __future__ import annotations
@@ -52,8 +63,6 @@ ALLOWLIST: Dict[str, Tuple[str, str]] = {
                                     "code for a token, so it cannot require one"),
     "/mcp/v1/authorize": ("mcp_signin", "OAuth authorize step (FastMCP accepts POST here); "
                                         "starts the GitHub sign-in"),
-    "/mcp/v1/consent": ("mcp_signin", "the OAuth consent form Nick's browser submits during "
-                                      "sign-in"),
     # ── the MCP protocol itself: FastMCP's OAuthProxy refuses a missing or invalid bearer
     #    with 401 on every call (measured: unauthenticated POSTs to /mcp/v1 get 401). ─────
     "/mcp/v1": ("mcp_own_auth", "MCP tool calls; FastMCP checks its own GitHub-OAuth bearer "
@@ -75,6 +84,24 @@ ALLOWLIST: Dict[str, Tuple[str, str]] = {
     "/webhook/mp_levels": ("hook", "PYTHIA level sheet; own secret, ALREADY refused when wrong "
                                    "(no observe mode)"),
 }
+
+#: path -> why. Writes here need Nick's session, but the session cookie ALONE is enough (no CSRF
+#: header): see the module docstring.
+SESSION_FORM_PATHS: Dict[str, str] = {
+    "/mcp/v1/consent": "the OAuth consent form Nick approves in his browser when Claude.ai "
+                       "connects; a plain HTML form with its own double-submit CSRF token",
+}
+
+_CONSENT_REFUSAL_BODY = json.dumps({
+    "detail": "Sign in to the hub in this browser first, then approve the connection again."
+}).encode()
+
+#: R-IV.1456(e)3: TradingView's published webhook source addresses (support article
+#: 43000529348, "How to configure webhook alerts").
+TRADINGVIEW_ADDRESSES = frozenset({
+    "52.89.214.238", "34.212.75.30", "54.218.53.128", "52.32.178.7",
+})
+SOURCE_CHECK_ENV = "WEBHOOK_SOURCE_CHECK"
 
 MODE_ENV = "WRITE_GUARD_MODE"
 
@@ -107,6 +134,25 @@ def mode() -> str:
 
 def allowlisted(path: str) -> Optional[Tuple[str, str]]:
     return ALLOWLIST.get(path)
+
+
+def source_mode() -> str:
+    """The hook source check: "enforce" only on that exact value; anything else logs."""
+    return ("enforce" if (os.getenv(SOURCE_CHECK_ENV) or "").strip().lower() == "enforce"
+            else "log")
+
+
+def source_address(headers) -> str:
+    """The request's real source: X-Real-IP (Railway sets it and overwrites a client's), else
+    the first X-Forwarded-For hop. Empty when neither is present."""
+    real = (headers.get("x-real-ip") or "").strip()
+    if real:
+        return real
+    return (headers.get("x-forwarded-for") or "").split(",")[0].strip()
+
+
+def source_is_tradingview(headers) -> bool:
+    return source_address(headers) in TRADINGVIEW_ADDRESSES
 
 
 def classify_credential(method: str, headers, cookies) -> str:
@@ -218,7 +264,7 @@ def record(event: dict) -> None:
             _hook_samples[event["path"]] = n + 1
         else:
             logger.warning("[write_guard] %s %s %s credential=%s ua=%s",
-                           "REFUSED" if event["kind"] == "refused" else "WOULD_REFUSE",
+                           event["kind"].upper(),
                            event["method"], event["path"], event["credential"],
                            (event["user_agent"] or "")[:60])
         if _recorded >= MAX_RECORDS_PER_DAY:
@@ -259,9 +305,17 @@ class WriteGuardMiddleware:
         listed = allowlisted(path)
         if listed is not None:
             if listed[0] == "hook":
-                record(build_event("hook_seen", scope, headers, None))
+                # R-IV.1456(e)3: by source first. Its own secret check still runs after this.
+                if source_is_tradingview(headers):
+                    record(build_event("hook_seen", scope, headers, None))
+                elif source_mode() == "enforce":
+                    record(build_event("source_refused", scope, headers, "source"))
+                    return await _refuse(send, _REFUSAL_BODY)
+                else:
+                    record(build_event("source_unlisted", scope, headers, "source"))
             return await self.app(scope, receive, send)
 
+        session_form = path in SESSION_FORM_PATHS
         try:
             cred = classify_credential(scope.get("method", ""), headers, req.cookies)
         except Exception as exc:                                    # noqa: BLE001
@@ -270,13 +324,18 @@ class WriteGuardMiddleware:
             cred = "check_failed"
         if cred in ("key", "session"):
             return await self.app(scope, receive, send)
+        if session_form and cred == "session_without_csrf_header":
+            return await self.app(scope, receive, send)
 
         if mode() == "enforce":
             record(build_event("refused", scope, headers, cred))
-            await send({"type": "http.response.start", "status": 401,
-                        "headers": [(b"content-type", b"application/json"),
-                                    (b"content-length", str(len(_REFUSAL_BODY)).encode())]})
-            await send({"type": "http.response.body", "body": _REFUSAL_BODY})
-            return
+            return await _refuse(send, _CONSENT_REFUSAL_BODY if session_form else _REFUSAL_BODY)
         record(build_event("would_refuse", scope, headers, cred))
         return await self.app(scope, receive, send)
+
+
+async def _refuse(send, body: bytes) -> None:
+    await send({"type": "http.response.start", "status": 401,
+                "headers": [(b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})

@@ -29,6 +29,10 @@ def api_call(method: str, path: str, data: dict = None) -> dict:
     url = f"{API_URL}/api{path}"
     body = json.dumps(data).encode("utf-8") if data else None
     req = urllib.request.Request(url, data=body, method=method)
+    # R-IV.1456(d)2: every hub write carries the key; reads do not need it.
+    key = os.getenv("PIVOT_API_KEY") or ""
+    if key:
+        req.add_header("X-API-Key", key)
     if body:
         req.add_header("Content-Type", "application/json")
     try:
