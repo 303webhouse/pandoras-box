@@ -424,9 +424,7 @@ async def load_pnl(pool, period: str = "month", account: str = "ALL") -> dict:
                  "and October read $485.03 better than it was (R-IV.1346)"),
     }
     out["computed_at"] = now.isoformat().replace("+00:00", "Z")
-    # R-IV.1356(c): shipped as the default. The rollback flag and its expiry are on the
-    # payload so an operator can find them without reading this file.
+    # R-IV.1356(c): shipped as the default. R-IV.1448(b) removed the ?view=summary rollback on
+    # 2026-10-29, and the payload's "rollback" entry that pointed an operator at it went with it.
     out["view"] = "pnl"
-    out["rollback"] = {"flag": "?view=summary", "expires": "2026-10-29",
-                       "note": "the old summary view, kept for one week then removed"}
     return out

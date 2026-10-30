@@ -66,6 +66,7 @@ DB_PORT = int(os.getenv("DB_PORT") or 5432)
 - **One Discord bot instance:** Runs on VPS only. Never run a second on Railway (duplicate gateway connections).
 - **VPS has no git repo:** Deploy via SSH + direct edits + restart, or rsync from local clone. No `git pull` on VPS.
 - **Local repo:** `C:\trading-hub` is the ONLY clone. Never create a second one.
+  - **One exception (R-IV.1448(b)2):** a throwaway *normal* clone in the lane's own scratchpad, for a fresh-clone test, is allowed only if it is never `--mirror` and never fetches `refs/pull/*` (GitHub's PR refs still serve pre-purge history), never pushed from, deleted in the same turn, and named in the report.
 
 ## Deployment
 

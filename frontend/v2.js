@@ -1696,9 +1696,19 @@
   // session with no reading, and a legend with counts. A SHORT history is drawn short and
   // flagged amber -- it is not padded out to 40 with invented "no reading" cells, which would
   // claim sessions were read and found empty when they were simply not in this generation.
+  //
+  // R-IV.1448(b)1: below RIBBON_MIN stored sessions there is NO strip at all -- the amber chip and
+  // one line instead. A strip of one or two squares read as a stray mark on the 10-26 check, not
+  // as a history; from RIBBON_MIN on it is drawn exactly as above.
+  const RIBBON_MIN = 5;
   function rcRibbon(rb) {
     if (!rb || !rb.sessions || !rb.sessions.length) {
       return '<div class="rg-ribbon">' + pvNa((rb && rb.error) || 'no stored sessions') + '</div>';
+    }
+    if (rb.sessions.length < RIBBON_MIN) {
+      return '<div class="rg-ribbon rg-ribbon-short"><div class="rg-legend"><span class="rg-chip rg-amber" title="'
+        + esc(rb.basis || '') + '">SHORT HISTORY · ' + esc(rb.count != null ? rb.count : rb.sessions.length)
+        + ' OF ' + esc(rb.asked_for || 40) + '</span></div><div class="rg-note">fills in nightly</div></div>';
     }
     const counts = new Map();
     const cells = rb.sessions.map((s) => {
@@ -8016,7 +8026,7 @@ const X = (function () {
     'sleeve ceiling and cash floor: no table anywhere, so no gauge is drawn and no headroom is claimed.',
     'roll chain: nothing in the schema records that one position followed another, so no chain is shown.',
     'structured evidence: notes are prose. The evidence here is the lots, which is where the broker references are.',
-    'pre-trade ticket: no ticket, checklist or discipline table exists; the New tab is a sample that saves nothing.',
+    'pre-trade ticket: no ticket, checklist or discipline table exists.',
     'open_quantity on this feed: served on /summary and on a single position, not on the list this panel reads (BUILD, R-IV.696(c)). Until it is, sizes read unknown rather than falling back to the opening quantity.',
   ];
   function missing() {

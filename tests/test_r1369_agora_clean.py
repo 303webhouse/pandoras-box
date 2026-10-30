@@ -368,6 +368,30 @@ with sync_playwright() as p:
     check('pop-out 1920: no errors', not errs, errs)
     ctx.close()
 
+    # R-IV.1448(b)1: under 5 stored sessions, NO strip -- the amber chip and "fills in nightly".
+    # From 5 on, the strip as above. Both sides of the boundary, because "4" and "5" are where an
+    # off-by-one would hide.
+    FULL_RIBBON = REGIME['ribbon']
+    for n, drawn in ((1, False), (4, False), (5, True)):
+        REGIME['ribbon'] = dict(FULL_RIBBON, sessions=FULL_RIBBON['sessions'][-n:], count=n)
+        pg, ctx, errs = page(b, 1920, 1080)
+        open_pop(pg)
+        rb = pg.evaluate("""() => { const r = document.querySelector('.rg-ribbon');
+          return { cells: document.querySelectorAll('.rg-cell').length, text: r ? r.innerText : '',
+            chip: [...document.querySelectorAll('.rg-ribbon .rg-chip')].map((c) => ({t: c.textContent.trim(), amber: c.classList.contains('rg-amber')})) }; }""")
+        chip = [c for c in rb['chip'] if c['t'].startswith('SHORT HISTORY')]
+        check('ribbon, %d stored: the amber chip reads "SHORT HISTORY - %d OF 40"' % (n, n),
+              len(chip) == 1 and chip[0]['amber'] and chip[0]['t'].replace('\u00b7', '-') == 'SHORT HISTORY - %d OF 40' % n, rb)
+        if drawn:
+            check('ribbon, %d stored: the strip IS drawn, one cell per session' % n, rb['cells'] == n, rb)
+            check('...without the "fills in nightly" line', 'fills in nightly' not in rb['text'], rb['text'])
+        else:
+            check('ribbon, %d stored: NO strip is drawn' % n, rb['cells'] == 0, rb)
+            check('...and the line says "fills in nightly"', 'fills in nightly' in rb['text'], rb['text'])
+        check('ribbon, %d stored: no errors' % n, not errs, errs)
+        ctx.close()
+    REGIME['ribbon'] = FULL_RIBBON
+
     # ══ 2. THE BOOK TILE ════════════════════════════════════════════════════════════════
     BOOK = """() => { const q = (s) => document.querySelector(s), t = (s) => (q(s) || {}).innerText || '';
       return { has: !!q('.bk'), total: t('.bk-total'), day: t('.bk-dayv'), dayWhy: t('.bk-day'), box: t('.bk-box'),

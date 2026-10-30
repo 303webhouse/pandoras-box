@@ -7,24 +7,17 @@
  * REALIZED AND UNREALIZED NEVER MIX. They are separate keys in the payload and separate tiles
  * here, and nothing adds them.
  *
- * Loaded BEFORE abacus.js so it can claim the page before the summary view renders: it sets
- * `window.__ABACUS_PNL` and abacus.js's boot checks that flag. Without the flag the two views
- * would both paint into #abPage and the loser would be whichever finished its fetch second.
+ * The ONLY view on /app/abacus since R-IV.1448(b): the old summary view, abacus.js and its
+ * `?view=summary` rollback were removed on 2026-10-29, so this file owns #abPage outright.
  */
 (function () {
   'use strict';
 
-  // R-IV.1356(c), Nick 20:05 MT 2026-10-22 ("Ship the previews"): THIS IS THE DEFAULT ABACUS VIEW.
-  //
-  // The old summary view is kept behind `?view=summary` for ONE WEEK and then removed:
-  //   ROLLBACK FLAG EXPIRES 2026-10-29. On that date, delete this branch, delete abacus.js's
-  //   `window.__ABACUS_PNL` guard, and retire the summary renderers.
-  // The date is written here rather than only in the lane file because the person who deletes it
-  // will be reading this line, not that one. `?pnl=v1` still works, so every link already shared
-  // keeps resolving to the same page.
+  // R-IV.1356(c), Nick 20:05 MT 2026-10-22 ("Ship the previews"): the default Abacus view.
+  // R-IV.1448(b): the one-week `?view=summary` rollback expired 2026-10-29 and is gone; that
+  // address now lands here like any other. `?pnl=v1` still works, so links already shared keep
+  // resolving to the same page.
   var params = new URLSearchParams(location.search);
-  if (params.get('view') === 'summary' && params.get('pnl') !== 'v1') return;
-  window.__ABACUS_PNL = true;
 
   var state = { period: params.get('period') || 'month', account: (params.get('account') || 'ALL').toUpperCase() };
 
@@ -127,8 +120,8 @@
     return list.map(function (a) {
       var v = a.realized, w = Math.round(Math.abs(Number(v || 0)) / mx * 100);
       return '<div class="pnl-row"><span>' + esc(a.account_display || a.account) + '</span>'
-        // The bar is this page's own ".ab-bar > i", which abacus.js already uses -- not a second
-        // bar component with a different inner element.
+        // The bar is abacus.css's own ".ab-bar > i" -- not a second bar component with a
+        // different inner element.
         + '<span class="ab-bar" role="img" aria-label="' + esc(usd(v, true) || 'unknown')
         + '"><i style="width:' + w + '%;background:'
         + (Number(v || 0) < 0 ? 'var(--down)' : 'var(--up)') + '"></i></span>'
@@ -272,7 +265,7 @@
       + '&account=' + encodeURIComponent(state.account);
     try {
       var r = await fetch(q, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-      if (r.status === 401) { host.innerHTML = '<div class="pnl-na">Sign in to see your P&amp;L.</div>'; return; }
+      if (r.status === 401) { host.innerHTML = '<div class="pnl-na">Sign in to see your P&amp;L.</div>'; showLogin(); return; }
       if (!r.ok) { host.innerHTML = '<div class="pnl-na">The hub answered HTTP ' + r.status + '. Nothing here is current.</div>'; return; }
       render(await r.json());
     } catch (e) {
@@ -280,12 +273,33 @@
     }
   }
 
+  // The sign-in form. It lived in abacus.js, which R-IV.1448(b) retired; it is the one part of
+  // that file that was not the summary view, so it moves here rather than going with it. A 401
+  // asks for sign-in; it never renders as an empty page.
+  function showLogin() {
+    var box = document.getElementById('abLogin');
+    if (!box || !box.hidden) return;
+    box.hidden = false;
+    document.getElementById('abPw').focus();
+    document.getElementById('abLoginForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var err = document.getElementById('abLoginErr');
+      err.textContent = '';
+      try {
+        var r = await fetch('/api/auth/login', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ password: document.getElementById('abPw').value }),
+        });
+        if (r.ok) location.reload();
+        else err.textContent = r.status === 401 ? 'Invalid password' : 'Login unavailable';
+      } catch (_) { err.textContent = 'Network error'; }
+    });
+  }
+
   function boot() {
     var page = document.getElementById('abPage');
     if (!page) return;
-    // The summary view's own sections are hidden rather than removed, so ?pnl=v1 is reversible by
-    // editing the address and nothing about the other view is destroyed.
-    Array.prototype.forEach.call(page.children, function (el) { el.hidden = true; });
     var host = document.createElement('div');
     host.id = 'abPnl';
     host.style.display = 'flex';
