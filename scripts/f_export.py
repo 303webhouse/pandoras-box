@@ -117,6 +117,103 @@ def session_is_held(d: date) -> bool:
     return R1378C_HELD_FROM <= d <= R1378C_HELD_TO
 
 
+# ── R-IV.1456(g): write-once, and the record of what the vendor changes ─────────────────
+
+#: Extended hours end 20:00 ET; five minutes' margin before a session counts as closed.
+SESSION_CLOSED_AT_ET = (20, 5)
+PRICE_COLS = ("Open", "High", "Low", "Close")
+#: One line per (night, session, ticker) whose vendor copy differs from the kept file, in
+#: ROOTars1m-revisions.tsv.
+REVISIONS_FILE = "bars1m-revisions.tsv"
+REVISIONS_HEADER = ("logged_utc", "session", "ticker", "bars_changed", "bars_added",
+                    "bars_removed", "volume_bars_changed", "largest_price_change",
+                    "largest_at", "kept_fp", "vendor_fp")
+
+
+def _et_zone():
+    from zoneinfo import ZoneInfo
+    return ZoneInfo("America/New_York")
+
+
+def session_closed(d: date, now_et: datetime) -> bool:
+    """A past session is closed; today's only after its extended hours have ended."""
+    today = now_et.date()
+    if d < today:
+        return True
+    if d > today:
+        return False
+    return (now_et.hour, now_et.minute) >= SESSION_CLOSED_AT_ET
+
+
+def frame_fingerprint(df: pd.DataFrame) -> str:
+    """Which VERSION of a session this is: OHLC and volume, rounded, hashed. Two nights that
+    served the same version print the same fingerprint, so the alternation is visible."""
+    cols = [c for c in PRICE_COLS + ("Volume",) if c in df.columns]
+    return hashlib.sha256(df[cols].astype(float).round(6).to_csv().encode()).hexdigest()[:12]
+
+
+def _same_clock(df: pd.DataFrame) -> pd.DataFrame:
+    """One index convention before two frames are compared: ET, nanoseconds. Polygon's frames
+    arrive in milliseconds and yfinance's in nanoseconds, and pandas will not intersect the
+    two as times."""
+    out = df.copy()
+    ix = pd.DatetimeIndex(out.index)
+    if ix.tz is None:
+        ix = ix.tz_localize("UTC")
+    out.index = ix.tz_convert(_et_zone()).as_unit("ns")
+    return out
+
+
+def bar_diff(kept: pd.DataFrame, vendor: pd.DataFrame) -> dict:
+    """How the vendor's copy differs from the kept file: bars whose price changed, bars added
+    or removed, bars whose volume changed, and the largest single price change and where."""
+    kept, vendor = _same_clock(kept), _same_clock(vendor)
+    common = kept.index.intersection(vendor.index)
+    k, v = kept.loc[common], vendor.loc[common]
+    changed = pd.Series(False, index=common)
+    largest, at = 0.0, ""
+    for c in PRICE_COLS:
+        if c not in k.columns or c not in v.columns:
+            continue
+        delta = (k[c].astype(float) - v[c].astype(float)).abs()
+        changed |= delta > 1e-9
+        if len(delta) and float(delta.max()) > largest:
+            largest = float(delta.max())
+            at = "%s %s" % (delta.idxmax().isoformat(), c)
+    vol = 0
+    if "Volume" in k.columns and "Volume" in v.columns:
+        vol = int(((k["Volume"].astype(float) - v["Volume"].astype(float)).abs() > 0).sum())
+    return {"bars_changed": int(changed.sum()),
+            "bars_added": len(vendor.index.difference(kept.index)),
+            "bars_removed": len(kept.index.difference(vendor.index)),
+            "volume_bars_changed": vol,
+            "largest_price_change": round(largest, 6), "largest_at": at}
+
+
+def append_tsv(path: str, header, row) -> None:
+    new = not os.path.exists(path)
+    with open(path, "a", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t", lineterminator="\n")
+        if new:
+            w.writerow(header)
+        w.writerow(row)
+
+
+def log_revision(d: date, ticker: str, kept: pd.DataFrame, vendor: pd.DataFrame,
+                 path: str = None) -> bool:
+    """Log the difference between the kept file and tonight's vendor copy. True if any."""
+    diff = bar_diff(kept, vendor)
+    if not (diff["bars_changed"] or diff["bars_added"] or diff["bars_removed"]
+            or diff["volume_bars_changed"]):
+        return False
+    append_tsv(path or os.path.join(ROOT, REVISIONS_FILE), REVISIONS_HEADER, (
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), d.isoformat(), ticker,
+        diff["bars_changed"], diff["bars_added"], diff["bars_removed"],
+        diff["volume_bars_changed"], diff["largest_price_change"], diff["largest_at"],
+        frame_fingerprint(kept), frame_fingerprint(vendor)))
+    return True
+
+
 def export_bars1m() -> dict:
     """Every 1-minute bar yfinance still holds, split per session date.
 
@@ -136,7 +233,12 @@ def export_bars1m() -> dict:
                # R-IV.1415(b)1 wants the held RANGE, not just a count, so the dates are kept
                # as a set rather than tallied away. A count alone cannot be checked against
                # the ruling's 09-25..10-15.
-               "sessions_written": set(), "held_dates": set()}
+               "sessions_written": set(), "held_dates": set(),
+               # R-IV.1456(g)1: WRITE-ONCE. Files kept as they were, and the sessions whose
+               # vendor copy differed from the kept file tonight (logged, never written over).
+               "files_kept": 0, "revisions_logged": 0, "revised_sessions": set(),
+               "sessions_open": set()}
+    now_et = datetime.now(timezone.utc).astimezone(_et_zone())
     for ticker in CENSUS:
         frames = []
         chunk_start = start
@@ -173,7 +275,7 @@ def export_bars1m() -> dict:
         by_day = {}
         for ts, row in all_df.iterrows():
             by_day.setdefault(ts.date(), []).append((ts, row))
-        written = held = 0
+        written = held = kept = 0
         for d, rows in sorted(by_day.items()):
             # R-IV.1378(c): the request window reaches back 29 days and today that is
             # 2026-09-25 -- the first day of the held range -- so without this the export
@@ -185,19 +287,37 @@ def export_bars1m() -> dict:
                 summary["sessions_held"] += 1
                 summary["held_dates"].add(d.isoformat())
                 continue
+            # R-IV.1456(g)1: a session still trading (extended hours end 20:00 ET) is not written
+            # at all -- written now, an incomplete file would become the permanent record.
+            if not session_closed(d, now_et):
+                summary["sessions_open"].add(d.isoformat())
+                continue
             sub = all_df.loc[[ts for ts, _ in rows]]
             path = os.path.join(ROOT, "bars1m", d.isoformat(), "%s.parquet" % ticker)
+            # R-IV.1456(g)1: WRITE-ONCE. yfinance serves two alternating versions of settled
+            # bars (measured 10-29/10-30), so rewriting nightly made F: flip between them under
+            # every reader. An existing session file is never overwritten; what the vendor
+            # serves tonight is compared with it and any difference is logged instead.
+            if os.path.exists(path):
+                kept += 1
+                if log_revision(d, ticker, pd.read_parquet(path), sub):
+                    summary["revisions_logged"] += 1
+                    summary["revised_sessions"].add(d.isoformat())
+                continue
             write_parquet(sub, path)
             written += 1
             summary["sessions_written"].add(d.isoformat())
         # HELD IS REPORTED, never silent. A run that wrote 9 of 30 sessions and said only "9"
         # is indistinguishable from a vendor that returned a third of the data.
         summary["files_written"] += written
-        print("  %-5s %6d bars -> %d session files%s"
-              % (ticker, len(all_df), written,
+        summary["files_kept"] += kept
+        print("  %-5s %6d bars -> %d session files written, %d kept%s"
+              % (ticker, len(all_df), written, kept,
                  (", %d HELD by R-IV.1378(c)" % held) if held else ""))
     summary["sessions_written"] = sorted(summary["sessions_written"])
     summary["held_dates"] = sorted(summary["held_dates"])
+    summary["revised_sessions"] = sorted(summary["revised_sessions"])
+    summary["sessions_open"] = sorted(summary["sessions_open"])
     return summary
 
 
@@ -231,6 +351,178 @@ def export_bars1d() -> None:
         print("  %-8s %5d daily bars (%s .. %s), %d distinct dates, %d bytes"
               % (ticker, len(df), df.index.min().date(), df.index.max().date(), days,
                  row["bytes"]))
+
+
+# ── R-IV.1456(g)2: a Polygon reference copy of the same 1-minute bars ───────────────────
+
+POLY_VS_YF_HEADER = ("logged_utc", "session", "ticker", "yf_bars", "polygon_bars",
+                     "common_bars", "bars_price_differ", "largest_price_diff", "largest_at",
+                     "only_yfinance", "only_polygon", "volume_bars_differ")
+#: The back-fill reaches to here (R-IV.1456(g)2: "Back-fill it from 09-25").
+POLYGON_FROM = date(2026, 9, 25)
+POLYGON_AGGS = "https://api.polygon.io/v2/aggs/ticker/%s/range/1/minute/%s/%s"
+#: Starter allows 5 requests a minute: 13 s apart (measured: flat out drew eleven 429s).
+POLYGON_PACE_S = 13
+#: One call carries up to 50,000 rows; ~900 bars a session, so ten sessions sit well inside.
+POLYGON_SESSIONS_PER_CALL = 10
+#: Half a cent: two vendors' prints are "the same price" within this.
+VENDOR_PRICE_TOLERANCE = 0.005
+
+
+def polygon_frame(results) -> pd.DataFrame:
+    """Polygon /v2/aggs results -> the yfinance file's shape: an ET DatetimeIndex named
+    Datetime, Open/High/Low/Close/Volume, plus VWAP, Transactions and source='polygon'."""
+    cols = ["Open", "High", "Low", "Close", "Volume", "VWAP", "Transactions", "source"]
+    if not results:
+        return pd.DataFrame(columns=cols, index=pd.DatetimeIndex([], tz=_et_zone(),
+                                                                 name="Datetime"))
+    df = pd.DataFrame(results)
+    idx = pd.to_datetime(df["t"], unit="ms", utc=True).dt.tz_convert(_et_zone())
+    out = pd.DataFrame({
+        "Open": df["o"].astype(float).values, "High": df["h"].astype(float).values,
+        "Low": df["l"].astype(float).values, "Close": df["c"].astype(float).values,
+        "Volume": df["v"].astype(float).values,
+        "VWAP": df["vw"].values if "vw" in df else [None] * len(df),
+        "Transactions": df["n"].values if "n" in df else [None] * len(df),
+    }, index=pd.DatetimeIndex(idx, name="Datetime"))   # NOT idx.values: that drops the zone
+    out["source"] = "polygon"
+    return out[~out.index.duplicated(keep="first")].sort_index()
+
+
+def compare_vendors(yfd: pd.DataFrame, pod: pd.DataFrame) -> dict:
+    """How the Polygon copy of one session differs from the yfinance file on F:."""
+    yfd, pod = _same_clock(yfd), _same_clock(pod)
+    common = yfd.index.intersection(pod.index)
+    y, p = yfd.loc[common], pod.loc[common]
+    differ = pd.Series(False, index=common)
+    largest, at = 0.0, ""
+    for c in PRICE_COLS:
+        delta = (y[c].astype(float) - p[c].astype(float)).abs()
+        differ |= delta > VENDOR_PRICE_TOLERANCE
+        if len(delta) and float(delta.max()) > largest:
+            largest = float(delta.max())
+            at = "%s %s" % (delta.idxmax().isoformat(), c)
+    vol = int(((y["Volume"].astype(float) - p["Volume"].astype(float)).abs() > 0).sum())
+    return {"yf_bars": len(yfd), "polygon_bars": len(pod), "common_bars": len(common),
+            "bars_price_differ": int(differ.sum()), "largest_price_diff": round(largest, 6),
+            "largest_at": at, "only_yfinance": len(yfd.index.difference(pod.index)),
+            "only_polygon": len(pod.index.difference(yfd.index)), "volume_bars_differ": vol}
+
+
+def _polygon_get(url: str, key: str, params: dict, sleep, get):
+    """One request, with up to three waits on a 429. Returns (status, json-or-None). The key
+    goes in the query string Polygon requires and is NEVER printed: errors name the status."""
+    for attempt in range(4):
+        resp = get(url, params=dict(params, apiKey=key), timeout=30)
+        if resp.status_code == 429 and attempt < 3:
+            sleep(60)
+            continue
+        try:
+            body = resp.json()
+        except Exception:                                           # noqa: BLE001
+            body = None
+        return resp.status_code, body
+    return 429, None
+
+
+def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, get=None,
+                          root: str = None) -> dict:
+    """Write Polygon's 1-minute bars for every census name and every session from
+    POLYGON_FROM that F: has a yfinance file for and no Polygon file yet, WRITE-ONCE, and log
+    how each differs from the yfinance file (bars1m-polygon-vs-yfinance.tsv).
+
+    Polygon Starter withholds the CURRENT session (measured 2026-10-15: a 403 seven hours
+    after the close), so a session's copy lands the night after it. A 403 on a past session
+    means the plan does not serve these bars after all: the run STOPS and says so
+    (R-IV.1456(g)2: "If Polygon's plan doesn't serve these bars at no extra cost, stop").
+    Nothing here changes what TRITON reads (R-IV.1456(g)3): a separate folder.
+    """
+    import time as _time
+    key = key if key is not None else (os.getenv("POLYGON_API_KEY") or "")
+    root = root or ROOT
+    out = {"status": "ok", "calls": 0, "files_written": 0, "sessions_written": set(),
+           "compared": 0, "no_bars": [], "reason": None}
+    if not key:
+        out.update(status="skipped", reason="no POLYGON_API_KEY in this environment")
+        return _poly_done(out)
+    if get is None:
+        import requests
+        get = requests.get
+    sleep = sleep or _time.sleep
+    now_et = now_et or datetime.now(timezone.utc).astimezone(_et_zone())
+    today = now_et.date()
+    yroot = os.path.join(root, "bars1m")
+    proot = os.path.join(root, "bars1m-polygon")
+    sessions = []
+    for name in (sorted(os.listdir(yroot)) if os.path.isdir(yroot) else []):
+        try:
+            d = date.fromisoformat(name)
+        except ValueError:
+            continue
+        if POLYGON_FROM <= d < today:
+            sessions.append(d)
+    first_call = True
+    for ticker in CENSUS:
+        missing = [d for d in sessions
+                   if os.path.exists(os.path.join(yroot, d.isoformat(), "%s.parquet" % ticker))
+                   and not os.path.exists(os.path.join(proot, d.isoformat(),
+                                                       "%s.parquet" % ticker))]
+        for i in range(0, len(missing), POLYGON_SESSIONS_PER_CALL):
+            group = missing[i:i + POLYGON_SESSIONS_PER_CALL]
+            if not first_call:
+                sleep(POLYGON_PACE_S)
+            first_call = False
+            url = POLYGON_AGGS % (ticker, group[0].isoformat(), group[-1].isoformat())
+            status, body = _polygon_get(url, key, {"adjusted": "false", "sort": "asc",
+                                                   "limit": 50000}, sleep, get)
+            out["calls"] += 1
+            if status == 403:
+                out.update(status="stopped", reason=(
+                    "Polygon refused %s %s..%s (403): the plan does not serve these bars; "
+                    "stopped" % (ticker, group[0], group[-1])))
+                return _poly_done(out)
+            if status != 200 or not isinstance(body, dict):
+                out.update(status="partial", reason="Polygon answered %s for %s %s..%s"
+                           % (status, ticker, group[0], group[-1]))
+                continue
+            if body.get("next_url"):
+                out.update(status="partial", reason="Polygon paginated %s %s..%s; the rest "
+                           "is left for the next night" % (ticker, group[0], group[-1]))
+            frame = polygon_frame(list(body.get("results") or []))
+            by_day = {}
+            for ts in frame.index:
+                by_day.setdefault(ts.date(), []).append(ts)
+            for d in group:
+                ppath = os.path.join(proot, d.isoformat(), "%s.parquet" % ticker)
+                if d not in by_day:
+                    out["no_bars"].append("%s %s" % (d, ticker))
+                    continue
+                if os.path.exists(ppath):        # write-once, like the yfinance files
+                    continue
+                pod = frame.loc[by_day[d]]
+                write_parquet(pod, ppath)
+                out["files_written"] += 1
+                out["sessions_written"].add(d.isoformat())
+                yfd = pd.read_parquet(os.path.join(yroot, d.isoformat(), "%s.parquet" % ticker))
+                c = compare_vendors(yfd, pod)
+                append_tsv(os.path.join(root, "bars1m-polygon-vs-yfinance.tsv"),
+                           POLY_VS_YF_HEADER, (
+                               datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                               d.isoformat(), ticker, c["yf_bars"], c["polygon_bars"],
+                               c["common_bars"], c["bars_price_differ"],
+                               c["largest_price_diff"], c["largest_at"], c["only_yfinance"],
+                               c["only_polygon"], c["volume_bars_differ"]))
+                out["compared"] += 1
+    return _poly_done(out)
+
+
+def _poly_done(out: dict) -> dict:
+    out["sessions_written"] = sorted(out["sessions_written"])
+    print("=== bars1m-polygon: %s | %d calls | wrote %d files across %d sessions: %s%s ==="
+          % (out["status"].upper(), out["calls"], out["files_written"],
+             len(out["sessions_written"]), ",".join(out["sessions_written"]) or "NONE",
+             (" | " + out["reason"]) if out["reason"] else ""))
+    return out
 
 
 # ── the dark-pool README LAB needs ──────────────────────────────────────

@@ -149,7 +149,8 @@ def main() -> int:
 
     sys.path.insert(0, HERE)
     try:
-        from f_export import R1378C_HOLD_ACTIVE, export_bars1d, export_bars1m
+        from f_export import (R1378C_HOLD_ACTIVE, export_bars1d, export_bars1m,
+                              export_polygon_bars1m)
     except Exception as exc:                                        # noqa: BLE001
         _say("FAILED: cannot import the export (%s)" % type(exc).__name__)
         _record(STATUS_ERROR, error="import failed: %s" % type(exc).__name__)
@@ -165,10 +166,26 @@ def main() -> int:
         _record(STATUS_ERROR, error="%s: %s" % (type(exc).__name__, str(exc)[:200]))
         return EXIT_FAILED
 
+    # R-IV.1456(g)2: the Polygon reference copy. Its own folder, never read by TRITON
+    # (R-IV.1456(g)3), so a failure here is reported but does not fail the yfinance export.
+    print()
+    try:
+        poly = export_polygon_bars1m()
+    except Exception as exc:                                        # noqa: BLE001
+        traceback.print_exc()
+        poly = {"status": "error", "files_written": 0, "calls": 0,
+                "reason": "%s: %s" % (type(exc).__name__, str(exc)[:160])}
+    poly_line = "POLYGON %s: %d files, %d calls%s" % (
+        str(poly.get("status")).upper(), poly.get("files_written", 0), poly.get("calls", 0),
+        (" (%s)" % poly["reason"]) if poly.get("reason") else "")
+
     written = summary.get("files_written", 0)
     held = summary.get("sessions_held", 0)
     sessions = summary.get("sessions_written") or []
     empty = summary.get("tickers_empty") or []
+    # R-IV.1456(g)1: write-once. Kept files and the sessions whose vendor copy differed.
+    kept = summary.get("files_kept", 0)
+    revised = summary.get("revised_sessions") or []
 
     # R-IV.1415(b)1: ONE LINE, carrying the held sessions it skipped -- COUNT AND RANGE -- and
     # the sessions it wrote. One line because this log is read by scrolling to the end of a
@@ -193,24 +210,36 @@ def main() -> int:
         _say("INTERNAL INCONSISTENCY: held count %d but %d held dates recorded -- reporting "
              "both, trust neither" % (held, len(held_dates)))
     held_span = ("%s..%s" % (held_dates[0], held_dates[-1])) if held_dates else "none"
-    _say("HELD %d (%s) | WROTE %d files across %d sessions: %s | window %s..%s%s"
+    _say("HELD %d (%s) | WROTE %d files across %d sessions: %s | KEPT %d | REVISED %d "
+         "logged (%s) | window %s..%s%s | %s"
          % (len(held_dates), held_span, written, len(sessions),
-            ",".join(sessions) if sessions else "NONE",
+            ",".join(sessions) if sessions else "NONE", kept,
+            summary.get("revisions_logged", 0), ",".join(revised) if revised else "none",
             summary.get("window_start"), summary.get("window_end"),
-            (" | %d tickers empty: %s" % (len(empty), ",".join(empty))) if empty else ""))
+            (" | %d tickers empty: %s" % (len(empty), ",".join(empty))) if empty else "",
+            poly_line))
 
     # ZERO FILES IS A FAULT, NOT A SUCCESS, and saying so is the whole reason this record
     # exists. `completed_defective` is the existing vocabulary for it (R-IV.426(b)): the pass
     # ran to the end and its OWN output check failed. No new label (R-IV.925(b)).
+    #
+    # R-IV.1456(g)1: under write-once a night with no NEW session (a weekend, or a rerun) writes
+    # nothing and keeps everything, which is correct. Zero is still a fault when nothing was
+    # KEPT either -- the vendor served no session at all -- or a name came back empty.
     if written == 0:
-        reason = ("wrote 0 session files (%d held by R-IV.1378(c), %d tickers empty)"
-                  % (held, len(empty)))
-        _say("COMPLETED BUT DEFECTIVE: %s" % reason)
-        _record(STATUS_COMPLETED_DEFECTIVE, rows_touched=0, error=reason)
-        return EXIT_OK
+        if not kept or empty:
+            reason = ("wrote 0 session files and kept %d (%d held by R-IV.1378(c), %d tickers "
+                      "empty)" % (kept, held, len(empty)))
+            _say("COMPLETED BUT DEFECTIVE: %s" % reason)
+            _record(STATUS_COMPLETED_DEFECTIVE, rows_touched=0, error=reason)
+            return EXIT_OK
 
-    _record(STATUS_OK, rows_touched=written,
-            skip_reason=("%d sessions held by R-IV.1378(c)" % held) if held else None)
+    notes = []
+    if held:
+        notes.append("%d sessions held by R-IV.1378(c)" % held)
+    notes.append("kept %d, %d revisions logged" % (kept, summary.get("revisions_logged", 0)))
+    notes.append(poly_line)
+    _record(STATUS_OK, rows_touched=written, skip_reason="; ".join(notes)[:1000])
     _say("done in %.1fs" % (datetime.now(timezone.utc) - started).total_seconds())
     return EXIT_OK
 
