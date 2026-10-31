@@ -1355,15 +1355,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("❌ darkpool_forward did NOT start: %s", e)
 
-    # R-IV.1456(f): the ONE weekend top-up of the forward walk's backlog. Does nothing unless
-    # DARKPOOL_TOPUP_ARM is set to its exact value; refuses a second run by itself. Removed in
-    # the next push.
-    try:
-        from jobs import darkpool_topup as _dpt
-        asyncio.create_task(_dpt.start_if_armed())
-    except Exception as e:
-        logger.error("❌ darkpool_topup did NOT start: %s", e)
-
     # Stable Engine: nightly close recompute + provisional snapshots + index/rates
     # strip (yfinance, zero UW).
     try:
@@ -1775,14 +1766,6 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(900)  # 15 minutes
 
     b2_resolver_task = asyncio.create_task(b2_options_resolver_loop())
-
-    # Initial Chronos data load
-    try:
-        from jobs.chronos_ingest import run_chronos_earnings_ingest
-        asyncio.create_task(run_chronos_earnings_ingest())
-        logger.info("📅 Chronos initial earnings load queued")
-    except Exception as e:
-        logger.warning("Chronos initial load error: %s", e)
 
     # Ensure proximity attribution columns exist
     try:

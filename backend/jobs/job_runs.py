@@ -53,8 +53,6 @@ JOB_OPTION_QUOTE_CAPTURE = "option_quote_capture"
 # closed. It hit its call limit four nights running and recorded nothing anywhere but its own
 # run table, so the failure was invisible.
 JOB_DARKPOOL_FORWARD = "darkpool_forward"
-# R-IV.1456(f): the one weekend top-up of that walk's backlog (jobs/darkpool_topup.py).
-JOB_DARKPOOL_TOPUP = "darkpool_topup"
 # R-IV.1461(f)1: the earnings calendar, every page of the next 10 sessions (chronos_ingest).
 JOB_EARNINGS_INGEST = "earnings_ingest"
 
