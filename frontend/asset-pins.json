@@ -65,8 +65,8 @@
       "sha256": "1618636c1558a282f0acd9bc0ed82dffd88287b2394e3e414556be2ee20bdb9a"
     },
     "assets/event-strip-earn.css": {
-      "pin": 1,
-      "sha256": "4d73f072584e772cc7300c5ff3a9710fdd3f89adf79d5ccb99ac9fe8df7c234b"
+      "pin": 2,
+      "sha256": "5e6435e2658fe3978eb961af6b9d45816406e31cc5b7f068cce4f99141ccc795"
     },
     "assets/honest-labels.css": {
       "pin": 1,
@@ -89,8 +89,8 @@
       "sha256": "f9d82de6281c3b171ef308abc1b381f79275d6efc96ec8f5e75f0f20eb55ca88"
     },
     "v2.js": {
-      "pin": 116,
-      "sha256": "bb6e15a6b9410dca59aed49d8117733bc6cc851c12830ee0d4ebe758d0c58481"
+      "pin": 117,
+      "sha256": "efc93624892537710b3b8eaa5bbd2f6c2d60471c96c7c571b3fee237095b68e3"
     }
   }
 }

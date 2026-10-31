@@ -9,7 +9,10 @@
 
 .ev-legend { flex-wrap: wrap; row-gap: 4px; }
 
-.ev-earnlist { display: flex; flex-direction: column; gap: 2px; margin-top: auto; min-width: 0; }
+/* R-IV.1469: right under the date (after an FOMC decision or a book expiry), not pinned to
+   the foot of a column the tallest day stretches -- a 4-row desktop tile showed none of them. */
+.ev-earnlist { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ev-evs:empty { display: none; }
 .ev-echip {
   font: 12px/15px var(--mono); color: var(--text-2); min-width: 0;
   padding-left: 4px; border-left: 2px solid transparent;
@@ -39,12 +42,17 @@
 .ev-rxi i { font-style: normal; color: var(--text-3); }
 
 @media (min-width: 769px) {
+  /* One line. When a column is too narrow, the YOURS word gives way first (the teal edge and
+     the title still say it); the ticker and the implied move never do (R-IV.1469: at 1440 px
+     "PLTR YOURS AMC ±11.3%" lost its number). */
   .ev-echip {
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; gap: 4px; align-items: baseline; white-space: nowrap; overflow: hidden;
   }
-  .ev-echip em, .ev-echip span { display: inline; }
-  .ev-echip em { margin-left: 4px; }
-  .ev-echip span { margin-left: 4px; }
+  .ev-echip b, .ev-echip span { flex: none; display: inline; }
+  .ev-echip span { order: 1; }
+  .ev-echip em {
+    display: inline; order: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  }
   /* the reactions sit between the legend chips and the blackout label */
   .ev-rx { flex-basis: auto; order: 0; margin-left: 12px; }
 }

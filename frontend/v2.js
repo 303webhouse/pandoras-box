@@ -3560,10 +3560,17 @@
       (m.days || []).map((d) => Number(d.earn) || 0).concat([1]));
 
     const days = (m.days || []).map((d, i, arr) => {
-      const evs = (d.events || []).map((e) => {
+      const evChip = (e) => {
         const k = String(e.kind || 'macro');
         return '<span class="ev-chip ev-' + esc(k) + '">' + esc(e.k) + '</span>';
-      }).join('');
+      };
+      const evs = (d.events || []).map(evChip).join('');
+      // R-IV.1469: a desktop tile shows ~4 lines under the date, so the order decides what is
+      // seen without scrolling: an FOMC decision and the book's own expiries, then the
+      // earnings chips, then the rest of the macro calendar.
+      const lead = (e) => e.kind === 'top' || e.kind === 'book';
+      const evsLead = (d.events || []).filter(lead).map(evChip).join('');
+      const evsRest = (d.events || []).filter((e) => !lead(e)).map(evChip).join('');
       const earn = Number(d.earn) || 0;
       const h = Math.max(2, Math.round((earn / maxEarn) * 16));
       const yours = Number(d.book_earn) || 0;
@@ -3577,8 +3584,11 @@
       return '<div class="ev-day' + (d.blackout ? ' ev-blackout' : '')
         + (i === arr.length - 1 ? ' ev-last' : '') + '">'
         + '<div class="ev-dow">' + esc(d.dow) + '<b>' + esc(d.dd) + '</b></div>'
-        + '<div class="ev-evs">' + evs + '</div>'
-        + earnCell
+        + (EARN_OFF
+          ? '<div class="ev-evs">' + evs + '</div>' + earnCell
+          : (evsLead ? '<div class="ev-evs ev-lead">' + evsLead + '</div>' : '')
+            + earnCell
+            + '<div class="ev-evs">' + evsRest + '</div>')
         + '</div>';
     }).join('');
 

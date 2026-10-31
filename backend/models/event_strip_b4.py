@@ -185,6 +185,7 @@ def build_strip(today: _dt.date, *, is_trading_day,
             "events": [], "earn": 0, "book_earn": 0, "blackout": in_blackout(d)}
         for d in days}
 
+    seen = set()
     for ev in macro:
         d = ev.get("date")
         if d not in by_day:
@@ -193,6 +194,11 @@ def build_strip(today: _dt.date, *, is_trading_day,
         if label is None:
             # Shown under its own name rather than dropped. See MACRO_KEYS.
             label, kind = str(ev.get("name", ""))[:18], KIND_MACRO
+        # R-IV.1469: UW's economic calendar lists some events twice (measured 10-31: every
+        # 11-02..11-06 event, twice). A second identical chip says nothing the first did not.
+        if (d, label, kind) in seen:
+            continue
+        seen.add((d, label, kind))
         by_day[d]["events"].append({"k": label, "kind": kind})
 
     for ex in book_expiries:
