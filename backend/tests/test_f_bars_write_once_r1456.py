@@ -36,7 +36,9 @@ def fx(tmp_path, monkeypatch):
     return mod
 
 
-def _bars(d: date, base: float, n: int = 5, bump_at: int = None, bump: float = 0.0):
+def _bars(d: date, base: float, n: int = 390, bump_at: int = None, bump: float = 0.0):
+    # R-IV.1469(e)1: a FULL regular session by default -- a short one is now written as
+    # .partial, never as the session file.
     from zoneinfo import ZoneInfo
     idx = pd.date_range("%s 09:30" % d.isoformat(), periods=n, freq="min",
                         tz=ZoneInfo("America/New_York"), name="Datetime")
@@ -84,7 +86,7 @@ def test_an_EXISTING_session_file_is_never_overwritten_and_the_difference_is_LOG
     before = _sha(_path(fx, D1))
     # Tonight the vendor serves ANOTHER version of D1 (one bar's price moved $9.01, one bar
     # added) and D2 for the first time.
-    vendor = pd.concat([_bars(D1, 100.0, n=6, bump_at=2, bump=9.01), _bars(D2, 200.0)])
+    vendor = pd.concat([_bars(D1, 100.0, n=391, bump_at=2, bump=9.01), _bars(D2, 200.0)])
     monkeypatch.setattr(fx, "yf", _FakeYF(vendor))
     s = fx.export_bars1m()
     assert _sha(_path(fx, D1)) == before, "the kept file was written over"
@@ -164,7 +166,7 @@ class _Resp:
         return self._body
 
 
-def _poly_results(d: date, base: float, n: int = 5):
+def _poly_results(d: date, base: float, n: int = 390):
     from zoneinfo import ZoneInfo
     out = []
     for i, ts in enumerate(pd.date_range("%s 09:30" % d.isoformat(), periods=n, freq="min",
@@ -175,9 +177,10 @@ def _poly_results(d: date, base: float, n: int = 5):
     return out
 
 
-def _seed_yf(fx, days):
+def _seed_yf(fx, days, longer=()):
+    """yfinance files for `days`; a day in `longer` carries one after-hours bar more (16:00)."""
     for d in days:
-        df = _bars(d, 100.0)
+        df = _bars(d, 100.0, n=391 if d in longer else 390)
         df["source"] = "yfinance"
         fx.write_parquet(df, _path(fx, d))
 
@@ -192,12 +195,12 @@ def _now():
 
 def test_POLYGON_backfills_from_09_25_writes_once_and_logs_the_differences(fx, capsys):
     days = [date(2026, 9, 24), date(2026, 9, 25), D1, D2, date(2026, 10, 30)]
-    _seed_yf(fx, days)
+    _seed_yf(fx, days, longer=(D2,))
     calls, sleeps = [], []
 
     def get(url, params=None, timeout=None):
         calls.append((url, dict(params)))
-        res = _poly_results(D1, 100.0) + _poly_results(D2, 100.0, n=4)
+        res = _poly_results(D1, 100.0) + _poly_results(D2, 100.0)
         res += _poly_results(date(2026, 9, 25), 100.2)
         return _Resp(200, {"results": res})
     out = fx.export_polygon_bars1m(key="TEST-KEY-NEVER-PRINTED", now_et=_now(),
@@ -219,7 +222,7 @@ def test_POLYGON_backfills_from_09_25_writes_once_and_logs_the_differences(fx, c
                                  "ticker", "source", "adjusted"]
     assert str(pol["timestamp_utc"].dt.tz) == "UTC" and set(pol["session_et"]) == {D1.isoformat()}
     assert set(pol["ticker"]) == {"SPY"} and not pol["adjusted"].any()
-    assert set(pol["source"]) == {"polygon_v2_aggs_1minute"} and len(pol) == 5
+    assert set(pol["source"]) == {"polygon_v2_aggs_1minute"} and len(pol) == 390
     log = pd.read_csv(os.path.join(fx.ROOT, "bars1m_polygon_vs_yfinance.tsv"), sep="\t")
     assert list(log.columns) == list(fx.POLY_VS_YF_HEADER) and len(log) == 3
     d1 = log[log["session"] == D1.isoformat()].iloc[0]
@@ -227,7 +230,7 @@ def test_POLYGON_backfills_from_09_25_writes_once_and_logs_the_differences(fx, c
     d2 = log[log["session"] == D2.isoformat()].iloc[0]
     assert d2["only_yfinance"] == 1 and d2["only_polygon"] == 0
     s925 = log[log["session"] == "2026-09-25"].iloc[0]
-    assert s925["bars_price_differ"] == 5 and abs(s925["largest_price_diff"] - 0.2) < 1e-6
+    assert s925["bars_price_differ"] == 390 and abs(s925["largest_price_diff"] - 0.2) < 1e-6
     assert "TEST-KEY-NEVER-PRINTED" not in capsys.readouterr().out
 
     # Second night: nothing missing -> no call, nothing rewritten.
@@ -243,7 +246,7 @@ def test_POLYGON_backfills_from_09_25_writes_once_and_logs_the_differences(fx, c
     spec.loader.exec_module(tc)
     bars, info = tc.load_polygon(os.path.join(fx.ROOT, "bars1m_polygon_daily", "*",
                                               "*_adjusted_false.parquet"))
-    assert len(bars) == 5 + 4 + 5 and set(bars["source"]) == {"polygon"}
+    assert len(bars) == 390 * 3 and set(bars["source"]) == {"polygon"}
     assert sorted(i["first_session_et"] for i in info) == ["2026-09-25", D1.isoformat(),
                                                            D2.isoformat()]
 

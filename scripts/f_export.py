@@ -164,6 +164,56 @@ def _same_clock(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+# ── R-IV.1469(e)1: write-once never locks a PARTIAL session ──────────────────────────────
+#
+# Write-once (R-IV.1456(g)1) froze whatever copy landed first. A vendor that served a session
+# short on the first night would have made the short copy the permanent record. So a session
+# file is written once only when it is COMPLETE in regular hours; a short copy is written beside
+# it as `<file>.partial` -- outside every `*.parquet` glob TRITON and QUERY use -- and retried the
+# next night. A later complete copy is written once as the normal file and the .partial goes; a
+# later copy that is longer but still short replaces the .partial.
+#
+# COMPLETE = every regular-hours minute has a bar: 09:30-15:59 ET, 390 bars, or 09:30-12:59 ET,
+# 210 bars, on an early close. Extended hours are not counted: their bar count varies with
+# trading and proves nothing about completeness.
+FULL_RTH_BARS = 390
+HALF_RTH_BARS = 210
+#: The 13:00 ET early closes in the export's range -- the same two days TRITON's registration
+#: names (scripts/lab/triton_r.py HALF_DAYS). A later early close must be added here.
+EARLY_CLOSES = frozenset({date(2026, 11, 27), date(2026, 12, 24)})
+PARTIAL_SUFFIX = ".partial"
+#: Polygon keeps two years, so a short Polygon copy could be re-asked forever. Retried while the
+#: session is at most this many calendar days old; after that it stays .partial and is listed.
+#: (yfinance's own ~30-day window bounds its retries: the export asks for the window every night.)
+POLY_RETRY_DAYS = 10
+
+
+def expected_rth_bars(d: date) -> int:
+    return HALF_RTH_BARS if d in EARLY_CLOSES else FULL_RTH_BARS
+
+
+def rth_bar_count(stamps, d: date) -> int:
+    """Distinct regular-hours minutes of session `d` among `stamps` (any tz; naive = UTC)."""
+    ix = pd.DatetimeIndex(stamps)
+    if ix.tz is None:
+        ix = ix.tz_localize("UTC")
+    et = ix.tz_convert(_et_zone())
+    close_min = 13 * 60 if d in EARLY_CLOSES else 16 * 60
+    mins = et.hour * 60 + et.minute
+    keep = (pd.Index(et.date) == d) & (mins >= 9 * 60 + 30) & (mins < close_min)
+    return int(et[keep].floor("min").nunique())
+
+
+def _partial_rth(ppath: str, d: date, stamps_of) -> int:
+    """RTH bars in an existing .partial, or -1 when there is none (or it cannot be read)."""
+    if not os.path.exists(ppath):
+        return -1
+    try:
+        return rth_bar_count(stamps_of(pd.read_parquet(ppath)), d)
+    except Exception:                                               # noqa: BLE001
+        return -1
+
+
 def bar_diff(kept: pd.DataFrame, vendor: pd.DataFrame) -> dict:
     """How the vendor's copy differs from the kept file: bars whose price changed, bars added
     or removed, bars whose volume changed, and the largest single price change and where."""
@@ -237,7 +287,13 @@ def export_bars1m() -> dict:
                # R-IV.1456(g)1: WRITE-ONCE. Files kept as they were, and the sessions whose
                # vendor copy differed from the kept file tonight (logged, never written over).
                "files_kept": 0, "revisions_logged": 0, "revised_sessions": set(),
-               "sessions_open": set()}
+               "sessions_open": set(),
+               # `sessions_held` counts FILES (session x ticker); this set is the same fact, so
+               # the two can be compared without mixing files and dates.
+               "held_files": set(),
+               # R-IV.1469(e)1: short copies kept as .partial tonight, and .partials replaced
+               # by a complete file tonight. "<session> <ticker> <rth bars>/<expected>".
+               "partial": set(), "partials_completed": set()}
     now_et = datetime.now(timezone.utc).astimezone(_et_zone())
     for ticker in CENSUS:
         frames = []
@@ -275,7 +331,7 @@ def export_bars1m() -> dict:
         by_day = {}
         for ts, row in all_df.iterrows():
             by_day.setdefault(ts.date(), []).append((ts, row))
-        written = held = kept = 0
+        written = held = kept = partial = 0
         for d, rows in sorted(by_day.items()):
             # R-IV.1378(c): the request window reaches back 29 days and today that is
             # 2026-09-25 -- the first day of the held range -- so without this the export
@@ -286,6 +342,7 @@ def export_bars1m() -> dict:
                 held += 1
                 summary["sessions_held"] += 1
                 summary["held_dates"].add(d.isoformat())
+                summary["held_files"].add((d.isoformat(), ticker))
                 continue
             # R-IV.1456(g)1: a session still trading (extended hours end 20:00 ET) is not written
             # at all -- written now, an incomplete file would become the permanent record.
@@ -304,20 +361,38 @@ def export_bars1m() -> dict:
                     summary["revisions_logged"] += 1
                     summary["revised_sessions"].add(d.isoformat())
                 continue
+            # R-IV.1469(e)1: only a COMPLETE session becomes the write-once file.
+            expected = expected_rth_bars(d)
+            got = rth_bar_count(sub.index, d)
+            ppath = path + PARTIAL_SUFFIX
+            if got < expected:
+                if got > _partial_rth(ppath, d, lambda df: df.index):
+                    write_parquet(sub, ppath)
+                summary["partial"].add("%s %s %d/%d" % (d.isoformat(), ticker, got, expected))
+                partial += 1
+                continue
             write_parquet(sub, path)
             written += 1
             summary["sessions_written"].add(d.isoformat())
+            if os.path.exists(ppath):
+                os.remove(ppath)
+                summary["partials_completed"].add("%s %s" % (d.isoformat(), ticker))
         # HELD IS REPORTED, never silent. A run that wrote 9 of 30 sessions and said only "9"
         # is indistinguishable from a vendor that returned a third of the data.
         summary["files_written"] += written
         summary["files_kept"] += kept
-        print("  %-5s %6d bars -> %d session files written, %d kept%s"
+        print("  %-5s %6d bars -> %d session files written, %d kept%s%s"
               % (ticker, len(all_df), written, kept,
-                 (", %d HELD by R-IV.1378(c)" % held) if held else ""))
+                 (", %d HELD by R-IV.1378(c)" % held) if held else "",
+                 (", %d PARTIAL (short in regular hours; retried next night)" % partial)
+                 if partial else ""))
     summary["sessions_written"] = sorted(summary["sessions_written"])
     summary["held_dates"] = sorted(summary["held_dates"])
     summary["revised_sessions"] = sorted(summary["revised_sessions"])
     summary["sessions_open"] = sorted(summary["sessions_open"])
+    summary["held_files"] = sorted(summary["held_files"])
+    summary["partial"] = sorted(summary["partial"])
+    summary["partials_completed"] = sorted(summary["partials_completed"])
     return summary
 
 
@@ -478,7 +553,9 @@ def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, 
     key = key if key is not None else polygon_key()
     root = root or ROOT
     out = {"status": "ok", "calls": 0, "files_written": 0, "sessions_written": set(),
-           "per_ticker": {}, "compared": 0, "no_bars": [], "reason": None}
+           "per_ticker": {}, "compared": 0, "no_bars": [], "reason": None,
+           # R-IV.1469(e)1, as for the yfinance files.
+           "partial": [], "partials_completed": []}
     if not key:
         out.update(status="skipped", reason="no POLYGON_API_KEY in this environment")
         return _poly_done(out)
@@ -497,11 +574,24 @@ def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, 
             continue
         if POLYGON_FROM <= d < today:
             sessions.append(d)
+    def yf_file(d, ticker):
+        """The session's yfinance file: the complete one, else its .partial, else None."""
+        p = os.path.join(yroot, d.isoformat(), "%s.parquet" % ticker)
+        if os.path.exists(p):
+            return p
+        return p + PARTIAL_SUFFIX if os.path.exists(p + PARTIAL_SUFFIX) else None
+
+    def poly_due(d, ticker):
+        """No complete Polygon file yet, and either never asked or a .partial still in its
+        retry window (R-IV.1469(e)1)."""
+        pp = poly_path(root, d, ticker)
+        if os.path.exists(pp):
+            return False
+        return (not os.path.exists(pp + PARTIAL_SUFFIX)) or (today - d).days <= POLY_RETRY_DAYS
+
     first_call = True
     for ticker in CENSUS:
-        missing = [d for d in sessions
-                   if os.path.exists(os.path.join(yroot, d.isoformat(), "%s.parquet" % ticker))
-                   and not os.path.exists(poly_path(root, d, ticker))]
+        missing = [d for d in sessions if yf_file(d, ticker) and poly_due(d, ticker)]
         for i in range(0, len(missing), POLYGON_SESSIONS_PER_CALL):
             group = missing[i:i + POLYGON_SESSIONS_PER_CALL]
             if not first_call:
@@ -532,11 +622,23 @@ def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, 
                     continue
                 if os.path.exists(ppath):        # write-once, like the yfinance files
                     continue
+                # R-IV.1469(e)1: only a COMPLETE session becomes the write-once file.
+                expected = expected_rth_bars(d)
+                got = rth_bar_count(pd.to_datetime(pod["timestamp_utc"], utc=True), d)
+                if got < expected:
+                    if got > _partial_rth(ppath + PARTIAL_SUFFIX, d,
+                                          lambda df: pd.to_datetime(df["timestamp_utc"], utc=True)):
+                        write_parquet(pod.reset_index(drop=True), ppath + PARTIAL_SUFFIX)
+                    out["partial"].append("%s %s %d/%d" % (d, ticker, got, expected))
+                    continue
                 write_parquet(pod.reset_index(drop=True), ppath)
+                if os.path.exists(ppath + PARTIAL_SUFFIX):
+                    os.remove(ppath + PARTIAL_SUFFIX)
+                    out["partials_completed"].append("%s %s" % (d, ticker))
                 out["files_written"] += 1
                 out["sessions_written"].add(d.isoformat())
                 out["per_ticker"][ticker] = out["per_ticker"].get(ticker, 0) + 1
-                yfd = pd.read_parquet(os.path.join(yroot, d.isoformat(), "%s.parquet" % ticker))
+                yfd = pd.read_parquet(yf_file(d, ticker))
                 c = compare_vendors(yfd, _as_bars(pod))
                 append_tsv(os.path.join(root, POLY_VS_YF_FILE), POLY_VS_YF_HEADER, (
                     datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -550,10 +652,14 @@ def export_polygon_bars1m(key: str = None, now_et: datetime = None, sleep=None, 
 def _poly_done(out: dict) -> dict:
     out["sessions_written"] = sorted(out["sessions_written"])
     per = ",".join("%s:%d" % (t, n) for t, n in sorted(out.get("per_ticker", {}).items()))
-    print("=== bars1m_polygon_daily: %s | %d calls | wrote %d files across %d sessions: %s%s%s ==="
+    part = out.get("partial") or []
+    done = out.get("partials_completed") or []
+    print("=== bars1m_polygon_daily: %s | %d calls | wrote %d files across %d sessions: %s%s%s%s%s ==="
           % (out["status"].upper(), out["calls"], out["files_written"],
              len(out["sessions_written"]), ",".join(out["sessions_written"]) or "NONE",
              (" | per ticker " + per) if per else "",
+             (" | PARTIAL %d (retried next night): %s" % (len(part), "; ".join(part))) if part else "",
+             (" | partials completed: " + "; ".join(done)) if done else "",
              (" | " + out["reason"]) if out["reason"] else ""))
     return out
 
@@ -863,7 +969,8 @@ def _archive_rows() -> list:
                 rows_back = -1
                 rows_declared = None
                 note = "not written this run; hash verified"
-                if name.endswith(".parquet"):
+                is_partial = name.endswith(".parquet" + PARTIAL_SUFFIX)
+                if name.endswith(".parquet") or is_partial:
                     # R-IV.1064(c): the FOOTER first, which is metadata and cheap...
                     import pyarrow.parquet as _pq
                     rows_declared = int(_pq.ParquetFile(path).metadata.num_rows)
@@ -879,6 +986,9 @@ def _archive_rows() -> list:
                         continue
                     note = ("not written this run; hash verified; rows from the parquet footer "
                             "and confirmed by reading the data")
+                    if is_partial:
+                        note = ("PARTIAL session copy, short in regular hours (R-IV.1469(e)1): "
+                                "NOT a session file; retried nightly; " + note)
                 out.append({"path": path, "rows_written": rows_declared,
                             "rows_read_back": rows_back,
                             "bytes": os.path.getsize(path), "sha256": sha256_of(path),

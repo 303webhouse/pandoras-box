@@ -204,20 +204,28 @@ def main() -> int:
     #
     # The counts come from what was actually written: `files_written` is incremented per
     # write_parquet call and `sessions_written` is the set of sessions those writes landed in.
-    if held != len(held_dates):
-        # The count and the list are the SAME FACT from two places. If they ever disagree the
-        # line must say so rather than print the prettier of the two.
-        _say("INTERNAL INCONSISTENCY: held count %d but %d held dates recorded -- reporting "
-             "both, trust neither" % (held, len(held_dates)))
+    # `held` counts FILES (session x ticker) and `held_files` lists them: the SAME FACT from two
+    # places, so if they disagree the line says so. (Until R-IV.1469 this compared the file count
+    # with the DATE count -- 88 files vs 11 dates every night -- and cried wolf.)
+    held_files = summary.get("held_files") or []
+    if held != len(held_files):
+        _say("INTERNAL INCONSISTENCY: held count %d but %d held files recorded -- reporting "
+             "both, trust neither" % (held, len(held_files)))
     held_span = ("%s..%s" % (held_dates[0], held_dates[-1])) if held_dates else "none"
-    _say("HELD %d (%s) | WROTE %d files across %d sessions: %s | KEPT %d | REVISED %d "
-         "logged (%s) | window %s..%s%s | %s"
-         % (len(held_dates), held_span, written, len(sessions),
+    # R-IV.1469(e)1: short sessions kept as .partial (retried next night), and .partials a
+    # complete copy replaced tonight. Named, never counted alone.
+    part = summary.get("partial") or []
+    done = summary.get("partials_completed") or []
+    part_note = ((" | PARTIAL %d (retried next night): %s" % (len(part), "; ".join(part)))
+                 if part else "") + ((" | partials completed: " + "; ".join(done)) if done else "")
+    _say("HELD %d files across %d sessions (%s) | WROTE %d files across %d sessions: %s | KEPT %d"
+         " | REVISED %d logged (%s) | window %s..%s%s%s | %s"
+         % (held, len(held_dates), held_span, written, len(sessions),
             ",".join(sessions) if sessions else "NONE", kept,
             summary.get("revisions_logged", 0), ",".join(revised) if revised else "none",
             summary.get("window_start"), summary.get("window_end"),
             (" | %d tickers empty: %s" % (len(empty), ",".join(empty))) if empty else "",
-            poly_line))
+            part_note, poly_line))
 
     # ZERO FILES IS A FAULT, NOT A SUCCESS, and saying so is the whole reason this record
     # exists. `completed_defective` is the existing vocabulary for it (R-IV.426(b)): the pass
@@ -236,7 +244,10 @@ def main() -> int:
 
     notes = []
     if held:
-        notes.append("%d sessions held by R-IV.1378(c)" % held)
+        notes.append("%d files (%d sessions) held by R-IV.1378(c)" % (held, len(held_dates)))
+    part = summary.get("partial") or []
+    if part:
+        notes.append("%d partial (retried next night)" % len(part))
     notes.append("kept %d, %d revisions logged" % (kept, summary.get("revisions_logged", 0)))
     notes.append(poly_line)
     _record(STATUS_OK, rows_touched=written, skip_reason="; ".join(notes)[:1000])
