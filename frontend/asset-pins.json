@@ -15,8 +15,8 @@
   },
   "index.html": {
     "app.js": {
-      "pin": 180,
-      "sha256": "ee1c8d923e27814f6158e6e9de6b1474f6f2e96da3f8a118b8fa9de0a0b83c4d"
+      "pin": 182,
+      "sha256": "fd015e37440f206aa8c43b93c5780fd013e79293d7dee6e8a336a8c86c1098de"
     },
     "styles.css": {
       "pin": 156,
@@ -64,6 +64,14 @@
       "pin": 3,
       "sha256": "1618636c1558a282f0acd9bc0ed82dffd88287b2394e3e414556be2ee20bdb9a"
     },
+    "assets/event-strip-earn.css": {
+      "pin": 1,
+      "sha256": "4d73f072584e772cc7300c5ff3a9710fdd3f89adf79d5ccb99ac9fe8df7c234b"
+    },
+    "assets/honest-labels.css": {
+      "pin": 1,
+      "sha256": "bc4f4c204883a73c8230cc28457e4332f3aa1e3bf43283f0304b355c8e521769"
+    },
     "assets/positions-clean.css": {
       "pin": 2,
       "sha256": "97d13925f0ff33ff3a726a385c08ee4aa1a57881335d6790b748601261eea696"
@@ -81,8 +89,8 @@
       "sha256": "f9d82de6281c3b171ef308abc1b381f79275d6efc96ec8f5e75f0f20eb55ca88"
     },
     "v2.js": {
-      "pin": 115,
-      "sha256": "543e37f436effb0b2f066b5384a221eed7cd671c7e96ed07731b9fe801019fea"
+      "pin": 116,
+      "sha256": "bb6e15a6b9410dca59aed49d8117733bc6cc851c12830ee0d4ebe758d0c58481"
     }
   }
 }

@@ -668,6 +668,14 @@
     catch (_) { return true; }
   })();
 
+  // R-IV.1461(f)5: the Event Strip's earnings chips are the DEFAULT; `?earn=off` restores the
+  // old count bar UNTIL 2026-11-13 -- remove the rollback, with the branch it guards, on or
+  // after that date unless Nick says otherwise.
+  const EARN_OFF = (() => {
+    try { return /(?:^|[?&])earn=off(?:&|$)/.test(location.search); }
+    catch (_) { return false; }   // no `location` (the suite evaluates this file in node)
+  })();
+
   // A stored regime key ('range_chop') as the word LEAN_BY_WORD is keyed on ('RANGE CHOP').
   const keyWord = (k) => String(k || '').replace(/_/g, ' ').trim().toUpperCase();
   // R-IV.1369(c)3: a NEUTRAL headline is --text, never --text-2, because a --text-2 headline
@@ -1057,7 +1065,7 @@
         kv('Cut-offs (dial)', '20 / 40 / 60 / 80 = URSA MAJOR | URSA MINOR | NEUTRAL | TORO MINOR | TORO MAJOR') +
         sec('THEME BREADTH · % OF WATCHLIST ABOVE 50-DAY · NIGHTLY') +
         kv('Call', v2.call + (v2.num ? ' · ' + v2.num : '')) + kv('Distance', v2.dist || '—') +
-        kv('Backend label', r.regime_label || '—') + kv('Names scored', (r.breadth || {}).total != null ? r.breadth.total : '—') +
+        kv('Backend label', (r.regime_label || '—') + (r.regime_scope ? ' · ' + r.regime_scope : '')) + kv('Names scored', (r.breadth || {}).total != null ? r.breadth.total : '—') +
         kv('Cut-offs (%)', '70 / 60 / 40 / 30 = STRONG BUY | MODERATE BUY | NEUTRAL | MODERATE SELL | STRONG SELL') +
         kv('As of (close)', r.metrics_date || '—') +
         '<div style="margin-top:10px;font-size:11px;color:var(--text-3);line-height:1.45">The two lenses share no inputs. Market mix blends 20 market-wide factors (volatility, breadth, credit, trend, macro) and recomputes every 15 minutes. Theme breadth is one nightly number: the share of your themed watchlist above its 50-day average.</div>';
@@ -3559,24 +3567,78 @@
       const earn = Number(d.earn) || 0;
       const h = Math.max(2, Math.round((earn / maxEarn) * 16));
       const yours = Number(d.book_earn) || 0;
+      // R-IV.1461(f)5: earnings chips by default; ?earn=off brings back the count bar
+      // (the rollback, kept until 11-13).
+      const earnCell = EARN_OFF
+        ? '<div class="ev-earn"><i style="height:' + h + 'px;background:'
+          + (yours ? 'var(--teal)' : 'var(--border-strong)') + '"></i>'
+          + '<span>' + earn + (yours ? ' \u00b7 ' + yours + ' yours' : '') + '</span></div>'
+        : evEarnChips(d);
       return '<div class="ev-day' + (d.blackout ? ' ev-blackout' : '')
         + (i === arr.length - 1 ? ' ev-last' : '') + '">'
         + '<div class="ev-dow">' + esc(d.dow) + '<b>' + esc(d.dd) + '</b></div>'
         + '<div class="ev-evs">' + evs + '</div>'
-        + '<div class="ev-earn"><i style="height:' + h + 'px;background:'
-        + (yours ? 'var(--teal)' : 'var(--border-strong)') + '"></i>'
-        + '<span>' + earn + (yours ? ' \u00b7 ' + yours + ' yours' : '') + '</span></div>'
+        + earnCell
         + '</div>';
     }).join('');
+
+    const empty = (!EARN_OFF && m.earn_feed_empty)
+      ? '<span class="ev-feed-empty" title="earnings_calendar has no rows for '
+        + esc(m.earn_next_session || 'the next session') + '">'
+        + esc(m.earn_feed_note || 'earnings feed empty') + '</span>'
+      : '';
 
     host.innerHTML =
       '<div class="ev-legend">'
       + '<span class="ev-chip ev-macro">MACRO</span>'
       + '<span class="ev-chip ev-book">YOUR BOOK</span>'
+      + empty
+      + (EARN_OFF ? '' : evReactionRow(m))
       + '<span class="ev-bl">' + esc(m.blackout_label || '') + '</span>'
       + '</div>'
       + '<div class="ev-grid">' + days + '</div>'
       + '<div class="ag-cap">' + esc(m.caption || '') + '</div>';
+  }
+
+  // \u2500\u2500 R-IV.1461(f)5: earnings chips \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // Dates, times and the market's own numbers only: ticker, BMO/AMC, the implied move,
+  // YOURS. No beat/miss call and no trade language. (EARN_OFF is declared beside CLEAN.)
+
+  function evPct(v, signed) {
+    if (v === null || v === undefined || !isFinite(Number(v))) return '';
+    const n = Number(v);
+    if (!signed) return '\u00b1' + Math.abs(n).toFixed(1) + '%';
+    return (n < 0 ? '\u2212' : '+') + Math.abs(n).toFixed(1) + '%';
+  }
+
+  function evEarnChips(d) {
+    const chips = (d.earn_chips || []).map((c) => {
+      const bits = [c.timing, evPct(c.implied, false)].filter(Boolean).join(' ');
+      const full = [c.t, c.yours ? 'YOURS' : '', bits].filter(Boolean).join(' ');
+      return '<span class="ev-echip' + (c.yours ? ' ev-yours' : '') + '" title="' + esc(full) + '">'
+        + '<b>' + esc(c.t) + '</b>' + (c.yours ? '<em>YOURS</em>' : '')
+        + (bits ? ' <span>' + esc(bits) + '</span>' : '') + '</span>';
+    }).join('');
+    const more = Number(d.earn_more) || 0;
+    return '<div class="ev-earnlist">' + chips
+      + (more ? '<span class="ev-emore">+' + more + ' more</span>' : '') + '</div>';
+  }
+
+  function evReactionRow(m) {
+    const rx = m.reactions || [];
+    if (!rx.length) return '';
+    const items = rx.map((r) => {
+      const md = String(r.date || '').slice(5);
+      return '<span class="ev-rxi' + (r.yours ? ' ev-yours' : '') + '">'
+        + '<b>' + esc(r.t) + '</b>' + (r.yours ? '<em>YOURS</em>' : '') + ' '
+        + esc(evPct(r.reaction, true))
+        + (r.implied !== null && r.implied !== undefined
+          ? ' vs ' + esc(evPct(r.implied, false)) : '')
+        + ' <i>' + esc(md + (r.timing ? ' ' + r.timing : '')) + '</i></span>';
+    }).join('');
+    const more = Number(m.reactions_more) || 0;
+    return '<div class="ev-rx"><span class="ev-rxh">REACTIONS</span>' + items
+      + (more ? '<span class="ev-emore">+' + more + ' more</span>' : '') + '</div>';
   }
 
   function initGrid() {
@@ -3985,11 +4047,13 @@
     // flips back at the open, on this same 60 s poll. Unknown session = the normal bar.
     const fut = marketShut() && ext && (ext.futures || []).length > 0;
     el.classList.toggle('fut', !!fut);
+    renderBreadthChip(fut ? null : data);
     if (fut) { renderFuturesBar(el, ext); return; }
     setIndexHeader(false);
     setDot('indexHealthDot', data && data.data_age_seconds, data ? !!data.degraded : null, data && data.flatline, data && data.session, null, data && data.incoherent);
     noteFlatline('strip', data && data.flatline, 'Index / strip');
-    const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA'];
+    // R-IV.1461(g)4: SMH on the board, beside the majors (served by the same strip job).
+    const order = ['SPY', 'QQQ', 'IWM', 'RSP', 'DIA', 'SMH'];
     // A suspect strip escalates the topbar dot. Only escalation is registered here:
     // the strip's routine freshness states stay out of the global roll-up, which is
     // how this tile behaved before, so nothing else on the board changes meaning.
@@ -4015,6 +4079,35 @@
         + chg
         + `<span class="ext">${ext != null ? (ext >= 0 ? '+' : '') + Number(ext).toFixed(1) + ' ATR' : ''}</span></div>`;
     }).join('');
+  }
+
+  // ── R-IV.1461(g)3: NARROW / BROAD chip ────────────────────────────────────────
+  // Cap-weighted (SPY, QQQ) against equal-weight (RSP) over the session, from the strip's own
+  // day changes. DISPLAY ONLY: it feeds nothing. The definition rides in the tooltip.
+  const BREADTH_BAND_PP = 0.20;
+  function breadthRead(map) {
+    const v = (s) => (map[s] && map[s].value != null && isFinite(Number(map[s].value))) ? Number(map[s].value) : null;
+    const spy = v('SPY'), qqq = v('QQQ'), rsp = v('RSP');
+    if (spy == null || qqq == null || rsp == null) return null;
+    const s = spy - rsp, q = qqq - rsp;
+    const word = (s >= BREADTH_BAND_PP && q >= BREADTH_BAND_PP) ? 'NARROW'
+      : (s <= -BREADTH_BAND_PP && q <= -BREADTH_BAND_PP) ? 'BROAD' : 'EVEN';
+    return { word, s, q };
+  }
+  function renderBreadthChip(data) {
+    const chip = $('ixBreadth'); if (!chip) return;
+    const map = {}; ((data && data.indices) || []).forEach((r) => { map[r.symbol] = r; });
+    const b = data ? breadthRead(map) : null;
+    if (!b) { chip.hidden = true; return; }
+    const pp = (x) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(2) + 'pp';
+    chip.hidden = false;
+    chip.className = 'ix-breadth ixb-' + b.word.toLowerCase();
+    chip.textContent = b.word;
+    chip.title = 'Session change, cap-weighted vs equal-weight: SPY − RSP ' + pp(b.s)
+      + ', QQQ − RSP ' + pp(b.q) + '. NARROW = SPY and QQQ both beat RSP (the equal-weight '
+      + 'S&P 500) by ' + BREADTH_BAND_PP.toFixed(2) + 'pp or more: the largest names carry the day. '
+      + 'BROAD = RSP beats both by ' + BREADTH_BAND_PP.toFixed(2) + 'pp or more. EVEN = neither. '
+      + 'Display only; it feeds nothing.';
   }
 
   // ── b4b Futures bar (outside the regular session) ─────────────────────────────

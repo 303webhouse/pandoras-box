@@ -34,6 +34,17 @@ DESCRIPTION = (
 )
 
 
+#: R-IV.1461(g)2: what each state means, served with the data. Momentum = 5d RS - 20d RS vs
+#: SPY, in points (bias_filters/sector_momentum.py: +3 = SURGING, -3 = DUMPING).
+STATE_RULE = (
+    "momentum = 5d RS - 20d RS (vs SPY, points). LEADING: momentum >= +3 and 20d RS >= 0. "
+    "ROTATING_IN: momentum >= +3 and 20d RS < 0 (a laggard improving; can be ranked last). "
+    "ROTATING_OUT: momentum <= -3 and 20d RS > 0 (a leader weakening; can be ranked first). "
+    "LAGGING: momentum <= -3 and 20d RS <= 0. NEUTRAL: otherwise. leadership_breadth_score "
+    "and rotation_regime count LEADING and ROTATING_IN as leaders."
+)
+
+
 # One definition, shared with the signal enrichment join (R-IV.422). The local names
 # are kept so this module reads as it did.
 _classify_regime = classify_rotation_regime
@@ -69,6 +80,10 @@ async def hub_get_sector_strength() -> dict:
             "rank_10d": entry.get("rank_10d"),
             "rank_20d": entry.get("rank_20d"),
             "state": _map_status(entry.get("status"), rs_20d),
+            # R-IV.1461(g)2: the two numbers the state is decided by, so a reader can see why
+            # (display only; the state itself is unchanged).
+            "rs_5d": entry.get("rs_5d"),
+            "rotation_momentum": entry.get("rotation_momentum"),
         }
         sectors.append(sector)
         by_rs_10d.append(sector)
@@ -115,6 +130,7 @@ async def hub_get_sector_strength() -> dict:
         "sectors": sectors,
         "narrow_leadership_flag": narrow,
         "leadership_breadth_score": breadth_score,
+        "state_rule": STATE_RULE,
     }
     if missing:
         data["warnings"] = [
@@ -131,6 +147,14 @@ async def hub_get_sector_strength() -> dict:
         f"Sector regime: {regime}. Leading: {top_str}. Lagging: {bot_str}. "
         f"Leadership breadth {breadth_score}."
     )
+    # R-IV.1461(g)2: a ROTATING_IN sector near the bottom of the ranks is a laggard bouncing,
+    # and the breadth score above counts it as a leader. Say so where the label is read.
+    n = len(have_20)
+    for s_ in sectors:
+        r20 = s_.get("rank_20d")
+        if s_["state"] == "ROTATING_IN" and r20 and n and r20 > n - 3:
+            summary += (f" {s_['etf']} reads ROTATING_IN from rank {r20}/{n} on 20d RS: a "
+                        f"5-day bounce in a laggard, counted as a leader in the breadth score.")
     if missing:
         summary += f" DEGRADED: {len(missing)} field(s) missing."
 

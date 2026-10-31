@@ -1,0 +1,14 @@
+/* R-IV.1461(g) — honest labels, display only. v2.html only, so the shared base (v2.css,
+   pinned by stater and abacus too) is untouched (R-IV.1456(i)). 12px: nothing new joins
+   the under-12px list (R-IV.1452(d)). */
+
+/* (g)3: NARROW / BROAD / EVEN — cap-weighted vs equal-weight over the session. Feeds nothing. */
+.ix-breadth {
+  font: 700 12px var(--mono); letter-spacing: .5px; padding: 1px 6px; border-radius: 4px;
+  border: 1px solid var(--border-strong); color: var(--text-2); cursor: help; margin-left: 8px;
+}
+.ix-breadth.ixb-narrow { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
+.ix-breadth.ixb-broad { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 55%, transparent); }
+
+/* (g)5 / (g)6: a scope note beside a figure that would otherwise read wider than it is. */
+.scope-note { font: 12px var(--mono); color: var(--text-3); margin-left: 6px; }

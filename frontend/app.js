@@ -8805,6 +8805,9 @@ function renderFlowRadar(data) {
                 : 'var(--text-secondary)';
         }
     }
+    // R-IV.1461(g)6: say what the P/C and premium totals cover (the polled tickers, pooled).
+    if (pulsePc) pulsePc.title = mp.scope || '';
+    if (pulsePremium) pulsePremium.title = mp.scope || '';
     if (pulsePremium) {
         if (!flowAvailable) {
             pulsePremium.textContent = '—';

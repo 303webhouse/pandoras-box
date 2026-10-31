@@ -8,6 +8,11 @@ from typing import Any, Dict, List, Optional
 from ..decorators import mcp_tool
 from ..envelope import make_response
 from services.read_only.catalysts import get_upcoming_catalysts
+from services.read_only import earnings as _earn
+
+#: With no ticker asked for, the earnings rows are capped (a busy week has hundreds), in
+#: services.read_only.earnings.ORDER_RULE's order. The full count rides beside them.
+EARNINGS_CAP = 25
 
 DESCRIPTION = (
     "Returns active catalysts and upcoming events from the Hermes alert system "
@@ -64,7 +69,7 @@ def _map_event(ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "id": ev.get("id") or f"{category}-{scheduled_iso}",
         "ticker": ev.get("ticker") or "MACRO",
         "type": type_map.get(category, "MACRO_DATA"),
-        "title": ev.get("name") or ev.get("title") or category or "Catalyst",
+        "title": ev.get("name") or ev.get("title") or ev.get("event") or category or "Catalyst",
         "scheduled_at": scheduled_dt.isoformat(),
         "is_upcoming": is_upcoming,
         "hours_until": round(delta_hours, 1) if is_upcoming else None,
@@ -72,6 +77,60 @@ def _map_event(ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "expected_impact": impact if impact in {"LOW", "MEDIUM", "HIGH", "CRITICAL"} else "MEDIUM",
         "context_note": ev.get("note") or ev.get("context_note"),
     }
+
+
+def _map_earnings(row: Dict[str, Any], now: datetime) -> Dict[str, Any]:
+    """One earnings_calendar row in the canonical schema: dates, times and the market's
+    own numbers only."""
+    when = _earn.scheduled_at(row["report_date"], row["timing"]).astimezone(timezone.utc)
+    delta_hours = (when - now).total_seconds() / 3600.0
+    upcoming = delta_hours > 0
+    bits = ["%s earnings" % row["ticker"]]
+    if row["timing"]:
+        bits.append(row["timing"])
+    if row["implied_move_pct"] is not None:
+        bits.append("implied ±%.1f%%" % row["implied_move_pct"])
+    if row["reaction_pct"] is not None:
+        bits.append("moved %+.1f%%" % row["reaction_pct"])
+    return {
+        "id": "EARNINGS-%s-%s" % (row["ticker"], row["report_date"].isoformat()),
+        "ticker": row["ticker"],
+        "type": "EARNINGS",
+        "title": " ".join(bits),
+        "scheduled_at": when.isoformat(),
+        "is_upcoming": upcoming,
+        "hours_until": round(delta_hours, 1) if upcoming else None,
+        "hours_since": round(-delta_hours, 1) if not upcoming else None,
+        "expected_impact": "MEDIUM",
+        "context_note": ("time is the session edge (BMO = before the 09:30 ET open, AMC = "
+                         "after the 16:00 ET close)" if row["timing"] else "UW gives no time"),
+        "timing": row["timing"] or None,
+        "implied_move_pct": row["implied_move_pct"],
+        "reaction_pct": row["reaction_pct"],
+        "yours": row["yours"],
+    }
+
+
+async def _add_earnings(mapped: List[Dict[str, Any]], ticker: Optional[str],
+                        lookback_hours: int, forward_days: int):
+    """Append earnings rows inside the windows. Returns (count in window, unavailable?)."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(hours=lookback_hours)).date()
+    rows = await _earn.fetch_earnings(start, now.date() + timedelta(days=forward_days), ticker)
+    if rows is None:
+        return None, True
+    inside = []
+    for r in sorted(rows, key=_earn.rank_key):
+        ev = _map_earnings(r, now)
+        if not ev["is_upcoming"] and (ev["hours_since"] or 0) > lookback_hours:
+            continue
+        inside.append(ev)
+    total = len(inside)
+    if not ticker:
+        inside = inside[:EARNINGS_CAP]          # in _earn.ORDER_RULE's order
+    mapped.extend(inside)
+    return total, False
 
 
 @mcp_tool(name="hub_get_hermes_alerts", description=DESCRIPTION)
@@ -94,7 +153,7 @@ async def hub_get_hermes_alerts(
             summary="Invalid lookback_hours.",
         )
 
-    raw = await get_upcoming_catalysts(days=forward_days)
+    raw = await get_upcoming_catalysts(days=forward_days, lookback_hours=lookback_hours)
     if raw is None:
         return make_response(
             status="unavailable",
@@ -118,6 +177,11 @@ async def hub_get_hermes_alerts(
                 continue
         mapped.append(normalized)
 
+    # R-IV.1461(f)3: Hermes reads earnings_calendar.
+    earnings_total, earnings_unavailable = await _add_earnings(
+        mapped, ticker_filter, lookback_hours, forward_days)
+    mapped.sort(key=lambda e: e["scheduled_at"])
+
     critical = sum(1 for e in mapped if e["expected_impact"] == "CRITICAL")
     high = sum(1 for e in mapped if e["expected_impact"] == "HIGH")
 
@@ -128,6 +192,10 @@ async def hub_get_hermes_alerts(
         "alerts": mapped,
         "critical_count": critical,
         "high_count": high,
+        "earnings_in_window": earnings_total,
+        "earnings_shown": sum(1 for e in mapped if e["type"] == "EARNINGS"),
+        "earnings_source": "unavailable" if earnings_unavailable else "earnings_calendar",
+        "earnings_order": _earn.ORDER_RULE,
     }
 
     scope = ticker_filter or "All"

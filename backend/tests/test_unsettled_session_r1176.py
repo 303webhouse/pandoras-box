@@ -333,7 +333,8 @@ def test_the_MCP_summary_is_unchanged_when_settled():
     data = {"regime_label": "RISK-ON", "breadth": {"pct_above_50dma": 71.2},
             "dominant": [{"theme": "Semis"}], "provisional": False}
     line = stable_regime._summary(data, "ok", [])
-    assert line.startswith("Regime: RISK-ON.")
+    # R-IV.1461(g)5 put the label's scope beside it; the sentence still OPENS with the label.
+    assert line.startswith("Regime: RISK-ON (themed watchlist")
     assert "PROVISIONAL" not in line
 
 

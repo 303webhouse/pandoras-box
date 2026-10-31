@@ -106,12 +106,29 @@ async def _book_expiries(conn) -> List[Dict[str, Any]]:
     return out
 
 
-async def _earnings(conn, days: int) -> List[Dict[str, Any]]:
+def _session_frame(now: Optional[_dt.datetime] = None):
+    """(today ET, the next session the feed check looks at, the two completed sessions whose
+    reactions get the day-after row)."""
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    et = mc._now_et(now)
+    today = et.date()
+    if _is_trading_day(today) and (et.hour, et.minute) < (16, 0):
+        nxt = today
+    else:
+        nxt = mc.next_trading_day(today)
+    last = mc.last_settled_session(now)
+    return today, nxt, [mc.previous_trading_day(last), last]
+
+
+async def _earnings(days: int, since: _dt.date) -> Optional[List[Dict[str, Any]]]:
+    """R-IV.1461(f)5: per row the ticker, timing, the market's implied move and reaction, and
+    YOURS (an open position in any account). None when the table cannot be read."""
+    from services.read_only import earnings as earn
     today = _dt.date.today()
-    rows = await conn.fetch(
-        "SELECT report_date, in_position_book FROM earnings_calendar "
-        " WHERE report_date BETWEEN $1 AND $2", today, today + _dt.timedelta(days=days * 2))
-    return [{"date": r["report_date"], "in_book": bool(r["in_position_book"])} for r in rows]
+    rows = await earn.fetch_earnings(since, today + _dt.timedelta(days=days * 2))
+    if rows is None:
+        return None
+    return [dict(r, date=r["report_date"], in_book=r["yours"]) for r in rows]
 
 
 @router.get("")
@@ -134,21 +151,26 @@ async def get_event_strip(_: str = Depends(require_api_key)) -> Dict[str, Any]:
             pool = await get_postgres_client()
             async with pool.acquire() as conn:
                 expiries = await _book_expiries(conn)
-                try:
-                    earnings = await _earnings(conn, SESSIONS)
-                except Exception as exc:                            # noqa: BLE001
-                    degraded.append("earnings_calendar: %s" % type(exc).__name__)
         except Exception as exc:                                    # noqa: BLE001
             degraded.append("book expiries: %s" % type(exc).__name__)
+        _today_et, next_session, reaction_dates = _session_frame()
+        got = await _earnings(SESSIONS, min(reaction_dates))
+        earnings_read = got is not None
+        if not earnings_read:
+            degraded.append("earnings_calendar: unreadable")
+        earnings = got or []
 
         strip = es.build_strip(today, is_trading_day=_is_trading_day, macro=macro,
-                              book_expiries=expiries, earnings=earnings, sessions=SESSIONS)
+                              book_expiries=expiries, earnings=earnings, sessions=SESSIONS,
+                              next_session=next_session, reaction_dates=reaction_dates,
+                              earnings_read=earnings_read)
         strip.update({
             "live": True,
             "sources": {
                 "macro": "Unusual Whales /api/market/economic-calendar (cached, TTL 1800s)",
                 "book_expiries": "unified_positions.expiry, open rows",
-                "earnings": "earnings_calendar (CHRONOS), with its own in_position_book flag",
+                "earnings": "earnings_calendar (CHRONOS, UW by date); YOURS = an open "
+                            "unified_positions row in any account",
                 "blackout": es.BLACKOUT_RULE,
             },
             "degraded": degraded,

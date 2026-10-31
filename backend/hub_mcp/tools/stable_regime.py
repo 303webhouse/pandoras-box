@@ -58,7 +58,9 @@ def _summary(data: dict, status: str, warnings: list) -> str:
     if data.get("provisional"):
         reason = data.get("provisional_reason") or "the session has not closed"
         prov = f"PROVISIONAL (IN-SESSION) — {reason}. "
-    return (f"{prov}Regime: {label}{tag}. {p50_str} above 50dma. "
+    # R-IV.1461(g)5: the label's scope, beside its state.
+    scope = data.get("regime_scope") or "themed watchlist (~250 names)"
+    return (f"{prov}Regime: {label}{tag} ({scope}). {p50_str} above 50dma. "
             f"Dominant: {dom_str}.{warn}")
 
 

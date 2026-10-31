@@ -1574,6 +1574,27 @@ async def get_earnings_afterhours() -> Optional[List[Dict[str, Any]]]:
     return result
 
 
+#: UW's largest page for the earnings lists. The default is 50, which is why the old
+#: today-only fetch stored exactly 100 rows (50 + 50) on busy dates (R-IV.1464(c)).
+EARNINGS_PAGE_LIMIT = 100
+
+
+async def get_earnings_page(side: str, on: date, page: int,
+                            limit: int = EARNINGS_PAGE_LIMIT) -> Optional[dict]:
+    """ONE page of UW's premarket or afterhours earnings list for a given date
+    (R-IV.1461(f)1). Uncached: the caller walks every page and must see each one.
+
+    Returns the whole response (so any total UW reports is visible), or a falsy
+    UWUnavailable / None when the page could not be read."""
+    if side not in ("premarket", "afterhours"):
+        raise ValueError("side must be premarket or afterhours")
+    return await _uw_request(
+        "/api/earnings/%s" % side,
+        params={"date": on.isoformat(), "limit": int(limit), "page": int(page)},
+        caller="earnings_%s" % side,
+    )
+
+
 async def get_earnings_dates(ticker: str) -> Optional[List[Dict[str, Any]]]:
     """Fetch historical + upcoming earnings dates for a ticker. TTL: 3600s (F.3)."""
     symbol = ticker.upper()

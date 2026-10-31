@@ -538,6 +538,11 @@ OFF_HOURS_FACTOR_BY_CALLER = {
     # R-IV.1456(f): the ONE weekend top-up of the same catch-up. A weekend is all off-hours,
     # so without this its 1,000 would be 250. Removed with the job in the next push.
     "darkpool_topup": 1.0,
+    # R-IV.1461(f)1: the earnings calendar is fetched nightly at 20:15 ET (and Sundays), so
+    # its whole window is off-hours: 100 x 0.25 = 25 pages would not cover eleven dates on
+    # both lists. Off-hours quota only; the 100 and STANDARD are unchanged.
+    "earnings_premarket": 1.0,
+    "earnings_afterhours": 1.0,
 }
 
 NON_RTH_QUOTA_FACTOR = {

@@ -18,6 +18,10 @@
     <link rel="stylesheet" href="/assets/positions-clean.css?v=2">
     <!-- R-IV.1431: B9 global markets, live. Fills #b9-mount in the Regime pop-out (R-IV.1432(d)). -->
     <link rel="stylesheet" href="/assets/b9/b9_live.css?v=4">
+    <!-- R-IV.1461(f)5: the Event Strip's earnings chips. Its own file, this page only. -->
+    <link rel="stylesheet" href="/assets/event-strip-earn.css?v=1">
+    <!-- R-IV.1461(g): the honest-label additions (NARROW/BROAD chip, scope notes). This page only. -->
+    <link rel="stylesheet" href="/assets/honest-labels.css?v=1">
     <!-- T1.5 — PWA. /app is the surface Nick actually installs, but the manifest was
          linked only from the legacy pages, so Add to Home Screen from here produced an
          unnamed, icon-less shortcut with no standalone display. No service worker in
@@ -180,6 +184,7 @@
                         <div class="tile-header">
                             <span class="tile-title" id="indexTitle" data-gloss="INDEX">Index</span>
                             <span class="tile-sub" id="indexSub"></span>
+                            <span class="ix-breadth" id="ixBreadth" hidden></span>
                             <div class="spacer"></div>
                             <span class="health-dot" id="indexHealthDot"></span>
                             <span class="tile-grip" data-gloss="GRIP">⠿</span>
@@ -379,7 +384,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gridstack@11.1.2/dist/gridstack-all.min.js"></script>
     <script src="/assets/agora-quotes.js?v=3"></script>
-    <script src="/v2.js?v=115"></script>
+    <script src="/v2.js?v=116"></script>
     <script src="/assets/b9/b9_live.js?v=3"></script>
     <script>
       /* R-IV.1444: the TV tile is ON BY DEFAULT on a desktop (Nick approved the preview 10-25).

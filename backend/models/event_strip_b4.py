@@ -149,17 +149,36 @@ def sessions_ahead(today: _dt.date, count: int, *, is_trading_day) -> List[_dt.d
     return out
 
 
+#: R-IV.1461(f)5: at most this many earnings chips a day; the rest is "+N more".
+EARN_CHIPS_PER_DAY = 3
+EARN_FEED_EMPTY = "earnings feed empty"
+
+
+def _chip(e: Dict[str, Any]) -> Dict[str, Any]:
+    """Dates, times and the market's own numbers only: ticker, BMO/AMC, implied move, YOURS."""
+    return {"t": e.get("ticker"), "timing": e.get("timing") or "",
+            "implied": e.get("implied_move_pct"), "yours": bool(e.get("yours"))}
+
+
 def build_strip(today: _dt.date, *, is_trading_day,
                 macro: Sequence[Dict[str, Any]] = (),
                 book_expiries: Sequence[Dict[str, Any]] = (),
                 earnings: Sequence[Dict[str, Any]] = (),
-                sessions: int = 10) -> Dict[str, Any]:
+                sessions: int = 10,
+                next_session: Optional[_dt.date] = None,
+                reaction_dates: Sequence[_dt.date] = (),
+                earnings_read: bool = True) -> Dict[str, Any]:
     """The strip. Every input is already-fetched data; nothing here calls out.
 
     `macro`: [{"date": date, "name": str}]
     `book_expiries`: [{"date": date, "label": str}]
-    `earnings`: [{"date": date, "in_book": bool}]
+    `earnings`: [{"date": date, "in_book": bool, "ticker", "timing", "implied_move_pct",
+                  "reaction_pct", "yours", "sp500", "market_cap"}]
+    `next_session`: the session the "earnings feed empty" check looks at.
+    `reaction_dates`: the completed sessions whose reporters' reactions get the day-after row.
+    `earnings_read`: False when the table could not be read -- then nothing is called empty.
     """
+    from services.read_only.earnings import ORDER_RULE, rank_key
     days = sessions_ahead(today, sessions, is_trading_day=is_trading_day)
     by_day: Dict[_dt.date, Dict[str, Any]] = {
         d: {"dow": d.strftime("%a").upper(), "dd": "%02d" % d.day, "iso": d.isoformat(),
@@ -181,6 +200,7 @@ def build_strip(today: _dt.date, *, is_trading_day,
         if d in by_day:
             by_day[d]["events"].append({"k": ex.get("label", "expiry"), "kind": KIND_BOOK})
 
+    per_day: Dict[_dt.date, List[Dict[str, Any]]] = {}
     for e in earnings:
         d = e.get("date")
         if d not in by_day:
@@ -188,6 +208,29 @@ def build_strip(today: _dt.date, *, is_trading_day,
         by_day[d]["earn"] += 1
         if e.get("in_book"):
             by_day[d]["book_earn"] += 1
+        if e.get("ticker"):
+            per_day.setdefault(d, []).append(e)
+    for d, rows in per_day.items():
+        rows = sorted(rows, key=rank_key)
+        by_day[d]["earn_chips"] = [_chip(e) for e in rows[:EARN_CHIPS_PER_DAY]]
+        by_day[d]["earn_more"] = max(0, len(rows) - EARN_CHIPS_PER_DAY)
+    for d in by_day:
+        by_day[d].setdefault("earn_chips", [])
+        by_day[d].setdefault("earn_more", 0)
+
+    # "earnings feed empty" (amber): the table has NO rows for the next session. Only said
+    # when the table was actually read -- a failed read is `degraded`, not empty.
+    feed_empty = bool(earnings_read and next_session is not None and
+                      not any(e.get("date") == next_session for e in earnings))
+
+    # The day-after row: the market's move against the move it priced. Only rows whose
+    # reaction exists (an AMC reporter's lands after the NEXT session closes).
+    rx = sorted((e for e in earnings
+                 if e.get("date") in set(reaction_dates) and e.get("reaction_pct") is not None
+                 and e.get("ticker")), key=rank_key)
+    reactions = [{"t": e["ticker"], "date": e["date"].isoformat(), "timing": e.get("timing") or "",
+                  "reaction": e["reaction_pct"], "implied": e.get("implied_move_pct"),
+                  "yours": bool(e.get("yours"))} for e in rx[:EARN_CHIPS_PER_DAY]]
 
     opex, opex_days, opex_basis = next_opex(today, is_trading_day=is_trading_day)
     return {
@@ -200,4 +243,10 @@ def build_strip(today: _dt.date, *, is_trading_day,
         "blackout_rule": BLACKOUT_RULE,
         "legend": ["MACRO", "YOUR BOOK"],
         "caption": "server calendar · display only",
+        "earn_feed_empty": feed_empty,
+        "earn_feed_note": EARN_FEED_EMPTY if feed_empty else None,
+        "earn_next_session": next_session.isoformat() if next_session else None,
+        "reactions": reactions,
+        "reactions_more": max(0, len(rx) - EARN_CHIPS_PER_DAY),
+        "earn_order": ORDER_RULE,
     }

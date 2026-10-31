@@ -87,12 +87,18 @@ def _infer_category(event_name: str) -> str:
 # ── Endpoints ───────────────────────────────────────────────
 
 @router.get("/catalyst/upcoming")
-async def get_upcoming_catalysts(days: int = 14):
+async def get_upcoming_catalysts(days: int = 14, lookback_hours: int = 24):
     """
-    Get upcoming catalyst events within the next N days.
+    Get catalyst events from `lookback_hours` ago through the next N days.
     Merges static econ calendar with user-added custom catalysts.
+
+    R-IV.1461(f)4: the window used to start at TODAY, so Hermes' own 24-hour lookback had
+    nothing to look back at. It now starts `lookback_hours` before now (by date, since these
+    events carry a date and no time); `next_catalyst` is still the first event from today on.
     """
     today = date.today()
+    start = (datetime.now(timezone.utc) - timedelta(hours=max(0, int(lookback_hours)))).date()
+    start = min(start, today)
     cutoff = today + timedelta(days=days)
 
     # Static events
@@ -101,7 +107,7 @@ async def get_upcoming_catalysts(days: int = 14):
     for ev in static:
         try:
             ev_date = date.fromisoformat(ev["date"])
-            if today <= ev_date <= cutoff:
+            if start <= ev_date <= cutoff:
                 upcoming.append(ev)
         except (ValueError, KeyError):
             continue
@@ -115,7 +121,7 @@ async def get_upcoming_catalysts(days: int = 14):
                 ev = json.loads(item)
                 try:
                     ev_date = date.fromisoformat(ev["date"])
-                    if today <= ev_date <= cutoff:
+                    if start <= ev_date <= cutoff:
                         ev["category"] = ev.get("category", "CUSTOM")
                         upcoming.append(ev)
                 except (ValueError, KeyError):
@@ -126,8 +132,9 @@ async def get_upcoming_catalysts(days: int = 14):
     # Sort by date
     upcoming.sort(key=lambda e: e.get("date", "9999"))
 
-    # Next catalyst (first upcoming)
-    next_catalyst = upcoming[0] if upcoming else None
+    # Next catalyst: the first one from today on (the lookback rows are already past)
+    ahead = [e for e in upcoming if e.get("date", "") >= today.isoformat()]
+    next_catalyst = ahead[0] if ahead else None
 
     return {
         "events": upcoming,

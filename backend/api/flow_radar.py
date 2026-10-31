@@ -148,6 +148,18 @@ async def _load_flow_from_db(pool, lookback_hours: int = 72):
     return flow_data, (newest.isoformat() if newest else None)
 
 
+# R-IV.1461(g)6: every figure says what it covers. The per-ticker rows come from UW's own
+# per-ticker flow (jobs/uw_flow_poller.py, /api/stock/{T}/flow-per-expiry); the market_pulse
+# totals are those rows SUMMED over the polled tickers -- neither per-ticker nor the whole market.
+PER_TICKER_SCOPE = "this ticker only (UW per-ticker flow)"
+DIVERGENCE_RULE = ("divergence = this ticker's premium sentiment against this ticker's own "
+                   "session change: BULLISH with change < -0.5%, or BEARISH with change > +0.5%")
+
+
+def pooled_scope(n: int) -> str:
+    return ("totals across the %d polled tickers, not per-ticker and not the whole market" % n)
+
+
 @router.get("/radar")
 async def get_flow_radar(_=Depends(require_api_key)):
     """
@@ -281,6 +293,7 @@ async def _compute_flow_radar() -> Dict[str, Any]:
                     "pc_ratio": pc_ratio,
                     "total_premium": flow.get("total_premium"),
                     "premium_display": _format_premium(flow.get("total_premium")),
+                    "figure_scope": PER_TICKER_SCOPE,
                 })
         except Exception as e:
             logger.warning("Flow radar position load failed: %s", e)
@@ -328,6 +341,7 @@ async def _compute_flow_radar() -> Dict[str, Any]:
                         "change_pct": change_pct,
                         "divergence": divergence,
                         "unusual": is_unusual,
+                        "figure_scope": PER_TICKER_SCOPE,
                     })
 
             watchlist_unusual.sort(
@@ -454,6 +468,8 @@ async def _compute_flow_radar() -> Dict[str, Any]:
         "net_premium_calls_usd": total_call,
         "net_premium_puts_usd": total_put,
         "net_premium_direction": overall_sentiment,
+        # R-IV.1461(g)6: what these totals cover, said beside them.
+        "scope": pooled_scope(len(flow_data)),
     }
 
     # === 6. Compact headlines (empty — frontend loadHeadlines() is the fallback) ===
@@ -469,6 +485,7 @@ async def _compute_flow_radar() -> Dict[str, Any]:
         "watchlist_unusual": watchlist_unusual,
         "sector_flow": sector_flow,
         "market_pulse": market_pulse,
+        "divergence_rule": DIVERGENCE_RULE,
         "headlines": headlines_compact,
         "flow_tickers_loaded": len(flow_data),
         "source": source,                     # "redis" | "db_fallback" | "none"

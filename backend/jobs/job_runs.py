@@ -55,6 +55,8 @@ JOB_OPTION_QUOTE_CAPTURE = "option_quote_capture"
 JOB_DARKPOOL_FORWARD = "darkpool_forward"
 # R-IV.1456(f): the one weekend top-up of that walk's backlog (jobs/darkpool_topup.py).
 JOB_DARKPOOL_TOPUP = "darkpool_topup"
+# R-IV.1461(f)1: the earnings calendar, every page of the next 10 sessions (chronos_ingest).
+JOB_EARNINGS_INGEST = "earnings_ingest"
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"

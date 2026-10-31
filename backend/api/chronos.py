@@ -57,6 +57,8 @@ async def init_chronos_table():
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings_calendar (report_date)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_earnings_book ON earnings_calendar (in_position_book) WHERE in_position_book = TRUE")
+    # R-IV.1461(f)2's four additive columns are added in main.py's boot block, right after
+    # this call (R-IV.1052: a first-boot database has every column a reader selects).
     logger.info("earnings_calendar table ready")
 
 

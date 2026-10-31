@@ -202,6 +202,16 @@ async def lifespan(app: FastAPI):
     try:
         from api.chronos import init_chronos_table
         await init_chronos_table()
+        # R-IV.1461(f)2: additive only -- the market's own numbers as UW sends them, and UW's
+        # S&P 500 flag (the Event Strip's stand-in for SPY weight, with market cap). At boot,
+        # in this file, so a first-boot database has every column a reader selects (R-IV.1052).
+        from database.postgres_client import get_postgres_client as _gpc
+        _pool = await _gpc()
+        async with _pool.acquire() as _conn:
+            await _conn.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS expected_move NUMERIC")
+            await _conn.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS expected_move_perc NUMERIC")
+            await _conn.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS reaction NUMERIC")
+            await _conn.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS is_sp500 BOOLEAN")
         logger.info("✅ Chronos earnings table ready")
     except Exception as e:
         logger.warning(f"⚠️ Could not initialize Chronos table: {e}")
@@ -1649,32 +1659,41 @@ async def lifespan(app: FastAPI):
 
     watchlist_alert_task = asyncio.create_task(watchlist_price_alert_loop())
 
-    # Chronos: refresh earnings calendar daily at 6 AM ET
+    # Chronos: the earnings calendar (R-IV.1461(f)1) -- once on deploy, then nightly at
+    # 20:15 ET Sunday-Thursday, every page of the last session and the next 10.
     async def chronos_earnings_loop():
-        """Daily earnings calendar refresh from FMP."""
+        """Earnings calendar refresh from UW, by date."""
         import pytz
         from datetime import datetime as dt_cls
+        from jobs.chronos_ingest import run_chronos_earnings_ingest, nightly_due
 
+        tz = pytz.timezone("America/New_York")
         await asyncio.sleep(60)  # 1 min startup delay
+
+        last_nightly = None
+        etf_refreshed = None
+        try:
+            await run_chronos_earnings_ingest()          # once on deploy
+            et = dt_cls.now(tz)
+            if nightly_due(et, None):
+                last_nightly = et.date()                 # a deploy after 20:15 is tonight's run
+        except Exception as e:
+            logger.warning("Chronos earnings startup run error: %s", e)
 
         while True:
             try:
-                et = dt_cls.now(pytz.timezone("America/New_York"))
-                # Run once daily around 6 AM ET on weekdays
-                if et.weekday() < 5 and (5 <= et.hour <= 6):
-                    from jobs.chronos_ingest import run_chronos_earnings_ingest
+                et = dt_cls.now(tz)
+                if nightly_due(et, last_nightly):
+                    last_nightly = et.date()
                     await run_chronos_earnings_ingest()
-                    # Weekly ETF component refresh (Mondays only)
-                    if et.weekday() == 0:
-                        from utils.position_overlap import refresh_etf_components
-                        await refresh_etf_components()
-                elif et.hour == 7 and et.minute < 15:
-                    # Catch-up run if 6 AM was missed
-                    from jobs.chronos_ingest import run_chronos_earnings_ingest
-                    await run_chronos_earnings_ingest()
+                # Weekly ETF component refresh (Mondays, 5-6 AM ET), unchanged
+                if et.weekday() == 0 and 5 <= et.hour <= 6 and etf_refreshed != et.date():
+                    etf_refreshed = et.date()
+                    from utils.position_overlap import refresh_etf_components
+                    await refresh_etf_components()
             except Exception as e:
                 logger.warning("Chronos earnings loop error: %s", e)
-            await asyncio.sleep(3600)  # Check every hour (only runs at 6-7 AM)
+            await asyncio.sleep(300)
 
     chronos_task = asyncio.create_task(chronos_earnings_loop())
 

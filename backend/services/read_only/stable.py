@@ -293,6 +293,15 @@ def _age_seconds(as_of) -> float | None:
     return max(0.0, (datetime.now(timezone.utc) - as_of).total_seconds())
 
 
+def regime_scope(total) -> str:
+    """R-IV.1461(g)5: what the Stable regime label measures, said beside it."""
+    try:
+        n = int(total)
+    except (TypeError, ValueError):
+        n = 0
+    return "themed watchlist (%s names)" % (n if n > 0 else "~250")
+
+
 def _envelope(as_of, anchor, degraded, *, feed=None, **data) -> dict:
     age = _age_seconds(as_of)
     # Flatline: the feed has aged past its SLO -> DEAD, not just stale. Escalates degraded.
@@ -526,6 +535,8 @@ async def get_regime() -> dict:
             return _envelope(
                 as_of, anchor, degraded, feed="nightly",
                 regime_label=regime_label,
+                # R-IV.1461(g)5: the label is about the themed watchlist, not the market.
+                regime_scope=regime_scope(breadth.get("total")),
                 thresholds={"risk_on_pct_above_50dma": 60, "risk_off_pct_above_50dma": 40,
                             "big_move_pct": 3.0,
                             "window_complete_floor_pct": _coverage_floor_pct()},

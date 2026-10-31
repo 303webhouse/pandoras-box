@@ -57,6 +57,7 @@ def _format_events(raw: Dict[str, Any], ticker: Optional[str]) -> List[Dict[str,
                 "change_pct": entry.get("change_pct"),
                 "divergence": entry.get("divergence"),
                 "unusual": entry.get("unusual"),
+                "figure_scope": entry.get("figure_scope") or "this ticker only",
             }
         )
 
@@ -74,6 +75,7 @@ def _format_events(raw: Dict[str, Any], ticker: Optional[str]) -> List[Dict[str,
                 "premium_display": entry.get("premium_display"),
                 "alignment": entry.get("alignment"),
                 "strength": entry.get("strength"),
+                "figure_scope": entry.get("figure_scope") or "this ticker only",
             }
         )
     return events
@@ -86,11 +88,17 @@ def _summary(
     net_puts: float,
     direction: str,
     event_count: int,
+    pooled: str = "totals across the polled tickers, not per-ticker",
 ) -> str:
-    scope = ticker.upper() if ticker else "Global"
+    # R-IV.1461(g)6: the net figures are never presented as the asked ticker's own.
+    if ticker:
+        return (
+            f"{ticker.upper()}: {event_count} per-ticker flow imprint(s) in events. "
+            f"Net {direction} (calls ${net_calls:,.0f}, puts ${net_puts:,.0f}) is {pooled}."
+        )
     return (
-        f"{scope} flow last {lookback_hours}h: net {direction} "
-        f"(calls ${net_calls:,.0f}, puts ${net_puts:,.0f}). "
+        f"Flow last {lookback_hours}h: net {direction} "
+        f"(calls ${net_calls:,.0f}, puts ${net_puts:,.0f}), {pooled}. "
         f"{event_count} events tracked."
     )
 
@@ -130,6 +138,10 @@ async def hub_get_flow_radar(
         "net_premium_calls_usd": net_calls,
         "net_premium_puts_usd": net_puts,
         "net_premium_direction": direction,
+        # R-IV.1461(g)6: the three net_premium_* figures are the POOLED totals, even when a
+        # ticker was asked for; the per-ticker figures are in `events`.
+        "net_premium_scope": market_pulse.get("scope")
+                             or "totals across the polled tickers, not per-ticker",
         "flow_data_available": flow_data_available,
         # F1 (7/1 db_fallback contract): provenance + honest freshness end-to-end.
         # source: "redis" (normal) | "db_fallback" (Redis empty, served from
@@ -142,7 +154,8 @@ async def hub_get_flow_radar(
     return make_response(
         status="ok",
         data=data,
-        summary=_summary(ticker, lookback_hours, net_calls, net_puts, direction, len(events)),
+        summary=_summary(ticker, lookback_hours, net_calls, net_puts, direction, len(events),
+                         data["net_premium_scope"]),
         # L1.0 Chunk 3: real staleness from the dashboard read-time compute (the
         # exact same value get_flow_radar emits — single source, null when unknown,
         # never the old hardcoded 300).

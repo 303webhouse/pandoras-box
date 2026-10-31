@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 
-MAJORS = ["SPY", "QQQ", "IWM", "RSP", "DIA"]
+# R-IV.1461(g)4: SMH on the board (same yfinance pull, zero UW calls).
+MAJORS = ["SPY", "QQQ", "IWM", "RSP", "DIA", "SMH"]
 # Yahoo symbol -> tenor label stored in stable_live_strip.symbol
 YIELDS = {"^IRX": "3M", "^FVX": "5Y", "^TNX": "10Y", "^TYX": "30Y"}
 # Addendum A2: 11 SPDR sector ETFs (kind='sector', day %) + FX (kind='fx').

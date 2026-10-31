@@ -60,13 +60,25 @@ def _summary(data: Dict[str, Any]) -> str:
     adx_t = adx.get("trend_strength") or ""
     adx_s = f"ADX {adx_v:.0f} {adx_t}".strip() if isinstance(adx_v, (int, float)) else "ADX —"
 
-    pv = [v for v in (sma.get("price_vs") or {}).values() if v]
+    price_vs = sma.get("price_vs") or {}
+    pv = [v for v in price_vs.values() if v]
     if pv and all(v == "above" for v in pv):
         loc = "above all MAs"
     elif pv and all(v == "below" for v in pv):
         loc = "below all MAs"
     else:
         loc = "mixed vs MAs"
+
+    # R-IV.1461(g)1: a stack that points one way while price sits on the other side of the
+    # 20, 50 AND 120-day says so, and the 200-day gets its own line. Display only:
+    # market_state's computed value is not read or changed here.
+    short = [price_vs.get(k) for k in ("20", "50", "120")]
+    against = {"bullish": "below", "bearish": "above"}.get(stack)
+    if against and all(v == against for v in short):
+        p200 = price_vs.get("200")
+        line200 = (f"200-day: price {p200} it." if p200 else "200-day: not available.")
+        return (f"{tkr} daily: {stack} stack, but price is {against} the 20, 50 and 120-day; "
+                f"{rsi_s}, {adx_s}.\n{line200}")
 
     return f"{tkr} daily: {stack} stack, {rsi_s}, {adx_s}, {loc}."
 
