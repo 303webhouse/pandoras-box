@@ -1688,6 +1688,13 @@ async def lifespan(app: FastAPI):
 
     chronos_task = asyncio.create_task(chronos_earnings_loop())
 
+    # R-IV.1461(h)/R-IV.1472(b): the evening earnings push, 15:00 MT, by ntfy, once a night.
+    try:
+        from jobs.earnings_evening_push import earnings_push_loop
+        asyncio.create_task(earnings_push_loop())
+    except Exception as e:
+        logger.error("earnings push did NOT start: %s", e)
+
     # Outcome resolver: walk 15m bars for accepted signals every 15 min (market hours)
     # S-1 Phase 2 (F-2, 2026-07-13): scoped to EQUITY only -- crypto now has its
     # own 24/7 loop below (crypto_outcome_resolver_loop), since crypto trades

@@ -55,6 +55,8 @@ JOB_OPTION_QUOTE_CAPTURE = "option_quote_capture"
 JOB_DARKPOOL_FORWARD = "darkpool_forward"
 # R-IV.1461(f)1: the earnings calendar, every page of the next 10 sessions (chronos_ingest).
 JOB_EARNINGS_INGEST = "earnings_ingest"
+# R-IV.1461(h)/R-IV.1472(b): the evening earnings push, one row per MT date (at most one a night).
+JOB_EARNINGS_PUSH = "earnings_push"
 
 # Terminal statuses, enumerated. Anything else is not a completion.
 STATUS_RUNNING = "running"

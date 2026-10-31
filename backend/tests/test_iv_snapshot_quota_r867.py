@@ -104,6 +104,8 @@ def test_only_the_ruled_callers_are_exempt():
         # R-IV.1461(f)1: the earnings calendar runs at 20:15 ET and on Sundays only.
         "earnings_premarket",
         "earnings_afterhours",
+        # R-IV.1472(b)3: the evening earnings push sends at 17:00 ET, always off-hours.
+        "earnings_push",
     }
 
 

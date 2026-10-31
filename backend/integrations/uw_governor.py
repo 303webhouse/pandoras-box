@@ -540,6 +540,8 @@ OFF_HOURS_FACTOR_BY_CALLER = {
     # both lists. Off-hours quota only; the 100 and STANDARD are unchanged.
     "earnings_premarket": 1.0,
     "earnings_afterhours": 1.0,
+    # R-IV.1472(b)3: sends at 15:00 MT = 17:00 ET, always off-hours.
+    "earnings_push": 1.0,
 }
 
 NON_RTH_QUOTA_FACTOR = {
@@ -791,6 +793,11 @@ FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
     # The reserve is 12,000 and the only other claim on it is the 5,000 above, so this is funded
     # from genuinely unallocated room and takes nothing from anyone.
     "iv_term_backfill": (165, TIER_STANDARD),
+    # R-IV.1472(b)3: the evening earnings push reads one post-market quote per held/top-10
+    # AMC name at 17:00 ET -- a handful a night; 40 leaves room for retries. From the reserve,
+    # like the backfills above, because `QUOTAS` sums EXACTLY to its ceiling by test and a
+    # new row there would eat the measured headroom.
+    "earnings_push": (40, TIER_STANDARD),
     # R-IV.1408(b)1: the FORWARD dark-pool walk. 250 a night, from the reserve, writing
     # `darkpool_backfill_pages` for each new session per R-IV.1403(c) with
     # `darkpool_collector` untouched (R-IV.912(c)2).
