@@ -142,7 +142,8 @@ def test_the_real_text_passes_the_no_orders_lint_and_says_nothing_else():
 
 @pytest.mark.parametrize("when,expect", [
     (datetime(2026, 10, 31, 15, 10, tzinfo=MT), False),   # Saturday
-    (datetime(2026, 11, 1, 15, 10, tzinfo=MT), True),     # Sunday
+    (datetime(2026, 11, 1, 15, 10, tzinfo=MT), False),    # Sunday 11-01: before FIRST_SEND (R-IV.1472(b)4)
+    (datetime(2026, 11, 8, 15, 10, tzinfo=MT), True),     # a later Sunday
     (datetime(2026, 11, 2, 14, 59, tzinfo=MT), False),    # before the window
     (datetime(2026, 11, 2, 15, 0, tzinfo=MT), True),
     (datetime(2026, 11, 2, 16, 0, tzinfo=MT), False),     # after it: no late push

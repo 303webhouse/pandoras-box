@@ -43,6 +43,9 @@ TOP_N = 10
 NO_AH = "after-hours move not yet available"
 FEED_EMPTY = "earnings feed empty"
 TITLE = "Pandora: earnings tonight"
+#: R-IV.1472(b)4: "First send Mon 11-02 15:00 MT". Without this the Sunday rule would have sent
+#: a first, empty list on Sun 11-01.
+FIRST_SEND = date(2026, 11, 2)
 
 TOP_SQL = """
 WITH latest AS (
@@ -72,7 +75,8 @@ def push_day(d: date) -> Optional[bool]:
 
 
 def due(now_mt: datetime) -> bool:
-    return bool(push_day(now_mt.date())) and SEND_FROM_MT <= now_mt.time() < SEND_UNTIL_MT
+    return (now_mt.date() >= FIRST_SEND and bool(push_day(now_mt.date()))
+            and SEND_FROM_MT <= now_mt.time() < SEND_UNTIL_MT)
 
 
 def evening_frame(today: date) -> Tuple[Optional[date], date]:
