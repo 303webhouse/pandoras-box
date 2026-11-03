@@ -16,6 +16,11 @@ WHAT IT CAPTURES
     and from each chain FOUR contracts: the ATM call and put, and the two short legs one
     implied move out. That is both sides of an ATM vertical, priced at the same instant.
 
+    From 10:00 ET each slot ALSO stores a STRIKE BAND (R-IV.1469(e)2) in
+    `option_quote_grid_band`: every listed strike TRITON-R2's money gate could pick for
+    either leg, whatever minute in the slot the event lands. Same call, more rows; the rule
+    and its inputs are under "the strike band" below.
+
     The existing 30-minute job (`option_quote_capture`) is unchanged and keeps running. It
     answers a different question -- the whole +/-5 strike neighbourhood across 0-3 DTE, twelve
     times a day -- and this one answers "what did the vertical cost at 11:25". Neither is a
@@ -128,6 +133,42 @@ LEG_SHORT_CALL = "short_call"
 LEG_SHORT_PUT = "short_put"
 
 # ---------------------------------------------------------------------------
+# the strike band (R-IV.1469(e)2, QUERY's relay of 2026-10-31, rule A)
+# ---------------------------------------------------------------------------
+#
+# TRITON-R2's money gate prices an ATM debit vertical at an event's entry minute: long leg
+# the listed strike nearest S0, short leg the listed strike nearest S0 +/- IM. The event is
+# not known at the slot, so the slot stores every listed strike the two legs could land on:
+#
+#   calls  S - m <= K <= S + IM_slot + m      puts  S - IM_slot - m <= K <= S + m
+#   plus the next LISTED strike beyond each end (nearest can land just outside a bound),
+#   IM_slot = S * sigma * sqrt(tau_slot / (390 * 252)), m = 0.5% of S,
+#   sigma = iv_snapshots.iv_near of the latest session BEFORE today (prior NYSE session),
+#   tau_slot = minutes from the SLOT to the session close.
+#
+# IM_slot is an upper bound for any entry inside the slot (tau only shrinks), and m covers
+# the underlying moving 0.5% between the slot and S0. "Listed" is the whole chain for the
+# expiry: one call already returns it, so the band costs rows, not calls.
+
+#: R2 reads 10:00 ET onward (window T1000); 09:45 and 09:50 keep their four legs only.
+BAND_FROM_ET = time(10, 0)
+BAND_MARGIN_FRACTION = 0.005
+#: 390 minutes a session x 252 sessions a year: the registration's trading-time year.
+BAND_YEAR_MINUTES = 390 * 252
+#: Half days, close 13:00 ET (= f_export.EARLY_CLOSES = triton_r.HALF_DAYS). The market
+#: calendar does not model early closes, so the list is kept here, beside its one reader.
+EARLY_CLOSES: Dict[date, time] = {date(2026, 11, 27): time(13, 0),
+                                  date(2026, 12, 24): time(13, 0)}
+SESSION_CLOSE_ET = time(16, 0)
+
+SPOT_FROM_PARITY = "parity"      # median of K + call_mid - put_mid over the 3 strikes nearest ATM
+SPOT_FROM_ATM = "atm_strike"     # no two-sided pair: the ATM strike itself, and labelled so
+PARITY_STRIKES = 3
+
+BAND_NO_SIGMA = "no_sigma"
+BAND_NO_SPOT = "no_spot"
+
+# ---------------------------------------------------------------------------
 # per-session state
 # ---------------------------------------------------------------------------
 
@@ -140,12 +181,15 @@ _nearest_expiry: Dict[str, Optional[str]] = {}
 _probed_empty: Dict[Tuple[str, str], bool] = {}
 _last_result: Dict[str, object] = {}
 _preflight_logged = False
+#: ticker -> (sigma, its session) for this session. Read from the DB, re-read while any
+#: ticker is missing (one 8-row query a slot), never invented.
+_sigma: Dict[str, Tuple[float, date]] = {}
 
 
 def reset_for_tests() -> None:
     """Clear per-session state. Tests only."""
     global _session_et_date, _calls_used, _slots_done, _nearest_expiry, _probed_empty
-    global _last_result, _preflight_logged
+    global _last_result, _preflight_logged, _sigma
     _session_et_date = None
     _calls_used = 0
     _slots_done = set()
@@ -153,11 +197,12 @@ def reset_for_tests() -> None:
     _probed_empty = {}
     _last_result = {}
     _preflight_logged = False
+    _sigma = {}
 
 
 def _roll_session(et_date: str) -> bool:
     """Start a new session when the ET date changes. True when a roll happened."""
-    global _session_et_date, _calls_used, _slots_done, _nearest_expiry, _probed_empty
+    global _session_et_date, _calls_used, _slots_done, _nearest_expiry, _probed_empty, _sigma
     if _session_et_date == et_date:
         return False
     _session_et_date = et_date
@@ -165,6 +210,7 @@ def _roll_session(et_date: str) -> bool:
     _slots_done = set()
     _nearest_expiry = {}
     _probed_empty = {}
+    _sigma = {}
     return True
 
 
@@ -356,6 +402,132 @@ def short_strike(strikes: Sequence[float], atm: float, move: float,
 
 
 # ---------------------------------------------------------------------------
+# the strike band
+# ---------------------------------------------------------------------------
+
+def session_close_et(session: date) -> time:
+    """16:00 ET, or 13:00 ET on the registered half days."""
+    return EARLY_CLOSES.get(session, SESSION_CLOSE_ET)
+
+
+def tau_minutes(session: date, slot: time) -> float:
+    """Minutes from the SLOT to the session close. Never negative."""
+    close = datetime.combine(session, session_close_et(session))
+    return max(0.0, (close - datetime.combine(session, slot)).total_seconds() / 60.0)
+
+
+def spot_from_chain(contracts: List[dict], centre: Optional[float]
+                    ) -> Tuple[Optional[float], str]:
+    """(S, method) from the chain alone -- no quote call.
+
+    Put-call parity: K + call_mid - put_mid at a strike is the forward, which on a 0-7 DTE
+    chain is the spot to within carry (cents, far inside m = 0.5% of S). The median over the
+    PARITY_STRIKES two-sided strikes nearest ATM, so one stale quote cannot move it. With no
+    two-sided pair, the ATM strike itself, labelled -- the extra strike beyond each end of the
+    band absorbs the half-increment that costs.
+    """
+    from jobs.option_quote_capture import _mid
+
+    calls = {c["strike"]: c for c in contracts if c.get("type") == "call"}
+    puts = {c["strike"]: c for c in contracts if c.get("type") == "put"}
+    est = []
+    for k in calls:
+        p = puts.get(k)
+        if p is None:
+            continue
+        cm = _mid(calls[k].get("bid"), calls[k].get("ask"))
+        pm = _mid(p.get("bid"), p.get("ask"))
+        if cm is None or pm is None:
+            continue
+        est.append((k, k + cm - pm))
+    if est:
+        ref = centre if centre is not None else sorted(e[0] for e in est)[len(est) // 2]
+        near = sorted(est, key=lambda e: (abs(e[0] - ref), e[0]))[:PARITY_STRIKES]
+        vals = sorted(v for _k, v in near)
+        n = len(vals)
+        s = vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+        if s > 0:
+            return s, SPOT_FROM_PARITY
+    if centre is not None and centre > 0:
+        return float(centre), SPOT_FROM_ATM
+    return None, SPOT_FROM_ATM
+
+
+def band_implied_move(spot: float, sigma: float, tau_min: float) -> float:
+    """IM_slot = S * sigma * sqrt(tau / (390 * 252)), the registration's trading-time year."""
+    return spot * sigma * math.sqrt(max(0.0, tau_min) / BAND_YEAR_MINUTES)
+
+
+def band_bounds(spot: float, im: float, kind: str) -> Tuple[float, float]:
+    """(lo, hi) for one contract type. Calls reach up one move, puts down one move."""
+    m = BAND_MARGIN_FRACTION * spot
+    if kind == "call":
+        return spot - m, spot + im + m
+    return spot - im - m, spot + m
+
+
+def band_strikes(listed: Sequence[float], lo: float, hi: float
+                 ) -> Tuple[List[float], bool, bool]:
+    """(strikes, beyond_lo_listed, beyond_hi_listed).
+
+    Every listed strike in [lo, hi], plus the next listed strike below lo and above hi. The
+    two flags say whether those beyond-strikes EXIST in the chain: False means the chain
+    ends inside the band's reach, which a reader must be able to tell from a capture gap.
+    """
+    s = sorted(set(listed))
+    inside = [k for k in s if lo <= k <= hi]
+    below = [k for k in s if k < lo]
+    above = [k for k in s if k > hi]
+    out = list(inside)
+    if below:
+        out.append(below[-1])
+    if above:
+        out.append(above[0])
+    return sorted(out), bool(below), bool(above)
+
+
+def build_band(contracts: List[dict], spot: float, sigma: float, tau_min: float) -> dict:
+    """{kind: (rows, lo, hi, beyond_lo, beyond_hi)} plus the shared inputs.
+
+    Strikes are chosen over the WHOLE chain for the expiry, per type ("listed" in the
+    relay's rule 6), never over a subset already stored.
+    """
+    im = band_implied_move(spot, sigma, tau_min)
+    out = {"implied_move": im, "margin": BAND_MARGIN_FRACTION * spot, "types": {}}
+    for kind in ("call", "put"):
+        of_kind = [c for c in contracts if c.get("type") == kind]
+        lo, hi = band_bounds(spot, im, kind)
+        keep, b_lo, b_hi = band_strikes([c["strike"] for c in of_kind], lo, hi)
+        ks = set(keep)
+        rows = sorted((c for c in of_kind if c["strike"] in ks), key=lambda c: c["strike"])
+        out["types"][kind] = (rows, lo, hi, b_lo, b_hi)
+    return out
+
+
+async def load_sigma(pool, session: date, tickers: Sequence[str] = TICKERS) -> None:
+    """Fill `_sigma` with each ticker's iv_near from the latest session BEFORE `session`.
+
+    The session is kept with the value, so a reader can see whether it was the prior NYSE
+    session or an older one. Never raises: a failed read leaves the band off, with a reason.
+    """
+    missing = [t for t in tickers if t not in _sigma]
+    if not missing or pool is None:
+        return
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT DISTINCT ON (ticker) ticker, session_date, iv_near"
+                " FROM iv_snapshots"
+                " WHERE ticker = ANY($1::text[]) AND session_date < $2::date"
+                " AND iv_near IS NOT NULL AND iv_near > 0"
+                " ORDER BY ticker, session_date DESC", list(missing), session)
+        for r in rows or []:
+            _sigma[r["ticker"]] = (float(r["iv_near"]), r["session_date"])
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[oqg] sigma read failed: %s", type(exc).__name__)
+
+
+# ---------------------------------------------------------------------------
 # one slot
 # ---------------------------------------------------------------------------
 
@@ -393,6 +565,7 @@ async def capture_slot(now: Optional[datetime] = None,
         "planned": len(pairs), "allowance": allowance, "ceiling": ceiling,
         "captured": 0, "rows": 0, "absent": 0, "unavailable": 0, "shed": 0,
         "calls": 0, "move_methods": {}, "degenerate": 0, "truncated": [],
+        "band_rows": 0, "band_tickers": 0, "band_skipped": {},
     }
 
     pool = None
@@ -401,6 +574,10 @@ async def capture_slot(now: Optional[datetime] = None,
         pool = await get_postgres_client()
     except Exception as exc:                                        # noqa: BLE001
         logger.error("[oqg] no db pool, slot %s LOST: %s", slot_key, type(exc).__name__)
+
+    band_on = slot >= BAND_FROM_ET
+    if band_on:
+        await load_sigma(pool, session)
 
     used_here = 0
     for ticker, expiry, dte in pairs:
@@ -442,6 +619,26 @@ async def capture_slot(now: Optional[datetime] = None,
             summary["move_methods"].get(move_method, 0) + 1
         if degen:
             summary["degenerate"] += 1
+
+        if band_on:
+            reason = None
+            sig = _sigma.get(ticker)
+            if sig is None:
+                reason = BAND_NO_SIGMA
+            else:
+                spot, spot_method = spot_from_chain(contracts, centre)
+                if spot is None:
+                    reason = BAND_NO_SPOT
+                else:
+                    tau = tau_minutes(session, slot)
+                    band = build_band(contracts, spot, sig[0], tau)
+                    summary["band_rows"] += await _store_band(
+                        pool, session, slot_key, now, ticker, expiry, dte, band,
+                        spot, spot_method, sig, tau, n_raw)
+                    summary["band_tickers"] += 1
+            if reason:
+                summary["band_skipped"][reason] = summary["band_skipped"].get(reason, 0) + 1
+
         if not legs:
             summary["absent"] += 1
             continue
@@ -456,9 +653,11 @@ async def capture_slot(now: Optional[datetime] = None,
     _last_result.clear()
     _last_result.update(summary)
     logger.info("[oqg] slot %s: %d/%d captured, %d rows, %d absent, %d unavailable, %d shed, "
-                "%d/%d calls", slot_key, summary["captured"], summary["planned"],
+                "%d/%d calls; band %d rows over %d tickers, skipped %s",
+                slot_key, summary["captured"], summary["planned"],
                 summary["rows"], summary["absent"], summary["unavailable"],
-                summary["shed"], _calls_used, ceiling)
+                summary["shed"], _calls_used, ceiling, summary["band_rows"],
+                summary["band_tickers"], summary["band_skipped"] or "none")
     return summary
 
 
@@ -575,6 +774,63 @@ async def _store(pool, session: date, slot_key: str, captured_at: datetime,
     except Exception as exc:                                        # noqa: BLE001
         logger.error("[oqg] store failed %s %s: %s", ticker, expiry, type(exc).__name__)
     return written
+
+
+BAND_UPSERT = """
+    INSERT INTO option_quote_grid_band
+        (session_date, slot_et, captured_at, ticker, expiry, dte, contract_type, strike,
+         bid, ask, mid, iv, delta, volume, open_interest,
+         spot, spot_method, sigma, sigma_session, tau_minutes, implied_move, margin,
+         band_lo, band_hi, beyond_lo_listed, beyond_hi_listed,
+         raw_contract_count, truncated, caller_tag)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+            $21,$22,$23,$24,$25,$26,$27,$28,$29)
+    ON CONFLICT (session_date, slot_et, ticker, expiry, contract_type, strike)
+    DO UPDATE SET
+        captured_at = EXCLUDED.captured_at,
+        bid = EXCLUDED.bid, ask = EXCLUDED.ask, mid = EXCLUDED.mid,
+        iv = EXCLUDED.iv, delta = EXCLUDED.delta,
+        volume = EXCLUDED.volume, open_interest = EXCLUDED.open_interest,
+        spot = EXCLUDED.spot, spot_method = EXCLUDED.spot_method,
+        sigma = EXCLUDED.sigma, sigma_session = EXCLUDED.sigma_session,
+        tau_minutes = EXCLUDED.tau_minutes, implied_move = EXCLUDED.implied_move,
+        margin = EXCLUDED.margin, band_lo = EXCLUDED.band_lo, band_hi = EXCLUDED.band_hi,
+        beyond_lo_listed = EXCLUDED.beyond_lo_listed,
+        beyond_hi_listed = EXCLUDED.beyond_hi_listed,
+        raw_contract_count = EXCLUDED.raw_contract_count,
+        truncated = EXCLUDED.truncated
+"""
+
+
+async def _store_band(pool, session: date, slot_key: str, captured_at: datetime,
+                      ticker: str, expiry: date, dte: int, band: dict, spot: float,
+                      spot_method: str, sig: Tuple[float, date], tau: float,
+                      n_raw: int) -> int:
+    """Insert one (ticker, slot) band in ONE round trip. Never raises; returns rows sent."""
+    if pool is None:
+        return 0
+    from jobs.option_quote_capture import _mid
+
+    args = []
+    for kind, (rows, lo, hi, b_lo, b_hi) in band["types"].items():
+        for r in rows:
+            args.append((
+                session, slot_key, captured_at, ticker, expiry, dte, kind, r["strike"],
+                r["bid"], r["ask"], _mid(r["bid"], r["ask"]), r["iv"], r["delta"],
+                int(r["volume"] or 0), int(r["open_interest"] or 0),
+                spot, spot_method, sig[0], sig[1], tau, band["implied_move"],
+                band["margin"], lo, hi, b_lo, b_hi,
+                n_raw, n_raw >= UW_CONTRACT_CAP, CALLER_TAG,
+            ))
+    if not args:
+        return 0
+    try:
+        async with pool.acquire() as conn:
+            await conn.executemany(BAND_UPSERT, args)
+        return len(args)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("[oqg] band store failed %s %s: %s", ticker, expiry, type(exc).__name__)
+        return 0
 
 
 # ---------------------------------------------------------------------------

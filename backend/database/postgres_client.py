@@ -2428,6 +2428,52 @@ async def init_database():
                 ON option_quote_grid (ticker, leg_role, session_date DESC, slot_et)
         """)
 
+        # R-IV.1469(e)2: the STRIKE BAND beside the grid, for TRITON-R2's money gate.
+        # Its own table because its identity is the opposite of the grid's: the band is a
+        # SET of listed strikes (every one between two bounds, plus one beyond each end), so
+        # (contract_type, strike) IS the key here, while the grid's four rows are keyed by
+        # leg role (test_the_grid_tables_identity_is_the_LEG_ROLE). The inputs that set the
+        # bounds travel on every row, so a reader can re-derive which strikes should be there.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS option_quote_grid_band (
+                id                   BIGSERIAL PRIMARY KEY,
+                captured_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                session_date         DATE        NOT NULL,
+                slot_et              TEXT        NOT NULL,
+                ticker               TEXT        NOT NULL,
+                expiry               DATE        NOT NULL,
+                dte                  INTEGER     NOT NULL,
+                contract_type        TEXT        NOT NULL,
+                strike               NUMERIC(12,4) NOT NULL,
+                bid                  NUMERIC(12,4),
+                ask                  NUMERIC(12,4),
+                mid                  NUMERIC(12,4),
+                iv                   NUMERIC(10,6),
+                delta                NUMERIC(10,6),
+                volume               BIGINT,
+                open_interest        BIGINT,
+                spot                 NUMERIC(12,4) NOT NULL,
+                spot_method          TEXT        NOT NULL,
+                sigma                NUMERIC(10,6) NOT NULL,
+                sigma_session        DATE        NOT NULL,
+                tau_minutes          NUMERIC(8,2) NOT NULL,
+                implied_move         NUMERIC(12,4) NOT NULL,
+                margin               NUMERIC(12,4) NOT NULL,
+                band_lo              NUMERIC(12,4) NOT NULL,
+                band_hi              NUMERIC(12,4) NOT NULL,
+                beyond_lo_listed     BOOLEAN     NOT NULL,
+                beyond_hi_listed     BOOLEAN     NOT NULL,
+                raw_contract_count   INTEGER,
+                truncated            BOOLEAN     NOT NULL DEFAULT FALSE,
+                caller_tag           TEXT        NOT NULL DEFAULT 'option_quote_grid',
+                UNIQUE (session_date, slot_et, ticker, expiry, contract_type, strike)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oqgb_session_ticker
+                ON option_quote_grid_band (session_date DESC, ticker, slot_et)
+        """)
+
         # Migration 032 (R-IV.394, T1): the mark guard's verdict column. On any
         # non-OK value unrealized_pnl was NOT written -- never zeroed, because a
         # zero P&L is a CLAIM that the position is flat.

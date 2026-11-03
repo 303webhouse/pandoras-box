@@ -114,6 +114,10 @@ SLOT_GRACE_MINUTES = 25
 #: intent; `captured_at` is the measurement, and a reader who cares can always tell a
 #: 15:59:12 capture from a 16:00:58 one.
 SLOT_GRACE_OVERRIDE_MINUTES = {time(15, 59): 2}
+#: The close. Beside its +/-5 window it also stores every strike the 5-minute grid stored
+#: that session (R-IV.1469(e)2 rule B): R2's close leg is the strike chosen at ENTRY, and it
+#: can sit far from the 15:59 price.
+CLOSE_SLOT = time(15, 59)
 UW_CONTRACT_CAP = 500      # the documented per-call ceiling (uw_api.py)
 
 #: Fraction of the RULED quota this job will spend in a session. R-IV.1415(c)2: its own
@@ -461,6 +465,24 @@ async def capture_slot(now: Optional[datetime] = None,
     except Exception as exc:                                        # noqa: BLE001
         logger.error("[oqc] no db pool, slot %s LOST: %s", slot_key, type(exc).__name__)
 
+    # R-IV.1469(e)2 rule B: at the close, every strike the grid stored today, per expiry.
+    union: Dict[Tuple[str, str], set] = {}
+    if slot == CLOSE_SLOT:
+        union, union_err = await grid_union(pool, session)
+        summary.update({"union_strikes": sum(len(v) for v in union.values()),
+                        "union_rows": 0, "union_missing": 0,
+                        "union_read": union_err or "ok"})
+        planned = {(t, e.isoformat()) for t, e, _d in pairs}
+        extra = sorted({(t, e) for t, e in union if (t, e) not in planned
+                        and date.fromisoformat(e) >= session},
+                       key=lambda p: (p[1], p[0]))
+        # An expiry outside 0-3 DTE that the grid used (its window is 0-7) costs one call
+        # here; none has occurred in the grid's first six sessions.
+        pairs = pairs + [(t, date.fromisoformat(e), (date.fromisoformat(e) - session).days)
+                         for t, e in extra]
+        summary["planned"] = len(pairs)
+        summary["union_extra_pairs"] = len(extra)
+
     used_here = 0
     for ticker, expiry, dte in pairs:
         if used_here >= allowance:
@@ -495,6 +517,11 @@ async def capture_slot(now: Optional[datetime] = None,
 
         rows, centre, method = select_window(contracts)
         summary["atm_methods"][method] = summary["atm_methods"].get(method, 0) + 1
+        keep = union.get((ticker, expiry.isoformat()))
+        if keep:
+            rows, added, missing = merge_union(rows, contracts, keep)
+            summary["union_rows"] += added
+            summary["union_missing"] += missing
         if not rows:
             summary["absent"] += 1
             continue
@@ -512,10 +539,64 @@ async def capture_slot(now: Optional[datetime] = None,
     _last_result.clear()
     _last_result.update(summary)
     logger.info("[oqc] slot %s: %d pairs captured, %d rows, %d absent, %d unavailable, "
-                "%d shed, %d/%d calls this session",
+                "%d shed, %d/%d calls this session%s",
                 slot_key, summary["captured"], summary["rows"], summary["absent"],
-                summary["unavailable"], summary["shed"], _calls_used, ceiling)
+                summary["unavailable"], summary["shed"], _calls_used, ceiling,
+                ("; grid union %d strikes, %d rows added, %d not in the close chain, read %s"
+                 % (summary["union_strikes"], summary["union_rows"],
+                    summary["union_missing"], summary["union_read"]))
+                if "union_read" in summary else "")
     return summary
+
+
+def _strike_key(kind: str, strike) -> Tuple[str, float]:
+    """(type, strike) with the strike rounded, so NUMERIC(12,4) from the DB and a float
+    parsed from an option symbol compare equal."""
+    return str(kind), round(float(strike), 4)
+
+
+async def grid_union(pool, session: date) -> Tuple[Dict[Tuple[str, str], set], Optional[str]]:
+    """({(ticker, expiry_iso): {(type, strike)}}, error) -- every strike the 5-minute grid
+    stored this session: its strike band and its four named legs.
+
+    Never raises. An unreadable union is reported (summary `union_read`), and the close is
+    still captured with its +/-5 window: losing the extra strikes is recoverable for no one,
+    but losing the whole close would be worse.
+    """
+    if pool is None:
+        return {}, "no pool"
+    out: Dict[Tuple[str, str], set] = {}
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT ticker, expiry, contract_type, strike FROM option_quote_grid_band"
+                " WHERE session_date = $1::date"
+                " UNION"
+                " SELECT ticker, expiry, contract_type, strike FROM option_quote_grid"
+                " WHERE session_date = $1::date", session)
+        for r in rows or []:
+            exp = r["expiry"]
+            exp = exp.isoformat() if hasattr(exp, "isoformat") else str(exp)[:10]
+            out.setdefault((r["ticker"], exp), set()).add(
+                _strike_key(r["contract_type"], r["strike"]))
+        return out, None
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("[oqc] grid union unreadable for %s: %s", session, type(exc).__name__)
+        return {}, "unreadable: %s" % type(exc).__name__
+
+
+def merge_union(rows: List[dict], contracts: List[dict], keep: set
+                ) -> Tuple[List[dict], int, int]:
+    """(rows + the chain's contracts at the union's strikes, added, missing).
+
+    `missing` counts union strikes the close chain no longer lists -- a vendor fact worth
+    counting, never filled in.
+    """
+    have = {_strike_key(r["type"], r["strike"]) for r in rows}
+    listed = {_strike_key(c["type"], c["strike"]): c for c in contracts}
+    added = [listed[k] for k in sorted(keep) if k in listed and k not in have]
+    missing = sum(1 for k in keep if k not in listed)
+    return rows + added, len(added), missing
 
 
 async def _finish(run_id, summary: dict, pool) -> None:
