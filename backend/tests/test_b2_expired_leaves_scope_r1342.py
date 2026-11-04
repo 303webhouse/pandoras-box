@@ -90,10 +90,17 @@ def test_an_UNEXPIRED_row_is_UNCHANGED():
 def test_a_contract_expiring_TODAY_is_STILL_IN_SCOPE():
     """Strictly BEFORE today. A contract expiring today can still be closed during the session,
     and `cut_verdict` already hands that case to EXPIRY_STOPPED. Dropping it here would remove
-    the alert on the one day it is most useful."""
+    the alert on the one day it is most useful.
+
+    THE CLOCK IS FROZEN (R-IV.1473(b)). ET_TODAY is fixed when the module loads, but both checks
+    read their own clock when called, so a suite that crossed midnight ET compared a "today"
+    from yesterday against today's date and failed. Noon ET on ET_TODAY is passed explicitly."""
+    from zoneinfo import ZoneInfo
+    noon = datetime(ET_TODAY.year, ET_TODAY.month, ET_TODAY.day, 12, 0,
+                    tzinfo=ZoneInfo("America/New_York"))
     row = _row(ET_TODAY, current_price="0.55")
-    assert is_expired(row) is False
-    assert is_in_scope(row) is True
+    assert is_expired(row, noon) is False
+    assert is_in_scope(row, noon) is True
 
 
 def test_a_row_with_NO_EXPIRY_is_not_treated_as_expired():
