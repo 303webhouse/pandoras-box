@@ -19,17 +19,19 @@ def test_the_walk_is_exempt_from_the_off_hours_cut():
     assert gov.OFF_HOURS_FACTOR_BY_CALLER.get(fwd.CALLER_TAG) == 1.0
 
 
-def test_the_governor_grants_the_full_250_off_hours():
+def test_the_governor_grants_the_full_quota_off_hours():
+    # 250 under R-IV.1408(b)1; 400 since R-IV.1493(b)1.
     quota, tier = gov.quota_for(fwd.CALLER_TAG)
-    assert (quota, tier) == (250, gov.TIER_STANDARD), "the ruled allowance itself moved"
-    assert gov.effective_quota(fwd.CALLER_TAG, NIGHT) == (250, gov.TIER_STANDARD)
+    assert (quota, tier) == (400, gov.TIER_STANDARD), "the ruled allowance itself moved"
+    assert gov.effective_quota(fwd.CALLER_TAG, NIGHT) == (400, gov.TIER_STANDARD)
     # The exemption is this caller's alone: an unlisted STANDARD caller still gets a quarter.
     assert gov.effective_quota("darkpool_ticker", NIGHT)[0] == int(gov.quota_for(
         "darkpool_ticker")[0] * 0.25)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("count,blocked", [(62, False), (249, False), (250, True)])
+@pytest.mark.parametrize("count,blocked", [(62, False), (250, False), (399, False),
+                                            (400, True)])
 async def test_the_REAL_gate_lets_the_63rd_call_through_after_hours(monkeypatch, count, blocked):
     """Through `precheck`, the function that actually blocked: 62 used is no longer the end."""
     async def _count(caller):
@@ -45,7 +47,7 @@ async def test_the_REAL_gate_lets_the_63rd_call_through_after_hours(monkeypatch,
     monkeypatch.setattr(gov, "_mode", lambda: "enforce")
     out = await gov.precheck(fwd.CALLER_TAG)
     if blocked:
-        assert out is not None and "250/250" in str(out.detail)
+        assert out is not None and "400/400" in str(out.detail)
     else:
         assert out is None, out
 

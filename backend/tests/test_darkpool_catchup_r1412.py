@@ -165,7 +165,7 @@ async def test_END_TO_END_the_current_session_is_FULLY_walked_first():
     finally:
         census.collect_one, pg.get_postgres_client, census.refresh_completeness = real
         del os.environ[fwd.ENV_FLAG]
-        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (250, gov.TIER_STANDARD)
+        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (400, gov.TIER_STANDARD)  # R-IV.1493(b)1
 
     assert out.get("blocked") is not True, out
     assert out["session"] == "2026-10-26"
@@ -214,7 +214,7 @@ async def test_the_catch_up_STOPS_at_the_ceiling():
     finally:
         census.collect_one, pg.get_postgres_client, census.refresh_completeness = real
         del os.environ[fwd.ENV_FLAG]
-        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (250, gov.TIER_STANDARD)
+        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (400, gov.TIER_STANDARD)  # R-IV.1493(b)1
 
     assert out["calls_spent"] <= fwd.night_ceiling() + 30, out["calls_spent"]
     assert calls["n"] == len(NAMES), (
@@ -226,17 +226,49 @@ async def test_the_catch_up_STOPS_at_the_ceiling():
 async def test_the_catch_up_is_REPORTED_SEPARATELY():
     """"the live session was collected" and "the backlog moved" must never be one number: a
     night that collected only backlog would otherwise look like a night that worked."""
+    import database.postgres_client as pg
     from integrations import uw_governor as gov
+
+    # R-IV.1493(b)2 changed what a Saturday does: it walks the backlog. With NO backlog it is
+    # still a STATED absence -- no run, no calls -- which is what this test now pins. The
+    # catch-up-only walk itself is tested in test_darkpool_walk_r1493.py.
+    sat = date(2026, 10, 24)
+    span = fwd.catchup_sessions(sat, set(), NAMES)
+    every = [{"ticker": t, "session_date": d} for t in NAMES for d in span]
+
+    class _DoneConn(_Conn):
+        async def fetch(self, *a, **k):
+            return every
+
+        async def fetchval(self, *a, **k):
+            raise AssertionError("a run was opened on a night with nothing to do")
+
+    class _DoneAcq(_Acq):
+        async def __aenter__(self):
+            return _DoneConn()
+
+    class _DonePool:
+        def acquire(self):
+            return _DoneAcq()
+
+    async def _pool():
+        return _DonePool()
 
     gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (250, gov.TIER_STANDARD)
     os.environ[fwd.ENV_FLAG] = "true"
+    real = pg.get_postgres_client
+    pg.get_postgres_client = _pool
     try:
         out = await fwd.walk_night(now=datetime(2026, 10, 24, 21, 0, tzinfo=ET))  # Saturday
     finally:
+        pg.get_postgres_client = real
         del os.environ[fwd.ENV_FLAG]
-    # A non-trading day is a STATED absence, not a run that collected nothing -- and it is
-    # reached only with both gates open, which is why they are opened here.
-    assert out.get("session") is None and out["reason"] == "not a trading session", out
+        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (400, gov.TIER_STANDARD)  # R-IV.1493(b)1
+    # A non-trading day with nothing pending is a STATED absence, not a run that collected
+    # nothing -- and it is reached only with both gates open, which is why they are opened here.
+    assert out.get("session") is None, out
+    assert out["reason"] == "not a trading session; no backlog", out
+    assert out["calls_spent"] == 0 and out["fired"] is True
     st = await fwd.status()
     code = _fn_src("walk_night")
     for key in ("catchup_sessions", "catchup_collected", "catchup_pending"):

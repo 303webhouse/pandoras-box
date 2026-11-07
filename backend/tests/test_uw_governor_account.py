@@ -415,11 +415,12 @@ def test_the_two_R_IV_1408_registrations_are_the_RULED_figures():
     come from a reallocation or from the buffer, and the ruling took the buffer.
 
     darkpool_forward 250/night came from the RESERVE, which asks the hub table for nothing.
+    R-IV.1493(b)1 raised it to 400, from the same reserve.
     """
     from integrations.uw_api_cache import DAILY_BUDGET, UW_FOREIGN_RESERVE
 
     assert g.QUOTAS["option_quote_grid"] == (640, g.TIER_STANDARD)
-    assert g.FOREIGN_RESERVE_QUOTAS["darkpool_forward"] == (250, g.TIER_STANDARD)
+    assert g.FOREIGN_RESERVE_QUOTAS["darkpool_forward"] == (400, g.TIER_STANDARD)
     # 1,310 at R-IV.1408; 1,290 since R-IV.1415(c) took a further 20 for
     # option_quote_capture. Both carves came from here for the same reason.
     assert g.QUOTA_SAFETY_BUFFER == 1290
@@ -428,7 +429,8 @@ def test_the_two_R_IV_1408_registrations_are_the_RULED_figures():
     # from the buffer rather than from a caller.
     assert sum(q for q, _ in g.QUOTAS.values()) == DAILY_BUDGET - g.QUOTA_SAFETY_BUFFER
 
-    # And the reserve still has room: 12,000 against 5,415 claimed.
+    # And the reserve still has room: 12,000 against 5,605 claimed (R-IV.1493(b)1).
+    assert sum(q for q, _ in g.FOREIGN_RESERVE_QUOTAS.values()) == 5605
     assert sum(q for q, _ in g.FOREIGN_RESERVE_QUOTAS.values()) <= UW_FOREIGN_RESERVE
 
     # RULED AND TAKEN at R-IV.1415(c): the +20 that restores option_quote_capture's 1.2x

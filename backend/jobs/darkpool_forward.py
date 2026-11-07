@@ -1,8 +1,21 @@
 """R-IV.1398(b)3 — the FORWARD dark-pool walk. One session a night, floored, census universe.
 
-FUNDED AND LIVE under R-IV.1408(b)1: 250 calls a night from the reserve. The universe is the
-CENSUS's eight names, which R-IV.1408(b)3 settled -- not Tier-1's sixteen, despite the earlier
-ruling's wording, and `census_names()` is named for what it is.
+FUNDED AND LIVE under R-IV.1408(b)1, at 250 calls a night from the reserve; RAISED TO 400
+(ceiling 384) under R-IV.1493(b)1. The universe is the CENSUS's eight names, which
+R-IV.1408(b)3 settled -- not Tier-1's sixteen, despite the earlier ruling's wording, and
+`census_names()` is named for what it is.
+
+WHY 400 (R-IV.1493, from R-IV.1491(c)'s cost study). A complete session costs the sum, over the
+eight names, of ceil(prints from 04:00 ET / 500) + 1 crossing page. Over the 48 sessions from
+09-01 to 11-06: median 155, p90 199, highest 232 / 224 / 210, and 11-05 at about 345 (TSLA was
+still partial at 320). The 240 ceiling covered 47 of 48 and cut 11-05 at AAPL, with MSFT and
+TSLA never reached. Each walk stops at its session's start, so a normal night still spends about
+155: the extra is spent only on a heavy day.
+
+NON-TRADING NIGHTS CATCH UP (R-IV.1493(b)2). A Saturday, Sunday or holiday night has no session
+of its own. It used to return "not a trading session" and spend nothing, which left 11-05's TSLA
+waiting until Monday. It now walks only the backlog, oldest first, under the same nightly
+ceiling, and when there is no backlog it opens no run and spends nothing. See `_catchup_night`.
 
 AND IT CATCHES UP, under R-IV.1412(b): the session that just closed is walked first and
 unconditionally, then whatever budget remains goes to the OLDEST unwritten session. Built
@@ -228,12 +241,104 @@ def session_verdict(names, session: date, done, results: List[dict],
         parts.append("cut mid-walk: " + ",".join(cut))
     if unreached:
         parts.append("never reached: " + ",".join(unreached))
-    parts.append("stop: " + (stop_reason or "unknown"))
+    parts.append("stop: " + _stop_text(stop_reason, [walked[t] for t in cut]))
     return STATUS_PARTIAL, "; ".join(parts)[:480]
+
+
+def backlog_verdict(pending: List[date], names, done, catchup: List[dict],
+                    stop_reason: Optional[str]) -> Tuple[str, Optional[str]]:
+    """R-IV.1493(b)2: did a catch-up-only night clear the backlog it found? -> (status, reason).
+
+    `ok` only when every ticker-session that was pending is now walked to its end, whether by
+    tonight or earlier. Otherwise `partial`, naming what is left and why the walk stopped.
+    """
+    from jobs.job_runs import STATUS_OK, STATUS_PARTIAL
+
+    walked = {(r["ticker"], r["session"]): r for r in catchup}
+    left, cut_rows = [], []
+    for d in pending:
+        for t in names:
+            if (t, d) in done:
+                continue
+            r = walked.get((t, d.isoformat()))
+            if r is not None and r.get("exhausted"):
+                continue
+            left.append("%s %s" % (d.isoformat(), t))
+            if r is not None:
+                cut_rows.append(r)
+    if not left:
+        return STATUS_OK, None
+    # The list is capped, not the reason: the stop must survive the 480-character field.
+    listing = ",".join(left)
+    if len(listing) > 240:
+        listing = listing[:240].rsplit(",", 1)[0] + ",... (%d in all)" % len(left)
+    return STATUS_PARTIAL, ("backlog left: %s; stop: %s"
+                            % (listing, _stop_text(stop_reason, cut_rows)))[:480]
+
+
+def _stop_text(stop_reason: Optional[str], cut_rows: List[dict]) -> str:
+    """R-IV.1493(b)3: why the walk stopped, never "unknown".
+
+    The night's own reason first. That is set at every break site: by `budget.stop()`, or by
+    `budget.run_out()` through `_out_of_budget`. Failing that, the cut rows' own stops, which
+    `collect_one` always writes (a vendor error, for one). The last fallback cannot be reached
+    from the code as written, and its wording says so rather than passing for a reason.
+    """
+    if stop_reason:
+        return stop_reason
+    own = ["%s: %s" % (r["ticker"], r["stop"]) for r in cut_rows if r.get("stop")]
+    if own:
+        return "; ".join(own)
+    return "NOT RECORDED (a fault: every break site records one)"
+
+
+def _out_of_budget(budget) -> bool:
+    """True when the walk must stop here, with work still left.
+
+    R-IV.1493(b)3: a budget that ran out is RECORDED as having run out. Before this, the loops
+    broke on `remaining <= 0` and left `stop_reason` None. Call it only when a ticker-session is
+    still to be walked, so a night that finished on its last call is not labelled as cut.
+    """
+    if budget.stopped:
+        return True
+    if budget.remaining <= 0:
+        budget.run_out()
+        return True
+    return False
+
+
+async def _walk_backlog(pool, pending: List[date], names, done, budget, summary: dict,
+                        catchup: List[dict]) -> None:
+    """Walk the pending sessions OLDEST FIRST until the budget stops. Appends to `catchup`.
+
+    Oldest first because the vendor drops its oldest dark-pool session every trading day, so
+    of two unwritten sessions the older one has less time left. Shared by the trading night,
+    where it gets the remainder, and by the catch-up-only night, where it gets everything.
+    """
+    from jobs.darkpool_backfill import collect_one
+
+    for older in pending:
+        if _out_of_budget(budget):
+            break
+        touched = False
+        for ticker in names:
+            if (ticker, older) in done:
+                continue
+            if _out_of_budget(budget):
+                break
+            catchup.append(await collect_one(pool, ticker, older, budget, CALLER_TAG))
+            touched = True
+        if touched:
+            summary["catchup_sessions"].append(older.isoformat())
+
 
 async def walk_night(now: Optional[datetime] = None,
                      session: Optional[date] = None) -> dict:
-    """Walk Tier-1 for one session, floored. Creates and ENDS a run. Never raises."""
+    """Walk the census names for one session, floored. Creates and ENDS a run. Never raises.
+
+    On a night with no session of its own (Saturday, Sunday, a holiday) it walks the backlog
+    only (R-IV.1493(b)2). See `_catchup_night`.
+    """
     global _preflight_logged
 
     block = preflight()
@@ -253,7 +358,8 @@ async def walk_night(now: Optional[datetime] = None,
     if session is None:
         session = target_session(now.astimezone(_et()))
     if session is None:
-        return {"session": None, "reason": "not a trading session", "collected": 0}
+        # R-IV.1493(b)2: no session closed tonight, so the whole night goes to the backlog.
+        return await _catchup_night(now)
 
     names = census_names()
     ceiling = night_ceiling()
@@ -288,34 +394,22 @@ async def walk_night(now: Optional[datetime] = None,
         # exactly how 2026-10-23 was lost, and it is why the backlog gets the REMAINDER rather
         # than the priority.
         for ticker in names:
-            if budget.stopped or budget.remaining <= 0:
-                break
             if (ticker, session) in done:
                 # Already exhausted and floored by an earlier attempt at this same night.
                 # Idempotent by design: the window retries until 23:00 ET, and a retry that
                 # re-walked a finished ticker would spend the night's budget twice.
                 summary["already_done"] += 1
                 continue
+            # After the done check, so a budget is only recorded as run out when a name
+            # was still to walk (R-IV.1493(b)3).
+            if _out_of_budget(budget):
+                break
             results.append(await collect_one(pool, ticker, session, budget, CALLER_TAG))
 
         # ── 2. THE REMAINDER goes to the OLDEST unwritten session.
-        # Oldest first because the vendor drops its oldest dark-pool session every trading
-        # day, so of two unwritten sessions the older one has less time left.
         pending = catchup_sessions(session, done, names)
         summary["catchup_pending"] = [d.isoformat() for d in pending]
-        for older in pending:
-            if budget.stopped or budget.remaining <= 0:
-                break
-            touched = False
-            for ticker in names:
-                if budget.stopped or budget.remaining <= 0:
-                    break
-                if (ticker, older) in done:
-                    continue
-                catchup.append(await collect_one(pool, ticker, older, budget, CALLER_TAG))
-                touched = True
-            if touched:
-                summary["catchup_sessions"].append(older.isoformat())
+        await _walk_backlog(pool, pending, names, done, budget, summary, catchup)
     except asyncio.CancelledError:
         # A deploy cancels this task mid-walk. CancelledError derives from BaseException, so
         # an `except Exception` would be blind to it -- which is how the census job left run 7
@@ -349,7 +443,7 @@ async def walk_night(now: Optional[datetime] = None,
     summary["status"] = status
     summary["status_reason"] = why
     await _end_run(pool, run_id, budget.calls,
-                   budget.stop_reason or "walked the Tier-1 list", summary)
+                   budget.stop_reason or WALKED_TO_THE_END, summary)
     await finish_run(job_run_id, status, rows_touched=len(results) + len(catchup),
                      skip_reason=why)
     if why:
@@ -363,6 +457,104 @@ async def walk_night(now: Optional[datetime] = None,
                 summary["pages"], summary["prints"], summary["floored"],
                 budget.calls, ceiling, summary["catchup_collected"],
                 summary["catchup_sessions"] or "-", summary["catchup_pending"] or "-")
+    return summary
+
+
+#: The run-level reason when nothing stopped the walk. It used to read "walked the Tier-1
+#: list", which named the wrong universe (R-IV.1408(b)3). Now worded so it cannot be mistaken
+#: for BUDGET_RAN_OUT (R-IV.1493(b)3).
+WALKED_TO_THE_END = "walked every name it reached to its end; budget not exhausted"
+
+
+async def _catchup_night(now: datetime) -> dict:
+    """R-IV.1493(b)2: a night with no session of its own walks ONLY the backlog.
+
+    Spends only while gaps remain, under the same nightly ceiling: `night_ceiling()` from the
+    same quota, on its own UW day. With nothing pending it opens NO run, neither the
+    `darkpool_backfill_runs` row the F: export gate keys on nor a `job_runs` row, and spends
+    nothing. It still returns `fired`, so the loop does not re-read the backlog every minute
+    until 23:59 ET.
+
+    The lookback is anchored on the night's own date. That date is not a session, so every
+    trading session before it is a candidate, including Friday's, which Friday night's own
+    walk may have left short.
+    """
+    from jobs.darkpool_backfill import Budget, DDL, DONE_SQL, refresh_completeness
+    from database.postgres_client import get_postgres_client
+    from integrations.uw_spend_ledger import uw_day
+    from jobs.job_runs import JOB_DARKPOOL_FORWARD, STATUS_ERROR, finish_run, start_run
+
+    night = now.astimezone(_et()).date()
+    names = census_names()
+
+    pool = await get_postgres_client()
+    async with pool.acquire() as conn:
+        for stmt in DDL:
+            await conn.execute(stmt)
+        done = {(r["ticker"], r["session_date"]) for r in await conn.fetch(DONE_SQL)}
+
+    pending = catchup_sessions(night, done, names)
+    if not pending:
+        logger.info("[dp-forward] %s is not a trading session and nothing is pending: "
+                    "no run, no calls", night)
+        return {"session": None, "night": night.isoformat(), "catchup_only": True,
+                "reason": "not a trading session; no backlog", "collected": 0,
+                "calls_spent": 0, "fired": True}
+
+    ceiling = night_ceiling()
+    budget = Budget(ceiling)
+    job_run_id = await start_run(JOB_DARKPOOL_FORWARD, night)
+    async with pool.acquire() as conn:
+        run_id = await conn.fetchval(
+            "INSERT INTO darkpool_backfill_runs (started_at, uw_day, calls_spent) "
+            "VALUES (NOW(), $1, 0) RETURNING id", uw_day(now))
+
+    summary = {"session": None, "night": night.isoformat(), "catchup_only": True,
+               "fired": True, "run_id": run_id, "names": list(names), "ceiling": ceiling,
+               "collected": 0, "already_done": 0, "pages": 0, "prints": 0, "exhausted": 0,
+               "floored": 0, "calls_spent": 0, "catchup_sessions": [],
+               "catchup_collected": 0, "catchup_pending": [d.isoformat() for d in pending]}
+
+    await budget.check_account()
+    catchup: List[dict] = []
+    try:
+        await _walk_backlog(pool, pending, names, done, budget, summary, catchup)
+    except asyncio.CancelledError:
+        await _end_run(pool, run_id, budget.calls, "cancelled mid-walk", summary)
+        await finish_run(job_run_id, STATUS_ERROR, rows_touched=len(catchup),
+                         error="cancelled mid-walk")
+        raise
+
+    summary["catchup_collected"] = len(catchup)
+    summary["pages"] = sum(r["pages"] for r in catchup)
+    summary["prints"] = sum(r["prints"] for r in catchup)
+    summary["catchup_exhausted"] = sum(1 for r in catchup if r["exhausted"])
+    summary["calls_spent"] = budget.calls
+
+    try:
+        await refresh_completeness(pool)
+    except Exception:                                               # noqa: BLE001
+        logger.warning("[dp-forward] completeness refresh failed", exc_info=True)
+
+    status, why = backlog_verdict(pending, names, done, catchup, budget.stop_reason)
+    summary["status"] = status
+    summary["status_reason"] = why
+    # The job_runs row says what kind of night it was even when it is `ok`, so a Saturday
+    # row is never read as a session's own walk.
+    note = why or ("not a trading session: catch-up only, walked %s"
+                   % (",".join(summary["catchup_sessions"]) or "-"))
+    await _end_run(pool, run_id, budget.calls, budget.stop_reason or WALKED_TO_THE_END,
+                   summary)
+    await finish_run(job_run_id, status, rows_touched=len(catchup), skip_reason=note)
+    if why:
+        logger.warning("[dp-forward] run %s catch-up night %s PARTIAL: %s", run_id, night, why)
+    _last_result.clear()
+    _last_result.update(summary)
+    logger.info("[dp-forward] run %s catch-up night %s: %d ticker-sessions over %s, %d pages, "
+                "%d prints, %d/%d calls (pending %s)",
+                run_id, night, len(catchup), summary["catchup_sessions"] or "-",
+                summary["pages"], summary["prints"], budget.calls, ceiling,
+                summary["catchup_pending"])
     return summary
 
 
@@ -416,7 +608,8 @@ async def run_forever() -> None:
                 # non-trading tick would consume the night: the retry window exists so a
                 # transient failure gets another attempt, and a gate that is opened at 21:00
                 # must still be able to collect at 21:30.
-                if not out.get("blocked") and out.get("session"):
+                # A catch-up-only night (R-IV.1493(b)2) has no session but did run.
+                if not out.get("blocked") and (out.get("session") or out.get("fired")):
                     _fired.add(key)
         except Exception:                                           # noqa: BLE001
             logger.error("[dp-forward] nightly error", exc_info=True)

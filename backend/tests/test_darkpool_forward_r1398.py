@@ -76,7 +76,7 @@ async def test_it_MAKES_NO_VENDOR_CALL_while_its_tag_is_unregistered():
     assert calls["n"] == 0, "the forward walk spent %d calls while unfunded" % calls["n"]
     assert out["blocked"] is True
     assert ceiling_unfunded == 0
-    assert fwd.night_ceiling() == int(250 * fwd.NIGHT_CEILING_FRACTION) == 240
+    assert fwd.night_ceiling() == int(400 * fwd.NIGHT_CEILING_FRACTION) == 384  # R-IV.1493(b)1
 
 
 def test_the_two_gates_are_reported_SEPARATELY():
@@ -90,15 +90,15 @@ def test_the_two_gates_are_reported_SEPARATELY():
     try:
         reason = fwd.preflight()
         assert reason is not None and fwd.ENV_FLAG in reason, reason
-        assert fwd.night_ceiling() == int(250 * fwd.NIGHT_CEILING_FRACTION) == 240
+        assert fwd.night_ceiling() == int(400 * fwd.NIGHT_CEILING_FRACTION) == 384  # R-IV.1493(b)1
         os.environ[fwd.ENV_FLAG] = "true"
         try:
             assert fwd.preflight() is None
         finally:
             del os.environ[fwd.ENV_FLAG]
     finally:
-        # Restored to the RULED figure (R-IV.1408(b)1), never popped.
-        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (250, gov.TIER_STANDARD)
+        # Restored to the RULED figure (R-IV.1493(b)1, was R-IV.1408(b)1's 250), never popped.
+        gov.FOREIGN_RESERVE_QUOTAS[fwd.CALLER_TAG] = (400, gov.TIER_STANDARD)
 
 
 def test_an_empty_env_value_is_OFF():
@@ -272,7 +272,7 @@ async def test_the_health_surface_NAMES_the_block():
     assert st["blocked"] and fwd.ENV_FLAG in st["blocked"], st["blocked"]
     assert "quota table" not in st["blocked"], (
         "the surface still blames the funding gate after the ruling funded it")
-    assert st["ceiling"] == int(250 * fwd.NIGHT_CEILING_FRACTION) == 240
+    assert st["ceiling"] == int(400 * fwd.NIGHT_CEILING_FRACTION) == 384  # R-IV.1493(b)1
     assert len(st["census_names"]) == 8
     assert "tier_1" not in st, "the surface still publishes the rejected label"
     assert st["nights_fired_this_process"] == []

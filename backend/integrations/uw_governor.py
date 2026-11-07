@@ -533,7 +533,8 @@ OFF_HOURS_FACTOR_BY_CALLER = {
     # whole window is 20:30-23:00 ET, so 250 x 0.25 = 62 was all it ever had: measured, the
     # vendor block read "QUOTA_EXCEEDED darkpool_forward 62/62" on every night from 10-27 to
     # 10-30, partway through NVDA, and AAPL, MSFT and TSLA were never reached. Off-hours quota
-    # only; the 250 and STANDARD are unchanged, so it is still shed first under pressure.
+    # only; the quota (400 since R-IV.1493(b)1) and STANDARD are unchanged by this, so it is
+    # still shed first under pressure.
     "darkpool_forward": 1.0,
     # R-IV.1461(f)1: the earnings calendar is fetched nightly at 20:15 ET (and Sundays), so
     # its whole window is off-hours: 100 x 0.25 = 25 pages would not cover eleven dates on
@@ -815,7 +816,13 @@ FOREIGN_RESERVE_QUOTAS: Dict[str, Tuple[int, str]] = {
     # entry above expired, its loop RETURNED rather than slept, and one date literal stopped
     # the dark-pool pages and the F: bars export together. A forward collection has no end
     # date to write.
-    "darkpool_forward": (250, TIER_STANDARD),
+    #
+    # RAISED 250 -> 400 under R-IV.1493(b)1, from the reserve: claimed 5,455 -> 5,605 of
+    # 12,000. The 240 ceiling covered 47 of 48 sessions (09-01..11-06; median 155, p90 199),
+    # but 11-05 needed about 345 and lost TSLA for three nights. 400 x 0.96 = 384 covers every
+    # session on file. Each walk stops at its session's 04:00 ET start, so a normal night
+    # still spends about 155: the extra is drawn only on a heavy day.
+    "darkpool_forward": (400, TIER_STANDARD),
 }
 
 

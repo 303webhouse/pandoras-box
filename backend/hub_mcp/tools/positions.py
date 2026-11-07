@@ -42,6 +42,8 @@ DESCRIPTION = (
     # promised nothing about classification because the field was being dropped.
     "**`status=CLOSED` returns CLOSED rows ONLY. EXPIRED and DUPLICATE_OF rows appear only "
     "under `ALL`** (TA-138). A CLOSED filter is not \"everything that has ended\".\n\n"
+    # R-IV.1486(c): the one line owed, stated as a rule of its own.
+    "**EXPIRED rows are separate from CLOSED rows; `status=ALL` returns both.**\n\n"
     "**`trade_outcome` is NOT an open-position filter. Select open rows with "
     "`open_quantity > 0`** — never by `trade_outcome`, and never by `strategy_tag` "
     "(R-IV.844(d)3, standing for every gate). `trade_outcome` is served AS STORED and is "

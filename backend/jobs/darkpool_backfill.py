@@ -408,6 +408,15 @@ def _oldest_cursor(rows: List[dict]) -> Optional[str]:
     return min(stamps) if stamps else None
 
 
+#: R-IV.1493(b)3: the one spelling of "our own call budget ran out". The session row's
+#: `stop_reason` has always used it, and the run-level reason now starts with it too, so
+#: "the budget ran out" and "the vendor has no more pages" are told apart by one prefix.
+#: Every vendor-side end of a walk is worded differently: "short page - session complete",
+#: "no further rows", "vendor returned no rows", "cursor stopped advancing", "reached prints
+#: executed before ...".
+BUDGET_RAN_OUT = "call budget exhausted"
+
+
 class Budget:
     """The three stops, in one place so every call site asks the same object."""
 
@@ -427,6 +436,19 @@ class Budget:
         if not self.stop_reason:
             self.stop_reason = reason
             logger.error("[dp-backfill] STOP: %s (after %d calls)", reason, self.calls)
+
+    def run_out(self) -> None:
+        """R-IV.1493(b)3: the budget ran out with work still to do. Recorded, not inferred.
+
+        Without this a night cut by its own ceiling left `stop_reason` None, and the forward
+        walk's verdict read "stop: unknown" (run 29, 2026-11-05). The text starts with
+        BUDGET_RAN_OUT so a reader can tell it from a vendor stop by prefix. It is not an
+        error, so it is logged at INFO rather than through `stop()`.
+        """
+        if not self.stop_reason:
+            self.stop_reason = "%s: %d of %d calls spent" % (BUDGET_RAN_OUT, self.calls,
+                                                            self.call_budget)
+            logger.info("[dp-backfill] %s", self.stop_reason)
 
     @property
     def stopped(self) -> bool:
@@ -631,7 +653,8 @@ async def collect_one(pool, ticker: str, session: date, budget: Budget,
             stop = "run stopped: %s" % budget.stop_reason
             break
         if budget.remaining <= 0:
-            stop = "call budget exhausted"
+            stop = BUDGET_RAN_OUT
+            budget.run_out()
             break
         before = budget.calls
         resp, err = await fetch_page(ticker, session, cursor, budget, caller)
