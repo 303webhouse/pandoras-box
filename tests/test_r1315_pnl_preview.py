@@ -54,8 +54,31 @@ for name in (os.path.join('assets', 'abacus-pnl.js'),):
     check('parses: ' + name, r.returncode == 0, (r.stderr or '')[:300])
 
 # ── the fake pool, holding rows in the book's own shape ────────────────────────────────────────
-TODAY = date.today()
+# THE CLOCK IS FROZEN (R-IV.1495(b)), as 14c69384 froze R-IV.1342's. This used to read
+# `date.today()`, and the closures below sit on days 13-20 of the CURRENT month. Run before the
+# 20th, they were in the future and the real loader rightly left them out of "this month", so 5
+# checks failed on the first ~19 days of every month and passed after. One instant now feeds the
+# fixture AND the loader (`_FrozenDatetime`, below). 12:00 MDT on a Friday late in a month.
+NOW = datetime(2026, 10, 30, 18, 0, tzinfo=timezone.utc)
+TODAY = date(2026, 10, 30)
 M1 = TODAY.replace(day=1)
+
+
+class _RealInstances(type):
+    """`isinstance(x, _FrozenDatetime)` answers for a REAL datetime too. The loader converts
+    rows with `isinstance(v, datetime)`, and a bare subclass made every stored datetime fail
+    that test (measured: `date - datetime` TypeError)."""
+
+    def __instancecheck__(cls, obj):
+        return isinstance(obj, datetime)
+
+
+class _FrozenDatetime(datetime, metaclass=_RealInstances):
+    """`api.abacus_pnl`'s `datetime` for the one call to `load_pnl`: `now()` answers NOW."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return NOW.astimezone(tz) if tz is not None else NOW.replace(tzinfo=None)
 
 
 def _utc(d):
@@ -84,12 +107,12 @@ CLOSURES = [
 OPEN = [
     {'position_id': 'POS_A', 'account': 'ROBINHOOD', 'ticker': 'QQQ', 'structure': 'put_debit_spread',
      'bucket': None, 'bucket_reason': None, 'unrealized_pnl': -120.00, 'current_price': 1.2,
-     'mark_as_of': None, 'price_updated_at': datetime.now(timezone.utc) - timedelta(hours=38),
+     'mark_as_of': None, 'price_updated_at': NOW - timedelta(hours=38),
      'mark_status': 'STALE'},
     {'position_id': 'POS_B', 'account': 'FIDELITY_ROTH', 'ticker': 'GUSH', 'structure': 'stock',
      'bucket': None, 'bucket_reason': None, 'unrealized_pnl': -118.00, 'current_price': 49.7,
-     'mark_as_of': datetime.now(timezone.utc) - timedelta(minutes=20),
-     'price_updated_at': datetime.now(timezone.utc) - timedelta(minutes=45), 'mark_status': 'OK'},
+     'mark_as_of': NOW - timedelta(minutes=20),
+     'price_updated_at': NOW - timedelta(minutes=45), 'mark_status': 'OK'},
     # UNPRICED: so the unrealized sum covers 2 of 3 and must render as a floor.
     {'position_id': 'POS_C', 'account': 'FIDELITY_401A', 'ticker': 'GDXJ', 'structure': 'stock',
      'bucket': None, 'bucket_reason': None, 'unrealized_pnl': None, 'current_price': None,
@@ -133,9 +156,20 @@ class _Pool:
 
 import asyncio  # noqa: E402
 
+import api.abacus_pnl as _abacus_pnl  # noqa: E402
 from api.abacus_pnl import load_pnl  # noqa: E402
 
-PAYLOAD = asyncio.get_event_loop().run_until_complete(load_pnl(_Pool(), 'month', 'ALL'))
+# The loader reads `datetime.now()` twice: the period's "today" and the mark ages. Both are
+# answered from NOW for this one call, then the module's own `datetime` is put back.
+_real_datetime = _abacus_pnl.datetime
+_abacus_pnl.datetime = _FrozenDatetime
+try:
+    PAYLOAD = asyncio.get_event_loop().run_until_complete(load_pnl(_Pool(), 'month', 'ALL'))
+finally:
+    _abacus_pnl.datetime = _real_datetime
+check('the loader ran on the frozen clock, not the wall clock',
+      PAYLOAD['period']['to'] == TODAY.isoformat()
+      and PAYLOAD['period']['from'] == M1.isoformat(), str(PAYLOAD.get('period'))[:160])
 say('payload built by the real loader: realized=%s closes=%s scratches=%s'
     % (PAYLOAD['realized'], PAYLOAD['closes'], PAYLOAD['scratches']))
 
