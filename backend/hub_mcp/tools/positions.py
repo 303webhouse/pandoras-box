@@ -203,16 +203,12 @@ async def _tactical_pct(rows, *, ticker, status, account) -> Dict[str, Any]:
                          "reason": "not computed: " + "; ".join(blockers)}
         return out
 
-    balances: Dict[str, Any] = {}
+    # R-IV.1482: the balances screen's DERIVED value, not the stored `account_balances.balance`
+    # (the 401(a)'s stored figure was the 0.00 seed placeholder, the Roth's a 09-24 number).
     try:
-        from database.postgres_client import get_postgres_client
+        from services.read_only.balances import account_values
 
-        pool = await get_postgres_client()
-        async with pool.acquire() as conn:
-            for r in await conn.fetch(
-                    "SELECT account_name, balance FROM account_balances"
-                    " WHERE UPPER(account_name) = ANY($1::text[])", wanted):
-                balances[(r["account_name"] or "").upper()] = r["balance"]
+        balances = await account_values(wanted)
     except Exception as exc:                                        # noqa: BLE001
         # An unreadable balance means no denominator, and `tactical_share` already refuses to
         # report a percentage of an unusable total rather than calling it zero.
@@ -223,7 +219,11 @@ async def _tactical_pct(rows, *, ticker, status, account) -> Dict[str, Any]:
         return out
 
     for acct in wanted:
-        out[acct] = tactical_share(rows, acct, balances.get(acct))
+        av = balances.get(acct) or {}
+        out[acct] = tactical_share(rows, acct, av.get("value"),
+                                   value_partial=av.get("partial", False),
+                                   value_reason=av.get("reason") or (
+                                       None if av else "no balances row for this account"))
     return out
 
 

@@ -773,7 +773,7 @@ book. [POSITIONS' standing practice, adopted R-IV.1055(a)]
   account.
 - **"20% portfolio risk cap — FIDELITY_ROTH only."** The cap now applies to
   tactical positions in both Fidelity accounts. Retired 2026-10-07.
-- **AHRP 401A PLAN (76679) and AHRP 403B PLAN (76680) are conduits, not tracked
+- **AHRP 401A PLAN (...6679) and AHRP 403B PLAN (...6680) are conduits, not tracked
   accounts** — linked to the brokerage window, holding no tradable capital. Flows
   are carried **where they enter a tracked account, never at the conduit**.
   [TA-105 §1, TA-106 §2]

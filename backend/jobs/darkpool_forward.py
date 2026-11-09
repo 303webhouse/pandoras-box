@@ -201,10 +201,12 @@ def catchup_sessions(session: date, done: set, names) -> List[date]:
     """Unwritten trading sessions before `session`, OLDEST FIRST, inside the lookback.
 
     "Unwritten" means at least one census name is missing from `done`, and `done` is
-    `DONE_SQL`'s set -- `exhausted AND reached_floor AND prints_received > 0`. So a
-    ticker-session that was walked but never reached its floor still counts as unwritten and
-    will be resumed, which is what makes the catch-up converge instead of declaring victory on
-    a partial walk.
+    `DONE_SQL`'s set -- `exhausted = TRUE`, nothing more. So a walk cut by the call budget
+    (not exhausted) counts as unwritten and is resumed, which is what makes the catch-up
+    converge. A walk the VENDOR ended (exhausted) counts as done even if it never reached its
+    floor -- walking it again would only fetch the same short page (IWM 11-02, R-IV.1492(c)).
+    The F: export gate's stricter `exhausted AND reached_floor AND prints_received > 0` is a
+    different count and lives in `refresh_completeness`.
 
     `session` itself is excluded: it is walked first and unconditionally by the caller, and
     including it here would let the remainder be spent on it twice.

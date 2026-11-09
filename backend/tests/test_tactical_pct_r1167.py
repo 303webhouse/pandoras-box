@@ -117,26 +117,14 @@ async def test_it_computes_for_an_unfiltered_OPEN_call(monkeypatch):
          "structure": "stock", "current_price": 10.0, "quantity": 90, "open_quantity": 90},
     ]
 
-    class _Conn:
-        async def fetch(self, sql, *args):
-            return [{"account_name": "FIDELITY_ROTH", "balance": 1000.0}]
+    # R-IV.1482: the account value is the balances screen's (services.read_only.balances.
+    # account_values). The path through that accessor is tested in test_tactical_account_
+    # value_r1482.py; here only the scope logic is under test.
+    async def _values(names):
+        return {"FIDELITY_ROTH": {"value": 1000.0, "partial": False, "reason": None}}
 
-    class _Acq:
-        async def __aenter__(self):
-            return _Conn()
-
-        async def __aexit__(self, *a):
-            return False
-
-    class _Pool:
-        def acquire(self):
-            return _Acq()
-
-    async def _get():
-        return _Pool()
-
-    import database.postgres_client as pc
-    monkeypatch.setattr(pc, "get_postgres_client", _get)
+    import services.read_only.balances as bal
+    monkeypatch.setattr(bal, "account_values", _values)
 
     out = await _tactical_pct(rows, ticker=None, status="OPEN", account=None)
     # 10 shares x 10.00 = 100 tactical against a 1000 balance
@@ -148,12 +136,12 @@ async def test_it_computes_for_an_unfiltered_OPEN_call(monkeypatch):
 async def test_an_unreadable_account_value_gives_no_percentage(monkeypatch):
     """No denominator, no percentage — and `tactical_share` already refuses to call that zero.
     A cap that cannot be computed must not look like a satisfied one."""
-    import database.postgres_client as pc
+    import services.read_only.balances as bal
 
-    async def _boom():
-        raise RuntimeError("db down")
+    async def _boom(names):
+        raise RuntimeError("balances unreadable")
 
-    monkeypatch.setattr(pc, "get_postgres_client", _boom)
+    monkeypatch.setattr(bal, "account_values", _boom)
     out = await _tactical_pct([], ticker=None, status="OPEN", account=None)
     for acct in CAP_ACCOUNTS:
         assert out[acct]["pct"] is None
@@ -163,27 +151,12 @@ async def test_an_unreadable_account_value_gives_no_percentage(monkeypatch):
 @pytest.mark.asyncio
 async def test_an_account_filter_on_a_capped_account_narrows_to_that_account(monkeypatch):
     """An account filter IS the whole account, so it may compute — but only for the one named."""
-    import database.postgres_client as pc
+    import services.read_only.balances as bal
 
-    class _Conn:
-        async def fetch(self, sql, *args):
-            return []
+    async def _values(names):
+        return {}
 
-    class _Acq:
-        async def __aenter__(self):
-            return _Conn()
-
-        async def __aexit__(self, *a):
-            return False
-
-    class _Pool:
-        def acquire(self):
-            return _Acq()
-
-    async def _get():
-        return _Pool()
-
-    monkeypatch.setattr(pc, "get_postgres_client", _get)
+    monkeypatch.setattr(bal, "account_values", _values)
     out = await _tactical_pct([], ticker=None, status="OPEN", account="FIDELITY_ROTH")
     assert "FIDELITY_ROTH" in out
     assert out["FIDELITY_ROTH"]["account"] == "FIDELITY_ROTH"

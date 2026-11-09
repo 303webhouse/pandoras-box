@@ -34,12 +34,6 @@ logger = logging.getLogger("roth_cap_reminder")
 #: be told, and one extra notification costs less than a missed one.
 _LAST_PUSHED: Dict[str, Optional[str]] = {}
 
-ACCOUNT_VALUE_SQL = """
-    SELECT account_name, balance
-      FROM account_balances
-     WHERE UPPER(account_name) = ANY($1::text[])
-"""
-
 POSITIONS_SQL = """
     SELECT p.position_id, p.account, p.classification, p.structure,
            p.current_price, p.quantity
@@ -66,15 +60,21 @@ async def run(*, pool=None) -> Dict[str, Any]:
             # it (R-IV.660(b)2), and a second SUM here would be a second author.
             from services.open_quantity import stamp_open_quantity
             await stamp_open_quantity(conn, rows)
-            bal = {(r["account_name"] or "").upper(): r["balance"]
-                   for r in await conn.fetch(ACCOUNT_VALUE_SQL, accounts)}
+        # R-IV.1482: the balances screen's DERIVED value, not the stored
+        # `account_balances.balance` (the 401(a)'s was the 0.00 seed placeholder).
+        from services.read_only.balances import account_values
+        bal = await account_values(accounts)
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("[roth-cap] could not read positions/balances: %s", type(exc).__name__)
         return out
 
     for acct in accounts:
         try:
-            verdict = tactical_share(rows, acct, bal.get(acct))
+            av = bal.get(acct) or {}
+            verdict = tactical_share(rows, acct, av.get("value"),
+                                     value_partial=av.get("partial", False),
+                                     value_reason=av.get("reason") or (
+                                         None if av else "no balances row for this account"))
             out["accounts"][acct] = verdict
             if verdict["pct"] is None:
                 # Loud: a cap that cannot be computed is a cap that is not being watched, and

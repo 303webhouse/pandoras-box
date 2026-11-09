@@ -63,6 +63,33 @@ async def get_account_balances(
         return None
 
 
+async def account_values(names) -> Dict[str, Dict[str, Any]]:
+    """R-IV.1482: each named account's value, AS THE BALANCES SCREEN SHOWS IT.
+
+    For readers that need only the total: the Roth and 401(a) tactical reminders. They used
+    to read the STORED `account_balances.balance`, a typed figure: the 401(a)'s was the 0.00
+    seed placeholder from 10-01 and the Roth's a 09-24 number. This returns the derived value
+    instead (ledger cash from the latest anchor + open positions at their marks), so the
+    reminder and the balances screen cannot disagree about one account.
+
+    Keyed by upper-case name: {"value", "partial", "reason"}. A missing account is absent.
+    RAISES when the balances cannot be read, so the caller names the failure instead of
+    dividing by nothing.
+    """
+    rows = await get_account_balances()
+    if rows is None:
+        raise RuntimeError("balances unreadable")
+    wanted = {(n or "").strip().upper() for n in names}
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        name = (r.get("account_name") or "").strip().upper()
+        if name in wanted:
+            out[name] = {"value": r.get("balance"),
+                         "partial": bool(r.get("balance_partial")),
+                         "reason": r.get("balance_reason")}
+    return out
+
+
 async def _attach_derived_cash(pool, rows: List[Dict[str, Any]]) -> None:
     """R-IV.551(b)1: serve the DERIVED cash where the stored figure was served.
 

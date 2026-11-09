@@ -99,11 +99,16 @@ def in_scope(row: Dict[str, Any]) -> bool:
 
 
 def tactical_share(rows: Iterable[Dict[str, Any]], account: str,
-                   account_value: Any) -> Dict[str, Any]:
+                   account_value: Any, *, value_partial: bool = False,
+                   value_reason: Optional[str] = None) -> Dict[str, Any]:
     """Tactical market value as a percentage of the account total. PURE — no clock, no I/O.
 
     Returns `pct = None` when the account value is unusable; a percentage of an unknown total
     is not a number, and a zero would read as "nothing tactical".
+
+    R-IV.1482: the callers pass the balances screen's DERIVED value, with its `partial` flag
+    and, when there is no value, its reason. A partial value leaves positions out of the
+    total, so the percentage OVERSTATES and the reason says so.
     """
     acct = (account or "").strip().upper()
     av = _dec(account_value)
@@ -140,10 +145,13 @@ def tactical_share(rows: Iterable[Dict[str, Any]], account: str,
         "pct": None,
         "at_or_over": False,
         "reason": "",
+        "account_value_partial": bool(value_partial),
     }
     if av is None or av <= 0:
         out["reason"] = ("account value unusable (%r), so a percentage cannot be computed -- "
                          "NOT reported as zero" % (account_value,))
+        if value_reason:
+            out["reason"] += "; the balances screen says: %s" % value_reason
         return out
 
     pct = (tac / av * Decimal("100")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
@@ -157,6 +165,10 @@ def tactical_share(rows: Iterable[Dict[str, Any]], account: str,
         # Understates, and says so. An unvalued tactical row can only push the true figure UP.
         out["reason"] += ("; %d tactical row(s) unvalued, so this UNDERSTATES"
                           % len(unvalued))
+    if value_partial:
+        # A partial account value is too SMALL, so the share of it is too LARGE.
+        out["reason"] += ("; the account value is PARTIAL (some positions unvalued), so this "
+                          "OVERSTATES")
     return out
 
 
