@@ -788,6 +788,11 @@ async def init_database():
         except Exception as e:
             print(f"WARNING: signals artemis_mode migration skipped: {e}")
 
+        # R-IV.1443(c): signals.outcome_source_valid admits 'UNGRADEABLE' (mirrors
+        # migrations/056). Widens only when the live definition lacks a value; never raises.
+        from database.outcome_source_check import ensure_outcome_source_check
+        await ensure_outcome_source_check(conn)
+
         # One-time cleanup: expire stuck COMMITTEE_REVIEW signals from April 2026 credit outage
         try:
             await conn.execute("""
