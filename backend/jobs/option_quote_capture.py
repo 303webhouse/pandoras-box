@@ -483,16 +483,25 @@ async def capture_slot(now: Optional[datetime] = None,
         summary["planned"] = len(pairs)
         summary["union_extra_pairs"] = len(extra)
 
+    # PER TICKER, for the status (R-IV.1503(b)): a ticker is SAVED when a pair of it stored
+    # rows, LOST when a pair of it was shed, failed or came back with nothing and none was
+    # saved. A ticker whose every pair the vendor answered as absent is neither: it had
+    # nothing to save. 11-13's close saved AAPL and lost the other seven, and logged "ok".
+    saved_tickers: set = set()
+    lost_tickers: set = set()
+
     used_here = 0
     for ticker, expiry, dte in pairs:
         if used_here >= allowance:
             summary["shed"] += 1
+            lost_tickers.add(ticker)
             continue
         try:
             raw, n_raw = await fetch_expiry(ticker, expiry)
         except Exception as exc:                                    # noqa: BLE001
             logger.warning("[oqc] %s %s fetch failed: %s", ticker, expiry, type(exc).__name__)
             summary["unavailable"] += 1
+            lost_tickers.add(ticker)
             continue
         used_here += 1
         _calls_used += 1
@@ -500,6 +509,7 @@ async def capture_slot(now: Optional[datetime] = None,
 
         if raw is None:
             summary["unavailable"] += 1
+            lost_tickers.add(ticker)
             continue
         if n_raw >= UW_CONTRACT_CAP:
             # Per-expiry calls should sit far under the cap; if one does not, the capture is
@@ -530,6 +540,10 @@ async def capture_slot(now: Optional[datetime] = None,
                                rows, centre, method, n_raw)
         summary["captured"] += 1
         summary["rows"] += written
+        (saved_tickers if written > 0 else lost_tickers).add(ticker)
+
+    summary["tickers_saved"] = sorted(saved_tickers)
+    summary["tickers_missing"] = sorted(lost_tickers - saved_tickers)
 
     if used_here:
         _slots_done.add(slot_key)
@@ -539,9 +553,10 @@ async def capture_slot(now: Optional[datetime] = None,
     _last_result.clear()
     _last_result.update(summary)
     logger.info("[oqc] slot %s: %d pairs captured, %d rows, %d absent, %d unavailable, "
-                "%d shed, %d/%d calls this session%s",
+                "%d shed, tickers saved %d, missing %s, %d/%d calls this session%s",
                 slot_key, summary["captured"], summary["rows"], summary["absent"],
-                summary["unavailable"], summary["shed"], _calls_used, ceiling,
+                summary["unavailable"], summary["shed"], len(summary["tickers_saved"]),
+                ",".join(summary["tickers_missing"]) or "none", _calls_used, ceiling,
                 ("; grid union %d strikes, %d rows added, %d not in the close chain, read %s"
                  % (summary["union_strikes"], summary["union_rows"],
                     summary["union_missing"], summary["union_read"]))
@@ -606,6 +621,11 @@ async def _finish(run_id, summary: dict, pool) -> None:
     the slot it describes cannot be captured again. `completed_defective` is the existing
     vocabulary for "ran to the end and its own output check failed" (R-IV.426(b)), and a
     missing pool is an `error` because the slot is LOST rather than empty.
+
+    FEWER TICKERS THAN IT SHOULD IS ALSO A FAULT (R-IV.1503(b)). Some rows is not every ticker:
+    11-13's close stored 22 rows of AAPL, lost the other seven to the governor, and logged
+    `ok`. A ticker in `tickers_missing` was lost, not absent, so the slot is
+    `completed_defective` and says which.
     """
     if run_id is None:
         return
@@ -613,10 +633,19 @@ async def _finish(run_id, summary: dict, pool) -> None:
         from jobs.job_runs import (STATUS_COMPLETED_DEFECTIVE, STATUS_ERROR, STATUS_OK,
                                    finish_run)
         rows = int(summary.get("rows") or 0)
+        missing = list(summary.get("tickers_missing") or [])
         if pool is None:
             await finish_run(run_id, STATUS_ERROR, rows_touched=rows,
                              error="no database pool: slot %s is LOST and cannot be recaptured"
                                    % summary.get("slot"))
+        elif rows > 0 and missing:
+            saved = len(summary.get("tickers_saved") or [])
+            await finish_run(
+                run_id, STATUS_COMPLETED_DEFECTIVE, rows_touched=rows,
+                error="saved %d of %d tickers; missing %s (%d unavailable, %d shed of %d planned)"
+                      % (saved, saved + len(missing), ",".join(missing),
+                         summary.get("unavailable") or 0, summary.get("shed") or 0,
+                         summary.get("planned") or 0))
         elif rows > 0:
             await finish_run(run_id, STATUS_OK, rows_touched=rows)
         else:
@@ -683,9 +712,35 @@ async def _store(pool, session: date, slot_key: str, captured_at: datetime,
 
 POLL_SECONDS = 60
 
+#: How far past a slot's opening minute the loop wakes for it (R-IV.1503(b)).
+#:
+#: A plain 60-second sleep wakes at whatever phase the process started on, so the first
+#: wake-up inside a slot lands anywhere in its first minute. For the close that is the whole
+#: margin: on 11-13 it landed at 15:59:59.9 ET, the first call went out inside the session,
+#: and every call after 16:00:00 met the governor's off-hours quota (320 x 0.25 = 80, with
+#: 193 already spent) and came back empty. Measured over the ten sessions before it, the
+#: close took 4.2-7.9 s. Waking ONE SECOND after the slot opens leaves ~50 s of it.
+SLOT_WAKE_OFFSET_SECONDS = 1.0
+
+
+def seconds_to_next_wake(now: datetime) -> float:
+    """POLL_SECONDS, or less when a slot opens sooner: the loop wakes ON the slot.
+
+    Weekends and holidays need no special case: a wake-up with no slot due costs nothing.
+    """
+    et = now.astimezone(ET)
+    for s in SLOT_TIMES_ET:
+        opens = (datetime.combine(et.date(), s, tzinfo=ET)
+                 + timedelta(seconds=SLOT_WAKE_OFFSET_SECONDS))
+        wait = (opens - et).total_seconds()
+        if 0 < wait < POLL_SECONDS:
+            return wait
+    return float(POLL_SECONDS)
+
 
 async def run_forever() -> None:
-    """Wake every minute, capture a slot when one is due. Catches everything."""
+    """Wake every minute and on each slot's opening, capture a slot when one is due.
+    Catches everything."""
     import asyncio
 
     await asyncio.sleep(75)
@@ -694,7 +749,7 @@ async def run_forever() -> None:
             await capture_slot()
         except Exception as exc:                                    # noqa: BLE001
             logger.error("[oqc] slot error: %s", exc)
-        await asyncio.sleep(POLL_SECONDS)
+        await asyncio.sleep(seconds_to_next_wake(datetime.now(timezone.utc)))
 
 
 async def capture_status() -> dict:
