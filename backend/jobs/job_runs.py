@@ -113,8 +113,13 @@ async def start_run(job_name: str, session_date: date) -> Optional[int]:
 async def finish_run(run_id: Optional[int], status: str,
                      rows_touched: Optional[int] = None,
                      skip_reason: Optional[str] = None,
-                     error: Optional[str] = None) -> None:
-    """Close a run row. No-op when start_run could not open one."""
+                     error: Optional[str] = None,
+                     detail: Optional[dict] = None) -> None:
+    """Close a run row. No-op when start_run could not open one.
+
+    `detail` (a JSON-able dict) goes to job_runs.detail (R-IV.1443(b)6). Only a caller that
+    passes it touches that column; every other caller runs exactly the statement it always ran.
+    """
     if run_id is None:
         return
     try:
@@ -122,12 +127,23 @@ async def finish_run(run_id: Optional[int], status: str,
 
         pool = await get_postgres_client()
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE job_runs SET finished_at = NOW(), status = $2, "
-                "rows_touched = $3, skip_reason = $4, error = $5 WHERE id = $1",
-                run_id, status, rows_touched,
-                (skip_reason or None), (error[:500] if error else None),
-            )
+            if detail is None:
+                await conn.execute(
+                    "UPDATE job_runs SET finished_at = NOW(), status = $2, "
+                    "rows_touched = $3, skip_reason = $4, error = $5 WHERE id = $1",
+                    run_id, status, rows_touched,
+                    (skip_reason or None), (error[:500] if error else None),
+                )
+            else:
+                import json as _json
+                await conn.execute(
+                    "UPDATE job_runs SET finished_at = NOW(), status = $2, "
+                    "rows_touched = $3, skip_reason = $4, error = $5, detail = $6::jsonb "
+                    "WHERE id = $1",
+                    run_id, status, rows_touched,
+                    (skip_reason or None), (error[:500] if error else None),
+                    _json.dumps(detail, default=str),
+                )
     except Exception as exc:
         logger.warning("[job_runs] finish_run(%s) failed: %s", run_id, exc)
 

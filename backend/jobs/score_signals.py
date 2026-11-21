@@ -142,6 +142,38 @@ def first_gradeable_bar_index(df, created_at) -> Optional[int]:
 GRADER_VERSION = "score_signals@6c4f943e"
 
 
+def signals_projection_set(outcome: str, resolved_at: str) -> str:
+    """The SET clause that projects a signal_outcomes grade onto `signals s` (Phase C).
+
+    ONE copy, used by the live write (`outcome` = "$1", `resolved_at` = "NOW()") and by the
+    ARTEMIS regrade (`so.outcome`, `so.outcome_at`), so the two can never project differently
+    (R-IV.1443(b)2). The text for the live call is byte-identical to the literal it replaced.
+    """
+    o, r = outcome, resolved_at
+    return f"""outcome = CASE
+                    WHEN {o} IN ('HIT_T1', 'HIT_T2') THEN 'WIN'
+                    WHEN {o} = 'STOPPED_OUT' THEN 'LOSS'
+                    ELSE NULL
+                END,
+                outcome_pnl_pct = CASE
+                    WHEN {o} IN ('HIT_T1','HIT_T2') AND s.direction = 'LONG'  THEN (s.target_1 - s.entry_price) / s.entry_price * 100
+                    WHEN {o} IN ('HIT_T1','HIT_T2') AND s.direction = 'SHORT' THEN (s.entry_price - s.target_1) / s.entry_price * 100
+                    WHEN {o} = 'STOPPED_OUT'        AND s.direction = 'LONG'  THEN (s.stop_loss - s.entry_price) / s.entry_price * 100
+                    WHEN {o} = 'STOPPED_OUT'        AND s.direction = 'SHORT' THEN (s.entry_price - s.stop_loss) / s.entry_price * 100
+                    ELSE NULL
+                END,
+                outcome_resolved_at = CASE
+                    WHEN {o} IN ('HIT_T1','HIT_T2','STOPPED_OUT') THEN {r}
+                    ELSE NULL
+                END,
+                outcome_source = CASE
+                    WHEN {o} IN ('HIT_T1','HIT_T2','STOPPED_OUT') THEN 'PROJECTED_FROM_BAR_WALK'
+                    WHEN {o} = 'EXPIRED' THEN 'EXPIRED'
+                    WHEN {o} = 'INVALIDATED' THEN 'INVALIDATED'
+                    ELSE NULL
+                END"""
+
+
 def walk_outcome(df, direction, entry, stop, t1, t2, invalidation):
     """One row's verdict over `df`, which must ALREADY be sliced to post-fire bars.
 
@@ -325,50 +357,44 @@ async def _update_outcome(
     # WHERE outcome_source IS NULL guard so it never overwrites BAR_WALK
     # (resolver), ACTUAL_TRADE (Ariadne), COUNTERFACTUAL (analytics), or
     # prior PROJECTED_FROM_BAR_WALK rows. Idempotent.
+    #
+    # R-IV.1443(b)3: every new grade records the grader that produced it ($7).
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
+        args = (outcome, price, days, max_fav, max_adv, signal_id)
+        try:
+            await conn.execute(LIVE_UPDATE_SQL, *args, GRADER_VERSION)
+        except Exception as exc:                                    # noqa: BLE001
+            # The column is added at boot. If that ALTER did not land, a grade must still be
+            # written -- without the version, and said so -- rather than lost every night.
+            if type(exc).__name__ != "UndefinedColumnError":
+                raise
+            logger.warning("[score_signals] signal_outcomes.grader_version missing; graded "
+                           "%s WITHOUT a grader_version", signal_id)
+            await conn.execute(LIVE_UPDATE_SQL_UNVERSIONED, *args)
+
+
+def _live_update_sql(versioned: bool) -> str:
+    return (
+        """
             WITH updated_so AS (
                 UPDATE signal_outcomes
                 SET outcome = $1, outcome_price = $2, outcome_at = NOW(),
-                    days_to_outcome = $3, max_favorable = $4, max_adverse = $5
+                    days_to_outcome = $3, max_favorable = $4, max_adverse = $5"""
+        + (", grader_version = $7" if versioned else "")
+        + """
                 WHERE signal_id = $6
                 RETURNING signal_id
             )
             UPDATE signals s
-            SET outcome = CASE
-                    WHEN $1 IN ('HIT_T1', 'HIT_T2') THEN 'WIN'
-                    WHEN $1 = 'STOPPED_OUT' THEN 'LOSS'
-                    ELSE NULL
-                END,
-                outcome_pnl_pct = CASE
-                    WHEN $1 IN ('HIT_T1','HIT_T2') AND s.direction = 'LONG'  THEN (s.target_1 - s.entry_price) / s.entry_price * 100
-                    WHEN $1 IN ('HIT_T1','HIT_T2') AND s.direction = 'SHORT' THEN (s.entry_price - s.target_1) / s.entry_price * 100
-                    WHEN $1 = 'STOPPED_OUT'        AND s.direction = 'LONG'  THEN (s.stop_loss - s.entry_price) / s.entry_price * 100
-                    WHEN $1 = 'STOPPED_OUT'        AND s.direction = 'SHORT' THEN (s.entry_price - s.stop_loss) / s.entry_price * 100
-                    ELSE NULL
-                END,
-                outcome_resolved_at = CASE
-                    WHEN $1 IN ('HIT_T1','HIT_T2','STOPPED_OUT') THEN NOW()
-                    ELSE NULL
-                END,
-                outcome_source = CASE
-                    WHEN $1 IN ('HIT_T1','HIT_T2','STOPPED_OUT') THEN 'PROJECTED_FROM_BAR_WALK'
-                    WHEN $1 = 'EXPIRED' THEN 'EXPIRED'
-                    WHEN $1 = 'INVALIDATED' THEN 'INVALIDATED'
-                    ELSE NULL
-                END
+            SET """ + signals_projection_set("$1", "NOW()") + """
             FROM updated_so
             WHERE s.signal_id = updated_so.signal_id
               AND s.outcome_source IS NULL
-            """,
-            outcome,
-            price,
-            days,
-            max_fav,
-            max_adv,
-            signal_id,
-        )
+            """)
+
+
+LIVE_UPDATE_SQL = _live_update_sql(True)
+LIVE_UPDATE_SQL_UNVERSIONED = _live_update_sql(False)
 
 
 async def cleanup_stale_discovery_tickers() -> None:

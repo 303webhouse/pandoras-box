@@ -1386,6 +1386,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("❌ Hermes phase 2 session alarm did NOT start: %s", e)
 
+    # R-IV.1443(b) / R-IV.1506(c): the ARTEMIS_SHORT one-shot regrade. Runs once, 180 s after
+    # boot; refuses if its snapshot table exists. REMOVE this block and the module in the next
+    # push after it succeeds (R-IV.1443(b)6).
+    try:
+        from jobs import artemis_regrade_write as _artemis_regrade
+        asyncio.create_task(_artemis_regrade.run_at_startup())
+        logger.info("artemis_regrade: one-shot scheduled (refuses if %s exists)",
+                    _artemis_regrade.SNAPSHOT_TABLE)
+    except Exception as e:
+        logger.error("artemis_regrade did NOT schedule: %s", e)
+
     # R-IV.1082(b): forward option bid/ask capture. 8 names, 0-3 DTE, 12 slots 10:00-15:30 ET.
     # Logged at ERROR if it fails to start, for the same reason as the alarm above: this is a
     # FORWARD collection under the collector law, so a session it misses is permanently absent

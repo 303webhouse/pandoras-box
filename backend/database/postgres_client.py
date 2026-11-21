@@ -793,6 +793,17 @@ async def init_database():
         from database.outcome_source_check import ensure_outcome_source_check
         await ensure_outcome_source_check(conn)
 
+        # R-IV.1443(b)3: every grade names the grader that produced it (mirrors migrations/057).
+        # Metadata-only ADD COLUMN; lock_timeout so a busy table cannot stall the boot. If it
+        # does not land, score_signals still grades, without the version, and logs it.
+        try:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL lock_timeout = '5s'")
+                await conn.execute(
+                    "ALTER TABLE signal_outcomes ADD COLUMN IF NOT EXISTS grader_version TEXT")
+        except Exception as e:
+            print(f"WARNING: signal_outcomes.grader_version migration skipped: {e}")
+
         # One-time cleanup: expire stuck COMMITTEE_REVIEW signals from April 2026 credit outage
         try:
             await conn.execute("""
@@ -3141,6 +3152,8 @@ async def init_database():
                 CREATE INDEX IF NOT EXISTS idx_job_runs_job_started
                     ON job_runs (job_name, started_at DESC)
             """)
+            # R-IV.1443(b)6: a run can carry a structured record (the ARTEMIS snapshot hash).
+            await conn.execute("ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS detail JSONB")
         except Exception as e:
             print(f"WARNING: job_runs table creation skipped: {e}")
 
