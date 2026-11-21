@@ -292,22 +292,25 @@ def test_a_later_add_does_not_move_the_cut():
 
 
 # ── scope ──────────────────────────────────────────────────────────────────
+#
+# A FROZEN CLOCK (AT_CUT, before _row's 11-20 expiry): is_in_scope also drops rows past expiry, so on
+# the wall clock these three went red on 11-21 for a reason that is not theirs.
 
 def test_only_B2_is_in_scope():
-    assert is_in_scope(_row()) is True
+    assert is_in_scope(_row(), now=AT_CUT) is True
     for other in ("B1", "B3", "TAIL", None, ""):
-        assert is_in_scope(_row(bucket=other)) is False, other
+        assert is_in_scope(_row(bucket=other), now=AT_CUT) is False, other
 
 
 def test_the_bucket_match_is_case_insensitive():
     """Stored casing is not guaranteed -- `Whale_Hunter`, not `whale_hunter` (R-IV.849(d))."""
     for spelling in ("B2", "b2", " b2 "):
-        assert is_in_scope(_row(bucket=spelling)) is True, spelling
+        assert is_in_scope(_row(bucket=spelling), now=AT_CUT) is True, spelling
 
 
 def test_open_is_decided_by_open_quantity_not_status():
     """R-IV.844(d)3. A closed row has no size; a partially exited row still does."""
-    assert is_in_scope(_row(open_quantity=0)) is False
-    assert is_in_scope(_row(open_quantity=1)) is True
+    assert is_in_scope(_row(open_quantity=0), now=AT_CUT) is False
+    assert is_in_scope(_row(open_quantity=1), now=AT_CUT) is True
     # status is not consulted at all, so a mislabelled row with real size is still in scope
-    assert is_in_scope(_row(open_quantity=3, status="CLOSED")) is True
+    assert is_in_scope(_row(open_quantity=3, status="CLOSED"), now=AT_CUT) is True
