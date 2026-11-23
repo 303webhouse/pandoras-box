@@ -24,6 +24,7 @@ import asyncio
 import csv
 import glob
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -1039,12 +1040,50 @@ OPTION_QUOTE_ROWS_SQL = """
 """
 
 
+#: The first session the capture ran its 13th slot (R-IV.1398(b)1). Measured from
+#: option_quote_capture: 10-16..10-23 hold twelve slots and every session from 10-26 holds 15:59.
+OQ_CLOSE_SLOT = "15:59"
+OQ_CLOSE_SLOT_FIRST_SESSION = date(2026, 10, 26)
+
+
+def _capture_slot_list() -> list:
+    """The capture's own SLOT_TIMES_ET as "HH:MM" (R-IV.1515(d)5).
+
+    Loaded from its file: this script runs on the local machine, outside the backend's import
+    path, and that module imports only the standard library at the top level.
+    """
+    path = os.path.join(os.path.dirname(HERE_DIR), "backend", "jobs", "option_quote_capture.py")
+    spec = importlib.util.spec_from_file_location("_oqc_slot_list", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return [t.strftime("%H:%M") for t in mod.SLOT_TIMES_ET]
+
+
+def expected_capture_slots(d: date, slots: list) -> list:
+    """The slots session `d` should hold: none before its era's first, none after an early close."""
+    want = [s for s in slots if s != OQ_CLOSE_SLOT or d >= OQ_CLOSE_SLOT_FIRST_SESSION]
+    if d in EARLY_CLOSES:
+        want = [s for s in want if s < "13:00"]
+    return want
+
+
+def capture_slot_check(d: date, stored, slots: list) -> tuple:
+    """(want, missing, unexpected), SLOT BY SLOT.
+
+    The old check was `count == 12`. It called every 13-slot session incomplete, and it passed
+    11-20, which holds twelve slots because its 12:30 was lost. A count cannot see which slot.
+    """
+    have = set(stored)
+    want = expected_capture_slots(d, slots)
+    return want, [s for s in want if s not in have], sorted(have - set(want))
+
+
 async def export_option_quotes() -> None:
     """One Parquet per session date, one row per (slot, contract).
 
     THE SLOT COVERAGE IS PRINTED AND CARRIED, because this is a forward collection under the
-    collector law: a session with 7 of 12 slots is usable but weaker, and a reader who cannot
-    see that treats it as complete. 12/12 is the only clean session.
+    collector law: a session missing a slot is usable but weaker, and a reader who cannot see
+    that treats it as complete. Only a session holding exactly its expected slots is clean.
     """
     import asyncpg
 
@@ -1056,6 +1095,12 @@ async def export_option_quotes() -> None:
             print("  no completed capture sessions yet; nothing exported")
             return
         print("  %d session(s) to export" % len(sessions))
+        # FAILS CLOSED: without the slot list no session can be called whole.
+        try:
+            slot_list = _capture_slot_list()
+        except Exception as exc:                                    # noqa: BLE001
+            slot_list = None
+            print("  capture slot list UNREADABLE: %s" % type(exc).__name__)
         for s in sessions:
             d = s["session_date"]
             rows = await conn.fetch(OPTION_QUOTE_ROWS_SQL, d)
@@ -1064,8 +1109,20 @@ async def export_option_quotes() -> None:
             df = pd.DataFrame([dict(r) for r in rows])
             path = os.path.join(ROOT, "option_quotes", "%s.parquet" % d.isoformat())
             row = write_parquet(df, path)
-            full = s["slots"] == len(df["slot_et"].unique()) == 12
-            note = "%d/12 slots, %d tickers" % (s["slots"], s["tickers"])
+            stored = list(df["slot_et"].unique())
+            if slot_list is None:
+                full = False
+                note = "%d slots, %d tickers; the capture's slot list could not be read" % (
+                    len(stored), s["tickers"])
+            else:
+                want, missing, unexpected = capture_slot_check(d, stored, slot_list)
+                full = not missing and not unexpected and s["slots"] == len(stored)
+                note = "%d/%d slots, %d tickers" % (len(want) - len(missing), len(want),
+                                                    s["tickers"])
+                if missing:
+                    note += "; missing " + ",".join(missing)
+                if unexpected:
+                    note += "; unexpected " + ",".join(unexpected)
             if not full:
                 # On the manifest row, so the archive carries its own incompleteness rather
                 # than leaving the next reader to count slots and discover it.

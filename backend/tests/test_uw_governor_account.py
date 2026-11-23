@@ -419,11 +419,13 @@ def test_the_two_R_IV_1408_registrations_are_the_RULED_figures():
     """
     from integrations.uw_api_cache import DAILY_BUDGET, UW_FOREIGN_RESERVE
 
-    assert g.QUOTAS["option_quote_grid"] == (640, g.TIER_STANDARD)
+    # 640 as registered; 790 since R-IV.1515(c)1 (2 extra calls x 75 slots, cap days only).
+    assert g.QUOTAS["option_quote_grid"] == (790, g.TIER_STANDARD)
     assert g.FOREIGN_RESERVE_QUOTAS["darkpool_forward"] == (400, g.TIER_STANDARD)
     # 1,310 at R-IV.1408; 1,290 since R-IV.1415(c) took a further 20 for
     # option_quote_capture. Both carves came from here for the same reason.
-    assert g.QUOTA_SAFETY_BUFFER == 1290
+    # 1,140 since R-IV.1515(c)1 took 150 for the grid's cap-day split.
+    assert g.QUOTA_SAFETY_BUFFER == 1140
 
     # The hub table lands EXACTLY on its ceiling, which is the whole point of taking the 640
     # from the buffer rather than from a caller.

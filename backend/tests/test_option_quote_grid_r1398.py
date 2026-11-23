@@ -158,7 +158,7 @@ async def test_the_grid_MAKES_NO_VENDOR_CALL_while_its_tag_is_unregistered():
     # Both states pinned, not just one: unfunded there is nothing to spend, funded the
     # ceiling follows the RULED quota so the code and the table cannot drift.
     assert ceiling_unfunded == 0
-    assert oqg.session_ceiling() == int(640 * oqg.SESSION_CEILING_FRACTION) == 614
+    assert oqg.session_ceiling() == int(790 * oqg.SESSION_CEILING_FRACTION) == 758
 
 
 def test_the_two_gates_are_reported_SEPARATELY():
@@ -190,7 +190,7 @@ def test_the_two_gates_are_reported_SEPARATELY():
     finally:
         # Restored to the RULED figure, not popped: R-IV.1408(b)2 funds it at 640 and a test
         # that left the tag unregistered would disarm every later test in the session.
-        gov.QUOTAS[oqg.CALLER_TAG] = (640, gov.TIER_STANDARD)
+        gov.QUOTAS[oqg.CALLER_TAG] = (790, gov.TIER_STANDARD)
 
 
 def test_an_empty_env_value_is_OFF_not_ON():
@@ -563,7 +563,7 @@ async def test_a_funded_slot_writes_FOUR_LEGS_per_ticker_on_EIGHT_calls():
         del os.environ[oqg.ENV_FLAG]
         # RESTORED to the RULED figure, never popped: popping leaves the tag
         # unregistered for every later test in the file (R-IV.1408(b)2 funds it at 640).
-        gov.QUOTAS[oqg.CALLER_TAG] = (640, gov.TIER_STANDARD)
+        gov.QUOTAS[oqg.CALLER_TAG] = (790, gov.TIER_STANDARD)
 
     assert out.get("blocked") is not True, out
     assert out["slot"] == "11:00"
@@ -617,7 +617,7 @@ async def test_the_second_visit_to_a_captured_slot_spends_nothing():
         del os.environ[oqg.ENV_FLAG]
         # RESTORED to the RULED figure, never popped: popping leaves the tag
         # unregistered for every later test in the file (R-IV.1408(b)2 funds it at 640).
-        gov.QUOTAS[oqg.CALLER_TAG] = (640, gov.TIER_STANDARD)
+        gov.QUOTAS[oqg.CALLER_TAG] = (790, gov.TIER_STANDARD)
 
     n_first = len(calls)
     assert n_first == 8, calls
@@ -678,4 +678,4 @@ async def test_the_health_surface_NAMES_the_block_rather_than_looking_idle():
     assert st["slots_missed"] == []
     # The ceiling now follows the RULED quota, which is what makes it impossible for the code
     # and the table to drift: 640 x 0.96.
-    assert st["ceiling"] == int(640 * oqg.SESSION_CEILING_FRACTION) == 614
+    assert st["ceiling"] == int(790 * oqg.SESSION_CEILING_FRACTION) == 758

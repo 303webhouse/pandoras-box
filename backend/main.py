@@ -662,28 +662,9 @@ async def lifespan(app: FastAPI):
                 logger.warning("Holy Grail scan loop error: %s", e)
             await asyncio.sleep(900)  # 15 minutes
 
-    # Scout Sniper scanner: RSI hooks + reversal candles every 15 min
-    async def scout_scan_loop():
-        """Run Scout Sniper scanner during market hours."""
-        import pytz
-        from datetime import datetime as dt_cls
-
-        # Offset from Holy Grail to spread load
-        await asyncio.sleep(360)  # 6 min after startup
-
-        while True:
-            try:
-                et = dt_cls.now(pytz.timezone("America/New_York"))
-                # Market hours: 9:30 AM - 4:00 PM ET, weekdays
-                if et.weekday() < 5 and 9 <= et.hour < 16:
-                    from scanners.scout_sniper_scanner import run_scout_scan, SCOUT_SCANNER_AVAILABLE
-                    if SCOUT_SCANNER_AVAILABLE:
-                        await run_scout_scan()
-                else:
-                    logger.debug("Scout scanner: outside market hours, skipping")
-            except Exception as e:
-                logger.warning("Scout scan loop error: %s", e)
-            await asyncio.sleep(900)  # 15 minutes
+    # R-IV.1515(d)1: the Scout Sniper loop is OFF, not repaired. It asked for 5 days of
+    # 15-minute bars (~130) and a 200-bar average, so every ticker raised, ~5,200 Yahoo
+    # requests a day for nothing; its last signal is 2026-03-11. The module stays.
 
     # Sector RS: compute daily pre-market, then check every hour
     async def sector_rs_loop():
@@ -1294,7 +1275,6 @@ async def lifespan(app: FastAPI):
     mtm_task = asyncio.create_task(mark_to_market_loop())
     confluence_task = asyncio.create_task(confluence_engine_loop())
     holy_grail_task = asyncio.create_task(holy_grail_scan_loop())
-    scout_task = asyncio.create_task(scout_scan_loop())
     sector_rs_task = asyncio.create_task(sector_rs_loop())
     sell_the_rip_task = asyncio.create_task(sell_the_rip_scan_loop())
     staleness_task = asyncio.create_task(factor_staleness_loop())
@@ -1612,22 +1592,10 @@ async def lifespan(app: FastAPI):
 
     oracle_task = asyncio.create_task(oracle_refresh_loop())
 
-    # Price collector: daily OHLCV for SPY + watchlist (backtesting + factor accuracy)
-    async def price_collector_loop():
-        """Collect daily prices for SPY + watchlist tickers."""
-        await asyncio.sleep(180)  # 3 min startup delay
-        while True:
-            try:
-                from analytics.price_collector import collect_price_history_cycle
-                result = await collect_price_history_cycle()
-                upserted = result.get("rows_upserted", 0)
-                if upserted > 0:
-                    logger.info("📈 Price collector: %d rows upserted", upserted)
-            except Exception as e:
-                logger.warning("Price collector error: %s", e)
-            await asyncio.sleep(3600)  # 1 hour
-
-    price_collector_task = asyncio.create_task(price_collector_loop())
+    # R-IV.1515(d)2: the price collector is OFF. It refused every insert because the database
+    # is past its own 300 MB guard, so `price_history` holds 0 rows. Its readers are left
+    # reading the empty table, as ruled. The scheduler's copy was already off
+    # (ENABLE_PRICE_HISTORY_COLLECTION is unset, default False).
 
     # Watchlist price alert: check every 30 min during market hours
     async def watchlist_price_alert_loop():
@@ -1808,7 +1776,6 @@ async def lifespan(app: FastAPI):
     mtm_task.cancel()
     confluence_task.cancel()
     holy_grail_task.cancel()
-    scout_task.cancel()
     sector_rs_task.cancel()
     sell_the_rip_task.cancel()
     staleness_task.cancel()
@@ -1826,7 +1793,6 @@ async def lifespan(app: FastAPI):
     wh_accumulation_task.cancel()
     wh_reversal_task.cancel()
     oracle_task.cancel()
-    price_collector_task.cancel()
     watchlist_alert_task.cancel()
     chronos_task.cancel()
     outcome_resolver_task.cancel()

@@ -112,6 +112,11 @@ POLL_SECONDS = 30
 DTE_MAX = 7
 UW_CONTRACT_CAP = 500
 
+#: R-IV.1515(c)1: the most extra calls one slot may spend, only on a chain at the cap and
+#: only to split it by contract type. Two calls is one split, so if two chains are capped in
+#: the same slot the first (nearest DTE, then ticker) is split and the second stays marked.
+GRID_SPLIT_EXTRA_MAX = 2
+
 #: Fraction of the registered quota this job will spend in a session. NOT a literal ceiling:
 #: a hard-coded number and a ruled quota drift apart, and the quota table is the record. The
 #: haircut leaves room for a retry and for the governor's own accounting.
@@ -580,6 +585,7 @@ async def capture_slot(now: Optional[datetime] = None,
         await load_sigma(pool, session)
 
     used_here = 0
+    split_extra = 0
     for i, (ticker, expiry, dte) in enumerate(pairs):
         if used_here >= allowance:
             summary["shed"] += 1
@@ -600,13 +606,16 @@ async def capture_slot(now: Optional[datetime] = None,
             continue
         if n_raw >= UW_CONTRACT_CAP:
             # R-IV.1513(c)2: re-ask by contract type, out of SPARE budget only -- the 30-minute
-            # job's helper and rule. The grid's allowance is ~8 calls for 8 pairs, so on most
-            # slots there is no spare and the capped chain is kept and marked, as before.
+            # job's helper and rule. R-IV.1515(c)1 funds that spare (allowance ~10 for 8 pairs)
+            # and limits it to GRID_SPLIT_EXTRA_MAX calls in a slot.
             from jobs.option_quote_capture import (SPLIT_NO_BUDGET, SPLIT_TYPES,
                                                    split_by_type, split_spare)
             outcome = SPLIT_NO_BUDGET
-            if split_spare(allowance, used_here, len(pairs) - i - 1) >= len(SPLIT_TYPES):
+            if (split_extra + len(SPLIT_TYPES) <= GRID_SPLIT_EXTRA_MAX
+                    and split_spare(allowance, used_here, len(pairs) - i - 1)
+                    >= len(SPLIT_TYPES)):
                 s_raw, s_n, s_spent, outcome = await split_by_type(_fetch, ticker, expiry)
+                split_extra += s_spent
                 used_here += s_spent
                 _calls_used += s_spent
                 summary["calls"] += s_spent

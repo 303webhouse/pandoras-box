@@ -247,7 +247,9 @@ def describe_block(sentinel) -> str:
 # margin. Asked for under R-IV.1408, not ruled then, ruled now. Same route as the 640 above and
 # for the same reason: the table sums to exactly DAILY_BUDGET - buffer, so the buffer is the
 # only source that costs no caller its measured demand.
-QUOTA_SAFETY_BUFFER = 1290  # headroom under the HUB budget, not the account limit
+# R-IV.1515(c)1: 1,290 -> 1,140, the +150 that lets the grid split a capped chain (2 extra
+# calls x 75 slots). Same route as the two carves above and for the same reason.
+QUOTA_SAFETY_BUFFER = 1140  # headroom under the HUB budget, not the account limit
 
 # ── RETUNED 2026-09-14 AGAINST MEASURED DEMAND (R-IV.379(c)) ────────────
 # The previous table called itself "STARTING VALUES to tune against the first
@@ -405,7 +407,12 @@ QUOTAS: Dict[str, Tuple[int, str]] = {
     # applies and an exemption would be a licence it has no use for. STANDARD, not FOREGROUND:
     # a forward collection should be shed before a live quote, and FOREGROUND would buy
     # immunity from shedding that this does not need.
-    "option_quote_grid": (640, TIER_STANDARD),
+    #
+    # R-IV.1515(c)1: 640 -> 790. Up to 2 extra calls in a slot (x 75), ONLY for a ticker whose
+    # chain came back at the 500-contract cap and ONLY to split it by contract type. A day
+    # with no capped chain still spends the 600 fixed calls; the limit is enforced in
+    # option_quote_grid.GRID_SPLIT_EXTRA_MAX.
+    "option_quote_grid": (790, TIER_STANDARD),
     "darkpool_ticker": (500, TIER_STANDARD),
     # R-IV.867(e): the daily ATM implied-volatility snapshot. Runs ONCE a session at 16:45 ET,
     # one /option-contracts call per universe ticker. 250 covers the universe with headroom and

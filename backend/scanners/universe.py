@@ -87,7 +87,9 @@ async def build_scan_universe(
     max_tickers: int = 300,
     include_scanner_universe: bool = True,
     respect_muted: bool = True,
-    use_polygon_prefilter: bool = True,
+    # R-IV.1515(d)4: OFF. The snapshot answers HTTP 403 on every call, and each scanner
+    # already fell back to the standard universe below.
+    use_polygon_prefilter: bool = False,
 ) -> List[str]:
     """
     Build deduplicated scan universe in priority order:

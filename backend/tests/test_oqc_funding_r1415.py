@@ -60,7 +60,8 @@ def test_the_calls_count_in_the_HUB_total_and_shed_at_STANDARD():
     assert g.ACCOUNT_SHED_AT[tier] == 0.75
     assert int(g.ACCOUNT_SHED_AT[tier] * UW_ACCOUNT_LIMIT) == 30000
     # And the raise came from the buffer, so the table still lands exactly on its ceiling.
-    assert g.QUOTA_SAFETY_BUFFER == 1290
+    # 1,140 since R-IV.1515(c)1 took a further 150 for the grid's cap-day split.
+    assert g.QUOTA_SAFETY_BUFFER == 1140
     assert sum(q for q, _ in g.QUOTAS.values()) == DAILY_BUDGET - g.QUOTA_SAFETY_BUFFER
 
 

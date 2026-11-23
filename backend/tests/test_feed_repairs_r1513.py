@@ -326,7 +326,7 @@ def test_grid_a_capped_chain_is_split_from_spare_budget():
     finally:
         oqg._fetch, pg.get_postgres_client = real_fetch, real_pool
         del os.environ[oqg.ENV_FLAG]
-        gov.QUOTAS[oqg.CALLER_TAG] = (640, gov.TIER_STANDARD)   # the RULED figure
+        gov.QUOTAS[oqg.CALLER_TAG] = (790, gov.TIER_STANDARD)   # the RULED figure
 
     keys = [k for k in out["split"]]
     assert len(keys) == 1 and keys[0].startswith("QQQ:"), out["split"]

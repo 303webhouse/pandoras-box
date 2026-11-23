@@ -5,7 +5,8 @@ Computes the difference between 19-day EMA and 39-day EMA of daily NYSE
 net advances (advancing issues - declining issues). Positive = healthy
 breadth momentum, negative = deteriorating breadth.
 
-Data source: yfinance ^ADVN / ^DECLN (NYSE advancing/declining issues).
+Data source: NYSE Composite (^NYA) daily returns as a breadth proxy. The direct
+^ADVN / ^DECLN source was removed by R-IV.1515(d)3: Yahoo no longer serves those symbols.
 Redis history: sorted set storing daily net advance readings for EMA calc.
 Staleness: 48h — swing timeframe.
 """
@@ -37,22 +38,16 @@ async def compute_score() -> Optional[FactorReading]:
     """Compute McClellan Oscillator from NYSE advance/decline data.
 
     Data source priority:
-    1. Direct ADVN/DECLN from yfinance (ideal, but Yahoo dropped these symbols)
-    2. NYSE Composite (^NYA) daily returns as breadth proxy
-    3. Redis history from prior /webhook/mcclellan calls
+    1. NYSE Composite (^NYA) daily returns as breadth proxy
+    2. Redis history from prior /webhook/mcclellan calls
     """
-    # --- Source 1: Direct ADVN/DECLN (may return in future) ---
-    combined = await _try_advn_decln()
-    source_label = "yfinance"
+    # --- Source 1: NYSE Composite proxy ---
+    combined = await _try_nyse_proxy()
+    source_label = "nyse_proxy"
 
-    # --- Source 2: NYSE Composite proxy ---
+    # --- Source 2: Redis history fallback ---
     if combined is None or len(combined) < MIN_HISTORY_FOR_EMA:
-        combined = await _try_nyse_proxy()
-        source_label = "nyse_proxy"
-
-    # --- Source 3: Redis history fallback ---
-    if combined is None or len(combined) < MIN_HISTORY_FOR_EMA:
-        logger.info("mcclellan: ADVN/DECLN and NYSE proxy unavailable — trying Redis history")
+        logger.info("mcclellan: NYSE proxy unavailable — trying Redis history")
         return await _compute_from_redis_history()
 
     # Compute net advances column if not present
@@ -84,43 +79,6 @@ async def compute_score() -> Optional[FactorReading]:
             "data_points": len(combined),
         },
     )
-
-
-async def _try_advn_decln() -> Optional[pd.DataFrame]:
-    """Try fetching raw NYSE advancing/declining issue counts from yfinance."""
-    advn_symbols = ["^ADVN", "^ADV", "ADVN"]
-    decln_symbols = ["^DECLN", "^DEC", "DECLN"]
-
-    advn_data = None
-    for sym in advn_symbols:
-        advn_data = await get_price_history(sym, days=60)
-        if advn_data is not None and not advn_data.empty and "close" in advn_data.columns:
-            break
-        advn_data = None
-
-    decln_data = None
-    for sym in decln_symbols:
-        decln_data = await get_price_history(sym, days=60)
-        if decln_data is not None and not decln_data.empty and "close" in decln_data.columns:
-            break
-        decln_data = None
-
-    if advn_data is None or decln_data is None:
-        return None
-
-    advn_vals = advn_data["close"].astype(float).dropna().reset_index(drop=True)
-    decln_vals = decln_data["close"].astype(float).dropna().reset_index(drop=True)
-    min_len = min(len(advn_vals), len(decln_vals))
-    if min_len < 5:
-        return None
-
-    combined = pd.DataFrame({
-        "advn": advn_vals.iloc[-min_len:].values,
-        "decln": decln_vals.iloc[-min_len:].values,
-    })
-    combined["net_advances"] = combined["advn"] - combined["decln"]
-    logger.debug("mcclellan: ADVN/DECLN fetched (%d rows)", len(combined))
-    return combined
 
 
 async def _try_nyse_proxy() -> Optional[pd.DataFrame]:
