@@ -203,6 +203,14 @@ SESSION_JOB_CLASSES = frozenset({"triton_grader", "circes_stew", "circes_stew_un
 # that session is considered due.
 SESSION_JOB_DUE_HOUR_ET = 17
 
+# R-IV.1515(h)3: classes whose pass for a session runs THE NEXT MORNING. lab_registered runs
+# tue-sat at 07:00 ET on the previous session's final bar (at most 33 s in its 30 runs), so
+# holding it to 17:00 on the session's own day read every Monday evening as a missing pass until
+# Tuesday's run. Its pass is due at 09:00 ET the calendar day after the session: two hours of
+# grace, and still before the open.
+NEXT_MORNING_CLASSES = frozenset({"lab_registered"})
+NEXT_MORNING_DUE_HOUR_ET = 9
+
 # Per-class staleness SLO (seconds) -- the "nothing is arriving at all" detector.
 DEFAULT_SLO_SECONDS = 4 * 3600
 SLO_SECONDS: dict[str, int] = {
@@ -269,7 +277,7 @@ SLO_SECONDS: dict[str, int] = {
 RTH_ONLY_CLASSES = frozenset({"tradingview", "server_scanner", "cta_scanner",
                              "footprint", "STRIKE_IB_BREAK"})
 
-def _pass_overdue(last_session_date, now_et=None) -> bool:
+def _pass_overdue(last_session_date, now_et=None, next_morning: bool = False) -> bool:
     """Is a session-job pass actually DUE and missing?
 
     Weekday approximation, deliberately and temporarily: T7 replaces this with the
@@ -286,7 +294,10 @@ def _pass_overdue(last_session_date, now_et=None) -> bool:
     from stable_engine.market_calendar import CalendarHorizonError, is_trading_day
 
     d = now_et.date()
-    if now_et.hour < SESSION_JOB_DUE_HOUR_ET:
+    if next_morning:
+        # The newest session whose NEXT calendar morning has reached the due hour.
+        d = d - timedelta(days=1 if now_et.hour >= NEXT_MORNING_DUE_HOUR_ET else 2)
+    elif now_et.hour < SESSION_JOB_DUE_HOUR_ET:
         d = d - timedelta(days=1)
     try:
         while not is_trading_day(d):
@@ -345,7 +356,9 @@ def _class_status(cls: str, age: float | None, rejected: int,
         # A session job is judged on WHETHER A DUE PASS IS MISSING, then on the
         # hour bound. Age alone cannot distinguish "no pass was due" (a weekend)
         # from "a pass was due and never came" -- and those are opposite facts.
-        if not _pass_overdue(last_session_date):
+        overdue = (_pass_overdue(last_session_date, next_morning=True)
+                   if cls in NEXT_MORNING_CLASSES else _pass_overdue(last_session_date))
+        if not overdue:
             return "ok"
         if age is None:
             return "no_data"

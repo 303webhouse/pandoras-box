@@ -245,7 +245,7 @@ def test_reads_and_valid_credentials_pass_untouched(monkeypatch, captured, mode)
 def test_a_hook_passes_in_enforce_and_leaves_a_source_sample(monkeypatch, captured):
     monkeypatch.setenv("WRITE_GUARD_MODE", "enforce")
     resp = TestClient(_tiny()).post("/webhook/tradingview",
-                                    headers={"X-Forwarded-For": "52.89.214.238"})
+                                    headers={"X-Forwarded-For": "52.89.214.238, 84.17.44.221"})
     assert resp.status_code == 200
     assert captured[0]["kind"] == "hook_seen" and captured[0]["credential"] is None
 

@@ -20,10 +20,10 @@ recorded as `hook_seen`, sources only, a bounded sample per day, so a hook's rea
 shown by address before its own switch is turned on.
 
 R-IV.1456(e)3, THE SOURCE CHECK: every hook TradingView sends to is also checked by where the
-request came from. A request whose real source address (X-Real-IP, which Railway overwrites --
-a client-supplied value does not survive, measured 2026-10-30 18:07 UTC) is not one of
-TradingView's four published webhook addresses is recorded as `source_unlisted`. It refuses
-nothing until `WEBHOOK_SOURCE_CHECK` is "enforce" (a deploy, on SPINE's go).
+request came from. A request whose real source address (the X-Forwarded-For entry Railway's edge
+wrote, see `source_address`) is not one of TradingView's four published webhook addresses is
+recorded as `source_unlisted`. It refuses nothing until `WEBHOOK_SOURCE_CHECK` is "enforce" (a
+deploy, on SPINE's go). R-IV.1515(h)1: the first refusal per path per UTC day sends one push.
 
 R-IV.1456(c)2, THE CONSENT FORM: /mcp/v1/consent is NOT on the allowlist. It needs Nick's signed-in
 session, and a session cookie alone is enough there: the form is a plain HTML POST that cannot
@@ -143,12 +143,19 @@ def source_mode() -> str:
 
 
 def source_address(headers) -> str:
-    """The request's real source: X-Real-IP (Railway sets it and overwrites a client's), else
-    the first X-Forwarded-For hop. Empty when neither is present."""
-    real = (headers.get("x-real-ip") or "").strip()
-    if real:
-        return real
-    return (headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    """The request's real source, as RAILWAY'S EDGE recorded it (R-IV.1515(h)2).
+
+    X-Forwarded-For reads "<sender>, <edge>": the last entry is the edge's own address and the
+    one before it is the peer the edge saw. Anything further left is what the CLIENT claimed, so
+    the first entry is the one value in the header a sender can choose. Measured over every
+    hook row to 2026-11-23: 2,509 of 2,509 have exactly two entries, with X-Real-IP equal to the
+    second-last. X-Real-IP is the fallback for a header too short to hold that entry; the first
+    entry is never read. Empty when neither is present.
+    """
+    hops = [h.strip() for h in (headers.get("x-forwarded-for") or "").split(",") if h.strip()]
+    if len(hops) >= 2:
+        return hops[-2]
+    return (headers.get("x-real-ip") or "").strip()
 
 
 def source_is_tradingview(headers) -> bool:
@@ -283,6 +290,80 @@ def record(event: dict) -> None:
         logger.warning("[write_guard] record failed: %s", type(exc).__name__)
 
 
+# ── the refusal alarm (R-IV.1515(h)1) ─────────────────────────────────────────────────
+
+#: Long enough to outlive the UTC day the key names.
+REFUSAL_PUSH_TTL_S = 2 * 24 * 3600
+_refusal_pushed: set = set()
+
+
+def _push_safe_address(addr: str) -> str:
+    """The address for the push, with dots as dashes.
+
+    ntfy_push refuses any text holding a figure like "52.89" as money to the cent, and an IPv4
+    address holds one in nearly every case, so the alarm would raise exactly when it had
+    something to say. Anything that is not an address is reported as "unknown".
+    """
+    import ipaddress
+    try:
+        return str(ipaddress.ip_address((addr or "").strip())).replace(".", "-")
+    except ValueError:
+        return "unknown"
+
+
+async def _alarm_refusal(path: str, addr: str, now: Optional[datetime] = None) -> None:
+    """One push for the first refusal on this path this UTC day. Never raises.
+
+    Redis makes "first" survive a restart; if it cannot answer, this process's own set still
+    limits the sends. A push that did not go out gives the slot back, so the next refusal tries
+    again: an alarm that failed once must not stay silent for the rest of the day.
+    """
+    day = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    mark = (day, path)
+    if mark in _refusal_pushed:
+        return
+    _refusal_pushed.add(mark)
+    key = "write_guard:source_refused_push:%s:%s" % (day, path)
+    client = None
+    try:
+        try:
+            from database.redis_client import get_redis_client
+            client = await get_redis_client()
+            if client is not None and not await client.set(key, "1", nx=True,
+                                                           ex=REFUSAL_PUSH_TTL_S):
+                return
+        except Exception as exc:                                    # noqa: BLE001
+            client = None
+            logger.warning("[write_guard] refusal alarm: redis unavailable: %s",
+                           type(exc).__name__)
+        from integrations import ntfy_push
+        out = await ntfy_push.send("HOOK", "source refused",
+                                   "%s from %s" % (path, _push_safe_address(addr)),
+                                   title="Pandora: hook refused", priority="high")
+        if out.get("sent"):
+            return
+        logger.error("[write_guard] refusal alarm NOT sent for %s: %s", path, out.get("reason"))
+    except Exception as exc:                                        # noqa: BLE001
+        logger.error("[write_guard] refusal alarm failed for %s: %s", path, type(exc).__name__)
+    _refusal_pushed.discard(mark)
+    if client is not None:
+        try:
+            await client.delete(key)
+        except Exception:                                           # noqa: BLE001
+            pass
+
+
+def _schedule_refusal_alarm(path: str, headers) -> None:
+    """Off the request path: a refusal must not wait on a push. Never raises."""
+    try:
+        # Off only in the test suite (tests/conftest.py), as for `record`.
+        if (os.getenv("WRITE_GUARD_RECORD") or "").strip().lower() == "off":
+            return
+        asyncio.ensure_future(_alarm_refusal(path, source_address(headers)))
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[write_guard] refusal alarm not scheduled: %s", type(exc).__name__)
+
+
 # ── the middleware ────────────────────────────────────────────────────────────────────────
 
 _REFUSAL_BODY = json.dumps({"detail": "Invalid or missing API key"}).encode()
@@ -310,6 +391,7 @@ class WriteGuardMiddleware:
                     record(build_event("hook_seen", scope, headers, None))
                 elif source_mode() == "enforce":
                     record(build_event("source_refused", scope, headers, "source"))
+                    _schedule_refusal_alarm(path, headers)
                     return await _refuse(send, _REFUSAL_BODY)
                 else:
                     record(build_event("source_unlisted", scope, headers, "source"))
