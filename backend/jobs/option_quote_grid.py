@@ -564,7 +564,7 @@ async def capture_slot(now: Optional[datetime] = None,
         "slot": slot_key, "session_date": session.isoformat(),
         "planned": len(pairs), "allowance": allowance, "ceiling": ceiling,
         "captured": 0, "rows": 0, "absent": 0, "unavailable": 0, "shed": 0,
-        "calls": 0, "move_methods": {}, "degenerate": 0, "truncated": [],
+        "calls": 0, "move_methods": {}, "degenerate": 0, "truncated": [], "split": {},
         "band_rows": 0, "band_tickers": 0, "band_skipped": {},
     }
 
@@ -580,7 +580,7 @@ async def capture_slot(now: Optional[datetime] = None,
         await load_sigma(pool, session)
 
     used_here = 0
-    for ticker, expiry, dte in pairs:
+    for i, (ticker, expiry, dte) in enumerate(pairs):
         if used_here >= allowance:
             summary["shed"] += 1
             continue
@@ -598,6 +598,21 @@ async def capture_slot(now: Optional[datetime] = None,
         if raw is None:
             summary["unavailable"] += 1
             continue
+        if n_raw >= UW_CONTRACT_CAP:
+            # R-IV.1513(c)2: re-ask by contract type, out of SPARE budget only -- the 30-minute
+            # job's helper and rule. The grid's allowance is ~8 calls for 8 pairs, so on most
+            # slots there is no spare and the capped chain is kept and marked, as before.
+            from jobs.option_quote_capture import (SPLIT_NO_BUDGET, SPLIT_TYPES,
+                                                   split_by_type, split_spare)
+            outcome = SPLIT_NO_BUDGET
+            if split_spare(allowance, used_here, len(pairs) - i - 1) >= len(SPLIT_TYPES):
+                s_raw, s_n, s_spent, outcome = await split_by_type(_fetch, ticker, expiry)
+                used_here += s_spent
+                _calls_used += s_spent
+                summary["calls"] += s_spent
+                if s_raw is not None:
+                    raw, n_raw = s_raw, s_n
+            summary["split"]["%s:%s" % (ticker, expiry.isoformat())] = outcome
         if n_raw >= UW_CONTRACT_CAP:
             logger.error("[oqg] %s %s returned %d >= cap %d - CENSORED",
                          ticker, expiry, n_raw, UW_CONTRACT_CAP)
@@ -661,7 +676,8 @@ async def capture_slot(now: Optional[datetime] = None,
     return summary
 
 
-async def _fetch(ticker: str, expiry: date) -> Tuple[Optional[list], int]:
+async def _fetch(ticker: str, expiry: date,
+                 option_type: Optional[str] = None) -> Tuple[Optional[list], int]:
     """ONE governed, UNCACHED call on this job's own tag.
 
     `_uw_request`, not `get_options_snapshot`, for the two reasons the 30-minute job records:
@@ -672,9 +688,13 @@ async def _fetch(ticker: str, expiry: date) -> Tuple[Optional[list], int]:
     """
     from integrations.uw_api import _uw_request
 
+    # `option_type` is UW's native filter, used only by the split (R-IV.1513(c)2).
+    params = {"expiry": expiry.isoformat()}
+    if option_type:
+        params["option_type"] = option_type
     data = await _uw_request(
         "/api/stock/%s/option-contracts" % ticker.upper(),
-        params={"expiry": expiry.isoformat()},
+        params=params,
         caller=CALLER_TAG,
     )
     if not data or not isinstance(data, dict) or "data" not in data:

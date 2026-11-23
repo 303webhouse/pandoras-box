@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 
 import pytz
 
@@ -575,6 +576,45 @@ NIGHTLY_RETRY_EVERY_S = 15 * 60          # a failed pass is re-attempted every 1
 NIGHTLY_RETRY_UNTIL_HOUR_ET = 23         # ...until 23:59 ET; past that it is tomorrow's
 _nightly_attempted_at: dict = {}         # session key -> last attempt (rate limit only)
 
+#: R-IV.1513(c)3: ...AND A SESSION STILL NOT COMPLETE AT MIDNIGHT IS CARRIED until 09:00 ET the
+#: next morning, still every NIGHTLY_RETRY_EVERY_S. On 11-19 Yahoo served 1 of 540 bars through
+#: all twelve attempts (21:00-23:48 ET); the cut-off at 23:59 ended the retry, so 11-19's
+#: metrics were not written until the NEXT night's pass and the whole of Friday 11-20 ran on
+#: 11-18's. 09:00 is before the open, so a carried pass never runs into the session it would
+#: be read in. Past it the session is left to the next night's re-request (R-IV.517(b)), as
+#: before.
+NIGHTLY_CARRY_UNTIL_HOUR_ET = 9
+
+
+def carried_nightly_session(et) -> Optional[date]:
+    """The previous session, while its nightly may still be retried in the small hours.
+
+    None at or after NIGHTLY_CARRY_UNTIL_HOUR_ET, and None when yesterday was not a trading
+    day -- or when the calendar cannot say: UNKNOWN is not YES. Monday morning carries nothing,
+    because Sunday was not a session and Friday's had its night and Saturday's small hours.
+    """
+    if et.hour >= NIGHTLY_CARRY_UNTIL_HOUR_ET:
+        return None
+    prev = et.date() - timedelta(days=1)
+    try:
+        from stable_engine.market_calendar import is_trading_day_or_none
+        return prev if is_trading_day_or_none(prev) is True else None
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[stable_jobs] carry: calendar unreadable for %s: %s", prev, exc)
+        return None
+
+
+async def _carry_tick(et) -> None:
+    """One loop tick of the R-IV.1513(c)3 carry. Never raises.
+
+    The rate-limit key is the CARRIED session's date, the same key the evening's attempts used,
+    so the 15-minute spacing runs straight through midnight.
+    """
+    session = carried_nightly_session(et)
+    if session is None:
+        return
+    await _maybe_run_nightly(et, session.isoformat(), session=session)
+
 #: Regime v1 (R-IV.1195(b)). It runs AFTER the nightly, because it classifies from the bars the
 #: nightly writes: on a session where the nightly has not yet advanced `stable_daily_bars`, the
 #: newest bar is yesterday's and the label would be stamped with yesterday's `as_of`. The
@@ -865,8 +905,11 @@ async def _maybe_run_shadow_grader(et, key_prefix: str) -> None:
                   session_date=et.date())
 
 
-async def _maybe_run_nightly(et, key_prefix: str) -> None:
+async def _maybe_run_nightly(et, key_prefix: str, session: Optional[date] = None) -> None:
     """Run the nightly if this session's pass has not completed. Never raises.
+
+    `session` is the session the pass is for: et's own date in the evening, the previous
+    session when carried past midnight (R-IV.1513(c)3).
 
     THE TRI-STATE IS LOAD-BEARING. `has_completed` returns True / False / None,
     and None means THE QUESTION COULD NOT BE ANSWERED -- which, on the night this
@@ -883,11 +926,12 @@ async def _maybe_run_nightly(et, key_prefix: str) -> None:
     """
     from jobs.job_runs import JOB_NIGHTLY, has_completed
 
+    session = session or et.date()
     last = _nightly_attempted_at.get(key_prefix)
     if last is not None and (et - last).total_seconds() < NIGHTLY_RETRY_EVERY_S:
         return
     try:
-        done = await has_completed(JOB_NIGHTLY, et.date())
+        done = await has_completed(JOB_NIGHTLY, session)
     except Exception as exc:
         logger.warning("[stable_jobs] nightly completion check failed: %s", exc)
         done = None
@@ -896,7 +940,7 @@ async def _maybe_run_nightly(et, key_prefix: str) -> None:
     _nightly_attempted_at[key_prefix] = et
     if last is not None:
         logger.warning("[stable_jobs] nightly RETRY for %s (completed=%s)", key_prefix, done)
-    await _record("nightly", run_nightly_close_recompute, session_date=et.date())
+    await _record("nightly", run_nightly_close_recompute, session_date=session)
 
 
 async def _maybe_run_regime(et, key_prefix: str) -> None:
@@ -977,6 +1021,9 @@ async def stable_engine_loop():
         try:
             et = now_et()
             key_prefix = et.strftime("%Y-%m-%d")
+            # R-IV.1513(c)3: OUTSIDE the weekday gate, because Friday's session is carried
+            # into Saturday's small hours.
+            await _carry_tick(et)
             if is_weekday(et):
                 # Provisional snapshots
                 for (h, m) in PROVISIONAL_TIMES:

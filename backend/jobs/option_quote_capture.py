@@ -167,6 +167,9 @@ ATM_FROM_MEDIAN = "median"
 _session_et_date: Optional[str] = None
 _calls_used = 0
 _slots_done: set = set()
+#: slot_key -> calls the slot may still spend on a re-ask (R-IV.1513(c)1). A slot that stays due
+#: re-asks out of the share it was first given, never a fresh one.
+_slot_share_left: Dict[str, int] = {}
 #: (ticker, expiry_iso) -> True when the vendor has served it, False when probed and empty.
 _expiry_known: Dict[Tuple[str, str], bool] = {}
 _last_result: Dict[str, object] = {}
@@ -175,21 +178,24 @@ _last_result: Dict[str, object] = {}
 def reset_for_tests() -> None:
     """Clear per-session state. Tests only."""
     global _session_et_date, _calls_used, _slots_done, _expiry_known, _last_result
+    global _slot_share_left
     _session_et_date = None
     _calls_used = 0
     _slots_done = set()
+    _slot_share_left = {}
     _expiry_known = {}
     _last_result = {}
 
 
 def _roll_session(et_date: str) -> bool:
     """Start a new session when the ET date changes. True when a roll happened."""
-    global _session_et_date, _calls_used, _slots_done, _expiry_known
+    global _session_et_date, _calls_used, _slots_done, _expiry_known, _slot_share_left
     if _session_et_date == et_date:
         return False
     _session_et_date = et_date
     _calls_used = 0
     _slots_done = set()
+    _slot_share_left = {}
     _expiry_known = {}
     return True
 
@@ -386,24 +392,116 @@ def select_window(contracts: List[dict], window: int = STRIKE_WINDOW
 # one call
 # ---------------------------------------------------------------------------
 
-async def fetch_expiry(ticker: str, expiry: date) -> Tuple[Optional[list], int]:
+async def fetch_expiry(ticker: str, expiry: date,
+                       option_type: Optional[str] = None) -> Tuple[Optional[list], int]:
     """(raw contracts, raw count). ONE governed, UNCACHED call on this job's own tag.
 
     `_uw_request` rather than `get_options_snapshot`: see the module docstring. A falsy
-    response (including the governor's typed sentinel) comes back as None and the caller
-    records the slot as incomplete rather than as empty.
+    response comes back as None and the caller records the slot as incomplete rather than as
+    empty.
+
+    R-IV.1513(c)1: A REFUSAL THAT NEVER LEFT THIS PROCESS comes back AS the governor's
+    sentinel, so the caller can leave it out of the session's call count. Until a slot that
+    stored nothing stayed due, a refusal cost the slot once; now the slot is re-asked each
+    minute of its grace, and counting every refused re-ask as a spent call would eat the
+    budget the later slots are owed. A 429 is NOT one of these: UW answered it, the governor
+    counted it, and it still comes back as None and counts.
+
+    `option_type` ("call" / "put") is UW's native filter, used only by `split_by_type`.
     """
     from integrations.uw_api import _uw_request
 
+    params = {"expiry": expiry.isoformat()}
+    if option_type:
+        params["option_type"] = option_type
     data = await _uw_request(
         "/api/stock/%s/option-contracts" % ticker.upper(),
-        params={"expiry": expiry.isoformat()},
+        params=params,
         caller=CALLER_TAG,
     )
+    if _never_sent(data):
+        return data, 0
     if not data or not isinstance(data, dict) or "data" not in data:
         return None, 0
     raw = data["data"] or []
     return raw, len(raw)
+
+
+def _never_sent(obj) -> bool:
+    """True for a governor sentinel whose call never reached UW (quota, breaker, account
+    shed, circuit). False for everything else, including a 429 and an unreadable governor."""
+    try:
+        from integrations.uw_governor import VENDOR_ANSWERED, is_unavailable
+    except Exception:                                               # noqa: BLE001
+        return False
+    return is_unavailable(obj) and getattr(obj, "reason", None) not in VENDOR_ANSWERED
+
+
+# ---------------------------------------------------------------------------
+# a capped chain, re-asked by contract type (R-IV.1513(c)2)
+# ---------------------------------------------------------------------------
+#
+# 11-20 was a monthly expiry and QQQ's same-day chain came back at the 500-contract cap in
+# every grid slot (74/74) and every 30-minute slot (12/12, the close included). The legs and the
+# band were stored, but a response at the cap may have been cut, and which strikes it lost
+# cannot be told from what it kept. UW filters natively by type, so the same chain asked as
+# calls and then as puts is two responses of roughly half the size.
+
+SPLIT_TYPES: Tuple[str, ...] = ("call", "put")
+
+SPLIT_OK = "split"                   # both halves under the cap: the chain is complete
+SPLIT_CAPPED = "split_capped"        # a half is itself at the cap: still truncated
+SPLIT_FAILED = "split_failed"        # a half did not come back, or came back the wrong type
+SPLIT_NO_BUDGET = "split_no_budget"  # the slot had no spare calls; the capped chain is kept
+
+
+def split_spare(allowance: int, used_here: int, pairs_after: int) -> int:
+    """Calls this slot can spend on a split WITHOUT shedding a pair it has not reached yet.
+
+    The split is paid for out of spare budget only. Funding it by shedding a later ticker
+    would trade one name's complete chain for another name's whole quote.
+    """
+    return allowance - used_here - pairs_after
+
+
+async def split_by_type(fetch, ticker: str, expiry: date
+                        ) -> Tuple[Optional[list], int, int, str]:
+    """(raw, n_raw, calls_spent, outcome). Never raises.
+
+    `raw` is both halves together, or None when the split failed (the caller keeps the capped
+    chain it already has). `n_raw` is the LARGER HALF -- the size of the biggest single
+    response, which is what the cap applies to -- so `truncated = n_raw >= cap` keeps meaning
+    exactly what it meant, and a half still at the cap is still marked truncated.
+
+    A half carrying a contract of the other type means the filter was not honoured; the halves
+    would then overlap, so that is a failure, not a merge.
+    """
+    from integrations.uw_api import _parse_option_symbol
+
+    halves: List[list] = []
+    spent = 0
+    for kind in SPLIT_TYPES:
+        try:
+            raw, _n = await fetch(ticker, expiry, option_type=kind)
+        except Exception as exc:                                    # noqa: BLE001
+            logger.warning("[oqc] %s %s %s split failed: %s", ticker, expiry, kind,
+                           type(exc).__name__)
+            return None, 0, spent, SPLIT_FAILED
+        if _never_sent(raw):
+            return None, 0, spent, SPLIT_FAILED
+        spent += 1
+        if raw is None:
+            return None, 0, spent, SPLIT_FAILED
+        for c in raw:
+            parsed = _parse_option_symbol((c or {}).get("option_symbol") or "")
+            if parsed and parsed.get("type") != kind:
+                logger.error("[oqc] %s %s: the %s half holds a %s -- filter not honoured",
+                             ticker, expiry, kind, parsed.get("type"))
+                return None, 0, spent, SPLIT_FAILED
+        halves.append(list(raw))
+    n_max = max(len(h) for h in halves)
+    return ([c for h in halves for c in h], n_max, spent,
+            SPLIT_CAPPED if n_max >= UW_CONTRACT_CAP else SPLIT_OK)
 
 
 # ---------------------------------------------------------------------------
@@ -449,13 +547,20 @@ async def capture_slot(now: Optional[datetime] = None,
     remaining_slots = sum(1 for s in SLOT_TIMES_ET if s >= slot)
     ceiling = session_ceiling()
     allowance = slot_allowance(_calls_used, remaining_slots, ceiling)
+    # R-IV.1513(c)1: A RE-ASK SPENDS ONLY WHAT IS LEFT OF THIS SLOT'S OWN SHARE. Recomputed
+    # fresh, `remaining // remaining_slots` would hand every re-ask a new share -- this slot is
+    # still counted among the remaining -- and a vendor answering empty for the whole 25-minute
+    # grace would spend (1 - 1/n)^25 of the budget: from 12:30 (n = 8), all but ~4% of what the
+    # close is owed. Capped, the slot's attempts together never exceed its first share.
+    if slot_key in _slot_share_left:
+        allowance = min(allowance, _slot_share_left[slot_key])
 
     pairs = plan_pairs(session)
     summary = {
         "slot": slot_key, "session_date": session.isoformat(),
         "planned": len(pairs), "allowance": allowance,
         "captured": 0, "rows": 0, "absent": 0, "unavailable": 0, "shed": 0,
-        "truncated": [], "calls": 0, "atm_methods": {},
+        "truncated": [], "calls": 0, "atm_methods": {}, "refused": 0, "split": {},
     }
 
     pool = None
@@ -491,7 +596,7 @@ async def capture_slot(now: Optional[datetime] = None,
     lost_tickers: set = set()
 
     used_here = 0
-    for ticker, expiry, dte in pairs:
+    for i, (ticker, expiry, dte) in enumerate(pairs):
         if used_here >= allowance:
             summary["shed"] += 1
             lost_tickers.add(ticker)
@@ -503,6 +608,13 @@ async def capture_slot(now: Optional[datetime] = None,
             summary["unavailable"] += 1
             lost_tickers.add(ticker)
             continue
+        if _never_sent(raw):
+            # R-IV.1513(c)1: refused before it left this process -- unavailable, LOST, and
+            # not a spent call.
+            summary["unavailable"] += 1
+            summary["refused"] += 1
+            lost_tickers.add(ticker)
+            continue
         used_here += 1
         _calls_used += 1
         summary["calls"] += 1
@@ -511,6 +623,18 @@ async def capture_slot(now: Optional[datetime] = None,
             summary["unavailable"] += 1
             lost_tickers.add(ticker)
             continue
+        if n_raw >= UW_CONTRACT_CAP:
+            # R-IV.1513(c)2: re-ask by contract type, out of spare budget only.
+            outcome = SPLIT_NO_BUDGET
+            if split_spare(allowance, used_here, len(pairs) - i - 1) >= len(SPLIT_TYPES):
+                s_raw, s_n, s_spent, outcome = await split_by_type(fetch_expiry, ticker, expiry)
+                used_here += s_spent
+                _calls_used += s_spent
+                summary["calls"] += s_spent
+                if s_raw is not None:
+                    raw, n_raw = s_raw, s_n
+            summary["split"]["%s:%s" % (ticker, expiry.isoformat())] = outcome
+            logger.warning("[oqc] %s %s at the cap: %s", ticker, expiry, outcome)
         if n_raw >= UW_CONTRACT_CAP:
             # Per-expiry calls should sit far under the cap; if one does not, the capture is
             # censored and that must be visible rather than averaged over later.
@@ -545,7 +669,29 @@ async def capture_slot(now: Optional[datetime] = None,
     summary["tickers_saved"] = sorted(saved_tickers)
     summary["tickers_missing"] = sorted(lost_tickers - saved_tickers)
 
-    if used_here:
+    # R-IV.1513(c)1: A SLOT THAT STORED NOTHING STAYS DUE while it is inside its grace. On
+    # 11-20 one 429 at 12:20:11 ET shed this job until 12:30:12; the 12:30 slot fired at
+    # 12:30:01, stored nothing, and was marked done, so the wake-up at 12:31 -- which would
+    # have been served -- found it "already captured". A slot whose every pair the vendor
+    # answered as absent had nothing to store and is done; a slot that saved even one ticker
+    # is done too, because re-asking it would overwrite those rows with later quotes.
+    # `due_slot` still bounds the retry: past the grace the slot is gone, as before.
+    #
+    # THE CLOSE NEVER RE-ASKS. Its 2-minute grace exists for wake-up phase, not for a second
+    # attempt: the loop wakes on 15:59:01, so a re-ask lands at 16:00:01 -- after the close, the
+    # one quote this series must never contain, stamped 15:59. A refused close is therefore done
+    # once it has been tried, refused calls included.
+    stored_nothing = summary["rows"] == 0 and bool(summary["tickers_missing"])
+    attempted = bool(used_here or summary["refused"])
+    _slot_share_left[slot_key] = max(0, allowance - used_here)
+    if slot == CLOSE_SLOT and attempted:
+        _slots_done.add(slot_key)
+    elif stored_nothing:
+        summary["stays_due_until"] = (
+            datetime.combine(session, slot)
+            + timedelta(minutes=SLOT_GRACE_OVERRIDE_MINUTES.get(slot, SLOT_GRACE_MINUTES))
+        ).strftime("%H:%M")
+    elif used_here:
         _slots_done.add(slot_key)
     summary["calls_used_session"] = _calls_used
     summary["ceiling"] = ceiling
@@ -634,10 +780,14 @@ async def _finish(run_id, summary: dict, pool) -> None:
                                    finish_run)
         rows = int(summary.get("rows") or 0)
         missing = list(summary.get("tickers_missing") or [])
+        again = summary.get("stays_due_until")
+        again_txt = ("; stays due until %s ET" % again) if again else ""
         if pool is None:
             await finish_run(run_id, STATUS_ERROR, rows_touched=rows,
-                             error="no database pool: slot %s is LOST and cannot be recaptured"
-                                   % summary.get("slot"))
+                             error=("no database pool: slot %s stored nothing%s"
+                                    % (summary.get("slot"), again_txt)) if again else
+                                   ("no database pool: slot %s is LOST and cannot be recaptured"
+                                    % summary.get("slot")))
         elif rows > 0 and missing:
             saved = len(summary.get("tickers_saved") or [])
             await finish_run(
@@ -651,9 +801,9 @@ async def _finish(run_id, summary: dict, pool) -> None:
         else:
             await finish_run(
                 run_id, STATUS_COMPLETED_DEFECTIVE, rows_touched=0,
-                error="stored no rows (%d absent, %d unavailable, %d shed of %d planned)"
+                error="stored no rows (%d absent, %d unavailable, %d shed of %d planned)%s"
                       % (summary.get("absent") or 0, summary.get("unavailable") or 0,
-                         summary.get("shed") or 0, summary.get("planned") or 0))
+                         summary.get("shed") or 0, summary.get("planned") or 0, again_txt))
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("[oqc] could not close the job_runs record: %s", type(exc).__name__)
 
